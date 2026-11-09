@@ -1,3 +1,3 @@
 mod stubs {
-    pub(super) struct NativePortalShape;
+    pub(super) struct PortalShape;
 }

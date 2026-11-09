@@ -758,7 +758,7 @@ mod tests {
     use super::*;
     use horizon_client::{entities::ArmorStand, mobs::Mob};
     use horizon_core::geometry::Vec3;
-    use mod_api::NativeWorldEpoch;
+    use mod_api::WorldEpoch;
 
     fn add_mob(game: &mut Game<'_>, id: u32, name: &str) -> MobRef {
         let kind = game.res.mob_types().get(name).unwrap().clone();
@@ -910,7 +910,7 @@ mod tests {
             game.mobs[0].extra.leash = None;
             game.mobs[0].extra.leash_pending = Some(Pending::Uuid([0, 0, 0, 99]));
             assert_eq!(cow.entity().leash_holder(game), None);
-            let stale = EntityRef::new(NativeWorldEpoch::new(999), 12);
+            let stale = EntityRef::new(WorldEpoch::new(999), 12);
             assert_eq!(stale.leash_holder(game), None);
             game.enter_level(super::super::Dim::Nether).unwrap();
             assert_eq!(cow.entity().leash_holder(game), None);
@@ -942,7 +942,7 @@ mod tests {
             check(game, cow, false);
             game.riding = None;
             check(game, cow, true);
-            let stale = MobRef::new(mod_api::EntityRef::new(NativeWorldEpoch::new(999), 12));
+            let stale = MobRef::new(mod_api::EntityRef::new(WorldEpoch::new(999), 12));
             let host: &dyn mod_api::Host = game;
             assert_eq!(stale.can_use_portal(host), None);
             game.enter_command_level(super::super::Dim::Nether).unwrap();
@@ -1082,7 +1082,7 @@ mod tests {
             }
             let mob = add_mob(game, 14, "minecraft:sniffer");
             let stale = MobRef::new(EntityRef::new(
-                NativeWorldEpoch::new(mob.entity().epoch().get() + 1),
+                WorldEpoch::new(mob.entity().epoch().get() + 1),
                 14,
             ));
             assert_eq!(stale.requires_custom_persistence(game), None);
@@ -1428,7 +1428,7 @@ mod tests {
             assert!(!game.mob_set_target(mob, Some(stand)));
             assert_eq!(game.mob_target(mob), Some(other));
             let stale = MobRef::new(EntityRef::new(
-                NativeWorldEpoch::new(entity.epoch().get() + 1),
+                WorldEpoch::new(entity.epoch().get() + 1),
                 12,
             ));
             assert!(game.mob(stale.entity()).is_none());
@@ -1638,7 +1638,7 @@ mod tests {
             assert_eq!(game.mob_has_restriction(dragon), None);
             // A stale handle changes no other entity.
             let stale = MobRef::new(EntityRef::new(
-                NativeWorldEpoch::new(entity.epoch().get() + 1),
+                WorldEpoch::new(entity.epoch().get() + 1),
                 12,
             ));
             assert_eq!(game.mob_left_handed(stale), None);

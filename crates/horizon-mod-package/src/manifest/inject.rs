@@ -169,6 +169,7 @@ pub enum NoSlotReason {
     SourcePending,
     ReplacePending,
     NoApiRecord,
+    ReplaceWithoutValue,
 }
 
 impl fmt::Display for NoSlotReason {
@@ -182,8 +183,9 @@ impl fmt::Display for NoSlotReason {
             Self::ExtensionSlotsPending => "extension slots pending (I6)",
             Self::ApiSitesPending => "API site listeners pending (U4c)",
             Self::SourcePending => "source injects pending (U5)",
-            Self::ReplacePending => "replace listeners pending (U9)",
+            Self::ReplacePending => "internals replace listeners pending (U9)",
             Self::NoApiRecord => "no API record: a parameter has no API type yet",
+            Self::ReplaceWithoutValue => "replace needs a return the API carries",
         })
     }
 }

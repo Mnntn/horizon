@@ -21,7 +21,7 @@ use horizon_world::{
     server_player_damage::ServerDamageEnvironment,
     synced_floats::{FloatValue, Observer, SyncedFloats},
 };
-pub use mod_api::health::{HurtSource, ShieldBlock, Victim};
+pub use mod_api::entity::health::{HurtSource, ShieldBlock, Victim};
 use std::{fs, io, path::Path};
 pub(crate) type Attributes = LiveAttributes<Box<dyn horizon_world::attributes::live::Identities>>;
 pub(crate) type State = HurtState<DamageTypeId>;

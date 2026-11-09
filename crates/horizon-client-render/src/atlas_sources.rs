@@ -288,6 +288,14 @@ pub fn list(sources: &[SpriteSource], textures: &[String]) -> BTreeMap<String, S
 /// An RGBA image.
 pub type Image = (u32, u32, Vec<u8>);
 
+/// The largest side of a sprite an `unstitch` region may cut, in pixels. Vanilla's
+/// `Unstitcher` has no limit of its own, but its stitcher can't place a sprite larger than the
+/// device's maximum texture size, and the renderer asks for the adapter's own limits. 32768 is the
+/// largest `max_texture_dimension_2d` current drivers report (NVIDIA's Vulkan; Direct3D 12 and
+/// Metal stop at 16384), so no region vanilla would stitch is refused. A larger declared region is
+/// skipped with a logged reason, never allocated.
+pub const MAX_REGION_SIDE: i64 = 32768;
+
 fn argb(rgba: &[u8]) -> Vec<u32> {
     rgba.as_chunks::<4>()
         .0
@@ -312,6 +320,7 @@ pub fn generate(
             let (w, h, pixels) = load(texture, "textures")?;
             let x_scale = f64::from(w) / divisor_x;
             let y_scale = f64::from(h) / divisor_y;
+            // A float-to-integer cast saturates (NaN is 0), so every value here is in range.
             let x = (region.x * x_scale).floor() as i64;
             let y = (region.y * y_scale).floor() as i64;
             let width = (region.width * x_scale).floor() as i64;
@@ -319,10 +328,32 @@ pub fn generate(
             if width <= 0 || height <= 0 {
                 return None;
             }
-            let mut out = vec![0u8; (width * height * 4) as usize];
+            // The region and divisors come from an atlas definition a mod or pack writes: refuse a
+            // sprite over the stated side before sizing anything.
+            if width > MAX_REGION_SIDE || height > MAX_REGION_SIDE {
+                log::warn!(
+                    "atlas region {} of {texture}: {width}x{height} exceeds the {MAX_REGION_SIDE}-pixel \
+                     sprite side; skipped",
+                    region.sprite
+                );
+                return None;
+            }
+            // Up to 4 GiB at the largest side: as vanilla's `NativeImage` allocation does, a
+            // refused allocation skips the sprite instead of ending the process.
+            let bytes = (width * height * 4) as usize;
+            let mut out = Vec::new();
+            if out.try_reserve_exact(bytes).is_err() {
+                log::warn!(
+                    "atlas region {} of {texture}: {width}x{height} could not be allocated; skipped",
+                    region.sprite
+                );
+                return None;
+            }
+            out.resize(bytes, 0u8);
             for row in 0..height {
                 for col in 0..width {
-                    let (sx, sy) = (x + col, y + row);
+                    // The offset is the pack's too: saturate, and the bounds check skips it.
+                    let (sx, sy) = (x.saturating_add(col), y.saturating_add(row));
                     if sx < 0 || sy < 0 || sx >= i64::from(w) || sy >= i64::from(h) {
                         continue;
                     }
@@ -474,5 +505,48 @@ mod tests {
         assert_eq!(out[0], 10);
         assert_eq!(out[4], 11);
         assert_eq!(out[8], 14);
+    }
+
+    /// An unstitch region over a 4x4 texture with divisors 1: the region's numbers are pixels.
+    fn region_of(x: f64, y: f64, width: f64, height: f64) -> Option<Image> {
+        let pixels: Vec<u8> = (0..16u8).flat_map(|i| [i, i, i, 255]).collect();
+        let load = |_: &str, _: &str| Some((4u32, 4u32, pixels.clone()));
+        let origin = SpriteOrigin::Region {
+            texture: "t".into(),
+            region: Region {
+                sprite: "s".into(),
+                x,
+                y,
+                width,
+                height,
+            },
+            divisor_x: 4.0,
+            divisor_y: 4.0,
+        };
+        generate(&origin, &load)
+    }
+
+    /// A pack's declared region can't overflow the size or ask for a huge allocation: past the
+    /// stated side it is skipped, whatever the numbers, and the copy's offsets can't overflow.
+    #[test]
+    fn a_huge_declared_region_is_refused_not_allocated() {
+        for (width, height) in [
+            (f64::MAX, f64::MAX),
+            (i64::MAX as f64, 2.0),
+            (2.0, i64::MAX as f64),
+            (3_000_000_000.0, 3_000_000_000.0),
+            ((MAX_REGION_SIDE + 1) as f64, 1.0),
+            (f64::INFINITY, 1.0),
+        ] {
+            assert_eq!(region_of(0.0, 0.0, width, height), None, "{width}x{height}");
+        }
+        // The largest side is still a sprite (one row, so the test allocates little).
+        let (w, h, out) = region_of(0.0, 0.0, MAX_REGION_SIDE as f64, 1.0).unwrap();
+        assert_eq!((w, h), (MAX_REGION_SIDE as u32, 1));
+        assert_eq!(&out[..4], [0, 0, 0, 255]);
+        // An offset near the integer limit: the pixels outside the texture stay transparent.
+        let (w, h, out) = region_of(i64::MAX as f64, -(i64::MAX as f64), 2.0, 2.0).unwrap();
+        assert_eq!((w, h), (2, 2));
+        assert!(out.iter().all(|&byte| byte == 0));
     }
 }

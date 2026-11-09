@@ -1,2 +1,1 @@
-mod package_side;
-pub use package_side::Side;
+pub use content::package_side::Side;

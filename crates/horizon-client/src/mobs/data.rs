@@ -8,7 +8,7 @@ use super::path::PathType;
 use crate::blocks::{BlockFacts, Fluid};
 use horizon_assets::resource_source::ResourceRoot;
 use horizon_world::registry::BlockStateId;
-pub use mod_api::mobs::PathComputationType;
+pub use mod_api::entity::mobs::PathComputationType;
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -337,7 +337,8 @@ impl MobData {
     }
     /// Take a mod's spawn rule for its entity type `id` (`SpawnPlacements.register`).
     pub fn register_mod_spawn(&mut self, id: &str, rule: &mod_api::SpawnPlacementRule) {
-        use mod_api::{NativeHeightmap as H, NativeSpawnPlacementType as T};
+        use mod_api::Heightmap as H;
+        use mod_api::SpawnPlacementType as T;
         let placement = match rule.placement {
             T::OnGround => Placement::OnGround,
             T::InWater => Placement::InWater,

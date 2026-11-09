@@ -1,3 +1,3 @@
 mod stubs {
-    pub(super) struct NativeActiveEffect;
+    pub(super) struct ActiveEffect;
 }

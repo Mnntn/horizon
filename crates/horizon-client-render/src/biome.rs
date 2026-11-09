@@ -4,7 +4,7 @@ use crate::Result;
 use horizon_assets::resource_source::{ResourceRoot, ResourceSource};
 use horizon_client_core::particle_type::ParticleType;
 use horizon_core::{noise::SimplexNoise, position::BlockPos, random::LegacyRandom};
-pub use mod_api::biome::{BiomeColors, SpawnEntry};
+pub use mod_api::world::biome::{BiomeColors, SpawnEntry};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},

@@ -28,7 +28,7 @@ pub(crate) fn alter_ground(
     let registry = |name: &str| context.registry(name);
     let setting = |mod_id: &str, key: &str| context.setting(mod_id, key);
     let mut provider = GroundProvider::Decorator;
-    mod_api::ground::native_alter_ground(
+    mod_api::world::ground::native_alter_ground(
         &mod_api::OwningWorldgen::new(&registry, &setting),
         tree.logs,
         tree.leaves,

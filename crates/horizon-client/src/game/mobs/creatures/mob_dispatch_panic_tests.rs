@@ -43,15 +43,15 @@ impl mod_api::Hooks for PanicOnDespawn {
     fn mob_despawn(&self, _: &dyn mod_api::Host, event: &mut mod_api::MobDespawnEvent<'_>) {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.force_allow {
-            *event.result = mod_api::NativeDespawn::Allow;
+            *event.result = mod_api::Despawn::Allow;
         }
         if self.at == Some(call) {
             // An unwound answer must not become the next attempt's answer.
-            *event.result = mod_api::NativeDespawn::Allow;
+            *event.result = mod_api::Despawn::Allow;
             panic!("actual mob despawn listener panicked");
         }
         if self.at.is_some_and(|at| call < at) {
-            *event.result = mod_api::NativeDespawn::Deny;
+            *event.result = mod_api::Despawn::Deny;
         }
     }
 }

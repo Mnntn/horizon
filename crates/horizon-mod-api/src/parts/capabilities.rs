@@ -370,7 +370,7 @@ pub mod tests {
         let host: &mut dyn ServerHost = &mut world;
         // The pipe's type has a provider, which answers in the level in place; parked while
         // the server ticks another, the same block entity's level gives none.
-        let parked = LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER);
+        let parked = LevelRef::new(WorldEpoch::new(1), crate::DimensionKey::NETHER);
         assert!(here().capability(host, &ITEMS, PIPE, None).is_some());
         assert!(parked.capability(host, &ITEMS, PIPE, None).is_none());
     }
@@ -568,7 +568,7 @@ pub mod tests {
             side: None,
         };
         let direct_block = || block_entity_providers(&ITEMS, &ordered_world(), at).unwrap();
-        let robot = EntityRef::new(NativeWorldEpoch::new(1), 3);
+        let robot = EntityRef::new(WorldEpoch::new(1), 3);
         let mut player = player_world(None);
         let direct_entity =
             || entity_providers(&ENTITY_ITEMS, &player_world(None), robot, ()).unwrap();

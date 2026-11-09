@@ -28,7 +28,7 @@ impl Game<'_> {
     pub(in crate::game) fn mapping(
         &self,
         name: &str,
-    ) -> Result<Option<NativeKeyMapping>, mod_api::TextFormError> {
+    ) -> Result<Option<mod_api::KeyMapping>, mod_api::TextFormError> {
         let Some(&(_, key)) = MAPPINGS.iter().find(|m| m.0 == name) else {
             return Ok(None);
         };
@@ -36,7 +36,7 @@ impl Game<'_> {
             Some(k) => self.movement_key_held(k),
             None => self.mouse_held()[usize::from(name == "key.use")],
         };
-        Ok(Some(NativeKeyMapping {
+        Ok(Some(mod_api::KeyMapping {
             down,
             label: keybinds::display_name(self.settings.keys.get(name)).try_into_api()?,
         }))

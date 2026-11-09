@@ -94,17 +94,14 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use mod_api::{LevelRef, NativeWorldEpoch};
+    use mod_api::{LevelRef, WorldEpoch};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn border_writes_move_the_shared_border_and_refuse_bad_values() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let level = game.level(game.dim.id()).unwrap();
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
 
             assert!(level.set_world_border_center(game, [100.0, -50.0]));
             assert_eq!(game.border.center(), [100.0, -50.0]);

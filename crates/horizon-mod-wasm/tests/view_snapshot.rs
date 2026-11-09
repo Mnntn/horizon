@@ -62,7 +62,9 @@ fn borrowed_snapshot_matches_owned_without_clone_allocations() {
     let old = count(|| {
         for _ in 0..1000 {
             owned.clear();
-            owned.put(&api::containers::ModBlockEntitySnapshot::from(&entity));
+            owned.put(&api::item::containers::ModBlockEntitySnapshot::from(
+                &entity,
+            ));
         }
     });
     let new = count(|| {
@@ -82,7 +84,9 @@ fn borrowed_snapshot_matches_owned_without_clone_allocations() {
         for _ in 0..1000 {
             let decoded: api::ModBlockEntity = api::wire::Reader::new(&input).take().unwrap();
             owned.clear();
-            owned.put(&api::containers::ModBlockEntitySnapshot::from(&decoded));
+            owned.put(&api::item::containers::ModBlockEntitySnapshot::from(
+                &decoded,
+            ));
         }
     });
     let new_roundtrip = count(|| {

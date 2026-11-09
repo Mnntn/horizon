@@ -29,7 +29,7 @@ pub trait ProjectilesBackend {
     /// Side: server.
     /// `AbstractArrow.pickup`, for an arrow or a mob's trident.
     #[access(WorldOnly)]
-    fn projectile_pickup(&self, projectile: ProjectileRef) -> Option<NativeArrowPickup>;
+    fn projectile_pickup(&self, projectile: ProjectileRef) -> Option<ArrowPickup>;
     /// Side: server.
     /// `AbstractArrow.getPierceLevel`: the signed byte stored by vanilla.
     #[access(WorldOnly)]
@@ -86,7 +86,7 @@ pub trait ProjectilesBackendMut {
     fn projectile_deflect(
         &mut self,
         projectile: ProjectileRef,
-        deflection: NativeDeflection,
+        deflection: Deflection,
         by: Option<EntityRef>,
         new_owner: Option<EntityRef>,
         by_attack: bool,
@@ -96,11 +96,7 @@ pub trait ProjectilesBackendMut {
     /// Sets `AbstractArrow.pickup`. False for a stale handle or a projectile
     /// that is not an arrow or a mob's trident.
     #[access(WorldOnly)]
-    fn projectile_set_pickup(
-        &mut self,
-        projectile: ProjectileRef,
-        pickup: NativeArrowPickup,
-    ) -> bool;
+    fn projectile_set_pickup(&mut self, projectile: ProjectileRef, pickup: ArrowPickup) -> bool;
     /// Side: server.
     /// `AbstractArrow.setPierceLevel`: stores the signed byte without clamping.
     #[access(WorldOnly)]

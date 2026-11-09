@@ -38,7 +38,7 @@ pub trait Hooks {
         contract = "collect",
         out = "provider",
         context = "worldgen",
-        target = "mod_api::ground::native_alter_ground",
+        target = "mod_api::world::ground::native_alter_ground",
         neoforge = "AlterGroundEvent"
     )]
     fn alter_ground();

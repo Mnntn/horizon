@@ -12,7 +12,6 @@ use horizon_client::{
     mesher::Vertex,
 };
 use horizon_core::nbt::{JavaString, Tag};
-pub use mod_api::game::{NativeMapDecoration, NativeMapInfo};
 use std::collections::HashMap;
 
 /// `LodestoneTracker.tick`: existing native eligibility/loaded-block predicate.
@@ -1881,11 +1880,11 @@ impl Game<'_> {
     /// The icons `native_map_decorations` adds to map `id`, as it is drawn
     /// (`frame`: in an item frame or on a screen, which show only what
     /// `shown_on_frame` allows).
-    pub(super) fn mod_map_decorations(&self, id: i32, frame: bool) -> Vec<NativeMapDecoration> {
+    pub(super) fn mod_map_decorations(&self, id: i32, frame: bool) -> Vec<mod_api::MapDecoration> {
         let Some(map) = self.maps.data.get(&id) else {
             return Vec::new();
         };
-        let info = NativeMapInfo {
+        let info = mod_api::MapInfo {
             id,
             center: map.center,
             scale: map.scale,
@@ -1898,7 +1897,7 @@ impl Game<'_> {
         decorations
             .into_iter()
             .filter(|d| !frame || d.shown_on_frame)
-            .map(|d| NativeMapDecoration {
+            .map(|d| mod_api::MapDecoration {
                 rot: d.rot & 15,
                 ..d
             })

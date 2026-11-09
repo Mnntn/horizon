@@ -681,7 +681,7 @@ fn server_services_preserve_identity_and_message_delivery() {
         assert_eq!(b.address(game).as_deref(), Some("2001:db8::13"));
         let stale = mod_api::__private::game::player_ref(
             mod_api::EntityRef::new(
-                mod_api::NativeWorldEpoch::new(a.entity().epoch().get() + 1),
+                mod_api::WorldEpoch::new(a.entity().epoch().get() + 1),
                 a.entity().id(),
             ),
             a.uuid(),

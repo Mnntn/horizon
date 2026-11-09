@@ -7,8 +7,8 @@ impl Game<'_> {
     /// `Pass`. On the client only `Success` ends the hand loop.
     pub(in crate::game) fn native_right_click_item(
         &mut self,
-        click: &NativeItemClick<'_>,
-        cancellation_result: &mut NativeInteractionResult,
+        click: &ItemClick<'_>,
+        cancellation_result: &mut mod_api::InteractionResult,
         canceled: &mut bool,
     ) {
         self.fire_right_click_item(click, cancellation_result, canceled);

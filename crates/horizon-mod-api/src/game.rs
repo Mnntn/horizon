@@ -5,7 +5,7 @@ use crate::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
-pub enum NativeHeightmap {
+pub enum Heightmap {
     WorldSurface,
     MotionBlocking,
     MotionBlockingNoLeaves,
@@ -16,12 +16,12 @@ pub enum NativeHeightmap {
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeBlockRun {
+pub struct BlockRun {
     pub x: i32,
     pub z: i32,
     pub y: i32,
     pub height: u32,
-    pub surface: Option<NativeHeightmap>,
+    pub surface: Option<Heightmap>,
     pub block: u32,
     pub only: Option<u32>,
 }
@@ -29,19 +29,19 @@ pub struct NativeBlockRun {
 #[derive(Clone, Debug, PartialEq, Default)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeBlockEdit {
+pub struct BlockEdit {
     /// Complete states to write; properties are never parsed from command strings.
     pub palette: Vec<BlockState>,
     /// Partial block or tag predicates; omitted properties are wildcards.
     pub filters: Vec<StatePredicate>,
-    pub runs: Vec<NativeBlockRun>,
+    pub runs: Vec<BlockRun>,
 }
 /// The camera shake native mods ask for (`native_camera_shake`): turns in
 /// degrees, and an offset in blocks along the camera's right, up and back.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeShake {
+pub struct Shake {
     pub pitch: f32,
     pub yaw: f32,
     pub roll: f32,
@@ -73,7 +73,7 @@ pub enum SleepProblem {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeClock {
+pub struct Clock {
     /// Ticks since the world was created (`Level.getGameTime`).
     pub game_time: i64,
     /// The time of day in ticks (`Level.getOverworldClockTime`): 0 at sunrise, 24000 a
@@ -86,7 +86,7 @@ pub struct NativeClock {
 #[derive(Clone, Debug, PartialEq, Default)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeColumnBlocks {
+pub struct ColumnBlocks {
     /// Distinct complete states, including separate entries for different property combinations.
     pub palette: Vec<BlockState>,
     pub bases: Vec<Option<i32>>,
@@ -97,7 +97,7 @@ pub struct NativeColumnBlocks {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
-pub enum NativeConfigKind {
+pub enum ConfigKind {
     /// The window only, when the game starts.
     Client,
     /// Once per process: the window when the game starts, or a dedicated
@@ -109,7 +109,7 @@ pub enum NativeConfigKind {
     /// `config/<file>`.
     Server,
 }
-impl NativeConfigKind {
+impl ConfigKind {
     /// The default file name's suffix, as NeoForge's.
     fn suffix(self) -> &'static str {
         match self {
@@ -124,16 +124,16 @@ impl NativeConfigKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeConfig {
+pub struct Config {
     pub mod_id: String,
-    pub kind: NativeConfigKind,
+    pub kind: ConfigKind,
     /// A path relative to `config/`: `<mod id>-<kind>.toml` unless named.
     pub file: String,
     pub default: String,
 }
-impl NativeConfig {
+impl Config {
     /// `config/<mod_id>-<kind>.toml`, `default` when missing.
-    pub fn new(mod_id: &str, kind: NativeConfigKind, default: &str) -> Self {
+    pub fn new(mod_id: &str, kind: ConfigKind, default: &str) -> Self {
         Self {
             mod_id: mod_id.to_owned(),
             kind,
@@ -151,9 +151,9 @@ impl NativeConfig {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeConfigFile {
+pub struct ConfigFile {
     pub mod_id: String,
-    pub kind: NativeConfigKind,
+    pub kind: ConfigKind,
     /// The registered name, relative to `config/` (or to a world's
     /// `serverconfig/`, where that copy was read).
     pub file: String,
@@ -163,7 +163,7 @@ pub struct NativeConfigFile {
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeDataMapType {
+pub struct DataMapType {
     /// `mod_id:name`: not in the `minecraft` namespace. Its files are
     /// `data/<mod_id>/data_maps/<registry path>/<name>.json`.
     pub id: String,
@@ -175,7 +175,7 @@ pub struct NativeDataMapType {
 #[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeExperienceOrb {
+pub struct ExperienceOrb {
     /// The entity's ID, as `native_entity_join_level` names it.
     pub id: u32,
     pub position: [f64; 3],
@@ -188,7 +188,7 @@ pub struct NativeExperienceOrb {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeFalling {
+pub struct Falling {
     /// `FallingBlockEntity.dropItem`: whether it drops as an item where it
     /// can't be placed.
     pub drop_item: bool,
@@ -196,7 +196,7 @@ pub struct NativeFalling {
     /// an anvil's.
     pub hurts: bool,
 }
-impl Default for NativeFalling {
+impl Default for Falling {
     fn default() -> Self {
         Self {
             drop_item: true,
@@ -208,7 +208,7 @@ impl Default for NativeFalling {
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeHeldItem {
+pub struct HeldItemSlot {
     pub id: ItemKey,
     pub count: u32,
     /// The inventory slot: 0 to 8, the hotbar (a mod use is the main hand's).
@@ -222,7 +222,7 @@ pub struct NativeHeldItem {
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeHit {
+pub struct Hit {
     pub block_x: i32,
     pub block_y: i32,
     pub block_z: i32,
@@ -237,20 +237,20 @@ pub struct NativeHit {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
-pub enum NativeModEvent {
+pub enum ModEvent {
     /// A right-click with the item began its use: the stack, and 0 ticks.
-    UseStart(NativeHeldItem, u32),
+    UseStart(HeldItemSlot, u32),
     /// The use ended: the stack it began with, and the ticks it was held. It
     /// ends when the button comes up, the hand's item changes or leaves the
     /// claim, the player respawns, or the game joins a server.
-    UseStop(NativeHeldItem, u32),
+    UseStop(HeldItemSlot, u32),
 }
 // no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A map as a native mod sees it when `native_map_decorations` is asked.
 // Native mods read it; nothing in Horizon does.
 #[derive(Clone, Copy, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
-pub struct NativeMapInfo<'a> {
+pub struct MapInfo<'a> {
     /// The map's id (`map_<id>`).
     pub id: i32,
     /// The map's centre block `[x, z]`.
@@ -268,7 +268,7 @@ pub struct NativeMapInfo<'a> {
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeMapDecoration {
+pub struct MapDecoration {
     /// An atlas sprite: vanilla's `map/decorations/<name>`, or a content
     /// mod's texture. An unknown sprite is left out.
     pub sprite: String,
@@ -290,7 +290,7 @@ pub struct NativeMapDecoration {
 // Native mods read it; nothing in Horizon does.
 #[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
-pub struct NativeMobRender<'a> {
+pub struct MobRender<'a> {
     /// The mob's network id, as the mob helpers and mod messages name it.
     pub id: u32,
     /// Its entity type (`minecraft:villager`).
@@ -321,12 +321,12 @@ pub struct NativeMobRender<'a> {
     pub on_ground: bool,
 }
 // no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
-/// Which player a [`NativeMobRender`] is, for `native_player_submit` and
+/// Which player a [`MobRender`] is, for `native_player_submit` and
 /// `native_mob_layer`.
 // Native mods read it; nothing in Horizon does.
 #[derive(Clone, Copy, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
-pub struct NativePlayerRender<'a> {
+pub struct PlayerRender<'a> {
     /// The player's profile name.
     pub name: &'a str,
     /// Whether it is the player of this window, drawn in third person.
@@ -362,15 +362,15 @@ pub(crate) mod built {
     use super::*;
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-    pub struct NativeConfigFile {
+    pub struct ConfigFile {
         pub mod_id: String,
-        pub kind: NativeConfigKind,
+        pub kind: ConfigKind,
         pub file: String,
         pub text: String,
     }
-    impl From<NativeConfigFile> for super::NativeConfigFile {
-        fn from(v: NativeConfigFile) -> Self {
-            let NativeConfigFile {
+    impl From<ConfigFile> for super::ConfigFile {
+        fn from(v: ConfigFile) -> Self {
+            let ConfigFile {
                 mod_id,
                 kind,
                 file,

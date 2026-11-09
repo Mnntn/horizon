@@ -22,8 +22,8 @@ impl Game<'_> {
         state: horizon_world::registry::BlockStateId,
         held: Option<&ItemStack>,
         branch: horizon_world::level::UseBranch,
-    ) -> Option<mod_api::NativeInteractionResult> {
-        use mod_api::NativeInteractionResult as Answer;
+    ) -> Option<mod_api::InteractionResult> {
+        use mod_api::InteractionResult as Answer;
         let pos = hit.pos;
         let registry = self.pack.assets.registry;
         let info = registry.state(state).filter(|s| s.name == BLOCK)?;

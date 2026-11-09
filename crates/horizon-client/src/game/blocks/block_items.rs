@@ -523,7 +523,7 @@ mod tests {
             let state = game.pack.assets.registry.default_state(CRATE).unwrap();
             for x in [1, 2] {
                 assert_eq!(
-                    game.level_set_block(level, [x, 64, 0], state, NativeBlockUpdateFlags::NONE),
+                    game.level_set_block(level, [x, 64, 0], state, BlockUpdateFlags::NONE),
                     Ok(true)
                 );
             }
@@ -651,7 +651,7 @@ mod tests {
             for (x, block) in (1..).zip(blocks) {
                 let state = game.pack.assets.registry.default_state(block).unwrap();
                 assert!(
-                    game.level_set_block(level, [x, 64, 0], state, NativeBlockUpdateFlags::NONE)
+                    game.level_set_block(level, [x, 64, 0], state, BlockUpdateFlags::NONE)
                         .unwrap(),
                     "{block} at {x}"
                 );

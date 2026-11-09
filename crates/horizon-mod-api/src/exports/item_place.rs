@@ -1,2 +1,1 @@
-mod item_place;
-pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};
+pub use block::item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};

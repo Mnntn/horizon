@@ -1,6 +1,8 @@
 //! The build-tool fixture is a real shared module, not a component.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
+#[path = "fixture/src/replace.rs"]
+mod replace;
 #[path = "fixture/src/shutdown.rs"]
 mod shutdown;
 use horizon_mod_package::manifest::Package;
@@ -117,6 +119,18 @@ fn real_member() {
         remember_shutdown(&mut failure, message.into());
         assert_eq!(failure.as_deref(), after, "{message}");
     }
+    // The guest's `replace` (`replace::own_average`, emitted through `mod_points::replace!`):
+    // its value reaches the caller across the boundary, and the body never runs.
+    let _: fn(&mut mod_points::GameBeaconAverageArgs) -> u32 = replace::own_average;
+    for (a, b, value) in replace::CASES {
+        assert_eq!(average(a, b), value, "{a} {b}");
+    }
+}
+
+/// `horizon_client::game::beacon::average`, as the staging pass marks it.
+#[horizon_mod_api_macros::point(name = "game_beacon_average", free)]
+fn average(a: u32, b: u32) -> u32 {
+    panic!("a replaced body ran: {a} {b}")
 }
 
 /// `horizon_client::game::server_lifecycle::remember_shutdown`, as the staging pass marks it.

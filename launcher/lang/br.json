@@ -1098,7 +1098,6 @@
   "optimization": "gwellaat",
   "played by {names}": "c'hoariet gant {names}",
   "realistic": "gwirvoudel",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "redek {command} goude",
   "runs {command} first": "redek {command} da gentañ",
   "simplistic": "simpl",
@@ -1235,5 +1234,7 @@
   "NATIVE": "NATIVE",
   "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
   "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
-  "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here."
+  "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

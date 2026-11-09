@@ -68,7 +68,11 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
     seal();
     let mut owners = Vec::new();
     fire_raw(PointId::TickWorldReturn, "fixture", &mut |_| {
-        owners.push(mod_api::crash::current_native_mod().unwrap().to_owned());
+        owners.push(
+            mod_api::content::crash::current_native_mod()
+                .unwrap()
+                .to_owned(),
+        );
     });
     let expected: Vec<_> = (0..3)
         .rev()
@@ -91,7 +95,7 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
                     RawKind::Erased(_) => "wasm",
                 }
             } else {
-                mod_api::crash::current_native_mod().unwrap()
+                mod_api::content::crash::current_native_mod().unwrap()
             });
         });
         assert_eq!(heard, row.expected);

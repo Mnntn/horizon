@@ -23,7 +23,7 @@ use horizon_client::{
 };
 use horizon_core::nbt::{JavaString, Tag};
 use horizon_protocol::text::translatable;
-use mod_api::NativePermissionLevel;
+use mod_api::PermissionLevel;
 use std::{
     io::Write,
     path::PathBuf,
@@ -1617,8 +1617,8 @@ impl Game<'_> {
             user.id,
             entity,
             &user.name,
-            NativePermissionLevel::from_level(old),
-            NativePermissionLevel::from_level(new),
+            PermissionLevel::from_level(old),
+            PermissionLevel::from_level(new),
             &mut cancel,
         );
         cancel

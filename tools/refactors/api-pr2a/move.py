@@ -95,7 +95,7 @@ pub mod registry_keys;
     write(path, text)
 
     # Split the generic name tables from API keys and the owning Parts state.
-    path = ROOT / "crates/horizon-mod-api/src/registry_keys.rs"
+    path = ROOT / "crates/horizon-mod-api/src/content/registry_keys.rs"
     api = path.read_text()
     tables = extract(api, "#[derive(Clone, Default)]", "impl BlockKey {")
     api = api.replace(tables, "use horizon_mod_runtime::registry_keys::{Effects, Names, Requests};\n\n")

@@ -10,7 +10,7 @@ impl Game<'_> {
     /// Client-side.
     pub(in crate::game) fn native_screen_exclusion_areas(
         &self,
-        screen: &NativeScreenView<'_>,
+        screen: &ScreenView<'_>,
         areas: &mut Vec<[f32; 4]>,
     ) {
         self.fire_screen_exclusion_areas(screen, areas);

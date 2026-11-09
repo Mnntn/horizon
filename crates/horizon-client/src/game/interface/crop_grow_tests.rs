@@ -1,9 +1,7 @@
 //! `crop_grow_pre` and `crop_grow_post` reach mods from the server's random ticks.
 use crate::game::LevelDimension;
 use horizon_core::position::BlockPos;
-use mod_api::{
-    CropGrowPostEvent, CropGrowPreEvent, Hooks, LevelRandomHost, NativeTriState, Registrar,
-};
+use mod_api::{CropGrowPostEvent, CropGrowPreEvent, Hooks, LevelRandomHost, Registrar, TriState};
 use std::sync::Mutex;
 
 static HEARD: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -20,7 +18,7 @@ impl Hooks for Gardener {
             .unwrap()
             .push(format!("pre {:?} {x} {y} {z}", event.dimension));
         if x == 0 {
-            *event.result = NativeTriState::False;
+            *event.result = TriState::False;
         }
     }
     fn crop_grow_post(&self, _: &mut dyn LevelRandomHost, event: &mut CropGrowPostEvent) {

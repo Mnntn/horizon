@@ -4,7 +4,7 @@
 //! natural spawning reads (`natural_spawning::SpawnPolicy`), and the chunk
 //! question it asks (`ServerLevel.canSpawnEntitiesInChunk`).
 use super::{Game, creatures::SpawnSite, natural_spawning};
-use mod_api::{EntityRef, LevelRef, NativeSpawnReason, SpawnFlags, SpawnLimits};
+use mod_api::{EntityRef, LevelRef, SpawnFlags, SpawnLimits};
 
 impl Game<'_> {
     /// `EntityType.spawn(level, pos, reason)` for a mob: `spawn_mob_spawned`'s path
@@ -17,7 +17,7 @@ impl Game<'_> {
         level: LevelRef,
         kind: &str,
         pos: [f64; 3],
-        reason: NativeSpawnReason,
+        reason: mod_api::SpawnReason,
     ) -> Option<EntityRef> {
         if !self.level_in_place(level) || !pos.iter().all(|v| v.is_finite()) {
             return None;
@@ -85,7 +85,7 @@ mod tests {
     use horizon_client::mobs::spawn_selection::{Category, Counted, SpawnPlayer, SpawnState};
     use mod_api::{
         EntityConstructingEvent, FinalizeSpawnEvent, Flow, Holder, Host, HostSide, LevelRef,
-        NativeSpawnReason, NativeWorldEpoch, SpawnFlags, SpawnLimits,
+        SpawnFlags, SpawnLimits, WorldEpoch,
     };
     use std::sync::{Arc, Mutex};
 
@@ -133,7 +133,7 @@ mod tests {
                         level,
                         "minecraft:cow",
                         [8.5, 64.0, 8.25],
-                        NativeSpawnReason::Command,
+                        mod_api::SpawnReason::Command,
                     )
                     .unwrap();
                 assert_eq!(game.entity_kind(cow).as_deref(), Some("minecraft:cow"));
@@ -146,7 +146,7 @@ mod tests {
                 );
 
                 let mobs = game.mobs.len();
-                let stale = LevelRef::new(NativeWorldEpoch::new(0), game.dim.key());
+                let stale = LevelRef::new(WorldEpoch::new(0), game.dim.key());
                 let at = [8.5, 64.0, 8.5];
                 let refused: [(LevelRef, &str, [f64; 3]); 9] = [
                     (level, "minecraft:cow", [f64::NAN, 64.0, 8.5]),
@@ -163,7 +163,7 @@ mod tests {
                 ];
                 for (level, kind, pos) in refused {
                     assert_eq!(
-                        game.level_spawn_mob(level, kind, pos, NativeSpawnReason::Command),
+                        game.level_spawn_mob(level, kind, pos, mod_api::SpawnReason::Command),
                         None,
                         "{kind} at {pos:?}"
                     );
@@ -262,7 +262,7 @@ mod tests {
                 "flags leave limits"
             );
 
-            let stale = LevelRef::new(NativeWorldEpoch::new(0), game.dim.key());
+            let stale = LevelRef::new(WorldEpoch::new(0), game.dim.key());
             assert_eq!(game.level_spawn_limits(stale), None);
             assert_eq!(game.level_spawn_flags(stale), None);
             assert!(!game.level_set_spawn_limits(stale, SpawnLimits::VANILLA));

@@ -75,7 +75,7 @@ impl AttributesRegistrar for PartRegistrar {
         sentiment: Sentiment,
     ) -> Result<(), crate::AttributeRegistrationError> {
         let result = (|| {
-            if crate::phase::LoadedMods::new()
+            if crate::world::phase::LoadedMods::new()
                 .get(self.mod_id)
                 .is_some_and(|package| package.side() != crate::Side::Both)
             {

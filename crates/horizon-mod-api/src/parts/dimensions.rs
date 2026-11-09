@@ -2,13 +2,13 @@ use super::*;
 use horizon_core::level_id::valid_level_id;
 
 /// The dimensions registered at startup, for the executable to hand to the engine.
-pub(crate) fn installed_dimension_list() -> &'static [crate::dimension::DimensionInfo] {
+pub(crate) fn installed_dimension_list() -> &'static [crate::world::dimension::DimensionInfo] {
     installed().map_or(&[], |installed| installed.dimensions.as_slice())
 }
 
 /// The chunk generators registered at startup, for the executable to hand to the engine.
 pub(crate) fn installed_chunk_generator_list()
--> &'static [crate::chunk_generator::ChunkGeneratorInfo] {
+-> &'static [crate::world::chunk_generator::ChunkGeneratorInfo] {
     installed().map_or(&[], |installed| installed.chunk_generators.as_slice())
 }
 
@@ -25,7 +25,7 @@ impl PartRegistrar {
     pub(crate) fn refuse_unknown_dimension_generators(&mut self) {
         for dimension in &self.dimensions {
             let generator = &dimension.settings.generator;
-            if generator != crate::dimension::NOISE_GENERATOR
+            if generator != crate::world::dimension::NOISE_GENERATOR
                 && !self.chunk_generators.iter().any(|g| *g.id == **generator)
             {
                 self.refused.push(format!(
@@ -129,11 +129,12 @@ impl DimensionsRegistrar for PartRegistrar {
             self.refused.push(refusal);
             return;
         }
-        self.dimensions.push(crate::dimension::DimensionInfo {
-            mod_id: self.mod_id,
-            id: id.into(),
-            settings,
-        });
+        self.dimensions
+            .push(crate::world::dimension::DimensionInfo {
+                mod_id: self.mod_id,
+                id: id.into(),
+                settings,
+            });
     }
     fn add_chunk_generator(&mut self, name: &str, generator: Arc<dyn crate::ChunkGenerator>) {
         let (namespace, path) = name.split_once(':').unwrap_or((self.mod_id, name));
@@ -154,7 +155,7 @@ impl DimensionsRegistrar for PartRegistrar {
                  digits and _ . - with / between segments, none empty, `.` or `..`",
                 self.mod_id
             ))
-        } else if id == crate::dimension::NOISE_GENERATOR {
+        } else if id == crate::world::dimension::NOISE_GENERATOR {
             Some(format!(
                 "{} registered chunk generator {id}, which is the game's own",
                 self.mod_id
@@ -170,7 +171,7 @@ impl DimensionsRegistrar for PartRegistrar {
             return;
         }
         self.chunk_generators
-            .push(crate::chunk_generator::ChunkGeneratorInfo {
+            .push(crate::world::chunk_generator::ChunkGeneratorInfo {
                 id: id.into(),
                 generator,
             });

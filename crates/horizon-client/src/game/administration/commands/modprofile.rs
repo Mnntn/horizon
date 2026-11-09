@@ -47,7 +47,7 @@ fn run(action: Action, game_dir: &Path) -> R<Vec<Text>> {
             }
             // A host command may be invoked synchronously by a mod. Draining here would
             // wait forever for that caller's own native guard to drop.
-            if mod_api::crash::current_native_call().is_some() {
+            if mod_api::content::crash::current_native_call().is_some() {
                 return Err(err("horizon.modprofile.inHook", &[]));
             }
             profiler::stop();

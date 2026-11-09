@@ -2,14 +2,12 @@
 #[doc(hidden)]
 pub mod game;
 pub use crate::game::{
-    CubeFace, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeConfig,
-    NativeConfigFile, NativeConfigKind, NativeDataMapType, NativeExperienceOrb, NativeFalling,
-    NativeHeightmap, NativeHeldItem, NativeHit, NativeMapDecoration, NativeMapInfo,
-    NativeMobRender, NativeModEvent, NativePlayerRender, NativeShake, PhantomSpawnResult,
-    SleepProblem,
+    BlockEdit, BlockRun, Clock, ColumnBlocks, Config, ConfigFile, ConfigKind, CubeFace,
+    DataMapType, ExperienceOrb, Falling, Heightmap, HeldItemSlot, Hit, MapDecoration, MapInfo,
+    MobRender, ModEvent, PhantomSpawnResult, PlayerRender, Shake, SleepProblem,
 };
 mod __private {
     mod built {
-        pub use crate::game::built::NativeConfigFile;
+        pub use crate::game::built::ConfigFile;
     }
 }

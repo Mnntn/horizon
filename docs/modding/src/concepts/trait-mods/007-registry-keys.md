@@ -35,7 +35,7 @@ and call `state.property(&metadata, "facing")` or `state.with(&metadata, "facing
 supplied `StateConstraint`s. Changes return a new value and never mutate the original.
 Unknown keys, ordinals and property combinations return typed `BlockStateError`s.
 
-`NativeSceneBlock::new(pos, state, entity)` and `StructureTemplateBlock::new(pos, state, nbt)`
+`SceneBlock::new(pos, state, entity)` and `StructureTemplateBlock::new(pos, state, nbt)`
 use this owned `BlockState`, including all properties. Structure reads preserve vanilla palette
 selection, mirror-then-rotation and placement order; an unavailable state mapping refuses the
 whole snapshot with `None`. `DrawContext::draw_scene` checks the entire scene before drawing:
@@ -117,8 +117,8 @@ A saved tank whose fluid's mod is absent carries an opaque unresolved identity. 
 `key()` is `None`; `UnresolvedFluid::id(host)` reads its saved name. It can move between
 name-backed mod tanks, but not into vanilla buckets or cauldrons.
 
-`NativeActiveEffect::id` and effect hook payloads carry `EffectKey`; living effect queries,
-application and removal use the same resolved key. `NativeActiveEffect::new(speed, …)`
+`ActiveEffect::id` and effect hook payloads carry `EffectKey`; living effect queries,
+application and removal use the same resolved key. `ActiveEffect::new(speed, …)`
 uses a key requested through `r.effect_key("minecraft:speed")`. Beacon-selection hooks
 carry `Option<EffectKey>` for each power; `None` is no selection. Enchantment effect-component
 names (for example `minecraft:damage` in `has_enchantment_effect`) are a different registry
@@ -130,8 +130,8 @@ Resolve item and block keys during load and keep them for tick and menu calls.
 `item_burn_time`, `item_compost_chance`, `give`, `enchantment_supports`'s item,
 and GUI `item` / `item_model` take `ItemKey`. `block_item`, `fluid_bucket` and
 `screen_hovered_item` return item keys. `level.block`, `lit_block_name` and
-`NativeHit.block` return block keys; `BlockEntityDrawContext::block` takes one.
-`NativeHeldItem.id` (including use-start/stop events) and `NativeStack.item`
+`Hit.block` return block keys; `BlockEntityDrawContext::block` takes one.
+`HeldItemSlot.id` (including use-start/stop events) and `Stack.item`
 carry item keys, not names. Unknown incoming slots are refused at the boundary.
 `block_sprites` takes API-owned `BlockState` values, preserving properties without
 parsing state strings or exposing numeric engine state IDs. The pre-change block event carries resolved `from` / `to`
@@ -183,7 +183,7 @@ this is not a total conversion. Insertion and other world writes retain strict v
 | Previous engine value | API-owned value | Mod changes |
 | --- | --- | --- |
 | Engine stack in `TooltipDisplay::for_stack` | `mod_api::ItemStack` | Pass the owned API stack supplied to the tooltip event. Its effective tooltip component includes vanilla's implicit defaults. Normal game rendering borrows the engine component without creating an API stack. |
-| Engine loot context and candidate stack | `mod_api::{NativeLootContext, LootStack}` | Contexts own their facts; candidate items are `ItemKey`s. Counts remain signed. Ordered `Option<Tag>` patches preserve removals and NBT types, and names are API `Text` trees. Writeback is atomic. |
+| Engine loot context and candidate stack | `mod_api::{LootContext, LootStack}` | Contexts own their facts; candidate items are `ItemKey`s. Counts remain signed. Ordered `Option<Tag>` patches preserve removals and NBT types, and names are API `Text` trees. Writeback is atomic. |
 | Engine `ParticleType` and options | `ParticleKey` and API `ParticleOptions` | Retain a key requested through `Registrar::particle_key`. Every parameter-family constructor takes its key; `simple(key)` also replaces string-based custom provider construction. The engine enum is no longer exported. |
 | Engine damage containers | `mod_api::{DamageContainer, DamageValues, Reduction}` | Hooks receive an owned scalar snapshot. Read reductions with `reduction`; edit damage and cooldown through the container setters. Sequencing methods remain game-only. |
 | Engine item property values | `mod_api::{ItemBar, ItemRarity}` | Resource methods retain their signatures; damageability, glint and repair checks use game-owned metadata reads. |

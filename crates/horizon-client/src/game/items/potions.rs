@@ -29,7 +29,7 @@ use horizon_core::{
     geometry::{Aabb, Axis, Direction, Vec3},
     random::{LegacyRandom, RandomSource},
 };
-use mod_api::{EffectApplicable, EffectTickChange, EntityRef, LivingRef, NativePlayerFood};
+use mod_api::{EffectApplicable, EffectTickChange, EntityRef, LivingRef, PlayerFood};
 
 /// Per-cloud settings; natural lingering clouds keep their creation defaults.
 pub(super) struct CloudSettings {
@@ -1289,13 +1289,11 @@ impl Game<'_> {
                     let max_health =
                         player.attribute("minecraft:max_health").unwrap_or(20.0) as f32;
                     let food = &player.health.food;
-                    let food = Some(NativePlayerFood::from(
-                        mod_api::__private::built::NativePlayerFood {
-                            level: food.food,
-                            saturation: food.saturation,
-                            exhaustion: food.exhaustion,
-                        },
-                    ));
+                    let food = Some(PlayerFood::from(mod_api::__private::built::PlayerFood {
+                        level: food.food,
+                        saturation: food.saturation,
+                        exhaustion: food.exhaustion,
+                    }));
                     let (keep, changes) = self.mod_effect_tick(
                         mod_api::__private::effect_key_by_index(
                             e.registry_index.expect("active effect registry index"),
@@ -1536,7 +1534,7 @@ impl Game<'_> {
         holder: LivingRef,
         health: f32,
         max_health: f32,
-        food: Option<NativePlayerFood>,
+        food: Option<PlayerFood>,
     ) -> (bool, Vec<EffectTickChange>) {
         let mut apply = false;
         self.native_should_apply_effect_tick_this_tick(effect, tick_count, amplifier, &mut apply);

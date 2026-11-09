@@ -47,7 +47,8 @@ fn io(error: std::io::Error) -> ConfigFileError {
 /// another mod's path, and where a symbolic link is on the way (`root`
 /// itself may be one, as the player set it up).
 fn resolve(root: &Path, path: &ConfigPath) -> Result<PathBuf, ConfigFileError> {
-    let mod_id = mod_api::crash::current_native_mod().ok_or(ConfigFileError::NoCallingMod)?;
+    let mod_id =
+        mod_api::content::crash::current_native_mod().ok_or(ConfigFileError::NoCallingMod)?;
     if !path.owned_by(mod_id) {
         return Err(ConfigFileError::NotOwned);
     }
@@ -118,7 +119,7 @@ fn write(root: &Path, file: &ConfigPath, bytes: &[u8]) -> Result<(), ConfigFileE
     }
     let path = resolve(root, file)?;
     // `config/<mod id>` is the mod's folder, so it can't be a file.
-    if path.is_dir() || Some(file.as_str()) == mod_api::crash::current_native_mod() {
+    if path.is_dir() || Some(file.as_str()) == mod_api::content::crash::current_native_mod() {
         return Err(ConfigFileError::NotAFile);
     }
     let folder = path.parent().unwrap_or(root);
@@ -194,7 +195,7 @@ impl ConfigFiles for GameConfigFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_client::crash::{NativeModCall, enter_native_mod};
+    use horizon_client::crash::{ModCall, enter_native_mod};
 
     struct Root(PathBuf);
     impl Root {
@@ -219,7 +220,7 @@ mod tests {
     }
 
     fn as_mod<R>(id: &'static str, f: impl FnOnce() -> R) -> R {
-        let _call = enter_native_mod(NativeModCall {
+        let _call = enter_native_mod(ModCall {
             id,
             hook: "world_load",
             part: None,
@@ -319,7 +320,7 @@ mod tests {
     fn a_mod_saves_its_config_through_the_game_and_the_reload_hears_it() {
         use mod_api::{
             self, ConfigLoadingEvent, ConfigReloadingEvent, Hooks, HostSide, ModEntry, Mods,
-            NativeConfig, NativeConfigKind, RegisterConfigsEvent,
+            RegisterConfigsEvent,
         };
         use std::sync::Mutex;
         static HEARD: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -345,9 +346,9 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Proof {
             fn register_configs(&self, _: HostSide, event: &mut RegisterConfigsEvent<'_>) {
-                event.configs.push(NativeConfig::new(
+                event.configs.push(mod_api::Config::new(
                     "proof",
-                    NativeConfigKind::Common,
+                    mod_api::ConfigKind::Common,
                     "count = 0\n",
                 ));
             }

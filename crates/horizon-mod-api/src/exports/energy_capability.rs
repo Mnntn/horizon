@@ -1,2 +1,1 @@
-mod energy_capability;
-pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
+pub use item::energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};

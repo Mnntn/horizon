@@ -97,17 +97,14 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use mod_api::{LevelRef, NativeWorldEpoch};
+    use mod_api::{LevelRef, WorldEpoch};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn weather_writes_set_the_level_in_place_and_refuse_others() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let level = game.level(game.dim.id()).unwrap();
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
 
             assert!(level.set_weather(game, 0, 6000, true, true));
@@ -157,10 +154,7 @@ mod tests {
     fn local_difficulty_and_tick_rate_reach_the_game() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let level = game.level(game.dim.id()).unwrap();
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             let here = game.local_difficulty([3.0, 64.0, -7.0]);
             let read = level.local_difficulty(game, [3, 64, -7]).unwrap();
             assert_eq!((read.base, read.effective), (here.base, here.effective));

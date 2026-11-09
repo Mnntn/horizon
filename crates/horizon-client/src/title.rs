@@ -768,7 +768,7 @@ fn rolls_user_splash(text: &str, random: &mut impl RandomSource, date: (u32, u32
 }
 
 impl Mode {
-    /// The id native mods see for this screen (`NativeScreenView.id`, the
+    /// The id native mods see for this screen (`ScreenView.id`, the
     /// screen hooks): one per variant, a hook's contract, so it stays the
     /// same from release to release. A new variant must add one.
     pub fn id(&self) -> &'static str {

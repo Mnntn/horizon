@@ -406,7 +406,7 @@ pub(in crate::game) mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::mobs::{Mob, villager};
     use horizon_core::geometry::Vec3;
-    use mod_api::{EntityRef, LivingRef, NativeWorldEpoch};
+    use mod_api::{EntityRef, LivingRef, WorldEpoch};
 
     /// A live cow `id` at `(5.5, 64, 5.5)`, with its handle.
     fn cow(game: &mut Game<'_>, id: u32) -> LivingRef {
@@ -504,7 +504,7 @@ pub(in crate::game) mod tests {
             assert_eq!(game.living_baby(mob), Some(false));
             // A stale handle reads None and writes false.
             let stale = LivingRef::new(EntityRef::new(
-                NativeWorldEpoch::new(mob.entity().epoch().get() + 1),
+                WorldEpoch::new(mob.entity().epoch().get() + 1),
                 12,
             ));
             assert!(game.mob(stale.entity()).is_none());

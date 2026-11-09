@@ -17,7 +17,7 @@ impl GameLevel<'_> {
         dimension: LevelDimension,
         pos: BlockPos,
         state: BlockStateId,
-        shape: NativePortalShape,
+        shape: PortalShape,
         cancel: &mut bool,
     ) {
         self.fire_portal_spawn(dimension, pos, state, shape, cancel);

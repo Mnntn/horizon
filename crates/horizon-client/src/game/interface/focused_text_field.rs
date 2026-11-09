@@ -8,7 +8,7 @@ use horizon_client::{
     screen_draw::{Measure, TextField},
     ui::EditBox,
 };
-use mod_api::widgets::TextEdit;
+use mod_api::client::widgets::TextEdit;
 
 /// `edited`'s text and caret into `field`: the text as if typed over all of it, so the box's
 /// filter and limit apply, and the positions kept within what it took.

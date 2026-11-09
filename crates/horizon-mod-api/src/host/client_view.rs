@@ -43,20 +43,20 @@ pub trait ClientViewClientHost {
     /// (`ClientboundSetTimePacket`), advanced each tick between packets; none
     /// on the title screen.
     #[access(ClientSetup)]
-    fn clock(&self) -> Option<NativeClock>;
+    fn clock(&self) -> Option<Clock>;
     /// Side: client.
     /// The first block along the view within `distance` (at most 1024), past the loaded chunks over the distant terrain.
     #[access(ClientSetup)]
-    fn raycast(&self, distance: f32) -> Option<NativeHit>;
+    fn raycast(&self, distance: f32) -> Option<Hit>;
     /// Side: client.
     /// The first block along the view within `RAYCAST_MAX`, and its distance.
     #[access(ClientSetup)]
-    fn view_hit(&self) -> Option<(f32, NativeHit)>;
+    fn view_hit(&self) -> Option<(f32, Hit)>;
     /// Side: client.
     /// The most recently extracted world frame's camera, if one exists.
     /// During GUI rendering this is the current frame, including bob/spin and FOV.
     #[access(ClientSetup)]
-    fn camera(&self) -> Option<NativeCamera>;
+    fn camera(&self) -> Option<Camera>;
     /// Side: client.
     /// The entity the view follows (`Minecraft.getCameraEntity`): the entity a server attached
     /// the camera to, else the local player. None outside a client world.
@@ -72,7 +72,7 @@ pub trait ClientViewClientHost {
     fn client_surface_heights(
         &self,
         columns: &[(i32, i32)],
-        heightmap: NativeHeightmap,
+        heightmap: Heightmap,
     ) -> Result<Vec<Option<i32>>, String>;
     /// Side: client.
     /// Points the view at `entity` (`Minecraft.setCameraEntity`), as a server's camera packet
@@ -90,5 +90,5 @@ pub trait ClientViewClientHost {
     /// or on a miss. Entity hits carry this client level's epoch. Unlike
     /// native_view_hit, this never traces distant terrain.
     #[access(ClientSetup)]
-    fn crosshair_target(&self) -> Option<NativeCrosshairTarget>;
+    fn crosshair_target(&self) -> Option<CrosshairTarget>;
 }

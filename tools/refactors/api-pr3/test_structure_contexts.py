@@ -131,7 +131,7 @@ def main():
     args = parser.parse_args()
     assert check().returncode == 0, "baseline must pass"
     if args.api_mutant:
-        path = ROOT / "crates/horizon-mod-api/src/structure_type.rs"
+        path = ROOT / "crates/horizon-mod-api/src/world/structure_type.rs"
         original = path.read_bytes()
         old = b"i64::from(y) - i64::from(self.min)"
         assert original.count(old) == 1

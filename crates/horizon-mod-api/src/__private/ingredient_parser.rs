@@ -1,4 +1,4 @@
-use crate::crafting::Shape;
+use crate::item::crafting::Shape;
 use serde_json::Value;
 use std::collections::HashSet;
 /// Where `Ingredient::resolve` leaves the hook's answer inside the occurrence

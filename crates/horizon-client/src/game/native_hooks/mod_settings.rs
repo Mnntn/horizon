@@ -14,7 +14,7 @@ static READ: LazyLock<Mutex<HashMap<(PathBuf, String), mod_api::SettingValue>>> 
 impl Game<'_> {
     /// The calling mod's setting `key` as kept in its data folder, or its default.
     fn own_setting(&self, key: &str) -> Option<mod_api::SettingValue> {
-        let mod_id = mod_api::crash::current_native_mod()?;
+        let mod_id = mod_api::content::crash::current_native_mod()?;
         read_typed(&self.native_data_dir(mod_id), mod_id, key)
     }
     /// The calling mod's toggle `key`: the player's choice, else its default.

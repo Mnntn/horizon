@@ -1,2 +1,1 @@
-mod screenshot;
-pub use screenshot::ScreenshotImage;
+pub use client::screenshot::ScreenshotImage;

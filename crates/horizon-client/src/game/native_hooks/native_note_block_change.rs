@@ -9,7 +9,7 @@ impl GameLevel<'_> {
     #[inline(always)]
     pub(in crate::game) fn native_note_block_change(
         &self,
-        context: &NativeNoteBlockChange,
+        context: &NoteBlockChange,
         new_note: &mut i32,
         cancel: &mut bool,
     ) {

@@ -62,11 +62,11 @@ impl Probe {
         self.hear(family, target);
     }
 }
-struct NativeGoal {
+struct GoalSpec {
     probe: Arc<Probe>,
     target: bool,
 }
-impl mod_api::Goal for NativeGoal {
+impl mod_api::Goal for GoalSpec {
     fn name(&self) -> &'static str {
         if self.target {
             "BorrowedTarget"
@@ -119,14 +119,14 @@ impl mod_api::EntityPart for GoalPart {
     fn register_goals(&self, goals: &mut mod_api::GoalRegistrar<'_>) {
         goals.add_target_goal(
             0,
-            NativeGoal {
+            GoalSpec {
                 probe: self.0.clone(),
                 target: true,
             },
         );
         goals.add_goal(
             0,
-            NativeGoal {
+            GoalSpec {
                 probe: self.0.clone(),
                 target: false,
             },

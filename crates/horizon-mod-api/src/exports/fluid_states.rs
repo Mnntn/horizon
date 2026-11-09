@@ -1,4 +1,3 @@
-mod fluid_states;
-pub use fluid_states::{
+pub use block::fluid_states::{
     FluidDefinition, FluidStateError, FluidStates, FluidTypeProperties, HostFluidStates,
 };

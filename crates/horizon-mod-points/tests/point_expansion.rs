@@ -50,6 +50,16 @@ mod mod_points {
         }
     }
 
+    pub struct WipeArgs {
+        pub cancel: bool,
+    }
+
+    impl WipeArgs {
+        pub fn __new() -> Self {
+            Self { cancel: false }
+        }
+    }
+
     pub struct SlotArgs {}
 
     impl SlotArgs {
@@ -100,6 +110,8 @@ mod mod_points {
         DoubleReturn,
         Shout,
         ShoutReturn,
+        Wipe,
+        WipeReturn,
     }
 
     pub mod dispatch {
@@ -144,11 +156,25 @@ mod mod_points {
             assert_eq!(args.text, "ab!");
             args.count *= 2;
         }
-        pub fn double(_: &mut DoubleArgs) {
+        /// A replace listener, when the place has one, answers last: 77.
+        pub fn double(args: &mut DoubleArgs) {
             heard("double");
+            if __private::replaced(PointId::Double) {
+                args.result = Some(77);
+            }
         }
         pub fn double_return(_: &mut DoubleArgs) {
             heard("double_return");
+        }
+        /// A replace listener, when the place has one, owns the unit function: it cancels.
+        pub fn wipe(_: &mut dyn ServerHost, args: &mut WipeArgs) {
+            heard("wipe");
+            if __private::replaced(PointId::Wipe) {
+                args.cancel = true;
+            }
+        }
+        pub fn wipe_return(_: &mut dyn ServerHost, _: &mut WipeArgs) {
+            heard("wipe_return");
         }
     }
 
@@ -159,7 +185,13 @@ mod mod_points {
         use super::*;
         pub use ::mod_points::__private::RawKind;
 
-        pub static POINTS: [AtomicBool; 12] = [const { AtomicBool::new(false) }; 12];
+        pub static POINTS: [AtomicBool; 14] = [const { AtomicBool::new(false) }; 14];
+        /// The places a `replace` listener owns, as the registry's seal leaves them.
+        pub static REPLACED: [AtomicBool; 14] = [const { AtomicBool::new(false) }; 14];
+
+        pub fn replaced(place: PointId) -> bool {
+            REPLACED[place as usize].load(std::sync::atomic::Ordering::Relaxed)
+        }
 
         pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(RawKind)) {
             let functions: Vec<_> = RAW
@@ -207,6 +239,12 @@ impl Counter {
         self.total = 0;
     }
 
+    /// A unit function with API and raw listeners: a replace there owns its cancel.
+    #[point(side = "server", raw)]
+    fn wipe(&mut self) {
+        self.total = 0;
+    }
+
     /// Its value borrows the counter: a head, and a raw-only return that gets the value.
     #[point(side = "server", raw)]
     fn slot(&mut self) -> &mut usize {
@@ -225,6 +263,11 @@ pub struct __ResetRaw<'r> {
 }
 pub type __ResetListener = for<'r> fn(&'r mut Counter, &'r mut __ResetRaw<'r>);
 pub type __ResetReturnListener = fn(&mut Counter);
+pub struct __WipeRaw<'r> {
+    pub cancel: &'r mut bool,
+}
+pub type __WipeListener = for<'r> fn(&'r mut Counter, &'r mut __WipeRaw<'r>);
+pub type __WipeReturnListener = fn(&mut Counter);
 pub struct __SlotRaw {}
 pub type __AddReturnListener = for<'r> fn(&'r mut Counter, &'r mut usize);
 pub type __SlotListener = for<'r> fn(&'r mut Counter, &'r mut __SlotRaw);
@@ -512,4 +555,37 @@ fn slots_change_arguments_stop_the_function_and_change_its_value() {
             "double"
         ]
     );
+
+    // A `replace` listener (the registry's last API one) owns the outcome: internals listeners
+    // run after it, but neither clearing its value nor uncancelling brings the body back.
+    use mod_points::__private::REPLACED;
+    RAW.lock().unwrap().clear();
+    for place in [PointId::Double, PointId::Wipe] {
+        POINTS[place as usize].store(true, Ordering::Relaxed);
+        REPLACED[place as usize].store(true, Ordering::Relaxed);
+    }
+    let clear: __DoubleListener = |raw| *raw.result = None;
+    let uncancel: __WipeListener = |_, raw| *raw.cancel = false;
+    RAW.lock().unwrap().extend([
+        (PointId::Double, RawKind::Typed(clear as *const ())),
+        (PointId::Wipe, RawKind::Typed(uncancel as *const ())),
+    ]);
+    assert_eq!(double(5), 77, "the replace's value, not the body's 10");
+    counter.total = 9;
+    counter.wipe();
+    assert_eq!(counter.total, 9, "the replaced body ran");
+    let other: __DoubleListener = |raw| *raw.result = Some(1);
+    RAW.lock().unwrap()[0].1 = RawKind::Typed(other as *const ());
+    assert_eq!(
+        double(5),
+        77,
+        "an internals answer doesn't override the replace's"
+    );
+    // Without a replace, the same internals listeners decide as before.
+    for place in [PointId::Double, PointId::Wipe] {
+        REPLACED[place as usize].store(false, Ordering::Relaxed);
+    }
+    assert_eq!(double(5), 1);
+    counter.wipe();
+    assert_eq!(counter.total, 0);
 }

@@ -5,7 +5,7 @@ use horizon_mod_runtime::attachments::{
     AttachmentRegistration, AttachmentType, Attachments, HasAttachmentLifetime, Holder,
     index::AttachmentIndex,
 };
-use mod_api::{EntityRef, NativeWorldEpoch};
+use mod_api::{EntityRef, WorldEpoch};
 use std::{
     cell::Cell,
     collections::HashMap,
@@ -72,7 +72,7 @@ impl SlotIdentities {
     pub fn observe<T: HasAttachmentLifetime>(
         &mut self,
         owners: &mut JoinList<T, false>,
-        epoch: NativeWorldEpoch,
+        epoch: WorldEpoch,
         id: fn(&T) -> u32,
     ) {
         owners.for_each_mut(|owner| {
@@ -84,7 +84,7 @@ impl SlotIdentities {
     pub fn observe_one<T: HasAttachmentLifetime>(
         &mut self,
         owner: &mut T,
-        epoch: NativeWorldEpoch,
+        epoch: WorldEpoch,
         id: u32,
     ) {
         use std::collections::hash_map::Entry;

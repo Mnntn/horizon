@@ -3,7 +3,7 @@
 //! Rust's orphan rule prevents foreign From/TryFrom implementations here.
 use horizon_core::nbt::{Compound, JavaString, Tag};
 use horizon_items::items::{ItemStack as EngineStack, Items};
-use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
+use mod_api::item::item_stack::{ItemStack as ApiStack, StackWriteError};
 #[path = "api_values/aggregates.rs"]
 pub(in crate::game) mod aggregates;
 #[path = "api_values/block_edit.rs"]
@@ -554,10 +554,10 @@ impl<C: ?Sized> TryIntoEngine<C> for (mod_api::Text, mod_api::Text) {
 }
 
 impl TryIntoApi for super::spill::BlockItemDrop {
-    type Api = mod_api::NativeItemDrop;
+    type Api = mod_api::ItemDrop;
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(mod_api::NativeItemDrop::new(
+        Ok(mod_api::ItemDrop::new(
             self.stack.try_into_api()?,
             self.position,
             self.velocity,
@@ -565,7 +565,7 @@ impl TryIntoApi for super::spill::BlockItemDrop {
         ))
     }
 }
-impl TryIntoEngine for mod_api::NativeItemDrop {
+impl TryIntoEngine for mod_api::ItemDrop {
     type Engine = super::spill::BlockItemDrop;
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
@@ -579,12 +579,12 @@ impl TryIntoEngine for mod_api::NativeItemDrop {
     }
 }
 
-impl TryIntoEngine for mod_api::NativeItemDisplayContext {
+impl TryIntoEngine for mod_api::ItemDisplayContext {
     type Engine = horizon_assets::item_model::DisplayContext;
     type Error = ();
     fn try_into_engine(&self, _: &Items) -> Result<Self::Engine, Self::Error> {
         use horizon_assets::item_model::DisplayContext as Engine;
-        use mod_api::NativeItemDisplayContext as Api;
+        use mod_api::ItemDisplayContext as Api;
         Ok(match self {
             Api::None => Engine::None,
             Api::ThirdPersonLeftHand => Engine::ThirdPersonLeftHand,
@@ -1074,7 +1074,7 @@ pub(crate) fn install_stack_hooks() {
                 return;
             }
             if let Ok(stack) = stack.try_into_api() {
-                mod_api::enchantments::native_get_enchantment_level(&stack, target, value);
+                mod_api::item::enchantments::native_get_enchantment_level(&stack, target, value);
             }
         },
         attributes: |stack, value| {
@@ -1082,7 +1082,7 @@ pub(crate) fn install_stack_hooks() {
                 return;
             }
             if let Ok(stack) = stack.try_into_api() {
-                mod_api::item_attributes::native_item_attribute_modifier(&stack, value);
+                mod_api::item::item_attributes::native_item_attribute_modifier(&stack, value);
             }
         },
     });
@@ -1092,7 +1092,7 @@ struct ApiSlot<'a> {
     engine: &'a mut dyn crate::menu::SlotView,
     invalid: bool,
 }
-impl mod_api::menu::SlotView for ApiSlot<'_> {
+impl mod_api::item::menu::SlotView for ApiSlot<'_> {
     fn item(&self) -> Option<ApiStack> {
         self.engine.item().and_then(|s| s.try_into_api().ok())
     }
@@ -1174,14 +1174,14 @@ pub(crate) fn stacked_on_other(
             engine: clicked,
             invalid: false,
         };
-        let mut api = mod_api::menu::StackedOnOther {
+        let mut api = mod_api::item::menu::StackedOnOther {
             player: event.player,
             player_entity_id: event.player_entity_id,
             slot: event.slot,
             container: event.container,
             container_slot: event.container_slot,
             primary: event.primary,
-            carried: mod_api::menu::CarriedAccess(&mut carried),
+            carried: mod_api::item::menu::CarriedAccess(&mut carried),
             clicked: &mut slot,
             cancellation_result,
         };
@@ -1221,10 +1221,10 @@ pub(crate) fn stacked_on_other(
 }
 
 impl TryIntoApi for crate::stations::AnvilResult {
-    type Api = mod_api::stations::AnvilResult;
+    type Api = mod_api::item::stations::AnvilResult;
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(mod_api::stations::AnvilResult {
+        Ok(mod_api::item::stations::AnvilResult {
             result: self.result.try_into_api()?,
             cost: self.cost,
             repair_item_count_cost: self.repair_item_count_cost,
@@ -1232,7 +1232,7 @@ impl TryIntoApi for crate::stations::AnvilResult {
         })
     }
 }
-impl TryIntoEngine for mod_api::stations::AnvilResult {
+impl TryIntoEngine for mod_api::item::stations::AnvilResult {
     type Engine = crate::stations::AnvilResult;
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
@@ -1245,17 +1245,17 @@ impl TryIntoEngine for mod_api::stations::AnvilResult {
     }
 }
 impl TryIntoApi for crate::menu::AnvilCraft {
-    type Api = mod_api::menu::AnvilCraft;
+    type Api = mod_api::item::menu::AnvilCraft;
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(mod_api::menu::AnvilCraft {
+        Ok(mod_api::item::menu::AnvilCraft {
             left: self.left.try_into_api()?,
             right: self.right.try_into_api()?,
             output: self.output.try_into_api()?,
         })
     }
 }
-impl TryIntoEngine for mod_api::menu::AnvilCraft {
+impl TryIntoEngine for mod_api::item::menu::AnvilCraft {
     type Engine = crate::menu::AnvilCraft;
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
@@ -1267,10 +1267,10 @@ impl TryIntoEngine for mod_api::menu::AnvilCraft {
     }
 }
 impl TryIntoApi for crate::menu::GrindstonePlace {
-    type Api = mod_api::menu::GrindstonePlace;
+    type Api = mod_api::item::menu::GrindstonePlace;
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(mod_api::menu::GrindstonePlace {
+        Ok(mod_api::item::menu::GrindstonePlace {
             top: self.top.try_into_api()?,
             bottom: self.bottom.try_into_api()?,
             vanilla_output: self.vanilla_output.try_into_api()?,
@@ -1279,7 +1279,7 @@ impl TryIntoApi for crate::menu::GrindstonePlace {
         })
     }
 }
-impl TryIntoEngine for mod_api::menu::GrindstonePlace {
+impl TryIntoEngine for mod_api::item::menu::GrindstonePlace {
     type Engine = crate::menu::GrindstonePlace;
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
@@ -1293,10 +1293,10 @@ impl TryIntoEngine for mod_api::menu::GrindstonePlace {
     }
 }
 impl TryIntoApi for crate::menu::GrindstoneTake {
-    type Api = mod_api::menu::GrindstoneTake;
+    type Api = mod_api::item::menu::GrindstoneTake;
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(mod_api::menu::GrindstoneTake {
+        Ok(mod_api::item::menu::GrindstoneTake {
             top: self.top.try_into_api()?,
             bottom: self.bottom.try_into_api()?,
             xp: self.xp,
@@ -1305,7 +1305,7 @@ impl TryIntoApi for crate::menu::GrindstoneTake {
         })
     }
 }
-impl TryIntoEngine for mod_api::menu::GrindstoneTake {
+impl TryIntoEngine for mod_api::item::menu::GrindstoneTake {
     type Engine = crate::menu::GrindstoneTake;
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
@@ -1320,16 +1320,16 @@ impl TryIntoEngine for mod_api::menu::GrindstoneTake {
 }
 
 impl TryIntoApi for crate::menu::AnvilUpdate {
-    type Api = mod_api::menu::AnvilUpdate;
+    type Api = mod_api::item::menu::AnvilUpdate;
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        let vanilla = mod_api::stations::AnvilResult {
+        let vanilla = mod_api::item::stations::AnvilResult {
             result: self.vanilla.output.try_into_api()?,
             cost: self.vanilla.xp_cost,
             repair_item_count_cost: self.vanilla.material_cost.max(0) as u32,
             only_renaming: false,
         };
-        let mut result = mod_api::menu::AnvilUpdate::new(
+        let mut result = mod_api::item::menu::AnvilUpdate::new(
             self.left.try_into_api()?,
             self.right.try_into_api()?,
             self.name.clone(),
@@ -1342,7 +1342,7 @@ impl TryIntoApi for crate::menu::AnvilUpdate {
     }
 }
 
-impl TryIntoEngine for mod_api::menu::AnvilUpdate {
+impl TryIntoEngine for mod_api::item::menu::AnvilUpdate {
     type Engine = crate::menu::AnvilUpdate;
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
@@ -1768,17 +1768,17 @@ mod brewed_boundary_tests {
 }
 
 impl TryIntoApi for crate::containers::ModBlockEntityFields {
-    type Api = mod_api::containers::ModBlockEntityFields;
+    type Api = mod_api::item::containers::ModBlockEntityFields;
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(mod_api::containers::ModBlockEntityFields {
+        Ok(mod_api::item::containers::ModBlockEntityFields {
             nbt: self.nbt.clone(),
             items: self.items.try_into_api()?,
             data: self.data.clone(),
         })
     }
 }
-impl TryIntoEngine for mod_api::containers::ModBlockEntityFields {
+impl TryIntoEngine for mod_api::item::containers::ModBlockEntityFields {
     type Engine = crate::containers::ModBlockEntityFields;
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
@@ -1796,7 +1796,7 @@ impl TryIntoApi for crate::containers::ModBlockEntity {
         Ok(mod_api::ModBlockEntity::from_snapshot(
             self.id().to_owned(),
             (**self).try_into_api()?,
-            mod_api::containers::ModRevision::from_snapshot(
+            mod_api::item::containers::ModRevision::from_snapshot(
                 self.revision().identity(),
                 self.revision().changes(),
             ),
@@ -1813,7 +1813,7 @@ enum BlockEntitySnapshotError {
 fn apply_block_entity_snapshot(
     entity: &mut crate::containers::ModBlockEntity,
     snapshot: &mod_api::ModBlockEntity,
-    before: mod_api::containers::ModRevision,
+    before: mod_api::item::containers::ModRevision,
     items: &Items,
 ) -> Result<(), BlockEntitySnapshotError> {
     let current = entity.revision();
@@ -1841,7 +1841,7 @@ fn apply_block_entity_snapshot(
 fn finish_block_entity_writeback<T>(
     entity: &mut crate::containers::ModBlockEntity,
     snapshot: &mod_api::ModBlockEntity,
-    before: mod_api::containers::ModRevision,
+    before: mod_api::item::containers::ModRevision,
     items: &Items,
     hook: &'static str,
     output: Result<T, BlockEntitySnapshotError>,
@@ -1953,9 +1953,9 @@ impl super::Game<'_> {
         hit: &super::Hit,
         hand: mod_api::Hand,
         stack: Option<&'a ApiStack>,
-    ) -> mod_api::NativeBlockClick<'a> {
+    ) -> mod_api::BlockClick<'a> {
         let (player, player_entity_id) = self.native_clicker();
-        mod_api::NativeBlockClick::from(mod_api::__private::built::NativeBlockClick {
+        mod_api::BlockClick::from(mod_api::__private::built::BlockClick {
             side: if self.remote.is_some() {
                 mod_api::LogicalSide::Client
             } else {
@@ -1973,7 +1973,7 @@ impl super::Game<'_> {
 
     pub(in crate::game) fn api_menu_button(
         &mut self,
-        context: &mod_api::menu::MenuButtonContext,
+        context: &mod_api::item::menu::MenuButtonContext,
         entity: &mut crate::containers::ModBlockEntity,
         carried: &mut Option<EngineStack>,
     ) {
@@ -2954,20 +2954,20 @@ macro_rules! gui_draw_value {
 }
 
 impl TryIntoApi for horizon_client::hud_layout::GuiDraw {
-    type Api = mod_api::hud_layout::GuiDraw;
+    type Api = mod_api::client::hud_layout::GuiDraw;
     type Error = mod_api::text::TextFormError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
         use horizon_client::hud_layout::GuiDraw as Engine;
-        use mod_api::hud_layout::GuiDraw as Api;
+        use mod_api::client::hud_layout::GuiDraw as Api;
         Ok(gui_draw_value!(self, Engine, Api, try_into_api()))
     }
 }
-impl<C: ?Sized> TryIntoEngine<C> for mod_api::hud_layout::GuiDraw {
+impl<C: ?Sized> TryIntoEngine<C> for mod_api::client::hud_layout::GuiDraw {
     type Engine = horizon_client::hud_layout::GuiDraw;
     type Error = mod_api::text::TextFormError;
     fn try_into_engine(&self, _: &C) -> Result<Self::Engine, Self::Error> {
         use horizon_client::hud_layout::GuiDraw as Engine;
-        use mod_api::hud_layout::GuiDraw as Api;
+        use mod_api::client::hud_layout::GuiDraw as Api;
         Ok(gui_draw_value!(self, Api, Engine, try_into_engine(&())))
     }
 }

@@ -1,2 +1,1 @@
-mod game_rule_value;
-pub use game_rule_value::GameRuleValue;
+pub use world::game_rule_value::GameRuleValue;

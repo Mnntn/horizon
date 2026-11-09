@@ -37,7 +37,7 @@ fn discarded_mob_leaves_selectors_and_saves_while_frozen() {
     )
     .unwrap();
     game.native_lifecycle
-        .begin_open(mod_api::NativeAuthority::IntegratedServer);
+        .begin_open(mod_api::Authority::IntegratedServer);
     game.world = World::new(game.res.facts().air, 1);
     game.world
         .chunks
@@ -83,7 +83,7 @@ fn discarded_mob_leaves_selectors_and_saves_while_frozen() {
     let health = game.mobs[0].health;
     let world_time = game.world.game_time;
     assert!(!game.entity_discard(mod_api::EntityRef::new(
-        mod_api::NativeWorldEpoch::new(u64::MAX),
+        mod_api::WorldEpoch::new(u64::MAX),
         42
     )));
     assert!(game.entity_discard(mod_api::EntityRef::new(

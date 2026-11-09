@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(properties("brigadier:string", &p), vec![2]);
     }
 
-    /// A mod's root of a vanilla name (`NativeCommand::replace_vanilla`)
+    /// A mod's root of a vanilla name (`mod_api::Command::replace_vanilla`)
     /// takes vanilla's place in the merged tree: the client gets one `stop`,
     /// the mod's, and the vanilla roots the mods don't name stay.
     #[test]

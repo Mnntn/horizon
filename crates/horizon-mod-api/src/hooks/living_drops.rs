@@ -22,7 +22,7 @@ pub trait Hooks {
     /// in vanilla). Experience orbs are not in the list
     /// (`native_living_experience_drop`); a spectator, who drops nothing,
     /// doesn't call this. Item entity state such as no-gravity, owner and
-    /// lifetime isn't in `NativeItemDrop`. Server-side.
+    /// lifetime isn't in `ItemDrop`. Server-side.
     #[hook(
         side = "server",
         contract = "cancel",
@@ -36,7 +36,7 @@ pub trait Hooks {
         player: Option<u128>,
         source: &HurtSource<'_>,
         recently_hit: bool,
-        drops: &mut Vec<NativeItemDrop>,
+        drops: &mut Vec<ItemDrop>,
         cancel: &mut bool,
     );
     /// A dying mob `entity` of `kind` is about to roll its drop chance for

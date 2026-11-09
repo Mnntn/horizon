@@ -13,7 +13,7 @@ use crate::mobs::Who;
 use horizon_client::items::ItemStack;
 use horizon_client::mobs::Mob;
 use horizon_world::attributes::{Modifier, Operation};
-use mod_api::first_person::Hand;
+use mod_api::client::first_person::Hand;
 use mod_api::{
     AttributeModifier, AttributeOperation, Direction, EntityRef, EquipmentSlot, Identifier,
     LivingRef, ModifierLifetime,
@@ -2379,7 +2379,7 @@ mod tests {
         };
         use horizon_client::{chunk::Chunk, entities::ArmorStand};
         use horizon_core::geometry::Vec3;
-        use mod_api::NativeAuthority;
+        use mod_api::Authority;
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -2414,7 +2414,7 @@ mod tests {
         let chunk = std::sync::Arc::new(Chunk::empty(0, 0));
         game.world.chunks.insert((0, 0), chunk);
         game.native_lifecycle
-            .begin_open(NativeAuthority::IntegratedServer);
+            .begin_open(Authority::IntegratedServer);
         let id = game
             .spawn_mob(
                 "minecraft:wolf",

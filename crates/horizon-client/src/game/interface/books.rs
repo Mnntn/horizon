@@ -69,7 +69,7 @@ pub(super) enum BookScreen {
     },
 }
 impl BookScreen {
-    /// The id the screen hooks see (`NativeScreenView.id`).
+    /// The id the screen hooks see (`ScreenView.id`).
     pub(super) fn id(&self) -> &'static str {
         match self {
             Self::Edit { signing: true, .. } => "book_sign",

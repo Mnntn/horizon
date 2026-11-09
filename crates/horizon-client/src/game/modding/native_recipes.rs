@@ -30,7 +30,7 @@ const MAX_SYNCED_RECIPES: usize = 1_000_000;
 #[derive(Default)]
 pub(super) struct RecipeTables {
     tables: Option<Arc<Recipes>>,
-    pub(super) categories: Option<HashMap<String, mod_api::recipe_book::RecipeBookCategory>>,
+    pub(super) categories: Option<HashMap<String, mod_api::item::recipe_book::RecipeBookCategory>>,
     known: (Option<u64>, Arc<[i32]>),
     /// The server's recipes of the types its native mods sent (`horizon:
     /// recipe_content`) over the window's own: what `Game::recipes` reads on
@@ -236,7 +236,7 @@ impl Game<'_> {
     pub(super) fn registered_recipe_book_category(
         &mut self,
         kind: &str,
-    ) -> Option<mod_api::recipe_book::RecipeBookCategory> {
+    ) -> Option<mod_api::item::recipe_book::RecipeBookCategory> {
         if self.recipe_tables.categories.is_none() {
             let mut declarations = Vec::new();
             self.native_recipe_book_categories(&mut declarations);

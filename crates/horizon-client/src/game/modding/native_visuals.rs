@@ -5,8 +5,8 @@ use horizon_client::{dynamic_light, gizmos};
 /// lights only after particle extraction, so removed particles cannot displace them.
 #[derive(Default)]
 pub(super) struct FrameVisuals {
-    item_lights: Vec<mod_api::NativeColoredLight>,
-    mod_lights: Vec<mod_api::NativeColoredLight>,
+    item_lights: Vec<mod_api::ColoredLight>,
+    mod_lights: Vec<mod_api::ColoredLight>,
 }
 
 impl FrameVisuals {
@@ -66,7 +66,7 @@ impl Game<'_> {
                     continue;
                 }
                 let [r, g, b] = color.map(|c| (c / top * 255.0).round() as u32);
-                visuals.item_lights.push(mod_api::NativeColoredLight::new(
+                visuals.item_lights.push(mod_api::ColoredLight::new(
                     source.at.to_array(),
                     r << 16 | g << 8 | b,
                     f32::from(source.level),
@@ -181,18 +181,15 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_built_rim_and_light_reach_the_frame() {
         use mod_api::{
-            ClientHost, Hooks, ModEntry, NativeBlockRim, NativeColoredLight, VisualsEvent,
-            testing::with_mods,
+            BlockRim, ClientHost, ColoredLight, Hooks, ModEntry, VisualsEvent, testing::with_mods,
         };
 
         struct Mod;
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn visuals(&self, _: &dyn ClientHost, event: &mut VisualsEvent<'_>) {
-                event
-                    .rims
-                    .push(NativeBlockRim::new([1, 64, 1], 0xFF00_FF00, 2.0));
-                let light = NativeColoredLight::new([1.5, 65.5, 1.5], 0xFF0000, 4.0, 0.5);
+                event.rims.push(BlockRim::new([1, 64, 1], 0xFF00_FF00, 2.0));
+                let light = ColoredLight::new([1.5, 65.5, 1.5], 0xFF0000, 4.0, 0.5);
                 event.lights.push(light);
             }
         }

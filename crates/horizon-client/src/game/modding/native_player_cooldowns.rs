@@ -12,7 +12,7 @@
 use super::Game;
 use horizon_client::cooldowns::Cooldowns;
 use horizon_client::items::ItemStack;
-use mod_api::{NativeItemCooldown, PlayerRef};
+use mod_api::{ItemCooldown, PlayerRef};
 use std::sync::Arc;
 
 impl Game<'_> {
@@ -44,15 +44,12 @@ impl Game<'_> {
     }
     /// Every group the player waits on and its ticks left, ordered by
     /// group.
-    pub(super) fn player_item_cooldowns(
-        &self,
-        player: PlayerRef,
-    ) -> Option<Vec<NativeItemCooldown>> {
-        let mut out: Vec<NativeItemCooldown> = self
+    pub(super) fn player_item_cooldowns(&self, player: PlayerRef) -> Option<Vec<ItemCooldown>> {
+        let mut out: Vec<ItemCooldown> = self
             .native_cooldowns_of(player)?
             .remaining()
             .filter(|(_, left)| *left > 0)
-            .map(|(group, left)| NativeItemCooldown {
+            .map(|(group, left)| ItemCooldown {
                 group: group.to_string(),
                 ticks_left: left,
             })
@@ -181,7 +178,7 @@ mod tests {
         let entity = player.entity();
         mod_api::__private::game::player_ref(
             mod_api::EntityRef::new(
-                mod_api::NativeWorldEpoch::new(entity.epoch().get() + 1),
+                mod_api::WorldEpoch::new(entity.epoch().get() + 1),
                 entity.id(),
             ),
             player.uuid(),

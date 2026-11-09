@@ -185,7 +185,7 @@ mod tests {
     use horizon_client::mobs::Mob;
     use horizon_client::motion::PlayerMotion;
     use horizon_core::geometry::Vec3;
-    use mod_api::{EntityRef, NativeWorldEpoch, SoundSource};
+    use mod_api::{EntityRef, SoundSource, WorldEpoch};
 
     fn spawn(game: &mut super::Game<'_>, id: u32, kind: &str) -> EntityRef {
         let kind = game.res.mob_types().get(kind).unwrap().clone();
@@ -227,7 +227,7 @@ mod tests {
             acting_player(game);
             let player = game.entity(7).unwrap();
             assert_eq!(source(game, player), Some(SoundSource::Players));
-            let stale = EntityRef::new(NativeWorldEpoch::new(cow.epoch().get() + 1), 10);
+            let stale = EntityRef::new(WorldEpoch::new(cow.epoch().get() + 1), 10);
             assert_eq!(source(game, stale), None);
         });
     }
@@ -285,7 +285,7 @@ mod tests {
             let sound = &game.creatures.lan_sounds[1];
             assert_eq!(sound.source as usize, SoundSource::Players.index());
             assert_eq!(sound.except, Some(3));
-            let stale = EntityRef::new(NativeWorldEpoch::new(cow.epoch().get() + 1), 10);
+            let stale = EntityRef::new(WorldEpoch::new(cow.epoch().get() + 1), 10);
             assert!(!game.entity_play_sound(stale, "minecraft:entity.cow.ambient", 1.0, 1.0));
             assert_eq!(game.creatures.lan_sounds.len(), 2);
         });
@@ -306,7 +306,7 @@ mod tests {
             game.audio.capture = Some(Vec::new());
             assert!(game.entity_broadcast_event(cow, 3));
             assert_eq!(game.lan_entity_events, [(10, 3)]);
-            let stale = EntityRef::new(NativeWorldEpoch::new(cow.epoch().get() + 1), 10);
+            let stale = EntityRef::new(WorldEpoch::new(cow.epoch().get() + 1), 10);
             assert!(!game.entity_broadcast_event(stale, 3));
             assert!(!game.entity_game_event(stale, "minecraft:step"));
             assert_eq!(game.lan_entity_events.len(), 1);

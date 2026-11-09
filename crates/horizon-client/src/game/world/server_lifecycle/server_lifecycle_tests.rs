@@ -2,7 +2,7 @@ use crate::game::{
     execution_role::ExecutionRole, native_entity_refs::tests::with_game,
     native_guest_turn_tests::with_guests,
 };
-use mod_api::{Hooks, ModEntry, NativeConfig, NativeConfigKind, ServerHost, testing::with_mods};
+use mod_api::{Hooks, ModEntry, ServerHost, testing::with_mods};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -38,7 +38,7 @@ fn every_started_server_stops_and_saves_even_when_startup_or_ticks_fail() {
         ) {
             if self.1.config_unloading.load(Ordering::Relaxed) {
                 e.configs
-                    .push(NativeConfig::new("log", NativeConfigKind::Server, ""));
+                    .push(mod_api::Config::new("log", mod_api::ConfigKind::Server, ""));
             }
         }
         fn config_unloading(

@@ -1,2 +1,1 @@
-mod tooltip_element;
-pub use tooltip_element::{TooltipElement, TooltipImage, TooltipPlace};
+pub use item::tooltip_element::{TooltipElement, TooltipImage, TooltipPlace};

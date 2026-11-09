@@ -62,7 +62,7 @@ pub mod tests {
 
     #[test]
     pub(crate) fn registry_keys_resolve_reused_parts_and_rebind_without_changing_identity() {
-        use crate::registry_keys::block_id;
+        use crate::content::registry_keys::block_id;
         struct Keys(Arc<std::sync::Mutex<Vec<BlockKey>>>);
         #[mod_api::__subscriptions]
         impl Hooks for Keys {
@@ -94,11 +94,14 @@ pub mod tests {
         assert!(BlockKey::from_slot(2).is_err());
         // The final registry contains content declared after the requester's registration.
         let states = ["minecraft:stone", "later:machine", "later:machine"];
-        crate::registry_keys::resolve_block_keys(["minecraft:stone", "later:machine"], |_| {
-            let properties = std::collections::BTreeMap::new();
-            horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&properties], 0)
-                .map_err(|error| format!("{error:?}"))
-        })
+        crate::content::registry_keys::resolve_block_keys(
+            ["minecraft:stone", "later:machine"],
+            |_| {
+                let properties = std::collections::BTreeMap::new();
+                horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&properties], 0)
+                    .map_err(|error| format!("{error:?}"))
+            },
+        )
         .unwrap();
         resolve_parts(
             &HashMap::new(),
@@ -401,7 +404,7 @@ pub mod tests {
         .get(state as usize)
         .copied()
         .unwrap_or("test:gauge");
-        let key = crate::registry_keys::block_key(name).unwrap();
+        let key = crate::content::registry_keys::block_key(name).unwrap();
         BlockState::from(BlockStateRecord::new(
             key,
             if state > 4 { u16::MAX } else { 0 },
@@ -426,7 +429,7 @@ pub mod tests {
     #[cfg(test)]
     /// Resolve this thread's parts with tag `test:gauged` holding `members`.
     pub(crate) fn resolve(members: &[&str]) -> Result<(), super::ResolvePartsError> {
-        crate::registry_keys::resolve_block_keys(
+        crate::content::registry_keys::resolve_block_keys(
             [
                 "minecraft:air",
                 "minecraft:granite",
@@ -461,7 +464,7 @@ pub mod tests {
     #[test]
     fn prepared_key_routing_tracks_tag_reload() {
         game_thread();
-        crate::registry_keys::resolve_block_keys(
+        crate::content::registry_keys::resolve_block_keys(
             [
                 "minecraft:air",
                 "test:gauge",
@@ -479,7 +482,7 @@ pub mod tests {
             },
         )
         .unwrap();
-        let other = crate::registry_keys::block_key("test:other").unwrap();
+        let other = crate::content::registry_keys::block_key("test:other").unwrap();
         resolve(&["test:other"]).unwrap();
         assert!(block_key_listens(HookId::AnalogOutput, other));
         resolve(&[]).unwrap();

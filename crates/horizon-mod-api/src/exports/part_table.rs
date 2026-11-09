@@ -24,6 +24,6 @@ mod __private {
     #[cfg(any(test, feature = "testing"))]
     pub use crate::{
         parts::tests as part_tests,
-        phase::{with_test_packages, with_test_registration_data},
+        world::phase::{with_test_packages, with_test_registration_data},
     };
 }

@@ -2,7 +2,7 @@
 //! in front, cycled by F5), the detached camera (`Camera.setup` with
 //! `getMaxZoom`), and the local player drawn as a model: in third person
 //! and in the inventory (`InventoryScreen.extractEntityInInventoryFollowsMouse`).
-use super::{Game, Screen, native_mob_draw::NativePlayerRender, shoulders::shoulder_variants};
+use super::{Game, Screen, native_mob_draw::PlayerRender, shoulders::shoulder_variants};
 use horizon_client::{
     blocks::BlockFacts,
     camera::{CameraEntity, CameraType, LivingCamera},
@@ -512,7 +512,7 @@ impl Game<'_> {
         let swinging = self.swing.swinging();
         // currentSwing.hand().asArm(mainArm).
         let swing_right_arm = swinging.then(|| {
-            (self.swing.attack_hand() == mod_api::first_person::Hand::Main)
+            (self.swing.attack_hand() == mod_api::client::first_person::Hand::Main)
                 != self.settings.main_hand_left
         });
         // LivingEntity.isVisuallySwimming and Entity.isInWater.
@@ -787,7 +787,7 @@ impl Game<'_> {
         // in place of the vanilla one and its layers (an invisible player is
         // not asked, as for the others).
         let name = self.own_profile_name();
-        let who = NativePlayerRender {
+        let who = PlayerRender {
             name: &name,
             local: true,
         };

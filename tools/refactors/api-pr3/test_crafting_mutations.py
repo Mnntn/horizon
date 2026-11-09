@@ -34,7 +34,7 @@ def prepare():
         'pub use horizon_items::items::{ItemStack, Items};\n'
         f'#[path = {json.dumps(str(SOURCE))}]\npub mod json_nbt;\n'
         f'#[path = {json.dumps(str(ROOT / "crates/horizon-client/src/crafting/ingredient.rs"))}]\npub mod ingredient;\n'
-        f'#[cfg(test)] mod form_fixture {{ pub use mod_api::crafting::*; #[path = {json.dumps(str(ROOT / "crates/horizon-mod-api/src/crafting/ingredient_form_tests.rs"))}] mod tests; }}\n'
+        f'#[cfg(test)] mod form_fixture {{ pub use mod_api::item::crafting::*; #[path = {json.dumps(str(ROOT / "crates/horizon-mod-api/src/crafting/ingredient_form_tests.rs"))}] mod tests; }}\n'
         'mod native_stack_hooks {\n'
         'pub fn ingredient_test(_: &horizon_world::native_load_context::LoopContext, _: &str, _: &horizon_core::nbt::Compound, _: &horizon_items::items::ItemStack, _: &mut bool) { panic!("match callback is not exercised by the load-boundary fixture"); }\n}\n'
     )

@@ -1,2 +1,1 @@
-mod scheduler;
-pub use scheduler::{MAX_PENDING_TASKS, ScheduleError, TaskId};
+pub use world::scheduler::{MAX_PENDING_TASKS, ScheduleError, TaskId};

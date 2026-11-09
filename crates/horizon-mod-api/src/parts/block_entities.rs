@@ -67,7 +67,7 @@ pub fn block_entity_providers<T: ?Sized + 'static>(
     at: BlockSide,
 ) -> Option<BlockEntityProviders<T>> {
     let parts = installed()?.keys.capabilities.get(key.name)?.get(
-        crate::registry_keys::block_entity_type_name(at.kind(host)?)?,
+        crate::content::registry_keys::block_entity_type_name(at.kind(host)?)?,
     )?;
     Some(BlockEntityProviders {
         parts,
@@ -244,7 +244,7 @@ pub mod tests {
         assert_eq!(
             {
                 let types = &types(&["minecraft:chest"]);
-                crate::registry_keys::resolve_block_entity_types(
+                crate::content::registry_keys::resolve_block_entity_types(
                     types.iter().map(String::as_str),
                     |id| types.iter().position(|name| name == id),
                 )
@@ -257,7 +257,7 @@ pub mod tests {
         );
         {
             let types = &types(&["minecraft:chest", "owner:press", "minecraft:furnace"]);
-            crate::registry_keys::resolve_block_entity_types(
+            crate::content::registry_keys::resolve_block_entity_types(
                 types.iter().map(String::as_str),
                 |id| types.iter().position(|name| name == id),
             )
@@ -267,21 +267,22 @@ pub mod tests {
         assert_eq!(keys[0], keys[1]);
         assert_ne!(keys[0], keys[2]);
         assert_eq!(
-            crate::registry_keys::block_entity_type_key("owner:press"),
+            crate::content::registry_keys::block_entity_type_key("owner:press"),
             Some(keys[0])
         );
         assert_eq!(
-            crate::registry_keys::block_entity_type_name(keys[2]),
+            crate::content::registry_keys::block_entity_type_name(keys[2]),
             Some("minecraft:chest")
         );
-        let furnace = crate::registry_keys::block_entity_type_key("minecraft:furnace").unwrap();
+        let furnace =
+            crate::content::registry_keys::block_entity_type_key("minecraft:furnace").unwrap();
         assert_ne!(furnace, keys[2]);
         assert_eq!(BlockEntityTypeKey::from_slot(furnace.0), Ok(furnace));
         assert!(BlockEntityTypeKey::from_slot(u32::MAX).is_err());
         struct Table;
         impl mod_api::prelude::KeysBackend for Table {
             fn block_entity_type_key_id(&self, key: BlockEntityTypeKey) -> String {
-                crate::registry_keys::block_entity_type_name(key)
+                crate::content::registry_keys::block_entity_type_name(key)
                     .unwrap()
                     .to_owned()
             }
@@ -375,7 +376,7 @@ pub mod tests {
                 let level = host.level("minecraft:overworld").unwrap();
                 let state = BlockState::of(&host.block_states(), self.0, &[]).unwrap();
                 assert_eq!(
-                    level.set_block(host, event.pos, state, NativeBlockUpdateFlags::KNOWN_SHAPE),
+                    level.set_block(host, event.pos, state, BlockUpdateFlags::KNOWN_SHAPE),
                     Ok(true)
                 );
             }
@@ -590,7 +591,7 @@ impl BlockEntitiesCapabilityProviders for InstalledProviders {
         kind: crate::BlockEntityTypeKey,
         index: &mut u32,
     ) -> Option<(BlockProviderOf, &'static str, bool)> {
-        let kind = crate::registry_keys::block_entity_type_name(kind)?;
+        let kind = crate::content::registry_keys::block_entity_type_name(kind)?;
         next(&installed()?.keys.capabilities, name, kind, index)
     }
 }

@@ -842,7 +842,21 @@ pub(super) fn generate(root: &Path) -> Result<(String, String), String> {
     let api_source = fs::read_to_string(root.join("crates/horizon-mod-api/src/lib.rs"))
         .map_err(|e| e.to_string())?;
     let api_source = super::exports::expand(root, &api_source)?;
-    let types = api_types(&api_source)?;
+    let mut types = api_types(&api_source)?;
+    // Parse domain files separately: their inner docs and attributes belong to
+    // that file, not to the middle of a concatenated API root.
+    for entry in fs::read_dir(root.join("crates/horizon-mod-api/src")).map_err(|e| e.to_string())? {
+        let path = entry.map_err(|e| e.to_string())?.path().join("types.rs");
+        if path.is_file() {
+            let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            let domain = api_types(&source).map_err(|e| format!("{}: {e}", path.display()))?;
+            for (receiver, name) in domain.handles {
+                if types.handles.insert(receiver.clone(), name).is_some() {
+                    return Err(format!("duplicate handle receiver {receiver}"));
+                }
+            }
+        }
+    }
     let supertraits = |union: &str| -> String {
         areas
             .iter()

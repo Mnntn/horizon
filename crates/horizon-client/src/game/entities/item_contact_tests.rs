@@ -58,7 +58,7 @@ fn the_active_stack_survives_a_partial_contact_and_consumption_removes_the_entit
     let prepare = |game: &mut Game<'_>| {
         game.options.dedicated = Some(Vec::new());
         game.native_lifecycle
-            .begin_open(mod_api::NativeAuthority::IntegratedServer);
+            .begin_open(mod_api::Authority::IntegratedServer);
         game.world = World::new(game.res.facts().air, 1);
         game.world
             .chunks

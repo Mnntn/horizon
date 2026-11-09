@@ -3,7 +3,7 @@
 //! in-flight guards. Repeated start is a no-op; repeated stop preserves the last report.
 #[path = "profiler/firefox.rs"]
 mod firefox;
-use crate::crash::NativeModCall;
+use crate::content::crash::ModCall;
 use std::cell::{Cell, UnsafeCell};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering::SeqCst};
@@ -221,10 +221,10 @@ pub(crate) fn stop_report() -> Report {
 pub(crate) struct Guard {
     pool: *const Pool,
     slot: usize,
-    call: NativeModCall,
+    call: ModCall,
     began: u64,
 }
-pub(crate) fn enter(call: NativeModCall) -> Option<Guard> {
+pub(crate) fn enter(call: ModCall) -> Option<Guard> {
     if !is_enabled() {
         return None;
     }
@@ -289,7 +289,7 @@ impl Drop for Guard {
 mod tests {
     use super::stop_report as stop;
     use super::*;
-    use crate::crash::enter_native_mod;
+    use crate::content::crash::enter_native_mod;
     static SERIAL: Mutex<()> = Mutex::new(());
     type Pause = Box<dyn FnOnce()>;
     thread_local! {
@@ -304,8 +304,8 @@ mod tests {
             now
         })
     }
-    fn call(id: &'static str, hook: &'static str, part: Option<&'static str>) -> NativeModCall {
-        NativeModCall { id, hook, part }
+    fn call(id: &'static str, hook: &'static str, part: Option<&'static str>) -> ModCall {
+        ModCall { id, hook, part }
     }
     #[test]
     fn profiler_guards_and_threads() {

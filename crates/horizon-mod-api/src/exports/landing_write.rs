@@ -1,2 +1,1 @@
-mod landing_write;
-pub use landing_write::LandingWrite;
+pub use world::landing_write::LandingWrite;

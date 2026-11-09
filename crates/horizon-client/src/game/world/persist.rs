@@ -282,8 +282,8 @@ pub(super) struct ItemDisplayTransformation {
     right_rotation: [f32; 4],
 }
 
-impl From<mod_api::NativeTransformation> for ItemDisplayTransformation {
-    fn from(value: mod_api::NativeTransformation) -> Self {
+impl From<mod_api::Transformation> for ItemDisplayTransformation {
+    fn from(value: mod_api::Transformation) -> Self {
         Self {
             translation: value.translation,
             left_rotation: value.left_rotation,
@@ -4174,7 +4174,7 @@ mod item_display_saved_transform_tests {
         )
         .unwrap();
         game.native_lifecycle
-            .begin_open(mod_api::NativeAuthority::IntegratedServer);
+            .begin_open(mod_api::Authority::IntegratedServer);
         game.build_registries();
         game.set_allow_commands(true);
 
@@ -4311,17 +4311,17 @@ mod item_display_saved_transform_tests {
     #[test]
     #[ignore = "prepared resources; actual native setter, stale raw and no-raw writer"]
     fn existing_native_item_display_setter_carries_only_transform_state() {
-        use mod_api::NativeTransformation;
+        use mod_api::Transformation;
         with_game(|game| {
             // Same actual server-context setup as existing native machine/contact fixtures.
             game.options.dedicated = Some(Vec::new());
             let id = summon(game, 4, None);
             let uuid = game.persist.uuid_of(id);
             let clock = game.world.game_time;
-            let update = NativeTransformation {
+            let update = Transformation {
                 translation: [9.0, 8.0, 7.0],
                 scale: [2.0; 3],
-                ..NativeTransformation::IDENTITY
+                ..Transformation::IDENTITY
             };
             let display = game.display(game.entity(id).unwrap()).unwrap();
             assert!(game.display_set_transformation(display, update));
@@ -4354,7 +4354,7 @@ mod item_display_saved_transform_tests {
             assert_eq!(fresh.get("teleport_duration"), Some(&Tag::Int(0)));
             assert!(fresh.get("start_interpolation").is_none());
             game.persist.raw.insert(id, raw);
-            let invalid = NativeTransformation {
+            let invalid = Transformation {
                 left_rotation: [0.0; 4],
                 ..update
             };

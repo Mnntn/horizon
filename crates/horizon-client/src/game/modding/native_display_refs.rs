@@ -15,8 +15,8 @@ use horizon_client::{
 };
 use horizon_protocol::entity_data::Value;
 use mod_api::{
-    DisplayRef, EntityRef, NativeBillboard, NativeDisplayKind, NativeItemDisplayContext,
-    NativeTextAlignment, NativeTransformation,
+    Billboard, DisplayKind, DisplayRef, EntityRef, ItemDisplayContext, TextAlignment,
+    Transformation,
 };
 use {
     horizon_core::nbt::{Compound, Tag},
@@ -24,10 +24,10 @@ use {
 };
 
 /// The entity data entry `id` of a display's compound: what it sets, else the default.
-fn entry(kind: NativeDisplayKind, tag: &Tag, id: u8) -> Option<Value> {
+fn entry(kind: DisplayKind, tag: &Tag, id: u8) -> Option<Value> {
     let find = |tag: &Tag, all: bool| {
         let mut data = display_data(tag, all);
-        if kind == NativeDisplayKind::Text {
+        if kind == DisplayKind::Text {
             data.extend(text_display_data(tag, all));
         }
         data.into_iter().find(|e| e.0 == id).map(|e| e.2)
@@ -51,20 +51,20 @@ fn rotation(q: &[f32; 4]) -> bool {
 impl Game<'_> {
     /// The display's kind and entity id, or None for a stale handle, a client,
     /// or an entity that isn't a display.
-    fn display_entity(&self, display: DisplayRef) -> Option<(NativeDisplayKind, u32)> {
+    fn display_entity(&self, display: DisplayRef) -> Option<(DisplayKind, u32)> {
         let Target::Other(id) = self.native_entity_target(display.entity())? else {
             return None;
         };
         let kind = self.others.iter().find(|o| o.id == id)?.kind.as_str();
-        Some((NativeDisplayKind::from_entity_type(kind)?, id))
+        Some((DisplayKind::from_entity_type(kind)?, id))
     }
 
     /// The display's compound, if it is a display of kind `only` (any when None).
     fn display_tag(
         &self,
         display: DisplayRef,
-        only: Option<NativeDisplayKind>,
-    ) -> Option<(NativeDisplayKind, Tag)> {
+        only: Option<DisplayKind>,
+    ) -> Option<(DisplayKind, Tag)> {
         let (kind, id) = self.display_entity(display)?;
         if only.is_some_and(|only| only != kind) {
             return None;
@@ -76,7 +76,7 @@ impl Game<'_> {
     fn display_value(
         &self,
         display: DisplayRef,
-        only: Option<NativeDisplayKind>,
+        only: Option<DisplayKind>,
         id: u8,
     ) -> Option<Value> {
         let (kind, tag) = self.display_tag(display, only)?;
@@ -90,19 +90,14 @@ impl Game<'_> {
         }
     }
 
-    fn display_int(
-        &self,
-        display: DisplayRef,
-        only: Option<NativeDisplayKind>,
-        id: u8,
-    ) -> Option<i32> {
+    fn display_int(&self, display: DisplayRef, only: Option<DisplayKind>, id: u8) -> Option<i32> {
         match self.display_value(display, only, id)? {
             Value::Int(v) => Some(v),
             _ => None,
         }
     }
 
-    fn display_byte(&self, display: DisplayRef, only: NativeDisplayKind, id: u8) -> Option<i8> {
+    fn display_byte(&self, display: DisplayRef, only: DisplayKind, id: u8) -> Option<i8> {
         match self.display_value(display, Some(only), id)? {
             Value::Byte(v) => Some(v),
             _ => None,
@@ -113,7 +108,7 @@ impl Game<'_> {
     fn display_edit(
         &mut self,
         display: DisplayRef,
-        only: Option<NativeDisplayKind>,
+        only: Option<DisplayKind>,
         edit: impl FnOnce(&mut Compound),
     ) -> bool {
         let Some((kind, id)) = self.display_entity(display) else {
@@ -137,7 +132,7 @@ impl Game<'_> {
     fn display_put(
         &mut self,
         display: DisplayRef,
-        only: Option<NativeDisplayKind>,
+        only: Option<DisplayKind>,
         key: &str,
         value: Tag,
     ) -> bool {
@@ -158,21 +153,18 @@ impl Game<'_> {
     }
 
     /// Which `Display` subclass the entity is.
-    pub(super) fn display_kind(&self, display: DisplayRef) -> Option<NativeDisplayKind> {
+    pub(super) fn display_kind(&self, display: DisplayRef) -> Option<DisplayKind> {
         Some(self.display_entity(display)?.0)
     }
 
     /// `Display.createTransformation`: the transformation as shown.
-    pub(super) fn display_transformation(
-        &self,
-        display: DisplayRef,
-    ) -> Option<NativeTransformation> {
+    pub(super) fn display_transformation(&self, display: DisplayRef) -> Option<Transformation> {
         let (kind, tag) = self.display_tag(display, None)?;
         let part = |id| match entry(kind, &tag, id)? {
             Value::Floats(v) => Some(v),
             _ => None,
         };
-        Some(NativeTransformation {
+        Some(Transformation {
             translation: part(11)?.try_into().ok()?,
             scale: part(12)?.try_into().ok()?,
             left_rotation: part(13)?.try_into().ok()?,
@@ -186,7 +178,7 @@ impl Game<'_> {
     pub(super) fn display_set_transformation(
         &mut self,
         display: DisplayRef,
-        transformation: NativeTransformation,
+        transformation: Transformation,
     ) -> bool {
         let t = transformation;
         if !finite(&t.translation)
@@ -219,9 +211,9 @@ impl Game<'_> {
     }
 
     /// `Display.getBillboardConstraints`.
-    pub(super) fn display_billboard(&self, display: DisplayRef) -> Option<NativeBillboard> {
+    pub(super) fn display_billboard(&self, display: DisplayRef) -> Option<Billboard> {
         match self.display_value(display, None, 15)? {
-            Value::Byte(v) => NativeBillboard::ALL.get(usize::try_from(v).ok()?).copied(),
+            Value::Byte(v) => Billboard::ALL.get(usize::try_from(v).ok()?).copied(),
             _ => None,
         }
     }
@@ -230,7 +222,7 @@ impl Game<'_> {
     pub(super) fn display_set_billboard(
         &mut self,
         display: DisplayRef,
-        billboard: NativeBillboard,
+        billboard: Billboard,
     ) -> bool {
         let name = Tag::String(billboard.name().into());
         self.display_put(display, None, "billboard", name)
@@ -388,7 +380,7 @@ impl Game<'_> {
 
     /// `TextDisplay.getText`; None for another kind of display.
     pub(super) fn display_text(&self, display: DisplayRef) -> Option<Text> {
-        match self.display_value(display, Some(NativeDisplayKind::Text), 23)? {
+        match self.display_value(display, Some(DisplayKind::Text), 23)? {
             Value::Text(tag) => Some(comp_text(&tag_to_json(&tag))),
             _ => None,
         }
@@ -397,19 +389,19 @@ impl Game<'_> {
     /// `TextDisplay.setText`; false for another kind of display.
     pub(super) fn display_set_text(&mut self, display: DisplayRef, text: Text) -> bool {
         let text = json_to_tag(&text.component());
-        self.display_put(display, Some(NativeDisplayKind::Text), "text", text)
+        self.display_put(display, Some(DisplayKind::Text), "text", text)
     }
 
     /// `TextDisplay.getLineWidth`.
     pub(super) fn display_line_width(&self, display: DisplayRef) -> Option<i32> {
-        self.display_int(display, Some(NativeDisplayKind::Text), 24)
+        self.display_int(display, Some(DisplayKind::Text), 24)
     }
 
     /// `TextDisplay.setLineWidth`; false for another kind of display.
     pub(super) fn display_set_line_width(&mut self, display: DisplayRef, width: i32) -> bool {
         self.display_put(
             display,
-            Some(NativeDisplayKind::Text),
+            Some(DisplayKind::Text),
             "line_width",
             Tag::Int(width),
         )
@@ -417,14 +409,14 @@ impl Game<'_> {
 
     /// `TextDisplay.getBackgroundColor`: ARGB.
     pub(super) fn display_background(&self, display: DisplayRef) -> Option<i32> {
-        self.display_int(display, Some(NativeDisplayKind::Text), 25)
+        self.display_int(display, Some(DisplayKind::Text), 25)
     }
 
     /// `TextDisplay.setBackgroundColor`; false for another kind of display.
     pub(super) fn display_set_background(&mut self, display: DisplayRef, argb: i32) -> bool {
         self.display_put(
             display,
-            Some(NativeDisplayKind::Text),
+            Some(DisplayKind::Text),
             "background",
             Tag::Int(argb),
         )
@@ -432,26 +424,26 @@ impl Game<'_> {
 
     /// `TextDisplay.getTextOpacity`: -1 is opaque, else 0 to 127 then -128 to -2.
     pub(super) fn display_text_opacity(&self, display: DisplayRef) -> Option<i8> {
-        self.display_byte(display, NativeDisplayKind::Text, 26)
+        self.display_byte(display, DisplayKind::Text, 26)
     }
 
     /// `TextDisplay.setTextOpacity`; false for another kind of display.
     pub(super) fn display_set_text_opacity(&mut self, display: DisplayRef, opacity: i8) -> bool {
         self.display_put(
             display,
-            Some(NativeDisplayKind::Text),
+            Some(DisplayKind::Text),
             "text_opacity",
             Tag::Byte(opacity),
         )
     }
 
     fn display_text_flag(&self, display: DisplayRef, bit: i8) -> Option<bool> {
-        Some(self.display_byte(display, NativeDisplayKind::Text, 27)? & bit != 0)
+        Some(self.display_byte(display, DisplayKind::Text, 27)? & bit != 0)
     }
 
     fn display_set_text_flag(&mut self, display: DisplayRef, key: &str, on: bool) -> bool {
         let value = Tag::Byte(i8::from(on));
-        self.display_put(display, Some(NativeDisplayKind::Text), key, value)
+        self.display_put(display, Some(DisplayKind::Text), key, value)
     }
 
     /// `TextDisplay.FLAG_SHADOW`.
@@ -485,12 +477,12 @@ impl Game<'_> {
     }
 
     /// `TextDisplay.getAlign`, from the left and right flags.
-    pub(super) fn display_alignment(&self, display: DisplayRef) -> Option<NativeTextAlignment> {
-        let flags = self.display_byte(display, NativeDisplayKind::Text, 27)?;
+    pub(super) fn display_alignment(&self, display: DisplayRef) -> Option<TextAlignment> {
+        let flags = self.display_byte(display, DisplayKind::Text, 27)?;
         Some(match (flags & 8 != 0, flags & 16 != 0) {
-            (true, _) => NativeTextAlignment::Left,
-            (_, true) => NativeTextAlignment::Right,
-            _ => NativeTextAlignment::Center,
+            (true, _) => TextAlignment::Left,
+            (_, true) => TextAlignment::Right,
+            _ => TextAlignment::Center,
         })
     }
 
@@ -498,15 +490,15 @@ impl Game<'_> {
     pub(super) fn display_set_alignment(
         &mut self,
         display: DisplayRef,
-        alignment: NativeTextAlignment,
+        alignment: TextAlignment,
     ) -> bool {
         let name = Tag::String(alignment.name().into());
-        self.display_put(display, Some(NativeDisplayKind::Text), "alignment", name)
+        self.display_put(display, Some(DisplayKind::Text), "alignment", name)
     }
 
     /// `BlockDisplay.getBlockState`; None for another kind of display.
     pub(super) fn display_block_state(&self, display: DisplayRef) -> Option<BlockStateId> {
-        let (_, tag) = self.display_tag(display, Some(NativeDisplayKind::Block))?;
+        let (_, tag) = self.display_tag(display, Some(DisplayKind::Block))?;
         tag.get("block_state")
             .and_then(|t| self.state_from_nbt(t))
             .or_else(|| self.pack.assets.registry.default_state("minecraft:air"))
@@ -522,12 +514,12 @@ impl Game<'_> {
             return false;
         }
         let tag = self.state_to_nbt(state);
-        self.display_put(display, Some(NativeDisplayKind::Block), "block_state", tag)
+        self.display_put(display, Some(DisplayKind::Block), "block_state", tag)
     }
 
     /// `ItemDisplay.getItemStack`; None for another kind of display or an empty stack.
     pub(super) fn display_item(&self, display: DisplayRef) -> Option<ItemStack> {
-        let (_, tag) = self.display_tag(display, Some(NativeDisplayKind::Item))?;
+        let (_, tag) = self.display_tag(display, Some(DisplayKind::Item))?;
         item_from_nbt(tag.get("item")?)
     }
 
@@ -538,7 +530,7 @@ impl Game<'_> {
         stack: Option<ItemStack>,
     ) -> bool {
         let stack = stack.filter(|s| s.count > 0 && &*s.item != "minecraft:air");
-        self.display_edit(display, Some(NativeDisplayKind::Item), |c| match stack {
+        self.display_edit(display, Some(DisplayKind::Item), |c| match stack {
             Some(stack) => {
                 c.insert("item".into(), horizon_client::save::item_to_nbt(&stack));
             }
@@ -549,26 +541,23 @@ impl Game<'_> {
     }
 
     /// `ItemDisplay.getItemTransform`: how the item is displayed.
-    pub(super) fn display_item_context(
-        &self,
-        display: DisplayRef,
-    ) -> Option<NativeItemDisplayContext> {
-        let (_, tag) = self.display_tag(display, Some(NativeDisplayKind::Item))?;
+    pub(super) fn display_item_context(&self, display: DisplayRef) -> Option<ItemDisplayContext> {
+        let (_, tag) = self.display_tag(display, Some(DisplayKind::Item))?;
         let name = match tag.get("item_display") {
             Some(Tag::String(s)) => s.to_string_lossy(),
             _ => String::new(),
         };
-        Some(NativeItemDisplayContext::from_name(&name).unwrap_or(NativeItemDisplayContext::None))
+        Some(ItemDisplayContext::from_name(&name).unwrap_or(ItemDisplayContext::None))
     }
 
     /// `ItemDisplay.setItemTransform`; false for another kind of display.
     pub(super) fn display_set_item_context(
         &mut self,
         display: DisplayRef,
-        context: NativeItemDisplayContext,
+        context: ItemDisplayContext,
     ) -> bool {
         let name = Tag::String(context.name().into());
-        self.display_put(display, Some(NativeDisplayKind::Item), "item_display", name)
+        self.display_put(display, Some(DisplayKind::Item), "item_display", name)
     }
 }
 
@@ -578,7 +567,7 @@ mod tests {
     use super::super::{commands::OtherEntity, native_entity_refs::tests::with_game};
     use super::*;
     use horizon_core::geometry::Vec3;
-    use mod_api::NativeWorldEpoch;
+    use mod_api::WorldEpoch;
 
     fn push(game: &mut Game<'_>, id: u32, kind: &str) -> DisplayRef {
         game.options.dedicated = Some(Vec::new());
@@ -605,9 +594,9 @@ mod tests {
             let text = push(game, 21, "minecraft:text_display");
             let block = push(game, 22, "minecraft:block_display");
             let item = push(game, 23, "minecraft:item_display");
-            assert_eq!(text.kind(game), Some(NativeDisplayKind::Text));
-            assert_eq!(block.kind(game), Some(NativeDisplayKind::Block));
-            assert_eq!(item.kind(game), Some(NativeDisplayKind::Item));
+            assert_eq!(text.kind(game), Some(DisplayKind::Text));
+            assert_eq!(block.kind(game), Some(DisplayKind::Block));
+            assert_eq!(item.kind(game), Some(DisplayKind::Item));
             assert_eq!(text.entity(), game.entity(21).unwrap());
             game.others.push(OtherEntity {
                 knot_check: None,
@@ -623,11 +612,8 @@ mod tests {
             });
             assert!(game.display(game.entity(24).unwrap()).is_none());
 
-            assert_eq!(
-                text.transformation(game),
-                Some(NativeTransformation::IDENTITY)
-            );
-            let moved = NativeTransformation {
+            assert_eq!(text.transformation(game), Some(Transformation::IDENTITY));
+            let moved = Transformation {
                 translation: [0.0, 1.5, 0.0],
                 left_rotation: [0.0, 1.0, 0.0, 0.0],
                 scale: [2.0, 2.0, 2.0],
@@ -643,9 +629,9 @@ mod tests {
             assert!(!text.set_transformation(game, bad));
             assert_eq!(text.transformation(game), Some(moved));
 
-            assert_eq!(item.billboard(game), Some(NativeBillboard::Fixed));
-            assert!(item.set_billboard(game, NativeBillboard::Center));
-            assert_eq!(item.billboard(game), Some(NativeBillboard::Center));
+            assert_eq!(item.billboard(game), Some(Billboard::Fixed));
+            assert!(item.set_billboard(game, Billboard::Center));
+            assert_eq!(item.billboard(game), Some(Billboard::Center));
             assert_eq!(block.brightness(game), None);
             assert!(block.set_brightness(game, Some((15, 3))));
             assert_eq!(block.brightness(game), Some((15, 3)));
@@ -695,7 +681,7 @@ mod tests {
             assert_eq!(text.line_width(game), Some(200));
             assert_eq!(text.background(game), Some(0x4000_0000));
             assert_eq!(text.text_opacity(game), Some(-1));
-            assert_eq!(text.alignment(game), Some(NativeTextAlignment::Center));
+            assert_eq!(text.alignment(game), Some(TextAlignment::Center));
             assert!(
                 text.set_text(game, mod_api::Text::literal("hello"))
                     .unwrap()
@@ -706,7 +692,7 @@ mod tests {
             assert!(text.set_text_shadow(game, true));
             assert!(text.set_see_through(game, true));
             assert!(text.set_default_background(game, true));
-            assert!(text.set_alignment(game, NativeTextAlignment::Right));
+            assert!(text.set_alignment(game, TextAlignment::Right));
             assert_eq!(
                 text.text(game).unwrap().unwrap(),
                 mod_api::Text::literal("hello")
@@ -728,12 +714,12 @@ mod tests {
                     Some(true),
                     Some(true),
                     Some(true),
-                    Some(NativeTextAlignment::Right)
+                    Some(TextAlignment::Right)
                 )
             );
-            assert!(text.set_alignment(game, NativeTextAlignment::Left));
+            assert!(text.set_alignment(game, TextAlignment::Left));
             assert!(text.set_text_shadow(game, false));
-            assert_eq!(text.alignment(game), Some(NativeTextAlignment::Left));
+            assert_eq!(text.alignment(game), Some(TextAlignment::Left));
             assert_eq!(text.text_shadow(game), Some(false));
             assert_eq!(text.see_through(game), Some(true));
 
@@ -768,18 +754,12 @@ mod tests {
                 extra: None,
             };
             assert_eq!(item.item(game), None);
-            assert_eq!(
-                item.item_context(game),
-                Some(NativeItemDisplayContext::None)
-            );
+            assert_eq!(item.item_context(game), Some(ItemDisplayContext::None));
             let sword = sword.try_into_api().unwrap();
             assert_eq!(item.set_item(game, Some(sword.clone())), Ok(true));
-            assert!(item.set_item_context(game, NativeItemDisplayContext::Head));
+            assert!(item.set_item_context(game, ItemDisplayContext::Head));
             assert_eq!(item.item(game), Some(sword));
-            assert_eq!(
-                item.item_context(game),
-                Some(NativeItemDisplayContext::Head)
-            );
+            assert_eq!(item.item_context(game), Some(ItemDisplayContext::Head));
             assert_eq!(item.set_item(game, None), Ok(true));
             assert_eq!(item.item(game), None);
 
@@ -788,8 +768,8 @@ mod tests {
             assert!(!block.set_text(game, mod_api::Text::literal("x")).unwrap());
             assert!(!text.set_block_state(game, stone));
             assert_eq!(text.block_state(game), None);
-            assert!(!block.set_item_context(game, NativeItemDisplayContext::Gui));
-            assert!(!item.set_alignment(game, NativeTextAlignment::Left));
+            assert!(!block.set_item_context(game, ItemDisplayContext::Gui));
+            assert!(!item.set_alignment(game, TextAlignment::Left));
             assert_eq!(item.line_width(game), None);
         });
     }
@@ -803,7 +783,7 @@ mod tests {
                 text.set_text(game, mod_api::Text::literal("saved"))
                     .unwrap()
             );
-            assert!(text.set_billboard(game, NativeBillboard::Vertical));
+            assert!(text.set_billboard(game, Billboard::Vertical));
             assert!(text.set_view_range(game, 2.5));
             let raw = game.persist.raw.get(&21).unwrap().clone();
             // The entity data the tracker sends: the changed entries only.
@@ -855,7 +835,7 @@ mod tests {
         with_game(|game| {
             let text = push(game, 21, "minecraft:text_display");
             let stale = DisplayRef::new(EntityRef::new(
-                NativeWorldEpoch::new(text.entity().epoch().get() + 1),
+                WorldEpoch::new(text.entity().epoch().get() + 1),
                 21,
             ));
             assert_eq!(stale.kind(game), None);

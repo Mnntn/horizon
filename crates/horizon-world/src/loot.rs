@@ -89,7 +89,7 @@ impl<'a> PackOverlay<'a> {
 pub fn native_loot_function(
     kind: &str,
     data: &Value,
-    ctx: &NativeLootContext<'_>,
+    ctx: &LootContext<'_>,
     stack: &mut LootStack,
 ) {
     crate::native_load_hooks::loot_function(kind, data, ctx, stack);
@@ -100,17 +100,12 @@ pub fn native_loot_function(
 /// whether it holds are here (`holds` starts `false`; a mod that claims
 /// the kind sets it).
 #[inline(never)]
-pub fn native_loot_condition(
-    kind: &str,
-    data: &Value,
-    ctx: &NativeLootContext<'_>,
-    holds: &mut bool,
-) {
+pub fn native_loot_condition(kind: &str, data: &Value, ctx: &LootContext<'_>, holds: &mut bool) {
     crate::native_load_hooks::loot_condition(kind, data, ctx, holds);
 }
 
 /// The tool a loot context names: its item id and enchantments.
-pub struct NativeLootTool {
+pub struct LootTool {
     pub item: String,
     pub enchantments: Vec<(String, i32)>,
 }
@@ -122,7 +117,7 @@ pub struct NativeLootTool {
 /// loot_table, interact_loot); the entity, damage and player by the main
 /// loot engine; each is None in the other. A table without a mod's kinds
 /// draws nothing and stays bit-for-bit the same.
-pub struct NativeLootContext<'a> {
+pub struct LootContext<'a> {
     /// The entity the table names (`this`), if any.
     pub entity: Option<&'a LootEntity>,
     /// The damage that killed it, if any.
@@ -132,7 +127,7 @@ pub struct NativeLootContext<'a> {
     /// The tool used, if any. The items engine fills it (all of its
     /// tables: block drops, entity drops, loot_table, interact_loot);
     /// the main loot engine has no tool in its context.
-    pub tool: Option<NativeLootTool>,
+    pub tool: Option<LootTool>,
     /// The block a block-drop table breaks, if any. The items engine
     /// fills it; the main loot engine has no block in its context.
     pub block: Option<&'a str>,
@@ -146,7 +141,7 @@ pub struct NativeLootContext<'a> {
     /// Where the roll happens: the origin, the block entity and the level,
     /// when the game rolled the table at a place (a broken block's drops,
     /// a mob's death loot); None for the other rolls. Either engine fills it.
-    pub place: Option<Arc<NativeLootPlace>>,
+    pub place: Option<Arc<LootPlace>>,
 }
 
 /// Where a loot roll happens, as a mod's own loot kinds see it:
@@ -155,7 +150,7 @@ pub struct NativeLootContext<'a> {
 /// the time; `WeatherCheck`: the rain and the thunder). The game sets it
 /// around a roll with [`with_native_loot_place`].
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct NativeLootPlace {
+pub struct LootPlace {
     /// `ORIGIN`: a broken block's centre, a dead mob's position.
     pub origin: Option<[f64; 3]>,
     /// `BLOCK_ENTITY`: the broken block's entity as it was before the
@@ -163,12 +158,12 @@ pub struct NativeLootPlace {
     /// mod's block entity carries its own data and its `Items`.
     pub block_entity: Option<Tag>,
     /// The level the roll is in.
-    pub level: Option<NativeLootLevel>,
+    pub level: Option<LootLevel>,
 }
 
 /// The level a loot roll is in, as a mod's own loot kinds see it.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct NativeLootLevel {
+pub struct LootLevel {
     /// The dimension's id (`minecraft:overworld`).
     pub dimension: String,
     /// `Level.getGameTime`.
@@ -183,14 +178,14 @@ pub struct NativeLootLevel {
 }
 
 thread_local! {
-    static NATIVE_LOOT_PLACE: RefCell<Option<Arc<NativeLootPlace>>> = const { RefCell::new(None) };
+    static NATIVE_LOOT_PLACE: RefCell<Option<Arc<LootPlace>>> = const { RefCell::new(None) };
 }
 
 /// Runs `roll` with `place` as where its loot rolls happen: every
-/// [`NativeLootContext`] made inside it, by either engine, carries it. The
+/// [`LootContext`] made inside it, by either engine, carries it. The
 /// place before is back when `roll` returns, so these nest.
-pub fn with_native_loot_place<T>(place: NativeLootPlace, roll: impl FnOnce() -> T) -> T {
-    struct Restore(Option<Arc<NativeLootPlace>>);
+pub fn with_native_loot_place<T>(place: LootPlace, roll: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Arc<LootPlace>>);
     impl Drop for Restore {
         fn drop(&mut self) {
             let before = self.0.take();
@@ -202,7 +197,7 @@ pub fn with_native_loot_place<T>(place: NativeLootPlace, roll: impl FnOnce() -> 
 }
 
 /// The place [`with_native_loot_place`] set for the rolls now running, if any.
-pub fn current_native_loot_place() -> Option<Arc<NativeLootPlace>> {
+pub fn current_native_loot_place() -> Option<Arc<LootPlace>> {
     NATIVE_LOOT_PLACE.with(|p| p.borrow().clone())
 }
 
@@ -1615,9 +1610,9 @@ impl<R: RandomSource> Context<'_, R> {
     }
     /// The context a mod's own loot kinds see: drawn lazily, only when
     /// the table has a mod's kind, so the random stays untouched without.
-    fn native_ctx(&mut self) -> NativeLootContext<'_> {
+    fn native_ctx(&mut self) -> LootContext<'_> {
         let seed = self.random.next_long();
-        NativeLootContext {
+        LootContext {
             entity: self.entity.map(|e| &e.this),
             damage: self.entity.and_then(|e| e.damage.as_ref()),
             player: self.entity.and_then(|e| e.player.as_ref()),
@@ -3253,10 +3248,10 @@ mod native_kinds_tests {
         assert_eq!(a, b, "same seed, different result");
     }
 
-    fn place(x: f64) -> NativeLootPlace {
-        NativeLootPlace {
+    fn place(x: f64) -> LootPlace {
+        LootPlace {
             origin: Some([x, 64.0, 0.5]),
-            ..NativeLootPlace::default()
+            ..LootPlace::default()
         }
     }
 

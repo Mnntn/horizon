@@ -3,10 +3,9 @@
 //! Written to `crash-reports/crash-<yyyy-MM-dd_HH.mm.ss>-client.txt` in the game folder when
 //! the main thread panics or `main` gets an error back. It stays a local file: the player
 //! reads it and shares it by hand.
-pub use mod_api::crash::{
-    ConvertedCall, ConvertedPackage, ConvertedPackageGuard, ConvertedPackages, NativeModCall,
-    NativeModGuard, clear_detail, current_converted_call, current_native_mod, enter_native_mod,
-    set_detail,
+pub use mod_api::content::crash::{
+    ConvertedCall, ConvertedPackage, ConvertedPackageGuard, ConvertedPackages, ModCall, ModGuard,
+    clear_detail, current_converted_call, current_native_mod, enter_native_mod, set_detail,
 };
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
@@ -28,7 +27,7 @@ thread_local! {
 /// `message`, with the native mod hook this thread is inside, if any, and the converted package
 /// the hook's runtime is executing.
 fn attributed(message: String) -> String {
-    let Some(call) = mod_api::crash::current_native_call() else {
+    let Some(call) = mod_api::content::crash::current_native_call() else {
         return message;
     };
     let part = call
@@ -39,7 +38,7 @@ fn attributed(message: String) -> String {
         "{message}\nin native mod {}, hook {}{part}",
         call.id, call.hook
     );
-    if let Some(scoped) = mod_api::crash::current_converted_call()
+    if let Some(scoped) = mod_api::content::crash::current_converted_call()
         && scoped.runtime == call.id
     {
         // `export` and `site` come from the runtime, and for wasm from module bytes: a name
@@ -319,7 +318,7 @@ pub fn system_details(side: &str) -> Vec<(String, String)> {
         ("Memory".to_owned(), memory()),
     ];
     out.extend(
-        mod_api::crash::details()
+        mod_api::content::crash::details()
             .into_iter()
             .filter(|(k, _)| side != "server" || *k != "Render Settings")
             .map(|(k, v)| (k.to_owned(), v)),
@@ -704,12 +703,12 @@ mod tests {
 
     #[test]
     fn a_panic_in_a_native_mods_hook_names_it() {
-        let outer = enter_native_mod(NativeModCall {
+        let outer = enter_native_mod(ModCall {
             id: "outer",
             hook: "render",
             part: None,
         });
-        let inner = enter_native_mod(NativeModCall {
+        let inner = enter_native_mod(ModCall {
             id: "b",
             hook: "tick",
             part: None,
@@ -719,7 +718,7 @@ mod tests {
         assert!(attributed("boom".into()).ends_with("\nin native mod outer, hook render"));
         drop(outer);
         assert_eq!(attributed("boom".into()), "boom");
-        let part = enter_native_mod(NativeModCall {
+        let part = enter_native_mod(ModCall {
             id: "c",
             hook: "analog_output",
             part: Some("c::Gauge"),
@@ -733,7 +732,7 @@ mod tests {
 
     #[test]
     fn a_panic_in_a_converted_package_names_the_runtime_package_export_and_site() {
-        let runtime = enter_native_mod(NativeModCall {
+        let runtime = enter_native_mod(ModCall {
             id: "portizon",
             hook: "client_tick_pre",
             part: None,
@@ -750,7 +749,7 @@ mod tests {
         ));
         // Another mod's hook inside the package keeps its own attribution: the runtime's
         // package is not named for a crash in somebody else's code.
-        let other = enter_native_mod(NativeModCall {
+        let other = enter_native_mod(ModCall {
             id: "other",
             hook: "tick",
             part: None,
@@ -773,7 +772,7 @@ mod tests {
 
     #[test]
     fn a_guest_export_cannot_forge_a_report_line() {
-        let runtime = enter_native_mod(NativeModCall {
+        let runtime = enter_native_mod(ModCall {
             id: "portizon",
             hook: "client_tick_pre",
             part: None,
@@ -820,7 +819,7 @@ mod tests {
                 *sink.lock().unwrap() = Some(panic_report(info, "client"));
             }
         }));
-        let _runtime = enter_native_mod(NativeModCall {
+        let _runtime = enter_native_mod(ModCall {
             id: "runtime",
             hook: "dispatch",
             part: None,
@@ -971,7 +970,7 @@ mod tests {
         let _ = std::panic::catch_unwind(|| panic!("the test crash"));
         // The same panic inside a native mod's hook, which the hook sees before the unwind.
         let _ = std::panic::catch_unwind(|| {
-            let _guard = enter_native_mod(NativeModCall {
+            let _guard = enter_native_mod(ModCall {
                 id: "a",
                 hook: "tick",
                 part: None,

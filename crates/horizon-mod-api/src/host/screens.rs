@@ -49,7 +49,7 @@ pub trait ScreensClientHost {
     /// fire over it as over any other, so the mod draws it in
     /// `native_screen_render_post` and takes its clicks, scroll, keys and
     /// typing there; the mouse is freed, and Escape closes it. Every mod's own
-    /// screen has the `NativeScreenView.id` `mod`, so a mod's screen hooks
+    /// screen has the `ScreenView.id` `mod`, so a mod's screen hooks
     /// check `native_mod_screen()` is its own before drawing. It doesn't pause
     /// a single-player game (as the inventory doesn't). True when it is open:
     /// false while another screen is (or another mod's), over the title

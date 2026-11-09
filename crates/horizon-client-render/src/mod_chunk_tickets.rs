@@ -3,7 +3,7 @@
 //! so two machines in one chunk don't release
 //! each other's. `Streaming` keeps the union with `/forceload`'s chunks in its
 //! `forced` set, which is all loading and ticking read.
-pub use mod_api::mod_chunk_tickets::{
+pub use mod_api::world::mod_chunk_tickets::{
     ControllerTickets, ModTicket, TicketOwner, TicketSet, TicketValidation,
 };
 use std::collections::{BTreeSet, HashMap};
@@ -153,8 +153,8 @@ mod tests {
         }
     }
 
-    fn in_mod(id: &'static str) -> crate::crash::NativeModGuard {
-        crate::crash::enter_native_mod(crate::crash::NativeModCall {
+    fn in_mod(id: &'static str) -> crate::crash::ModGuard {
+        crate::crash::enter_native_mod(crate::crash::ModCall {
             id,
             hook: "test",
             part: None,

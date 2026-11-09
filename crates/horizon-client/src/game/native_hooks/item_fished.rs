@@ -15,7 +15,7 @@ impl Game<'_> {
         &mut self,
         player: u128,
         player_entity_id: i32,
-        fished: &NativeItemFished<'_>,
+        fished: &ItemFished<'_>,
         rod_damage: &mut i32,
         cancel: &mut bool,
     ) {

@@ -9,9 +9,9 @@ use horizon_client::mobs::{
     },
     nav::NavKind,
 };
-use mod_api::{MobRef, NativeGoal, NativeMobFilter, NativeMobGoalEntry};
+use mod_api::{GoalSpec, MobFilter, MobGoalEntry, MobRef};
 
-/// The goal's kind id ([`NativeGoal::id`]) of a registered goal, by its
+/// The goal's kind id ([`GoalSpec::id`]) of a registered goal, by its
 /// internal name: the plain vanilla kinds map to their snake_case id, and a
 /// species variant of one (a bee's `BeeHurtByOtherGoal`, a labeled stroll)
 /// keeps its own vanilla name, as `goals` reads it and `remove_goal` takes
@@ -59,7 +59,7 @@ impl Game<'_> {
     /// (`nearest_target`, `hurt_by_target`) go in through
     /// `add_target_goal`; both selectors take them, as vanilla's two
     /// selectors do.
-    pub(super) fn mob_add_goal(&mut self, mob: MobRef, priority: i32, goal: &NativeGoal) -> bool {
+    pub(super) fn mob_add_goal(&mut self, mob: MobRef, priority: i32, goal: &GoalSpec) -> bool {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
             return false;
         };
@@ -87,7 +87,7 @@ impl Game<'_> {
         &mut self,
         mob: MobRef,
         priority: i32,
-        goal: &NativeGoal,
+        goal: &GoalSpec,
     ) -> bool {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
             return false;
@@ -135,10 +135,10 @@ impl Game<'_> {
     }
 
     /// `GoalSelector.getRunningGoals` read wider: every goal of the goal
-    /// selector as a `NativeMobGoalEntry` (the priority, the kind id and
+    /// selector as a `MobGoalEntry` (the priority, the kind id and
     /// whether it runs), in registration order. None for a stale or
     /// unavailable mob, a client, and the dragon.
-    pub(super) fn mob_goals(&self, mob: MobRef) -> Option<Vec<NativeMobGoalEntry>> {
+    pub(super) fn mob_goals(&self, mob: MobRef) -> Option<Vec<MobGoalEntry>> {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
             return None;
         };
@@ -146,7 +146,7 @@ impl Game<'_> {
         Some(
             m.ai.goals
                 .entries()
-                .map(|(priority, name, running)| NativeMobGoalEntry {
+                .map(|(priority, name, running)| MobGoalEntry {
                     priority,
                     id: goal_id(name),
                     running,
@@ -157,7 +157,7 @@ impl Game<'_> {
 
     /// Every goal of the target selector, as `goals` reads the goal
     /// selector's.
-    pub(super) fn mob_target_goals(&self, mob: MobRef) -> Option<Vec<NativeMobGoalEntry>> {
+    pub(super) fn mob_target_goals(&self, mob: MobRef) -> Option<Vec<MobGoalEntry>> {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
             return None;
         };
@@ -165,7 +165,7 @@ impl Game<'_> {
         Some(
             m.ai.targets
                 .entries()
-                .map(|(priority, name, running)| NativeMobGoalEntry {
+                .map(|(priority, name, running)| MobGoalEntry {
                     priority,
                     id: goal_id(name),
                     running,
@@ -238,23 +238,23 @@ impl Game<'_> {
         &self,
         species: Species,
         navigation: NavKind,
-        goal: &NativeGoal,
+        goal: &GoalSpec,
     ) -> Option<Box<dyn Goal>> {
         let needs_pathfinder = !matches!(
             goal,
-            NativeGoal::Float
-                | NativeGoal::ClimbOnTopOfPowderSnow
-                | NativeGoal::LookAtPlayer { .. }
-                | NativeGoal::RandomLookAround
-                | NativeGoal::LeapAtTarget { .. }
-                | NativeGoal::EatBlock
-                | NativeGoal::FollowMob { .. }
-                | NativeGoal::NearestTarget { .. }
+            GoalSpec::Float
+                | GoalSpec::ClimbOnTopOfPowderSnow
+                | GoalSpec::LookAtPlayer { .. }
+                | GoalSpec::RandomLookAround
+                | GoalSpec::LeapAtTarget { .. }
+                | GoalSpec::EatBlock
+                | GoalSpec::FollowMob { .. }
+                | GoalSpec::NearestTarget { .. }
         );
         if needs_pathfinder && !pathfinder(species) {
             return None;
         }
-        if matches!(goal, NativeGoal::FollowMob { .. })
+        if matches!(goal, GoalSpec::FollowMob { .. })
             && !matches!(
                 navigation,
                 NavKind::Ground | NavKind::WallClimber | NavKind::Flying
@@ -262,17 +262,14 @@ impl Game<'_> {
         {
             return None;
         }
-        let animal_only = matches!(
-            goal,
-            NativeGoal::Breed { .. } | NativeGoal::FollowParent { .. }
-        );
+        let animal_only = matches!(goal, GoalSpec::Breed { .. } | GoalSpec::FollowParent { .. });
         if animal_only && !mobs::drops::is_animal(species) {
             return None;
         }
         match goal {
-            NativeGoal::Float => Some(Box::new(Float)),
-            NativeGoal::ClimbOnTopOfPowderSnow => Some(Box::new(ClimbOnTopOfPowderSnow)),
-            NativeGoal::Panic { speed, water_range } => {
+            GoalSpec::Float => Some(Box::new(Float)),
+            GoalSpec::ClimbOnTopOfPowderSnow => Some(Box::new(ClimbOnTopOfPowderSnow)),
+            GoalSpec::Panic { speed, water_range } => {
                 if !speed.is_finite() || *speed < 0.0 || water_range.is_some_and(|r| r < 0) {
                     return None;
                 }
@@ -280,7 +277,7 @@ impl Game<'_> {
                 g.water_range = *water_range;
                 Some(Box::new(g))
             }
-            NativeGoal::Stroll {
+            GoalSpec::Stroll {
                 speed,
                 interval,
                 water_avoiding,
@@ -301,7 +298,7 @@ impl Game<'_> {
                 g.flying = *flying;
                 Some(Box::new(g))
             }
-            NativeGoal::LookAtPlayer {
+            GoalSpec::LookAtPlayer {
                 range,
                 probability,
                 only_horizontal,
@@ -329,8 +326,8 @@ impl Game<'_> {
                 g.only = only;
                 Some(Box::new(g))
             }
-            NativeGoal::RandomLookAround => Some(Box::new(RandomLookAround::default())),
-            NativeGoal::MeleeAttack {
+            GoalSpec::RandomLookAround => Some(Box::new(RandomLookAround::default())),
+            GoalSpec::MeleeAttack {
                 speed,
                 follow_unseen,
             } => {
@@ -339,13 +336,13 @@ impl Game<'_> {
                 }
                 Some(Box::new(MeleeAttack::new(*speed, *follow_unseen)))
             }
-            NativeGoal::LeapAtTarget { yd } => {
+            GoalSpec::LeapAtTarget { yd } => {
                 if !yd.is_finite() {
                     return None;
                 }
                 Some(Box::new(LeapAtTarget::new(*yd)))
             }
-            NativeGoal::AvoidEntity {
+            GoalSpec::AvoidEntity {
                 what,
                 max_dist,
                 walk,
@@ -361,13 +358,13 @@ impl Game<'_> {
                     return None;
                 }
                 let what = match what {
-                    NativeMobFilter::Player => Avoid::Player,
-                    NativeMobFilter::Species(ids) => Avoid::Species(self.species_list(ids)?),
-                    _ => unreachable!("&NativeMobFilter: unhandled variant"),
+                    MobFilter::Player => Avoid::Player,
+                    MobFilter::Species(ids) => Avoid::Species(self.species_list(ids)?),
+                    _ => unreachable!("&MobFilter: unhandled variant"),
                 };
                 Some(Box::new(AvoidEntity::new(what, *max_dist, *walk, *sprint)))
             }
-            NativeGoal::Tempt {
+            GoalSpec::Tempt {
                 speed,
                 items,
                 can_scare,
@@ -381,19 +378,19 @@ impl Game<'_> {
                     .collect::<Vec<_>>();
                 Some(Box::new(Tempt::new(*speed, items.into(), *can_scare)))
             }
-            NativeGoal::Breed { speed } => {
+            GoalSpec::Breed { speed } => {
                 if !speed.is_finite() || *speed < 0.0 {
                     return None;
                 }
                 Some(Box::new(Breed::new(*speed)))
             }
-            NativeGoal::FollowParent { speed } => {
+            GoalSpec::FollowParent { speed } => {
                 if !speed.is_finite() || *speed < 0.0 {
                     return None;
                 }
                 Some(Box::new(FollowParent::new(*speed)))
             }
-            NativeGoal::FollowMob { speed, stop, area } => {
+            GoalSpec::FollowMob { speed, stop, area } => {
                 if !speed.is_finite()
                     || *speed < 0.0
                     || !stop.is_finite()
@@ -405,17 +402,17 @@ impl Game<'_> {
                 }
                 Some(Box::new(FollowMob::new(*speed, *stop, *area)))
             }
-            NativeGoal::RestrictSun => Some(Box::new(RestrictSun)),
-            NativeGoal::FleeSun { speed } => {
+            GoalSpec::RestrictSun => Some(Box::new(RestrictSun)),
+            GoalSpec::FleeSun { speed } => {
                 if !speed.is_finite() || *speed < 0.0 {
                     return None;
                 }
                 Some(Box::new(FleeSun::new(*speed)))
             }
-            NativeGoal::EatBlock => Some(Box::new(EatBlock::default())),
-            NativeGoal::BreathAir => Some(Box::new(BreathAir)),
-            NativeGoal::TryFindWater => Some(Box::new(TryFindWater::default())),
-            NativeGoal::NearestTarget {
+            GoalSpec::EatBlock => Some(Box::new(EatBlock::default())),
+            GoalSpec::BreathAir => Some(Box::new(BreathAir)),
+            GoalSpec::TryFindWater => Some(Box::new(TryFindWater::default())),
+            GoalSpec::NearestTarget {
                 prey,
                 must_see,
                 must_reach,
@@ -425,21 +422,21 @@ impl Game<'_> {
                     return None;
                 }
                 let prey = match prey {
-                    NativeMobFilter::Player => Prey::Player,
-                    NativeMobFilter::Species(ids) => Prey::Species(self.species_list(ids)?),
-                    _ => unreachable!("&NativeMobFilter: unhandled variant"),
+                    MobFilter::Player => Prey::Player,
+                    MobFilter::Species(ids) => Prey::Species(self.species_list(ids)?),
+                    _ => unreachable!("&MobFilter: unhandled variant"),
                 };
                 let mut g = NearestTarget::new(prey, *must_see);
                 g.must_reach = *must_reach;
                 g.interval = *interval;
                 Some(Box::new(g))
             }
-            NativeGoal::HurtByTarget { alert } => {
+            GoalSpec::HurtByTarget { alert } => {
                 let mut g = HurtByTarget::new();
                 g.alert = *alert;
                 Some(Box::new(g))
             }
-            _ => unreachable!("&NativeGoal: unhandled variant"),
+            _ => unreachable!("&GoalSpec: unhandled variant"),
         }
     }
 
@@ -475,7 +472,7 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::{chunk::Chunk, mobs::Mob};
     use horizon_core::geometry::Vec3;
-    use mod_api::{EntityRef, MobRef, NativeGoal, NativeMobFilter, NativeWorldEpoch};
+    use mod_api::{EntityRef, GoalSpec, MobFilter, MobRef, WorldEpoch};
     use std::sync::Arc;
 
     /// A mob of `kind` in the game's list, its species goals registered by
@@ -512,7 +509,7 @@ mod tests {
                     .boxed_goal(
                         species,
                         super::NavKind::Ground,
-                        &NativeGoal::Panic {
+                        &GoalSpec::Panic {
                             speed: 1.0,
                             water_range: None,
                         },
@@ -527,18 +524,18 @@ mod tests {
             assert!(mismatches.is_empty(), "{}", mismatches.join("; "));
             for species in [Species::Bat, Species::Ghast, Species::Phantom] {
                 assert!(
-                    game.boxed_goal(species, super::NavKind::Ground, &NativeGoal::EatBlock)
+                    game.boxed_goal(species, super::NavKind::Ground, &GoalSpec::EatBlock)
                         .is_some()
                 );
                 assert!(
-                    game.boxed_goal(species, super::NavKind::Ground, &NativeGoal::RestrictSun)
+                    game.boxed_goal(species, super::NavKind::Ground, &GoalSpec::RestrictSun)
                         .is_none()
                 );
                 assert!(
                     game.boxed_goal(
                         species,
                         super::NavKind::Ground,
-                        &NativeGoal::HurtByTarget { alert: false }
+                        &GoalSpec::HurtByTarget { alert: false }
                     )
                     .is_none()
                 );
@@ -546,7 +543,7 @@ mod tests {
                     game.boxed_goal(
                         species,
                         super::NavKind::Ground,
-                        &NativeGoal::FollowMob {
+                        &GoalSpec::FollowMob {
                             speed: 1.0,
                             stop: 2.0,
                             area: 8.0
@@ -568,7 +565,7 @@ mod tests {
                     game.boxed_goal(
                         species,
                         super::NavKind::Water { breach: false },
-                        &NativeGoal::FollowMob {
+                        &GoalSpec::FollowMob {
                             speed: 1.0,
                             stop: 2.0,
                             area: 8.0
@@ -585,7 +582,7 @@ mod tests {
     fn follow_mob_uses_the_mobs_actual_navigation() {
         with_game(|game| {
             let mob = mob_in_game(game, "minecraft:cow", 501);
-            let goal = NativeGoal::FollowMob {
+            let goal = GoalSpec::FollowMob {
                 speed: 1.0,
                 stop: 2.0,
                 area: 8.0,
@@ -790,7 +787,7 @@ mod tests {
             assert!(zombie.add_goal(
                 game,
                 4,
-                &NativeGoal::Panic {
+                &GoalSpec::Panic {
                     speed: 1.4,
                     water_range: None,
                 }
@@ -806,8 +803,8 @@ mod tests {
             assert!(zombie.add_target_goal(
                 game,
                 3,
-                &NativeGoal::NearestTarget {
-                    prey: NativeMobFilter::Species(vec!["minecraft:skeleton".into()]),
+                &GoalSpec::NearestTarget {
+                    prey: MobFilter::Species(vec!["minecraft:skeleton".into()]),
                     must_see: true,
                     must_reach: false,
                     interval: 10,
@@ -818,7 +815,7 @@ mod tests {
             assert!(!zombie.add_goal(
                 game,
                 4,
-                &NativeGoal::Panic {
+                &GoalSpec::Panic {
                     speed: f64::NAN,
                     water_range: None,
                 }
@@ -826,7 +823,7 @@ mod tests {
             assert!(slime.add_goal(
                 game,
                 4,
-                &NativeGoal::Panic {
+                &GoalSpec::Panic {
                     speed: 1.0,
                     water_range: None,
                 }
@@ -834,19 +831,19 @@ mod tests {
             assert!(slime.add_goal(
                 game,
                 4,
-                &NativeGoal::MeleeAttack {
+                &GoalSpec::MeleeAttack {
                     speed: 1.0,
                     follow_unseen: false,
                 }
             ));
-            assert!(slime.add_goal(game, 4, &NativeGoal::Float));
-            assert!(!zombie.add_goal(game, 4, &NativeGoal::Breed { speed: 1.0 }));
-            assert!(cow.add_goal(game, 4, &NativeGoal::Breed { speed: 1.0 }));
+            assert!(slime.add_goal(game, 4, &GoalSpec::Float));
+            assert!(!zombie.add_goal(game, 4, &GoalSpec::Breed { speed: 1.0 }));
+            assert!(cow.add_goal(game, 4, &GoalSpec::Breed { speed: 1.0 }));
             assert!(!zombie.add_target_goal(
                 game,
                 3,
-                &NativeGoal::NearestTarget {
-                    prey: NativeMobFilter::Species(vec!["minecraft:unknown".into()]),
+                &GoalSpec::NearestTarget {
+                    prey: MobFilter::Species(vec!["minecraft:unknown".into()]),
                     must_see: true,
                     must_reach: false,
                     interval: 10,
@@ -864,8 +861,8 @@ mod tests {
             assert_eq!(zombie.remove_goal(game, "melee_attack"), Some(0));
             assert_eq!(zombie.remove_target_goal(game, "hurt_by_target"), Some(1));
             // A stale handle and a mob whose copy is held out.
-            let stale = MobRef::new(EntityRef::new(NativeWorldEpoch::new(999), 99));
-            assert!(!stale.add_goal(game, 1, &NativeGoal::Float));
+            let stale = MobRef::new(EntityRef::new(WorldEpoch::new(999), 99));
+            assert!(!stale.add_goal(game, 1, &GoalSpec::Float));
             assert!(stale.goals(game).is_none());
             let taken = game.mobs.lift();
             assert!(zombie.goals(game).is_none());

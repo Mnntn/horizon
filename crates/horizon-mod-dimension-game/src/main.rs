@@ -11,7 +11,7 @@
 use horizon_mod_package::{Side, runtime::BuiltMod};
 use mod_api::{
     BlockKey, ChunkAccess, ChunkGenerator, CommandArgumentValue, CommandSource, DimensionSettings,
-    Flow, Hooks, ModEntry, NativeCommand, RegisterCommandsEvent, Registrar, RegistrationContext,
+    Flow, Hooks, ModEntry, RegisterCommandsEvent, Registrar, RegistrationContext,
     RunModCommandEvent, ServerHost, ServerTickEvent, ServerTickPhase, Text,
 };
 use std::sync::Mutex;
@@ -85,8 +85,8 @@ impl Hooks for DimProbe {
 
     fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
         event.commands.extend([
-            NativeCommand::new("dimprobe enter <level:word>"),
-            NativeCommand::new("dimprobe later <level:word>"),
+            mod_api::Command::new("dimprobe enter <level:word>"),
+            mod_api::Command::new("dimprobe later <level:word>"),
         ]);
     }
 

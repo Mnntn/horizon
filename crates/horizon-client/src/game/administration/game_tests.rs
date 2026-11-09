@@ -2068,8 +2068,7 @@ mod registered_game_test_tests {
                         host,
                         pos,
                         self.0,
-                        mod_api::NativeBlockUpdateFlags::CLIENTS
-                            | mod_api::NativeBlockUpdateFlags::NEIGHBORS
+                        mod_api::BlockUpdateFlags::CLIENTS | mod_api::BlockUpdateFlags::NEIGHBORS
                     )
                     .unwrap()
             );

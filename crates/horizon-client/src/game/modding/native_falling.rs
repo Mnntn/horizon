@@ -6,7 +6,6 @@
 use super::{FallingBlock, Game};
 use horizon_core::{geometry::Vec3, position::BlockPos};
 use horizon_world::registry::BlockStateId;
-pub use mod_api::game::NativeFalling;
 
 /// The most falling blocks a level holds before `spawn_falling_block`
 /// refuses more: a mod's debris shouldn't take the server's tick with it.
@@ -42,7 +41,7 @@ impl Game<'_> {
         state: BlockStateId,
         pos: [f64; 3],
         velocity: [f64; 3],
-        falling: NativeFalling,
+        falling: mod_api::Falling,
     ) -> bool {
         if (self.serving.is_none() && self.options.dedicated.is_none())
             || dimension != self.dim.id()

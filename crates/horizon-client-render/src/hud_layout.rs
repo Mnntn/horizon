@@ -6,7 +6,7 @@
 //! drawing so the parity fixture can compare them with the vanilla client.
 use crate::{font::Font, text::Text};
 use horizon_core::random::{LegacyRandom, RandomSource};
-pub use mod_api::hud_layout::{Blend, HealthInputs, HeartKind, PoseOp};
+pub use mod_api::client::hud_layout::{Blend, HealthInputs, HeartKind, PoseOp};
 use std::borrow::Cow;
 
 /// One `GuiGraphicsExtractor` call.

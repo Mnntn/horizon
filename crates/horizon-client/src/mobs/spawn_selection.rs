@@ -20,7 +20,7 @@ use horizon_core::{
     geometry::{Aabb, Vec3},
     random::RandomSource,
 };
-use mod_api::{NativeSpawnCheck, SpawnFlags, SpawnLimits};
+use mod_api::{SpawnCheck, SpawnFlags, SpawnLimits};
 use serde_json::Value;
 use std::{borrow::Cow, collections::HashMap, fs, path::Path};
 
@@ -342,8 +342,8 @@ pub trait NaturalLevel: SpawnLevel {
         _reason: Reason,
         _at: [f64; 3],
         _pending: Pending,
-    ) -> NativeSpawnCheck {
-        NativeSpawnCheck::Default
+    ) -> SpawnCheck {
+        SpawnCheck::Default
     }
     /// The position check just asked refused the mob: what the level made
     /// for it is dropped.
@@ -630,8 +630,8 @@ pub fn position_ok<L: NaturalLevel>(
     vanilla: impl FnOnce() -> bool,
 ) -> bool {
     let ok = match l.position_check(entity, reason, at, pending) {
-        NativeSpawnCheck::Succeed => true,
-        NativeSpawnCheck::Fail => false,
+        SpawnCheck::Succeed => true,
+        SpawnCheck::Fail => false,
         _ => vanilla(),
     };
     if !ok {

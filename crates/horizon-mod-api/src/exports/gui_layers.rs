@@ -1,2 +1,1 @@
-mod gui_layers;
-pub use gui_layers::{GuiLayer, GuiLayerPlacement};
+pub use client::gui_layers::{GuiLayer, GuiLayerPlacement};

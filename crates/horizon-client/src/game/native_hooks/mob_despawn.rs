@@ -12,7 +12,7 @@ impl Game<'_> {
         mob: MobRef,
         kind: &str,
         pos: [f64; 3],
-        result: &mut NativeDespawn,
+        result: &mut Despawn,
     ) {
         self.fire_mob_despawn(dimension, mob, kind, pos, result);
     }

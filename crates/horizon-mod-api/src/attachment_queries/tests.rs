@@ -54,7 +54,7 @@ impl AttachmentHost for Store {
 
 #[test]
 fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
-    let epoch = NativeWorldEpoch::new(19);
+    let epoch = WorldEpoch::new(19);
     let level = LevelRef::new(epoch, DimensionKey::NETHER);
     let cases = [
         (

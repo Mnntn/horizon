@@ -19,7 +19,7 @@ impl Game<'_> {
         entity: u32,
         kind: &str,
         source: &HurtSource<'_>,
-        entries: &mut Vec<mod_api::NativeArmorHurt>,
+        entries: &mut Vec<mod_api::ArmorHurt>,
         cancel: &mut bool,
     ) {
         self.fire_armor_hurt(player, entity, kind, source, entries, cancel);

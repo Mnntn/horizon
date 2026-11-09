@@ -8,7 +8,7 @@ impl Game<'_> {
     pub(in crate::game) fn native_screen_render_pre(
         &self,
         draw: &mut HudBatch,
-        screen: &NativeScreenView<'_>,
+        screen: &ScreenView<'_>,
         canceled: &mut bool,
     ) {
         self.fire_screen_render_pre(draw, screen, canceled);
@@ -17,7 +17,7 @@ impl Game<'_> {
     pub(in crate::game) fn native_screen_render_background(
         &self,
         draw: &mut HudBatch,
-        screen: &NativeScreenView<'_>,
+        screen: &ScreenView<'_>,
     ) {
         self.fire_screen_render_background(draw, screen);
     }
@@ -25,7 +25,7 @@ impl Game<'_> {
     pub(in crate::game) fn native_screen_render_foreground(
         &self,
         draw: &mut HudBatch,
-        screen: &NativeScreenView<'_>,
+        screen: &ScreenView<'_>,
     ) {
         self.fire_screen_render_foreground(draw, screen);
     }

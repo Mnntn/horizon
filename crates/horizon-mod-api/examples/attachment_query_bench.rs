@@ -32,7 +32,7 @@ struct BenchHost {
     maps: Vec<Attachments>,
 }
 fn holder(id: u32) -> AttachmentHolder {
-    AttachmentHolder::Entity(EntityRef::new(NativeWorldEpoch::new(1), id))
+    AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(1), id))
 }
 impl BenchHost {
     fn new(cold: bool, indexed: bool) -> Self {

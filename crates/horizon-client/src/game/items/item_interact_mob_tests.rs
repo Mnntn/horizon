@@ -56,7 +56,7 @@ impl ItemPart for Probe {
         let answer = self.answer.load(Ordering::Relaxed);
         if answer != 0 && self.discard.load(Ordering::Relaxed) {
             let entity = host.entity(event.entity as u32).unwrap();
-            assert!(entity.remove(host, mod_api::NativeRemovalReason::Discarded));
+            assert!(entity.remove(host, mod_api::RemovalReason::Discarded));
         }
         match answer {
             0 => None,
@@ -137,7 +137,7 @@ fn actual_item_interact_mob_fallback_priority_and_filters_isolated() {
         )
         .unwrap();
         game.native_lifecycle
-            .begin_open(mod_api::NativeAuthority::IntegratedServer);
+            .begin_open(mod_api::Authority::IntegratedServer);
         crate::game::native_entity_refs::tests::resolve_parts(&game).unwrap();
         game.world = World::new(game.res.facts().air, 1);
         game.world

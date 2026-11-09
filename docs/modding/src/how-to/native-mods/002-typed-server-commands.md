@@ -3,7 +3,7 @@
 
 ## Typed server commands
 
-Register each server usage with `register_commands` and `NativeCommand`. The
+Register each server usage with `register_commands` and `Command`. The
 `run_mod_command` event carries a `CommandInvocation`,
 not a raw line to split. Match its `literals` to your command path, then read named
 values through `command.argument(name)` and `CommandArgumentValue`. An integer is
@@ -25,7 +25,7 @@ cannot resolve there. Every source receives the same owned data, on native and w
 `event.source` is a non-exhaustive `CommandSource`: `Player { player, .. }`,
 `Console { .. }`, `CommandBlock { position, level, .. }`,
 `CommandBlockMinecart { entity, .. }` or `Function { id, .. }`.
-`source.permission()` returns the effective `NativePermissionLevel`: functions use
+`source.permission()` returns the effective `PermissionLevel`: functions use
 function permission; blocks and carts use game-master permission. `execute as`,
 `at` and `in` change argument resolution, not the origin. Feedback through
 `host.commands().feedback` honours the underlying source's silence and track-output.
@@ -69,7 +69,7 @@ fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
 }
 
 fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
-    event.commands.push(NativeCommand::new("machine use <machine:mymod:machine>"));
+    event.commands.push(Command::new("machine use <machine:mymod:machine>"));
 }
 ```
 

@@ -21,7 +21,7 @@ use horizon_core::{
     random::RandomSource,
 };
 use horizon_world::registry::BlockStateId;
-use mod_api::particles::PositionSource;
+use mod_api::client::particles::PositionSource;
 use std::collections::HashSet;
 
 pub const HELP: &[&str] = &[
@@ -1453,7 +1453,7 @@ impl Game<'_> {
                 f64::from(at.1),
                 f64::from(at.2) + 0.5,
             ];
-            let yaw = mod_api::camera::wrap_degrees(self.world.random.next_float() * 360.0);
+            let yaw = mod_api::client::camera::wrap_degrees(self.world.random.next_float() * 360.0);
             self.next_entity += 1;
             let mut mob = Mob::new(
                 self.next_entity,
@@ -1564,7 +1564,7 @@ impl Game<'_> {
     /// `LightmapRenderStateExtractor`: the night vision effect's intensity
     /// (`GameRenderer.nightVisionScale`), or conduit power's water vision.
     pub(super) fn night_vision_intensity(&self, partial: f32) -> f32 {
-        use mod_api::fog::FogType;
+        use mod_api::client::fog::FogType;
         if let Some(e) = self.potions.effects.get("night_vision") {
             // MobEffectInstance.endsWithin(200); -1 is infinite.
             return if e.duration < 0 || e.duration > 200 {
@@ -2116,8 +2116,8 @@ impl Game<'_> {
         &mut self,
         pos: [i32; 3],
         held: Option<&horizon_client::items::ItemStack>,
-    ) -> Result<Option<mod_api::NativeInteractionResult>> {
-        use mod_api::NativeInteractionResult as Answer;
+    ) -> Result<Option<mod_api::InteractionResult>> {
+        use mod_api::InteractionResult as Answer;
         if !matches!(
             &*self.block_name(pos),
             "minecraft:redstone_ore" | "minecraft:deepslate_redstone_ore"

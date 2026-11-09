@@ -1,9 +1,9 @@
-//! A mod's own screen with two text fields and two buttons (`mod_api::widgets`): F8 opens it,
+//! A mod's own screen with two text fields and two buttons (`mod_api::client::widgets`): F8 opens it,
 //! Tab walks the widgets, typing edits a field, Copy puts the first field's text in the second,
 //! and Done (or Escape) closes it. The same source builds as a native mod and as a mod.wasm.
 
 // ANCHOR: widget_screen
-use mod_api::widgets::{Button, Outcome, TextField, WidgetId, Widgets};
+use mod_api::client::widgets::{Button, Outcome, TextField, WidgetId, Widgets};
 use mod_api::{
     ClientHost, ClientTickPreEvent, Flow, Hooks, InputKeyEvent, KeyAction, ScreenCharTypedPreEvent,
     ScreenKeyPressedPreEvent, ScreenMouseButtonPressedPreEvent, ScreenMouseButtonReleasedPreEvent,

@@ -93,7 +93,7 @@ pub struct Real;
 
     def test_conditional_test_modules_are_not_production(self):
         source = '''#[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests { #[derive(Debug)] pub struct NativeLootDrops; }
+mod tests { #[derive(Debug)] pub struct LootDrops; }
 #[cfg(all(feature = "foo", any(test, all(test, feature = "bar"))))]
 mod more_tests { pub enum OnlyTest {} }
 #[cfg(any(test, feature = "foo"))] pub struct Production;

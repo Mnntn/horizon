@@ -14,7 +14,7 @@ impl Game<'_> {
     /// on the window only. The exclusion areas follow this choice a frame late.
     pub(in crate::game) fn native_screen_render_inventory_mob_effects(
         &self,
-        screen: &NativeScreenView<'_>,
+        screen: &ScreenView<'_>,
         available_space: i32,
         compact: &mut bool,
         horizontal_offset: &mut i32,
@@ -37,7 +37,7 @@ impl Game<'_> {
     /// screen is open, even when no text field is focused.
     pub(in crate::game) fn native_screen_preedit_pre(
         &self,
-        screen: &NativeScreenView<'_>,
+        screen: &ScreenView<'_>,
         full_text: &str,
         caret_position: usize,
         blocks: &[String],
@@ -59,7 +59,7 @@ impl Game<'_> {
     /// wanted) and `native_screen_preedit_pre` did not cancel. Same arguments.
     pub(in crate::game) fn native_screen_preedit_post(
         &self,
-        screen: &NativeScreenView<'_>,
+        screen: &ScreenView<'_>,
         full_text: &str,
         caret_position: usize,
         blocks: &[String],

@@ -2735,7 +2735,7 @@ fn a_create_world_tab_label_wider_than_its_tab_stays_inside_it() {
 }
 
 /// The ids native mods see for the title's screens (`Mode::id`, the screen
-/// hooks' `NativeScreenView.id`): one per screen, stable across releases.
+/// hooks' `ScreenView.id`): one per screen, stable across releases.
 #[test]
 fn the_title_screens_have_their_own_ids() {
     let mut f = Fixture::new();

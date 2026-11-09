@@ -111,10 +111,10 @@ for file, replacements in {
         '[`Registrar::effect_key`]': '[`Registrar::effect_key`](EffectsRegistrar::effect_key)',
         '([`Registrar::declare_entity_attributes`](crate::Registrar))': '([`Registrar::declare_entity_attributes`](EntityAttributesRegistrar::declare_entity_attributes))',
     },
-    'crates/horizon-mod-api/src/ticket_controller.rs': {
+    'crates/horizon-mod-api/src/world/ticket_controller.rs': {
         '(super::Registrar::register_ticket_controller)': '(super::TicketsRegistrar::register_ticket_controller)',
     },
-    'crates/horizon-mod-api/src/item_place.rs': {
+    'crates/horizon-mod-api/src/block/item_place.rs': {
         '(super::Registrar::place_provider)': '(super::ItemsRegistrar::place_provider)',
     },
 }.items():

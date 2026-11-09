@@ -15,7 +15,7 @@ impl Game<'_> {
         player: u128,
         player_entity_id: i32,
         pos: [i32; 3],
-        take: &mut mod_api::menu::GrindstoneTake,
+        take: &mut mod_api::item::menu::GrindstoneTake,
         cancel: &mut bool,
     ) {
         self.fire_grindstone_take(player, player_entity_id, pos, take, cancel);

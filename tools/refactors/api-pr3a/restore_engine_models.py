@@ -34,24 +34,24 @@ engine = ('//! Engine recipe ingredients and stack matching.\n'
           'use super::{ItemStack, Items};\n'
           'use horizon_world::native_load_context::LoadContext;\n'
           'use serde_json::Value;\nuse std::collections::HashSet;\n'
-          'use mod_api::crafting::{WalkedIngredient, native_ingredient};\n'
-          'pub use mod_api::crafting::Shape;\n'
+          'use mod_api::item::crafting::{WalkedIngredient, native_ingredient};\n'
+          'pub use mod_api::item::crafting::Shape;\n'
           'use crate::native_stack_hooks::ingredient_test as native_ingredient_test;\n')
 write(client+'crafting/ingredient.rs', engine+helpers+ing)
-s = read(client+'crafting.rs').replace('use mod_api::__private::game::IngredientTest;\n','').replace('pub use mod_api::crafting::{Ingredient, Shape, native_ingredient, native_ingredient_test};', 'mod ingredient;\npub use ingredient::{Ingredient, Shape};')
+s = read(client+'crafting.rs').replace('use mod_api::__private::game::IngredientTest;\n','').replace('pub use mod_api::item::crafting::{Ingredient, Shape, native_ingredient, native_ingredient_test};', 'mod ingredient;\npub use ingredient::{Ingredient, Shape};')
 write(client+'crafting.rs',s)
 # The records carry stacks but no engine behaviour.
 s = read(api+'stations.rs')
 write(client+'stations/models.rs', '//! Engine station results.\nuse super::ItemStack;\n'+s[s.index('/// One offer row'):])
-s = read(client+'stations.rs').replace('pub use mod_api::stations::{AnvilResult, EnchantmentRow};', 'mod models;\npub use models::{AnvilResult, EnchantmentRow};').replace('use mod_api::__private::game::IngredientTest;\n','')
+s = read(client+'stations.rs').replace('pub use mod_api::item::stations::{AnvilResult, EnchantmentRow};', 'mod models;\npub use models::{AnvilResult, EnchantmentRow};').replace('use mod_api::__private::game::IngredientTest;\n','')
 write(client+'stations.rs',s)
 s = read(api+'menu.rs')
 s = s[s.index('/// Operations on the clicked slot'):]
 s = s.replace('crate::stations::AnvilResult','crate::stations::AnvilResult')
 write(client+'menu/models.rs', '//! Engine menu records and slot access.\nuse super::ItemStack;\n'+s)
 s = read(client+'menu.rs').replace('use mod_api::__private::game::IngredientTest;\n','')
-a=s.index('pub use mod_api::menu::{'); b=s.index('};',a)+2
-s=s[:a]+'''pub use mod_api::menu::{LogicalSide, MenuButtonContext};
+a=s.index('pub use mod_api::item::menu::{'); b=s.index('};',a)+2
+s=s[:a]+'''pub use mod_api::item::menu::{LogicalSide, MenuButtonContext};
 mod models;
 pub use models::{AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake, SlotView, StackedOnOther};'''+s[b:]
 write(client+'menu.rs',s)

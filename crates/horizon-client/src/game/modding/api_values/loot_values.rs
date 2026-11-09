@@ -1,12 +1,12 @@
 //! Owned loot values at the guarded game boundary. No inventory count rules apply.
 use super::{TryIntoApi, TryIntoEngine};
 use horizon_world::loot as engine;
-use mod_api::snapshots as api;
+use mod_api::world::snapshots as api;
 
 pub(crate) fn dispatch_loot_function(
     kind: &str,
     data: &serde_json::Value,
-    ctx: &engine::NativeLootContext<'_>,
+    ctx: &engine::LootContext<'_>,
     stack: &mut engine::LootStack,
 ) {
     if !mod_api::__private::listened(mod_api::HookId::LootFunction) {
@@ -24,7 +24,7 @@ pub(crate) fn dispatch_loot_function(
 pub(crate) fn dispatch_loot_condition(
     kind: &str,
     data: &serde_json::Value,
-    ctx: &engine::NativeLootContext<'_>,
+    ctx: &engine::LootContext<'_>,
     holds: &mut bool,
 ) {
     if !mod_api::__private::listened(mod_api::HookId::LootCondition) {
@@ -171,13 +171,13 @@ fn entity(value: &engine::LootEntity) -> Result<api::LootEntity, LootValueError>
     }
     Ok(*vehicle.expect("a chain starts with its supplied entity"))
 }
-impl TryIntoApi for engine::NativeLootContext<'_> {
-    type Api = api::NativeLootContext;
+impl TryIntoApi for engine::LootContext<'_> {
+    type Api = api::LootContext;
     type Error = LootValueError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
         #[cfg(test)]
         CONVERSIONS.with(|count| count.set(count.get() + 1));
-        let mut value = api::NativeLootContext::new(self.seed);
+        let mut value = api::LootContext::new(self.seed);
         value.entity = self.entity.map(entity).transpose()?;
         value.player = self.player.map(entity).transpose()?;
         value.damage = self
@@ -194,7 +194,7 @@ impl TryIntoApi for engine::NativeLootContext<'_> {
             .tool
             .as_ref()
             .map(|tool| {
-                Ok(api::NativeLootTool::new(
+                Ok(api::LootTool::new(
                     mod_api::__private::item_key(&tool.item).ok_or(LootValueError::UnknownItem)?,
                     tool.enchantments.clone(),
                 ))
@@ -204,11 +204,11 @@ impl TryIntoApi for engine::NativeLootContext<'_> {
         value.luck = self.luck;
         value.biome = self.biome.map(str::to_owned);
         value.place = self.place.as_ref().map(|place| {
-            let mut result = api::NativeLootPlace::default();
+            let mut result = api::LootPlace::default();
             result.origin = place.origin;
             result.block_entity = place.block_entity.clone();
             result.level = place.level.as_ref().map(|level| {
-                let mut result = api::NativeLootLevel::default();
+                let mut result = api::LootLevel::default();
                 result.dimension = level.dimension.clone();
                 result.game_time = level.game_time;
                 result.day_time = level.day_time;
@@ -245,8 +245,8 @@ mod tests {
             ],
         }
     }
-    fn context() -> engine::NativeLootContext<'static> {
-        engine::NativeLootContext {
+    fn context() -> engine::LootContext<'static> {
+        engine::LootContext {
             entity: None,
             damage: None,
             player: None,
@@ -272,11 +272,11 @@ mod tests {
             source: Some(engine::LootEntity::new("minecraft:skeleton")),
             direct: Some(engine::LootEntity::new("minecraft:arrow")),
         };
-        let value = engine::NativeLootContext {
+        let value = engine::LootContext {
             entity: Some(&victim),
             damage: Some(&damage),
             player: None,
-            tool: Some(engine::NativeLootTool {
+            tool: Some(engine::LootTool {
                 item: "minecraft:stick".into(),
                 enchantments: vec![("minecraft:fortune".into(), 3)],
             }),
@@ -284,10 +284,10 @@ mod tests {
             biome: Some("minecraft:plains"),
             luck: 1.5,
             seed: -42,
-            place: Some(std::sync::Arc::new(engine::NativeLootPlace {
+            place: Some(std::sync::Arc::new(engine::LootPlace {
                 origin: Some([1.0, 2.0, 3.0]),
                 block_entity: Some(Tag::ByteArray(vec![7])),
-                level: Some(engine::NativeLootLevel {
+                level: Some(engine::LootLevel {
                     dimension: "test:level".into(),
                     game_time: 17,
                     day_time: -3,

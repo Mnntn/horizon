@@ -6,7 +6,7 @@ use crate::options_ui::{MusicGroup, MusicTrack};
 use crate::sound_engine::{InstanceId, MUSIC, PlayResult, SoundEngine, SoundInstance, Sounds};
 use crate::sound_events::{Sentinel, SoundRegistry};
 use horizon_core::random::{LegacyRandom, RandomSource};
-pub use mod_api::music::{Music, MusicLayer};
+pub use mod_api::client::music::{Music, MusicLayer};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},

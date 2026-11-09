@@ -10,7 +10,7 @@ impl Game<'_> {
     /// (`Server`); a game reads only its own kinds, so push them all every
     /// time. A file outside `config/`, or one already registered, is skipped.
     /// API 397.
-    pub(in crate::game) fn native_register_configs(&mut self, configs: &mut Vec<NativeConfig>) {
+    pub(in crate::game) fn native_register_configs(&mut self, configs: &mut Vec<mod_api::Config>) {
         self.fire_register_configs(configs);
     }
     /// A registered config was read (`ModConfigEvent.Loading`): `config`
@@ -18,7 +18,7 @@ impl Game<'_> {
     /// convention). Every mod hears every config, so check `mod_id`. Fired
     /// where the config's kind loads (`native_register_configs`), a `Server`
     /// one before `native_server_about_to_start`. API 397.
-    pub(in crate::game) fn native_config_loading(&mut self, config: &NativeConfigFile) {
+    pub(in crate::game) fn native_config_loading(&mut self, config: &ConfigFile) {
         self.fire_config_loading(config);
     }
     /// A loaded config's file changed on disk (`ModConfigEvent.Reloading`):
@@ -26,14 +26,14 @@ impl Game<'_> {
     /// second, on the window and on the server's tick; a file saved with the
     /// same text, removed or unreadable fires nothing and keeps its last
     /// text. API 397.
-    pub(in crate::game) fn native_config_reloading(&mut self, config: &NativeConfigFile) {
+    pub(in crate::game) fn native_config_reloading(&mut self, config: &ConfigFile) {
         self.fire_config_reloading(config);
     }
     /// A `Server` config is dropped as its server stops
     /// (`ModConfigEvent.Unloading`), after `native_server_stopping`; the next
     /// world reads it again. `Client` and `Common` configs stay until the
     /// game quits. API 397.
-    pub(in crate::game) fn native_config_unloading(&mut self, config: &NativeConfigFile) {
+    pub(in crate::game) fn native_config_unloading(&mut self, config: &ConfigFile) {
         self.fire_config_unloading(config);
     }
 }

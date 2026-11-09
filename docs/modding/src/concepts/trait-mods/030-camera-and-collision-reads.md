@@ -10,7 +10,7 @@ The pause-change pre hook sees the old state; the post hook sees the new state.
 `ClientHost::playing()` is true while the player is in the world with nothing over it: no screen, title, sign
 editor or book, so keys and zoom apply. `ClientHost::mapping(name)` reads a vanilla key mapping (`key.forward`,
 `key.left`, `key.back`, `key.right`, `key.jump`, `key.sneak`, `key.sprint`, `key.attack`, `key.use`) as a
-`NativeKeyMapping`: whether it is held (`KeyMapping.isDown`) and the `label` of the key it is bound to, as Controls
+`KeyMapping`: whether it is held (`KeyMapping.isDown`) and the `label` of the key it is bound to, as Controls
 shows it. It is `None` for any other name. Both read without `&mut`, so the HUD and screen hooks can ask them.
 
 `ClientHost::clipboard_text()` reads the system clipboard (`KeyboardHandler.getClipboard`, empty text when it
@@ -34,8 +34,8 @@ Setting a type never emits `camera_type_cycle`; F5 alone cycles, and its final e
 wins over requests made inside the cycle callback.
 
 `ClientHost::crosshair_target()` returns the ordinary interaction-range target as
-`NativeCrosshairTarget::Block { pos, state, hit }` or
-`NativeCrosshairTarget::Entity { entity, point }`. The block hit contains its world-space
+`CrosshairTarget::Block { pos, state, hit }` or
+`CrosshairTarget::Entity { entity, point }`. The block hit contains its world-space
 location, face and inside flag; the entity point is also in world coordinates.
 It uses the game's current targeting ray and block/entity reach, respects blocks
 occluding entities, and returns `None` on a miss or without a client world.

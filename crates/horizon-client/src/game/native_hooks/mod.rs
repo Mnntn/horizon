@@ -13,15 +13,14 @@ pub(in crate::game) use fire::{
     ItemAfterVerticalCollisionCall, UpdateShapeCall,
 };
 
-use super::native_data_maps::NativeDataMapType;
+use super::native_data_maps::DataMapType;
 use super::{
     Game, GameLevel, LevelDimension, Screen,
     execution_role::{self, ExecutionRole},
-    maps::{NativeMapDecoration, NativeMapInfo},
     mod_api_host,
     native_block_entity_draw::BlockEntityDraw,
-    native_configs::{NativeConfig, NativeConfigFile},
-    native_mob_draw::{NativeMobRender, NativePlayerRender},
+    native_configs::ConfigFile,
+    native_mob_draw::{MobRender, PlayerRender},
     native_panel_recipes::RecipePage,
 };
 use horizon_client::block_contact::Pending;
@@ -68,35 +67,31 @@ use horizon_world::level::{BonemealCheck, PlaceContext};
 use mod_api::CommandSource;
 use mod_api::GameMode;
 use mod_api::GameTests;
-pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
+pub use mod_api::game::{PhantomSpawnResult, Shake, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, BlockTintSources, CameraDrawContext, ClientAudioOptions,
     ClientChatOptions, ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions,
     ClientMiningPrediction, ClientModifiers, ClientReloadListeners, ColorResolvers,
     CommandInvocation, EnchantmentDamageEffects, EnchantmentInfo, EntityRef, GameRuleActor,
-    InteractionAttempt, InteractionKey, LayerDefinition, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
-    NativeNoteBlockChange, ParticleProviders, PathComputationType, Placement, PlayerRef,
+    HandRender, InteractionAttempt, InteractionKey, LayerDefinition, LifecycleContext, LivingRef,
+    NoteBlockChange, ParticleProviders, PathComputationType, Placement, PlayerRef,
     RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage, ServerReloadListeners,
     ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
-    AttachmentStore, BonemealSource, ChunkRef, FluidStack, LevelRef, LogicalSide,
-    NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags, NativeInteractionResult,
-    NativeItemClick, NativeItemDrop, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
+    ActiveEffect, AttachmentStore, BlockClick, BlockUpdateFlags, BonemealSource, ChunkRef,
+    FluidStack, ItemClick, ItemDrop, LevelRef, LogicalSide, NeighbourUpdate, TooltipElement,
+    TriState, UsePhase,
 };
 use mod_api::{
     BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, HiddenParts, MapDecorationType,
     PosedParts, RuntimeSprite, TaskId, TextureAtlasRegistration,
 };
-use mod_api::{
-    CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, SoundPlay, SoundRef,
-};
 pub(crate) use mod_api::{
-    ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
-    NativeItemFished, NativeLootDrops, NativeMinimap, NativePanelEvent, NativePortalShape,
-    NativeScreen, NativeScreenView, NativeStack, NativeZoom,
+    BlockRim, ClientPacket, ClientPayload, ColoredLight, ExplosionStart, ItemFished, LootDrops,
+    PanelEvent, PortalShape, ScreenView,
 };
+use mod_api::{CameraType, Despawn, Identifier, MobRef, PermissionLevel, SoundPlay, SoundRef};
 use std::{
     collections::HashMap,
     fs,

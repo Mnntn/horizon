@@ -181,7 +181,7 @@ impl Game<'_> {
         let mut sequences = std::mem::take(&mut self.rand_sequences);
         let mut events = Vec::new();
         let mut planned: Vec<Planned> = Vec::new();
-        let source = Some(mod_api::NativeSpawner::Block(mod_api::BlockPos::new(
+        let source = Some(mod_api::SpawnSource::Block(mod_api::BlockPos::new(
             key.0, key.1, key.2,
         )));
         let mut uuids: Vec<(u32, Uuid)> = Vec::new();

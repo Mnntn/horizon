@@ -14,7 +14,7 @@ pub trait WorldEditServerHost {
     /// or predicate that fails typed validation, a run naming a palette entry or filter past the end,
     /// or more than 65536 filters.
     #[access(WorldOnly)]
-    fn edit_blocks(&mut self, dimension: &str, edit: &NativeBlockEdit) -> Result<u64, String>;
+    fn edit_blocks(&mut self, dimension: &str, edit: &BlockEdit) -> Result<u64, String>;
     /// Side: server.
     /// For a server mod: each column's height by `heightmap` in the authoritative level `dimension` (the one being
     /// ticked), none for a column not loaded. `Err` says why nothing was read: another dimension or a client of a
@@ -24,7 +24,7 @@ pub trait WorldEditServerHost {
         &self,
         dimension: &str,
         columns: &[(i32, i32)],
-        heightmap: NativeHeightmap,
+        heightmap: Heightmap,
     ) -> Result<Vec<Option<i32>>, String>;
     /// Side: server.
     /// For a server mod: `below` blocks under and `above` blocks from each column's height by `heightmap`, as a
@@ -38,9 +38,9 @@ pub trait WorldEditServerHost {
         &self,
         dimension: &str,
         columns: &[(i32, i32)],
-        heightmap: NativeHeightmap,
+        heightmap: Heightmap,
         range: (u32, u32),
-    ) -> Result<NativeColumnBlocks, String>;
+    ) -> Result<ColumnBlocks, String>;
     /// Side: server.
     /// For a server mod: structure template `id` (`mymod:hut`, found as
     /// `StructureTemplateManager.get` finds it: the world's saved structures,

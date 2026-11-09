@@ -6,7 +6,7 @@ impl Game<'_> {
     /// vanilla's pick, and a mod may set another.
     pub(in crate::game) fn native_player_heart_type(
         &mut self,
-        kind: &mut mod_api::hud_layout::HeartKind,
+        kind: &mut mod_api::client::hud_layout::HeartKind,
     ) {
         self.fire_player_heart_type(kind);
     }
@@ -14,7 +14,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod player_heart_type_tests {
-    use mod_api::hud_layout::HeartKind;
+    use mod_api::client::hud_layout::HeartKind;
     use mod_api::{ClientHost, Hooks, ModEntry, PlayerHeartTypeEvent, testing::with_mods};
     use std::sync::{Arc, Mutex};
 

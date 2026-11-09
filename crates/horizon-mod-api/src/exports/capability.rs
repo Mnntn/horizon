@@ -1,2 +1,1 @@
-mod capability;
-pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
+pub use item::capability::{BlockSide, Capability, CapabilityKey, ITEMS};

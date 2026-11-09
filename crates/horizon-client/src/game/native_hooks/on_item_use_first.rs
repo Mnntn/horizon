@@ -9,8 +9,8 @@ impl Game<'_> {
     pub(in crate::game) fn native_on_item_use_first(
         &mut self,
         stack: &mod_api::ItemStack,
-        click: &NativeBlockClick<'_>,
-        answer: &mut Option<NativeInteractionResult>,
+        click: &BlockClick<'_>,
+        answer: &mut Option<mod_api::InteractionResult>,
     ) {
         self.fire_on_item_use_first(stack, click, answer);
     }

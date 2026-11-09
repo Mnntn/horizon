@@ -1,3 +1,2 @@
-mod tooltip_appender;
-pub(crate) use tooltip_appender::TOOLTIP_DETAILS;
-pub use tooltip_appender::{TooltipAppendContext, TooltipAppender, TooltipPlacement};
+pub(crate) use item::tooltip_appender::TOOLTIP_DETAILS;
+pub use item::tooltip_appender::{TooltipAppendContext, TooltipAppender, TooltipPlacement};

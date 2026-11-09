@@ -16,7 +16,7 @@ impl GameLevel<'_> {
         dimension: LevelDimension,
         pos: BlockPos,
         state: BlockStateId,
-        result: &mut NativeTriState,
+        result: &mut TriState,
     ) {
         self.fire_crop_grow_pre(dimension, pos, state, result);
     }

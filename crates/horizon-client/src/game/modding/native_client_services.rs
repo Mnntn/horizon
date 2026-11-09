@@ -142,7 +142,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_widgets_draw_as_the_games_own() {
-        use mod_api::widgets::{TextField, Widgets};
+        use mod_api::client::widgets::{TextField, Widgets};
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let label = Text::literal("Done");
             let mut ours = HudBatch::scratch([320, 240]);

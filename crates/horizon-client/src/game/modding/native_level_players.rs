@@ -40,7 +40,7 @@ mod tests {
         Dim,
         native_guest_turn_tests::{place_host, with_guests},
     };
-    use mod_api::{ChunkRef, LevelRef, NativeWorldEpoch, PlayerRef};
+    use mod_api::{ChunkRef, LevelRef, PlayerRef, WorldEpoch};
 
     /// Open the Nether and go back, so it is a parked level of the server.
     fn park_the_nether(game: &mut super::Game<'_>) {
@@ -95,10 +95,7 @@ mod tests {
             assert_eq!(uuids(level.online_players(game)), Some(vec![99, 12]));
             assert_eq!(uuids(nether.online_players(game)), Some(vec![13]));
 
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             assert_eq!(stale.online_players(game), None);
         });
     }
@@ -199,10 +196,7 @@ mod tests {
             );
 
             let stale = ChunkRef::new(
-                LevelRef::new(
-                    NativeWorldEpoch::new(level.epoch().get() + 1),
-                    level.dimension(),
-                ),
+                LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension()),
                 [0, 0],
             );
             assert_eq!(stale.watchers(game), None);

@@ -87,7 +87,7 @@ impl InstanceGroupStorage {
             .get_mut(fields.slot as usize)
             .and_then(Option::as_mut)
             .filter(|g| {
-                g.owner == mod_api::crash::current_native_mod()
+                g.owner == mod_api::content::crash::current_native_mod()
                     && g.generation == fields.generation
                     && g.model.fields().generation == model_generation
             })
@@ -108,7 +108,7 @@ impl InstanceGroups for Game<'_> {
         if slot.translucent {
             return Err(GroupError::Translucent);
         }
-        let owner = mod_api::crash::current_native_mod();
+        let owner = mod_api::content::crash::current_native_mod();
         let mut storage = self.instance_groups.borrow_mut();
         let reserved: usize = storage
             .groups
@@ -324,7 +324,7 @@ mod tests {
         storage.retire_disabled(&std::collections::BTreeSet::from(["group-owner".into()]));
         assert!(storage.get(handle, 1).is_ok());
         assert!(matches!(storage.get(handle, 2), Err(GroupError::Stale)));
-        let _owner = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+        let _owner = mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
             id: "other",
             hook: "test",
             part: None,

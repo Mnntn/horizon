@@ -1,2 +1,1 @@
-mod reload_order;
-pub use reload_order::ReloadOrderError;
+pub use world::reload_order::ReloadOrderError;

@@ -1,3 +1,3 @@
 mod stubs {
-    pub(super) struct NativeItemDrop;
+    pub(super) struct ItemDrop;
 }

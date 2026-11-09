@@ -9,7 +9,7 @@ use horizon_core::random::{RandomSource, slime_chunk_random};
 use horizon_world::{dimension_type::DimensionFacts, registry::BlockStateId};
 
 /// `EntitySpawnReason`: the mod API's own enum.
-pub use mod_api::NativeSpawnReason as Reason;
+pub use mod_api::SpawnReason as Reason;
 /// `EntitySpawnReason.isSpawner`.
 pub fn is_spawner(reason: Reason) -> bool {
     matches!(reason, Reason::Spawner | Reason::TrialSpawner)
@@ -336,7 +336,7 @@ fn mod_predicate<L: SpawnLevel>(
     y: i32,
     z: i32,
 ) -> bool {
-    use mod_api::NativeSpawnLight as Light;
+    use mod_api::SpawnLight as Light;
     rule.spawnable_on
         .as_deref()
         .is_none_or(|on| tag(l, on, x, y - 1, z))
@@ -805,9 +805,7 @@ mod mod_spawn_rule_tests {
     use super::*;
     use crate::blocks::{RenderShape, Sounds, StateFacts};
     use horizon_core::random::LegacyRandom;
-    use mod_api::{
-        NativeHeightmap, NativeSpawnLight, NativeSpawnPlacementType, SpawnPlacementRule,
-    };
+    use mod_api::{SpawnLight, SpawnPlacementRule, SpawnPlacementType};
     use std::{cell::RefCell, sync::Arc};
 
     const AIR: BlockStateId = BlockStateId(0);
@@ -970,10 +968,10 @@ mod mod_spawn_rule_tests {
         }
     }
 
-    fn rule(light: NativeSpawnLight) -> SpawnPlacementRule {
+    fn rule(light: SpawnLight) -> SpawnPlacementRule {
         SpawnPlacementRule {
-            placement: NativeSpawnPlacementType::OnGround,
-            heightmap: NativeHeightmap::OceanFloor,
+            placement: SpawnPlacementType::OnGround,
+            heightmap: mod_api::Heightmap::OceanFloor,
             spawnable_on: Some("test:ghoul_ground".to_owned()),
             light,
             biome_tag: Some("test:haunted".to_owned()),
@@ -985,7 +983,7 @@ mod mod_spawn_rule_tests {
     /// that declared `Bright` spawns in daylight on the same spot.
     #[test]
     fn the_rule_checks_ground_biome_and_light_in_place_of_the_templates_predicate() {
-        let mut level = Flat::new(&[("ruby:ghoul", rule(NativeSpawnLight::Bright))]);
+        let mut level = Flat::new(&[("ruby:ghoul", rule(SpawnLight::Bright))]);
         let on_grass = [0, 1, 0];
         assert!(level.check("ruby:ghoul", Reason::Natural, on_grass));
         assert!(
@@ -1008,7 +1006,7 @@ mod mod_spawn_rule_tests {
 
     #[test]
     fn a_dark_rule_needs_the_dark_a_monster_needs() {
-        let mut level = Flat::new(&[("ruby:ghoul", rule(NativeSpawnLight::Dark))]);
+        let mut level = Flat::new(&[("ruby:ghoul", rule(SpawnLight::Dark))]);
         let on_grass = [0, 1, 0];
         level.sky = 0;
         assert!(level.check("ruby:ghoul", Reason::Natural, on_grass));
@@ -1023,7 +1021,7 @@ mod mod_spawn_rule_tests {
     /// answer as `default_result`; it may overturn it either way.
     #[test]
     fn the_per_check_hook_hears_the_rules_answer() {
-        let mut level = Flat::new(&[("ruby:ghoul", rule(NativeSpawnLight::Bright))]);
+        let mut level = Flat::new(&[("ruby:ghoul", rule(SpawnLight::Bright))]);
         level.hook = Some(true);
         assert!(level.check("ruby:ghoul", Reason::Natural, [5, 2, 0]));
         level.hook = Some(false);
@@ -1034,10 +1032,10 @@ mod mod_spawn_rule_tests {
     #[test]
     fn a_declared_placement_type_and_heightmap_replace_the_species_ones() {
         let anywhere = SpawnPlacementRule {
-            placement: NativeSpawnPlacementType::NoRestrictions,
+            placement: SpawnPlacementType::NoRestrictions,
             spawnable_on: None,
             biome_tag: None,
-            ..rule(NativeSpawnLight::Any)
+            ..rule(SpawnLight::Any)
         };
         let level = Flat::new(&[("ruby:floater", anywhere)]);
         // Mid-air with nothing below: no restrictions allows it, a zombie's

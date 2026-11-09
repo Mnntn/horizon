@@ -224,7 +224,7 @@ pub trait Hooks {
     )]
     fn command();
     /// The client's own commands (NeoForge's `RegisterClientCommandsEvent`), which
-    /// `command` runs: push a `NativeCommand` per usage (`x <mode:word>`).
+    /// `command` runs: push a `Command` per usage (`x <mode:word>`).
     /// Asked when a connection starts and again when the server sends its
     /// own tree, so the chat box colours, completes and lists them as the
     /// game's own; a name the game already has keeps that command's
@@ -978,7 +978,7 @@ pub trait Hooks {
         holder: LivingRef,
         health: f32,
         max_health: f32,
-        food: Option<NativePlayerFood>,
+        food: Option<PlayerFood>,
         changes: &mut Vec<EffectTickChange>,
         keep: &mut bool,
     );
@@ -1349,7 +1349,7 @@ pub trait Hooks {
     /// stacks; empty ones don't drop (NeoForge's global loot modifiers, Fabric's
     /// `LootTableEvents.MODIFY_DROPS`); `context` says what dropped them and
     /// how, and it is called even when `drops` is empty. A player's use drops
-    /// through it too (`NativeLootDrops::used`: shears, a brush, an item
+    /// through it too (`LootDrops::used`: shears, a brush, an item
     /// frame), with that player named. Lead drops from untying or cutting a
     /// leash, and from a mob a player killed while leashed, pass through here
     /// too, with that player named. It hears blocks that a
@@ -2411,13 +2411,13 @@ pub trait Hooks {
     fn gui_layer_post();
     /// Icons a mod puts on map `map` each time it is drawn: held, in an
     /// item frame or on the cartography table's screen (a map's pixels are
-    /// its own; nothing is saved in the map). Push `NativeMapDecoration`s
+    /// its own; nothing is saved in the map). Push `MapDecoration`s
     /// (an atlas sprite, a position in half map pixels, a rotation, and
     /// whether it shows in a frame and on the screen like vanilla's markers
     /// do); they are drawn after the vanilla ones with the same pose, and a
     /// sprite the atlas lacks is left out. `map.center`, `map.scale` and
     /// `map.dimension` say which blocks the map shows, and
-    /// `NativeMapDecoration::x` has the formula. Vanilla's decorations are
+    /// `MapDecoration::x` has the formula. Vanilla's decorations are
     /// not passed in. Asked every frame a map is drawn, so keep it cheap.
     /// The client half of `MapDecorationType` and `addDecoration`: a type
     /// registered on the server and saved in the map's data is not here.
@@ -4151,7 +4151,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         name: &str,
         advancement: &str,
         criterion: &str,
-        progress_type: NativeProgressType,
+        progress_type: ProgressType,
         progress: &AdvancementProgress,
     );
     /// A guest's arm swing was handled by the server. `hand` is `mainhand`. Server-side.

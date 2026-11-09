@@ -8,11 +8,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 BASE = 'cb01ae304c7136f1598f97650c63ccfc1da47b90'
 BLOCKS = runpy.run_path(str(Path(__file__).with_name('rename.py')))['blocks']
-PHASE = ROOT / 'crates/horizon-mod-api/src/phase.rs'
+PHASE = ROOT / 'crates/horizon-mod-api/src/world/phase.rs'
 
 
 def main():
-    old_phase = subprocess.check_output(['git', 'show', BASE + ':crates/horizon-mod-api/src/phase.rs'], text=True)
+    old_phase = subprocess.check_output(['git', 'show', BASE + ':crates/horizon-mod-api/src/world/phase.rs'], text=True)
     start = old_phase.index('    let metadata = matches!(')
     end = old_phase.index('    let settings =', start)
     names = set(re.findall(r'"(\w+)"', old_phase[start:end]))

@@ -11,7 +11,7 @@ pub trait ClientInputClientHost {
     /// Side: client.
     /// Mod `mod_id`'s events since its last poll (at most 256 wait).
     #[access(WorldOnly)]
-    fn poll(&mut self, mod_id: &str) -> Vec<NativeModEvent>;
+    fn poll(&mut self, mod_id: &str) -> Vec<ModEvent>;
     /// Side: client.
     /// Where the mouse is, in GUI pixels.
     #[access(ClientSetup)]
@@ -30,7 +30,7 @@ pub trait ClientInputClientHost {
     /// it. `Ok(None)` for a mapping it doesn't answer for. Refuses an invalid
     /// label with [`TextFormError`], including components deeper than 512 nodes.
     #[access(ClientSetup)]
-    fn mapping(&self, name: &str) -> Result<Option<NativeKeyMapping>, TextFormError>;
+    fn mapping(&self, name: &str) -> Result<Option<KeyMapping>, TextFormError>;
     /// Side: client.
     /// Milliseconds on the game's own clock (`Util.getMillis`), counting from the game's start:
     /// what a text field's cursor blinks by and what tells a double click from two clicks.

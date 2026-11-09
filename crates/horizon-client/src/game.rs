@@ -166,18 +166,13 @@ use horizon_core::{
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use horizon_mod_package::selection::{Argument, LaunchArguments};
-pub use maps::{NativeMapDecoration, NativeMapInfo};
 pub use native_block_entity_draw::BlockEntityDraw;
-pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
+pub use native_claimed_items::{HeldItemSlot, ModEvent};
 pub use native_components::NativeComponentError;
-pub use native_configs::{NativeConfig, NativeConfigFile, NativeConfigKind};
-pub use native_data_maps::NativeDataMapType;
-pub use native_falling::NativeFalling;
-pub use native_hooks::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
-pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
-pub use native_server::NativeExperienceOrb;
-pub use native_world_columns::NativeColumnBlocks;
-pub use native_world_edit::{NativeBlockEdit, NativeBlockRun, NativeHeightmap};
+pub use native_configs::ConfigFile;
+pub use native_data_maps::DataMapType;
+pub use native_hooks::{PhantomSpawnResult, Shake, SleepProblem};
+pub use native_mob_draw::{MobRender, PlayerRender};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -640,7 +635,7 @@ enum Screen {
     Studio,
 }
 impl Screen {
-    /// The id native mods see for this screen (`NativeScreenView.id`, the
+    /// The id native mods see for this screen (`ScreenView.id`, the
     /// `screen_render_post` hook): one per variant, and a hook's contract, so
     /// it stays the same from release to release. A new variant must add one.
     fn id(self) -> &'static str {
@@ -1214,7 +1209,7 @@ impl LevelAccess for GameLevel<'_> {
         {
             return vanilla;
         }
-        let mut result = mod_api::NativeTriState::Default;
+        let mut result = mod_api::TriState::Default;
         self.native_crop_grow_pre(self.dimension, pos, state, &mut result);
         result.or(vanilla)
     }
@@ -1274,10 +1269,10 @@ impl LevelAccess for GameLevel<'_> {
     ) -> Option<i32> {
         let mut cancel = false;
         if self.native_authoritative {
-            let context = mod_api::NativeNoteBlockChange {
+            let context = mod_api::NoteBlockChange {
                 dimension: self.dimension,
                 pos,
-                instrument: mod_api::NativeNoteInstrument::ALL[usize::from(instrument)],
+                instrument: mod_api::NoteInstrument::ALL[usize::from(instrument)],
                 old_note: old,
             };
             self.native_note_block_change(&context, &mut new, &mut cancel);
@@ -1291,13 +1286,13 @@ impl LevelAccess for GameLevel<'_> {
         instrument: &mut u8,
         note: &mut i32,
     ) -> bool {
-        use mod_api::NativeNoteInstrument;
+        use mod_api::NoteInstrument;
         if !self.native_authoritative
             || !mod_api::__private::listened(mod_api::HookId::NoteBlockPlay)
         {
             return true;
         }
-        let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
+        let mut played_instrument = NoteInstrument::ALL[usize::from(*instrument)];
         let mut played = *note;
         let mut cancel = false;
         let (player, player_entity_id) = if by_player {
@@ -1330,13 +1325,12 @@ impl LevelAccess for GameLevel<'_> {
         let mut cancel = false;
         if self.native_authoritative && mod_api::__private::listened(mod_api::HookId::PortalSpawn) {
             let b = shape.bottom_left;
-            let shape =
-                mod_api::NativePortalShape::from(mod_api::__private::built::NativePortalShape {
-                    x_axis: shape.x_axis,
-                    bottom_left: [b.x, b.y, b.z],
-                    width: shape.width,
-                    height: shape.height,
-                });
+            let shape = mod_api::PortalShape::from(mod_api::__private::built::PortalShape {
+                x_axis: shape.x_axis,
+                bottom_left: [b.x, b.y, b.z],
+                width: shape.width,
+                height: shape.height,
+            });
             self.native_portal_spawn(self.dimension, pos, state, shape, &mut cancel);
         }
         !cancel
@@ -2242,10 +2236,10 @@ impl WorldTables {
 pub(super) fn durability_damage(damage: f32) -> f32 {
     (damage / 4.0).max(1.0)
 }
-/// The durability damage a mod left for `slot` (`NativeArmorHurt::new_damage`, cast to int
+/// The durability damage a mod left for `slot` (`mod_api::ArmorHurt::new_damage`, cast to int
 /// as vanilla casts it); an entry it removed keeps vanilla's `fallback`.
 pub(super) fn answered_wear(
-    entries: &[mod_api::NativeArmorHurt],
+    entries: &[mod_api::ArmorHurt],
     slot: horizon_core::equipment_slot::EquipmentSlot,
     fallback: u32,
 ) -> u32 {
@@ -3013,7 +3007,7 @@ struct Game<'a> {
     waypoints: horizon_client::locator_bar::ClientWaypoints,
     /// The camera the last frame drew from (position, yaw, pitch, fov), for the locator bar.
     locator_camera: Option<([f64; 3], f32, f32, f32)>,
-    native_camera_frame: Option<mod_api::NativeCamera>,
+    native_camera_frame: Option<mod_api::Camera>,
     /// The yaw and pitch a native mod's camera drew the last frame from (`native_camera_pose`),
     /// none when it drew from vanilla's.
     posed_rotation: Option<(f32, f32)>,
@@ -5050,15 +5044,15 @@ impl Game<'_> {
         &self,
         origin: [f64; 3],
         block_entity: Option<horizon_core::nbt::Tag>,
-    ) -> horizon_world::loot::NativeLootPlace {
+    ) -> horizon_world::loot::LootPlace {
         let (rain, thunder) = self.world.weather.levels(1.0);
         // Level.canHaveWeather: sky light, no ceiling and not the End.
         let weather =
             self.world.shape.sky_light && !self.world.shape.has_ceiling && self.dim != Dim::End;
-        horizon_world::loot::NativeLootPlace {
+        horizon_world::loot::LootPlace {
             origin: Some(origin),
             block_entity,
-            level: Some(horizon_world::loot::NativeLootLevel {
+            level: Some(horizon_world::loot::LootLevel {
                 dimension: self.dim.id().to_owned(),
                 game_time: self.world.game_time,
                 day_time: self.world.day_time,
@@ -7008,8 +7002,8 @@ impl Game<'_> {
         );
         let on_ground = wanted.y < 0.0 && movement.y != wanted.y;
         f.on_ground = on_ground;
-        if next.y < f.position.y {
-            f.fall_distance += f.position.y - next.y;
+        if movement.y < 0.0 {
+            f.fall_distance -= f64::from(movement.y as f32);
         }
         let from = f.position;
         f.position = next;
@@ -7510,10 +7504,11 @@ impl Game<'_> {
         // its PASS goes on to Item.use, which a guest's UseItem asks for.
         // A slow tick's line names the phase of a use that took it (#8669): the
         // mods' hook, the block's own use, then the item's.
-        use mod_api::{NativeInteractionResult as Answer, NativeTriState};
+        use mod_api::InteractionResult as Answer;
+        use mod_api::TriState;
         let on_block = matches!(self.guest_use, Some(GuestUse::OnBlock(_)));
         let mut block_hit = block_hit;
-        let (mut use_block, mut use_item) = (NativeTriState::Default, NativeTriState::Default);
+        let (mut use_block, mut use_item) = (TriState::Default, TriState::Default);
         let block_phase = horizon_client::spans::guard("use_block");
         if let Some(hit) = block_hit {
             let held = self.held().cloned();
@@ -7535,7 +7530,7 @@ impl Game<'_> {
                     return Ok(true);
                 }
                 native_hooks::BlockClickAnswer::Canceled(_) => {
-                    (use_block, use_item) = (NativeTriState::False, NativeTriState::False);
+                    (use_block, use_item) = (TriState::False, TriState::False);
                 }
             }
         }
@@ -7833,7 +7828,7 @@ impl Game<'_> {
         // ServerPlayerGameMode.useItem and useItemOn: an item on cooldown is
         // not used (PASS, so the other hand may still act), unless
         // RightClickBlock's useItem TRUE forces a block click's useOn.
-        let forced = on_block && use_item == NativeTriState::True;
+        let forced = on_block && use_item == TriState::True;
         if !forced
             && self
                 .cooldowns
@@ -8232,7 +8227,7 @@ impl Game<'_> {
                         continue;
                     };
                     if let Some(living) = mob {
-                        let effect = mod_api::NativeActiveEffect::new(
+                        let effect = mod_api::ActiveEffect::new(
                             mod_api::__private::effect_key_by_index(def.index)
                                 .expect("effects resolved at load"),
                             eff.duration,
@@ -12688,11 +12683,11 @@ impl Game<'_> {
         if mod_api::__private::listened(mod_api::HookId::ArmorHurt)
             && let (Some(uuid), Some(player)) = (self.lan_acting_uuid, self.lan_acting_entity)
         {
-            let mut entries: Vec<mod_api::NativeArmorHurt> = eligible
+            let mut entries: Vec<mod_api::ArmorHurt> = eligible
                 .iter()
                 .enumerate()
                 .filter_map(|(i, e)| {
-                    Some(mod_api::NativeArmorHurt {
+                    Some(mod_api::ArmorHurt {
                         slot: armor_slot(i),
                         stack: e.as_ref()?.try_into_api().ok()?,
                         damage: durability_damage(damage),
@@ -14202,7 +14197,7 @@ impl Game<'_> {
             } else {
                 None
             };
-            let mut render = mod_api::NativeHandRender {
+            let mut render = mod_api::HandRender {
                 player: self.own_uuid(),
                 player_entity_id: self.own_entity_id(),
                 hand,
@@ -15773,7 +15768,7 @@ impl Game<'_> {
         self.screen_blur_requested.set(false);
         self.native_camera_frame = (mods_read_camera && !title).then(|| {
             let partial = camera_alpha as f32;
-            mod_api::NativeCamera {
+            mod_api::Camera {
                 position: camera.to_array(),
                 eye_height: self.view.eye_height_old
                     + (self.view.eye_height - self.view.eye_height_old) * partial,

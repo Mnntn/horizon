@@ -1,2 +1,1 @@
-mod fluid_model;
-pub use fluid_model::FluidModel;
+pub use block::fluid_model::FluidModel;

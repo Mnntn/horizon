@@ -2730,6 +2730,133 @@ mod tests {
 
     use super::*;
 
+    /// The player's route, from a fresh data folder with nothing registered by hand: the
+    /// launcher's own install of a release, a native build on it, then an update to a newer
+    /// release and a switch to it. The native build reads its base's resources throughout.
+    #[test]
+    fn a_native_build_starts_from_a_release_the_launcher_installed() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        if std::env::var_os("HORIZON_PLAYER_FLOW_CHILD").is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let status = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "native_mods::tests::a_native_build_starts_from_a_release_the_launcher_installed",
+                ])
+                .env("HORIZON_PLAYER_FLOW_CHILD", "1")
+                .env("HORIZON_LAUNCHER_HOME", home.path().join("launcher"))
+                .env("HORIZON_HOME", home.path().join("home"))
+                .env("XDG_DATA_HOME", home.path().join("data"))
+                .env("XDG_CONFIG_HOME", home.path().join("config"))
+                .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        // A release archive as GitHub serves it: one top folder holding the game.
+        let mut archive = Vec::new();
+        {
+            let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
+                &mut archive,
+                flate2::Compression::fast(),
+            ));
+            let game = b"release game";
+            let mut header = tar::Header::new_gnu();
+            header.set_size(game.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            tar.append_data(
+                &mut header,
+                format!("horizon-linux-x86_64/{}", backend::CLIENT),
+                &game[..],
+            )
+            .unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        let sha256: String =
+            sha2::Digest::finalize(<sha2::Sha256 as sha2::Digest>::new_with_prefix(&archive))
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+        let install_release = |tag: &str| {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!(
+                "http://{}/horizon-linux-x86_64.tar.gz",
+                listener.local_addr().unwrap()
+            );
+            let body = archive.clone();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0; 4096];
+                let _ = std::io::Read::read(&mut stream, &mut request);
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .unwrap();
+                stream.write_all(&body).unwrap();
+            });
+            let release = backend::Release {
+                tag: tag.into(),
+                name: tag.into(),
+                body: String::new(),
+                date: String::new(),
+                time: String::new(),
+                asset: Some((url, archive.len() as u64)),
+                prerelease: false,
+                nightly: None,
+            };
+            backend::install_as(&release, tag, &sha256, None, |_| {}).unwrap();
+            server.join().unwrap();
+            // `horizon-launcher prepare` writes the resources from the player's own Minecraft.
+            let resources = backend::resources(tag);
+            fs::create_dir_all(&resources).unwrap();
+            fs::write(resources.join("horizon-resources.json"), b"{}").unwrap();
+        };
+        let (old, new) = ("v2026.11.01", "v2026.11.02");
+        // (a) A fresh install: the release is the build's base, chosen as the launcher chooses.
+        install_release(old);
+        let base = base_for(None, &backend::installed(), false).unwrap();
+        assert_eq!(base, old);
+        let binary = dir("player-flow").join("built");
+        fs::write(&binary, b"native game").unwrap();
+        let native = "native-player-flow";
+        install(
+            &base,
+            native,
+            Target::Client,
+            &binary,
+            &[],
+            &serde_json::json!({"base": base, "horizon": "0".repeat(40), "target": "client"}),
+            &[],
+        )
+        .unwrap();
+        backend::need_prepared(native).unwrap();
+        assert_eq!(backend::resources(native), backend::resources(old));
+        // (b) An update: a newer release arrives, and a rebuild with `update` moves to it. The
+        // build made before it still plays, on the base it was made from, which stays installed.
+        install_release(new);
+        assert_eq!(
+            base_for(Some(native), &backend::installed(), true).as_deref(),
+            Some(new)
+        );
+        assert_eq!(
+            update_for(native, &backend::installed()).as_deref(),
+            Some(new)
+        );
+        backend::need_prepared(native).unwrap();
+        assert!(backend::remove_version(old).unwrap_err().contains(native));
+        // (c) Switching the selected version leaves the build and its base as they are.
+        let mut settings = backend::Settings::load();
+        settings.selected = Some(new.into());
+        settings.save().unwrap();
+        backend::need_prepared(native).unwrap();
+        assert_eq!(backend::resources(native), backend::resources(old));
+    }
+
     #[test]
     fn isolation_keeps_cancellation_exact_after_a_retry() {
         let _guard = TEST_STATE.lock().unwrap();

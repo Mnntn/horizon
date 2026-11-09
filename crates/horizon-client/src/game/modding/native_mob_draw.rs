@@ -7,7 +7,7 @@
 //! has `native_player_submit` (`RenderPlayerEvent.Pre`), and every mob and
 //! player in view gets `native_mob_layer` after its vanilla model
 //! (`EntityRenderersEvent.AddLayers`), in the same frame.
-pub use mod_api::game::{NativeMobRender, NativePlayerRender};
+pub use mod_api::game::{MobRender, PlayerRender};
 
 use super::{Dim, Game, native_block_entity_draw::BlockEntityDraw};
 use glam::{DVec3, Mat4};
@@ -18,13 +18,13 @@ use horizon_client::{
 };
 
 /// The render state of `m` at `partial` (`LivingEntityRenderer.extractRenderState`).
-pub(super) fn mob_render<'a>(m: &'a Mob, partial: f32) -> NativeMobRender<'a> {
+pub(super) fn mob_render<'a>(m: &'a Mob, partial: f32) -> MobRender<'a> {
     let body = anim::body_rot(m, partial);
     // The walk cycle, head turn and age as the vanilla models read them:
     // no walking while riding or dead, a baby's legs three times as far
     // (`WalkAnimationState.position(partial)`, `positionScale`).
     let pose = anim::state(m, partial);
-    NativeMobRender {
+    MobRender {
         id: m.id,
         kind: &m.kind.id,
         custom_name: m.custom_name.as_deref(),
@@ -74,7 +74,7 @@ impl Game<'_> {
     pub(super) fn mod_player_geometry(
         &self,
         mob: &Mob,
-        who: NativePlayerRender<'_>,
+        who: PlayerRender<'_>,
         partial: f32,
         camera: DVec3,
         light: u32,
@@ -99,7 +99,7 @@ impl Game<'_> {
     pub(super) fn mod_mob_layer_geometry(
         &self,
         mob: &Mob,
-        who: Option<NativePlayerRender<'_>>,
+        who: Option<PlayerRender<'_>>,
         partial: f32,
         camera: DVec3,
         light: u32,
@@ -126,7 +126,7 @@ impl Game<'_> {
         camera: DVec3,
         light: u32,
         out: &mut Vec<Vertex>,
-        hook: impl FnOnce(&NativeMobRender<'_>, &mut BlockEntityDraw) -> bool,
+        hook: impl FnOnce(&MobRender<'_>, &mut BlockEntityDraw) -> bool,
     ) -> bool {
         let render = mob_render(mob, partial);
         let a = f64::from(partial);

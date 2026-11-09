@@ -291,7 +291,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         let listener = shape.raw_listener();
         let variant = shape.variant();
         let raw_record = raw_places(false);
-        quote! {
+        let fire = quote! {
             mod_points::__private::fire_raw(
                 mod_points::PointId::#variant,
                 #name,
@@ -316,6 +316,25 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
                     }
                 },
             );
+        };
+        // A `replace` listener (the last API one) owns the outcome: the internals listeners
+        // after it run, but its cancel and value stand whatever they leave.
+        if !api || !(cancels || results) {
+            return fire;
+        }
+        let keep = results.then(|| {
+            quote!(let __owned = if __replaced { __result_slot.take() } else { ::std::option::Option::None };)
+        });
+        let force = cancels.then(|| quote!(if __replaced { __cancel = true; }));
+        let restore = results.then(|| {
+            quote!(if let ::std::option::Option::Some(__value) = __owned { __result_slot = ::std::option::Option::Some(__value); })
+        });
+        quote! {
+            let __replaced = mod_points::__private::replaced(mod_points::PointId::#variant);
+            #keep
+            #fire
+            #force
+            #restore
         }
     });
     let stop = {

@@ -18,7 +18,7 @@ References are repository-relative at this worktree's HEAD. They identify curren
 
 | Route | Verified owner | Proposed treatment |
 | --- | --- | --- |
-| Native closure transaction, nested success/error and unwind | `crates/horizon-mod-api/src/transaction.rs:44` and :72; Drop at :82 | Preserve synchronous closure semantics and the guard; rollback must finish before a catcher observes state. |
+| Native closure transaction, nested success/error and unwind | `crates/horizon-mod-api/src/item/transaction.rs:44` and :72; Drop at :82 | Preserve synchronous closure semantics and the guard; rollback must finish before a catcher observes state. |
 | Game-owned open/close and nested merge | `crates/horizon-client/src/game/runtime/transactions.rs:174`, :179, :192 | Extend this coordinator's Level (:34), never add a mod journal coordinator. |
 | Emergency abort | `crates/horizon-client/src/game/runtime/transactions.rs:239` | Restore participant values through the same rollback path. |
 | Root effects and rollback | `crates/horizon-client/src/game/runtime/transactions.rs:462`, :513 | Integrate participant lifetime and notification work here; no guest dispatch from rollback. |

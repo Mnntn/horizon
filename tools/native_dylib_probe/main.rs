@@ -30,22 +30,23 @@ fn main() {
                 .unwrap();
             assert_eq!(exchange(vec![1, 2, 3]), [4, 5, 6]);
             assert!(
-                mod_api::crash::details()
+                mod_api::content::crash::details()
                     .iter()
                     .any(|(key, value)| *key == "linkage probe" && value == "shared dependency")
             );
             let tls = *library.get::<fn(Option<&str>)>(b"probe_tls").unwrap();
             tls(None);
-            let guard = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
-                id: "probe",
-                hook: "test",
-                part: None,
-            });
+            let guard =
+                mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
+                    id: "probe",
+                    hook: "test",
+                    part: None,
+                });
             mod_points::__private::POINTS[0].store(true, Ordering::SeqCst);
             tls(Some("probe"));
             // Global registry shared across threads, but native call attribution is TLS.
             std::thread::spawn(move || {
-                assert_eq!(mod_api::crash::current_native_mod(), None);
+                assert_eq!(mod_api::content::crash::current_native_mod(), None);
                 mod_points::__private::POINTS[0].store(false, Ordering::SeqCst);
                 tls(None);
             })
@@ -54,12 +55,12 @@ fn main() {
             drop(guard);
             tls(None);
             let enter = library
-                .get::<fn() -> mod_api::crash::NativeModGuard>(b"probe_enter")
+                .get::<fn() -> mod_api::content::crash::ModGuard>(b"probe_enter")
                 .unwrap();
             let from_mod = enter();
-            assert_eq!(mod_api::crash::current_native_mod(), Some("mod"));
+            assert_eq!(mod_api::content::crash::current_native_mod(), Some("mod"));
             drop(from_mod);
-            assert_eq!(mod_api::crash::current_native_mod(), None);
+            assert_eq!(mod_api::content::crash::current_native_mod(), None);
         }
     }
     assert_eq!(probe_shared::STATE.load(Ordering::SeqCst), 2);

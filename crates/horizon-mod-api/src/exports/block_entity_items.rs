@@ -1,2 +1,1 @@
-mod block_entity_items;
-pub use block_entity_items::BlockEntityItemError;
+pub use block::block_entity_items::BlockEntityItemError;

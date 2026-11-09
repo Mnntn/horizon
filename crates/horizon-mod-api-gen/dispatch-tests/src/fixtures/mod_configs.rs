@@ -1,4 +1,4 @@
 mod stubs {
-    pub(super) struct NativeConfig;
-    pub(super) struct NativeConfigFile;
+    pub(super) struct Config;
+    pub(super) struct ConfigFile;
 }

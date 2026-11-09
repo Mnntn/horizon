@@ -1,2 +1,1 @@
-mod menu_slot;
-pub use menu_slot::MenuSlotBacking;
+pub use item::menu_slot::MenuSlotBacking;

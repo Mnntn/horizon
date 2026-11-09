@@ -2026,13 +2026,13 @@ impl<R: RandomSource> LootContext<'_, R> {
     /// the tool it has, and a seed from the roll's random. The entity, the
     /// damage, the player and the biome belong to the main loot engine's
     /// rolls; they are None here (docs/modding/src/how-to/native-mods.md).
-    fn native_loot_context(&self, random: &mut R) -> horizon_world::loot::NativeLootContext<'_> {
-        horizon_world::loot::NativeLootContext {
+    fn native_loot_context(&self, random: &mut R) -> horizon_world::loot::LootContext<'_> {
+        horizon_world::loot::LootContext {
             entity: None,
             damage: None,
             player: None,
             block: (!self.block.is_empty()).then_some(self.block),
-            tool: self.held.map(|h| horizon_world::loot::NativeLootTool {
+            tool: self.held.map(|h| horizon_world::loot::LootTool {
                 item: h.item.to_string(),
                 enchantments: h
                     .enchantments()
@@ -2775,12 +2775,12 @@ fn apply_loot(
 fn mod_function(
     kind: &str,
     data: &Value,
-    ctx: &horizon_world::loot::NativeLootContext<'_>,
+    ctx: &horizon_world::loot::LootContext<'_>,
     stack: &mut ItemStack,
     hook: impl FnOnce(
         &str,
         &Value,
-        &horizon_world::loot::NativeLootContext<'_>,
+        &horizon_world::loot::LootContext<'_>,
         &mut horizon_world::loot::LootStack,
     ),
 ) {

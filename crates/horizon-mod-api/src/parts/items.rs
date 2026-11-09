@@ -45,7 +45,7 @@ impl crate::TooltipAppender for TooltipAppenderPart {
         context: &crate::TooltipAppendContext,
         lines: &mut Vec<(crate::Text, u32)>,
     ) {
-        let _guard = crate::crash::enter_native_mod(crate::crash::NativeModCall {
+        let _guard = crate::content::crash::enter_native_mod(crate::content::crash::ModCall {
             id: self.mod_id,
             hook: "tooltip_appender",
             part: Some(std::any::type_name_of_val(&*self.appender)),
@@ -193,7 +193,7 @@ pub mod tests {
         player.slots.extend(main_hand.map(|stack| (5, stack)));
         host.level.entity(2, "minecraft:pig");
         host.level.entity(3, "test:robot");
-        let nether = LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER);
+        let nether = LevelRef::new(WorldEpoch::new(1), crate::DimensionKey::NETHER);
         host.players.join(4, 4, nether);
         let head = [("slot".into(), Tag::String("head".into()))];
         host.registries
@@ -246,10 +246,13 @@ pub mod tests {
         check(&|id| ["minecraft:stick", "later:widget"].contains(&id)).unwrap();
         let keys = keys.lock().unwrap();
         assert_eq!(
-            crate::registry_keys::item_id(keys[0]),
+            crate::content::registry_keys::item_id(keys[0]),
             Some("minecraft:stick")
         );
-        assert_eq!(crate::registry_keys::item_id(keys[1]), Some("later:widget"));
+        assert_eq!(
+            crate::content::registry_keys::item_id(keys[1]),
+            Some("later:widget")
+        );
         let super::ResolvePartsError::ItemKeys(errors) =
             check(&|id| id == "minecraft:stick").unwrap_err()
         else {
@@ -276,7 +279,7 @@ pub mod tests {
                 _: &TooltipAppendContext,
                 _: &mut Vec<(Text, u32)>,
             ) {
-                assert_eq!(crate::crash::current_native_mod(), Some("inner"));
+                assert_eq!(crate::content::crash::current_native_mod(), Some("inner"));
                 assert!(!self.0, "test unwind");
             }
         }
@@ -288,7 +291,7 @@ pub mod tests {
             nested: false,
         };
         let stack = stick();
-        let outer = crate::crash::enter_native_mod(crate::crash::NativeModCall {
+        let outer = crate::content::crash::enter_native_mod(crate::content::crash::ModCall {
             id: "outer",
             hook: "outer",
             part: None,
@@ -306,10 +309,10 @@ pub mod tests {
                     .append(&NoHost, &stack, &context, &mut Vec::new())
             }));
             assert_eq!(result.is_err(), panic);
-            assert_eq!(crate::crash::current_native_mod(), Some("outer"));
+            assert_eq!(crate::content::crash::current_native_mod(), Some("outer"));
         }
         drop(outer);
-        assert_eq!(crate::crash::current_native_mod(), None);
+        assert_eq!(crate::content::crash::current_native_mod(), None);
     }
 
     /// A pipe's item capability, reached through `.0`: one slot from every side but its top,
@@ -410,7 +413,7 @@ pub mod tests {
         if super::super::installed().is_none() {
             install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
         }
-        crate::registry_keys::resolve_items([
+        crate::content::registry_keys::resolve_items([
             "minecraft:stick",
             "minecraft:iron_helmet",
             "minecraft:iron_sword",
@@ -438,7 +441,7 @@ pub mod tests {
             "test:robot",
         ])
         .unwrap();
-        crate::registry_keys::item_key(id).expect("explicit fixture item")
+        crate::content::registry_keys::item_key(id).expect("explicit fixture item")
     }
 
     pub(crate) fn stack(item: &str, count: u32, damage: u32) -> ItemStack {
@@ -714,7 +717,7 @@ pub mod tests {
     pub(crate) fn a_players_items_are_their_inventory_and_each_index_takes_only_what_fits_there() {
         install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
         game_thread();
-        let entity = |id| EntityRef::new(NativeWorldEpoch::new(1), id);
+        let entity = |id| EntityRef::new(WorldEpoch::new(1), id);
         let helmet = || stack("minecraft:iron_helmet", 1, 0);
         let mut player = player_world(Some(stack("minecraft:stick", 60, 0)));
         player_mut(&mut player)
@@ -776,7 +779,7 @@ pub mod tests {
      {
         install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
         game_thread();
-        let entity = |id| EntityRef::new(NativeWorldEpoch::new(1), id);
+        let entity = |id| EntityRef::new(WorldEpoch::new(1), id);
         let mut player = player_world(None);
         let host: &mut dyn ServerHost = &mut player;
         // A pig has no items; a mod's robot has its provider's; a player in a parked level
@@ -792,10 +795,12 @@ pub mod tests {
     pub(crate) fn items(stacks: impl IntoIterator<Item = ItemStack>) -> u32 {
         stacks
             .into_iter()
-            .map(|s| match crate::registry_keys::item_id(s.item()).unwrap() {
-                "test:pouch" | "test:bag" => s.count() * (1 + s.damage()),
-                _ => s.count(),
-            })
+            .map(
+                |s| match crate::content::registry_keys::item_id(s.item()).unwrap() {
+                    "test:pouch" | "test:bag" => s.count() * (1 + s.damage()),
+                    _ => s.count(),
+                },
+            )
             .sum()
     }
     #[cfg(test)]
@@ -1279,7 +1284,7 @@ pub mod tests {
             chest(&mut world, FROM).slots[0],
             Some(stack("minecraft:stick", 5, 0))
         );
-        assert!(crate::item_place::warned_about("doubler"));
+        assert!(crate::block::item_place::warned_about("doubler"));
     }
 
     #[test]
@@ -1527,7 +1532,7 @@ pub mod tests {
         let bread = stack("minecraft:bread", 3, 0);
         assert_eq!(exchange(&mut shelf_, &shelf_slot(0), bread.clone()), 3);
         assert_eq!(shelf_.slots, [Some(bread), None, None]);
-        assert!(!crate::item_place::warned_about("the game"));
+        assert!(!crate::block::item_place::warned_about("the game"));
 
         // A transfer amount is not a resident stack: 128 offered, one accepted,
         // and a 127-item remainder are valid even though this slot's maximum is 64.
@@ -1568,7 +1573,7 @@ pub mod tests {
         // Offered 2 apples, it keeps none and answers 7 taken: undone, and the slot stays empty.
         assert_eq!(insert(&mut shelf_, &shelf_slot(1), apples(2)), 0);
         assert_eq!(shelf_.slots, [Some(apples(10)), None, None]);
-        assert!(crate::item_place::warned_about("doubler"));
+        assert!(crate::block::item_place::warned_about("doubler"));
     }
 
     #[test]
@@ -1823,7 +1828,7 @@ pub mod tests {
             })
             .unwrap();
             assert!(player_of(&p).given.is_empty());
-            assert!(crate::item_place::warned_about("doubler"));
+            assert!(crate::block::item_place::warned_about("doubler"));
         }
     }
 
@@ -2127,7 +2132,7 @@ impl ItemsCapabilityProviders for InstalledProviders {
         item: crate::ItemKey,
         index: &mut u32,
     ) -> Option<(ItemProviderOf, &'static str, bool)> {
-        let item = crate::registry_keys::item_id(item)?;
+        let item = crate::content::registry_keys::item_id(item)?;
         next(&installed()?.keys.item_capabilities, name, item, index)
     }
 

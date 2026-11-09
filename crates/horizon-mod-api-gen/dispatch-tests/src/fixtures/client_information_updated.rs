@@ -1,3 +1,3 @@
 mod api {
-    pub struct NativeClientInfo;
+    pub struct ClientInfo;
 }

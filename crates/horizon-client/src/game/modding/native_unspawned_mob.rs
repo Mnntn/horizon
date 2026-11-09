@@ -2,7 +2,7 @@
 //! (`finalize_spawn`'s `mob`, docs/modding/src/how-to/spawning.md): the lend,
 //! the handle's reads (`UnspawnedMobRef`), the scoped editor handed out with it
 //! (`UnspawnedMobEdits`), and the spawn group data at the API boundary
-//! (`NativeSpawnGroup`).
+//! (`SpawnGroup`).
 //!
 //! A lend copies the mob into `Game::lent_mobs` for the call and copies it back
 //! after, so it works where the caller holds the level shared (natural
@@ -19,9 +19,9 @@ use horizon_client::text::Text;
 use horizon_world::attribute_map::ValueKind;
 use horizon_world::attributes::Operation;
 use mod_api::{
-    AttributeModifier, AttributeOperation, EntityRef, EquipmentSlot, Identifier, ItemStack,
-    NativeAgeableGroup, NativeSpawnGroup, NativeTropicalVariant, NativeWorldEpoch,
-    UnspawnedMobEdits, UnspawnedMobError, UnspawnedMobRef,
+    AgeableGroup, AttributeModifier, AttributeOperation, EntityRef, EquipmentSlot, Identifier,
+    ItemStack, SpawnGroup, TropicalVariant, UnspawnedMobEdits, UnspawnedMobError, UnspawnedMobRef,
+    WorldEpoch,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -129,10 +129,8 @@ impl Game<'_> {
 
     /// The world a lend's handles belong to; a game with none open lends
     /// under epoch 0, which no open world has.
-    pub(in crate::game) fn lend_epoch(&self) -> NativeWorldEpoch {
-        self.native_lifecycle
-            .epoch()
-            .unwrap_or(NativeWorldEpoch::new(0))
+    pub(in crate::game) fn lend_epoch(&self) -> WorldEpoch {
+        self.native_lifecycle.epoch().unwrap_or(WorldEpoch::new(0))
     }
 
     /// Runs `read` on the lend `handle` names.
@@ -283,58 +281,55 @@ impl Game<'_> {
 
 /// The pack's group data as the API's, a school's leader a handle of `epoch`;
 /// None where a value has no API name.
-pub(in crate::game) fn native_spawn_group(
-    group: &Group,
-    epoch: NativeWorldEpoch,
-) -> Option<NativeSpawnGroup> {
+pub(in crate::game) fn native_spawn_group(group: &Group, epoch: WorldEpoch) -> Option<SpawnGroup> {
     let named = |names: &[&'static str], i: u8| names.get(usize::from(i)).map(|n| (*n).to_owned());
     Some(match group {
-        Group::Ageable(a) => NativeSpawnGroup::Ageable(native_ageable(a)),
-        Group::Zombie { baby, jockey, husk } => NativeSpawnGroup::Zombie {
+        Group::Ageable(a) => SpawnGroup::Ageable(native_ageable(a)),
+        Group::Zombie { baby, jockey, husk } => SpawnGroup::Zombie {
             baby: *baby,
             jockey: *jockey,
             tried_camel: *husk,
         },
-        Group::Spider(effect) => NativeSpawnGroup::Spider {
+        Group::Spider(effect) => SpawnGroup::Spider {
             effect: match effect {
                 Some(e) => Some(Identifier::parse(e).ok()?),
                 None => None,
             },
         },
-        Group::Horse(a, v) => NativeSpawnGroup::Horse {
+        Group::Horse(a, v) => SpawnGroup::Horse {
             ageable: native_ageable(a),
             variant: named(&equine::VARIANT_NAMES, *v)?,
         },
-        Group::Llama(a, v) => NativeSpawnGroup::Llama {
+        Group::Llama(a, v) => SpawnGroup::Llama {
             ageable: native_ageable(a),
             variant: named(&llama::VARIANTS, *v)?,
         },
-        Group::Fox(a, v) => NativeSpawnGroup::Fox {
+        Group::Fox(a, v) => SpawnGroup::Fox {
             ageable: native_ageable(a),
             variant: named(&FOX_VARIANTS, *v)?,
         },
-        Group::Rabbit(a, v) => NativeSpawnGroup::Rabbit {
+        Group::Rabbit(a, v) => SpawnGroup::Rabbit {
             ageable: native_ageable(a),
             variant: RABBIT_VARIANTS
                 .iter()
                 .find(|(id, _)| id == v)
                 .map(|(_, n)| (*n).to_owned())?,
         },
-        Group::Axolotl(a, [first, second]) => NativeSpawnGroup::Axolotl {
+        Group::Axolotl(a, [first, second]) => SpawnGroup::Axolotl {
             ageable: native_ageable(a),
             variants: [
                 named(&horizon_client::entity_nbt::AXOLOTL_VARIANTS, *first)?,
                 named(&horizon_client::entity_nbt::AXOLOTL_VARIANTS, *second)?,
             ],
         },
-        Group::Wolf(a, v) => NativeSpawnGroup::Wolf {
+        Group::Wolf(a, v) => SpawnGroup::Wolf {
             ageable: native_ageable(a),
             variant: Identifier::parse(tame::WOLF_VARIANTS.get(usize::from(*v))?.0).ok()?,
         },
-        Group::School(leader, look) => NativeSpawnGroup::School {
+        Group::School(leader, look) => SpawnGroup::School {
             leader: EntityRef::new(epoch, *leader),
             tropical: match look {
-                Some((pattern, base, color)) => Some(NativeTropicalVariant::new(
+                Some((pattern, base, color)) => Some(TropicalVariant::new(
                     named(&horizon_client::entity_nbt::TROPICAL_PATTERNS, *pattern)?,
                     named(&render::DYE_NAMES, *base)?,
                     named(&render::DYE_NAMES, *color)?,
@@ -347,11 +342,11 @@ pub(in crate::game) fn native_spawn_group(
 
 /// The API's group data as the game's; None for a name the game does not know,
 /// which drops the group.
-pub(in crate::game) fn spawn_group(group: &NativeSpawnGroup) -> Option<Group> {
+pub(in crate::game) fn spawn_group(group: &SpawnGroup) -> Option<Group> {
     let index = |names: &[&str], name: &str| names.iter().position(|n| *n == name).map(|i| i as u8);
     Some(match group {
-        NativeSpawnGroup::Ageable(a) => Group::Ageable(ageable(a)),
-        NativeSpawnGroup::Zombie {
+        SpawnGroup::Ageable(a) => Group::Ageable(ageable(a)),
+        SpawnGroup::Zombie {
             baby,
             jockey,
             tried_camel,
@@ -360,33 +355,33 @@ pub(in crate::game) fn spawn_group(group: &NativeSpawnGroup) -> Option<Group> {
             jockey: *jockey,
             husk: *tried_camel,
         },
-        NativeSpawnGroup::Spider { effect } => Group::Spider(match effect {
+        SpawnGroup::Spider { effect } => Group::Spider(match effect {
             Some(id) => {
                 let def = horizon_client_core::potions::effect(&id.to_string())?;
                 Some(horizon_client_core::potions::namespaced(def.id))
             }
             None => None,
         }),
-        NativeSpawnGroup::Horse {
+        SpawnGroup::Horse {
             ageable: a,
             variant,
         } => Group::Horse(ageable(a), index(&equine::VARIANT_NAMES, variant)?),
-        NativeSpawnGroup::Llama {
+        SpawnGroup::Llama {
             ageable: a,
             variant,
         } => Group::Llama(ageable(a), index(&llama::VARIANTS, variant)?),
-        NativeSpawnGroup::Fox {
+        SpawnGroup::Fox {
             ageable: a,
             variant,
         } => Group::Fox(ageable(a), index(&FOX_VARIANTS, variant)?),
-        NativeSpawnGroup::Rabbit {
+        SpawnGroup::Rabbit {
             ageable: a,
             variant,
         } => Group::Rabbit(
             ageable(a),
             RABBIT_VARIANTS.iter().find(|(_, n)| n == variant)?.0,
         ),
-        NativeSpawnGroup::Axolotl {
+        SpawnGroup::Axolotl {
             ageable: a,
             variants: [first, second],
         } => Group::Axolotl(
@@ -396,7 +391,7 @@ pub(in crate::game) fn spawn_group(group: &NativeSpawnGroup) -> Option<Group> {
                 index(&horizon_client::entity_nbt::AXOLOTL_VARIANTS, second)?,
             ],
         ),
-        NativeSpawnGroup::Wolf {
+        SpawnGroup::Wolf {
             ageable: a,
             variant,
         } => {
@@ -407,7 +402,7 @@ pub(in crate::game) fn spawn_group(group: &NativeSpawnGroup) -> Option<Group> {
             let i = tame::WOLF_VARIANTS.iter().position(|(n, _)| *n == name)?;
             Group::Wolf(ageable(a), i as u8)
         }
-        NativeSpawnGroup::School { leader, tropical } => Group::School(
+        SpawnGroup::School { leader, tropical } => Group::School(
             leader.id(),
             match tropical {
                 Some(look) => Some((
@@ -438,13 +433,13 @@ const RABBIT_VARIANTS: [(u8, &str); 7] = [
     (99, "evil"),
 ];
 
-fn native_ageable(a: &Ageable) -> NativeAgeableGroup {
-    let mut out = NativeAgeableGroup::new(a.should_spawn_baby, a.baby_chance);
+fn native_ageable(a: &Ageable) -> AgeableGroup {
+    let mut out = AgeableGroup::new(a.should_spawn_baby, a.baby_chance);
     out.size = a.size;
     out
 }
 
-fn ageable(a: &NativeAgeableGroup) -> Ageable {
+fn ageable(a: &AgeableGroup) -> Ageable {
     Ageable {
         size: a.size,
         should_spawn_baby: a.should_spawn_baby,
@@ -796,9 +791,9 @@ mod tests {
         listening(
             move |_, event| {
                 heard.lock().unwrap().push(event.group.clone());
-                let mut ageable = NativeAgeableGroup::new(true, 1.0);
+                let mut ageable = AgeableGroup::new(true, 1.0);
                 ageable.size = 1;
-                *event.group = Some(NativeSpawnGroup::Ageable(ageable));
+                *event.group = Some(SpawnGroup::Ageable(ageable));
                 Flow::Continue
             },
             || {
@@ -898,56 +893,56 @@ mod tests {
     /// the group.
     #[test]
     fn group_data_crosses_by_vanilla_names() {
-        let epoch = NativeWorldEpoch::new(3);
+        let epoch = WorldEpoch::new(3);
         let ageable = Ageable::babies(true);
-        let api = NativeAgeableGroup::new(true, 0.05);
+        let api = AgeableGroup::new(true, 0.05);
         let cases = [
             (
                 Group::Horse(ageable, 1),
-                NativeSpawnGroup::Horse {
+                SpawnGroup::Horse {
                     ageable: api,
                     variant: "creamy".into(),
                 },
             ),
             (
                 Group::Rabbit(ageable, 99),
-                NativeSpawnGroup::Rabbit {
+                SpawnGroup::Rabbit {
                     ageable: api,
                     variant: "evil".into(),
                 },
             ),
             (
                 Group::Fox(ageable, 1),
-                NativeSpawnGroup::Fox {
+                SpawnGroup::Fox {
                     ageable: api,
                     variant: "snow".into(),
                 },
             ),
             (
                 Group::Axolotl(ageable, [0, 4]),
-                NativeSpawnGroup::Axolotl {
+                SpawnGroup::Axolotl {
                     ageable: api,
                     variants: ["lucy".into(), "blue".into()],
                 },
             ),
             (
                 Group::Wolf(ageable, 1),
-                NativeSpawnGroup::Wolf {
+                SpawnGroup::Wolf {
                     ageable: api,
                     variant: id("minecraft:spotted"),
                 },
             ),
             (
                 Group::Spider(Some("minecraft:speed")),
-                NativeSpawnGroup::Spider {
+                SpawnGroup::Spider {
                     effect: Some(id("minecraft:speed")),
                 },
             ),
             (
                 Group::School(7, Some((0, 1, 0))),
-                NativeSpawnGroup::School {
+                SpawnGroup::School {
                     leader: EntityRef::new(epoch, 7),
-                    tropical: Some(NativeTropicalVariant::new(
+                    tropical: Some(TropicalVariant::new(
                         "kob".into(),
                         "orange".into(),
                         "white".into(),
@@ -960,7 +955,7 @@ mod tests {
                     jockey: false,
                     husk: Some(true),
                 },
-                NativeSpawnGroup::Zombie {
+                SpawnGroup::Zombie {
                     baby: true,
                     jockey: false,
                     tried_camel: Some(true),
@@ -971,7 +966,7 @@ mod tests {
             assert_eq!(native_spawn_group(&game, epoch).as_ref(), Some(&api));
             assert_eq!(spawn_group(&api), Some(game));
         }
-        let unknown = NativeSpawnGroup::Horse {
+        let unknown = SpawnGroup::Horse {
             ageable: api,
             variant: "plaid".into(),
         };

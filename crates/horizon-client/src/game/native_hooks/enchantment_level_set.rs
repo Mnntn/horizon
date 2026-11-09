@@ -12,7 +12,7 @@ impl Game<'_> {
     pub(in crate::game) fn native_enchantment_level_set(
         &mut self,
         pos: [i32; 3],
-        offer: &mod_api::stations::EnchantmentRow<'_>,
+        offer: &mod_api::item::stations::EnchantmentRow<'_>,
         level: &mut i32,
     ) {
         self.fire_enchantment_level_set(pos, offer, level);

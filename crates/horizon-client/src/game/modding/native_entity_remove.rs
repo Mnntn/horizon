@@ -11,7 +11,7 @@
 use super::{Game, commands::Target};
 use horizon_client::items::ItemStack;
 use horizon_core::{geometry::Vec3, position::BlockPos};
-use mod_api::{EntityRef, NativeRemovalReason};
+use mod_api::{EntityRef, RemovalReason};
 
 impl Game<'_> {
     /// Removes the entity with no death and no loot (`Entity.discard`): a
@@ -19,15 +19,15 @@ impl Game<'_> {
     /// a boat its lead, as vanilla's `remove` does. False for a player, a dragon part,
     /// or a stale handle.
     pub(super) fn entity_discard(&mut self, entity: EntityRef) -> bool {
-        self.entity_remove(entity, NativeRemovalReason::Discarded)
+        self.entity_remove(entity, RemovalReason::Discarded)
     }
     /// Removes the entity for `reason` (`Entity.remove`): `Discarded`, as
     /// `discard`, or `Killed`, which also runs a mob's effects that act on
     /// removal (Oozing's slimes, Weaving's cobwebs, Wind Charged's burst),
     /// still with no death and no loot. False for a player, a dragon part, or a stale
     /// handle.
-    pub(super) fn entity_remove(&mut self, entity: EntityRef, reason: NativeRemovalReason) -> bool {
-        let killed = reason == NativeRemovalReason::Killed;
+    pub(super) fn entity_remove(&mut self, entity: EntityRef, reason: RemovalReason) -> bool {
+        let killed = reason == RemovalReason::Killed;
         match self.native_entity_target(entity) {
             // A part leaves the level with its dragon, never alone.
             None | Some(Target::Player | Target::Guest(_) | Target::DragonPart(_)) => false,
@@ -197,7 +197,7 @@ mod tests {
             cart.items[26] = Some(ItemStack::new("minecraft:sand", 7));
             game.carts.push(cart);
             let entity = game.entity(600).unwrap();
-            assert!(game.entity_remove(entity, NativeRemovalReason::Killed));
+            assert!(game.entity_remove(entity, RemovalReason::Killed));
             assert!(game.dropped.is_empty());
             game.native_removals_flush();
             assert!(game.carts.is_empty());

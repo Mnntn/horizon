@@ -1,0 +1,18 @@
+//! Entities, mobs, players, effects and their handles.
+
+pub(crate) mod attachment_holder;
+pub(crate) mod attachment_query;
+// hidden: a module of game-side types; mods use their re-exports
+#[doc(hidden)]
+pub mod behaviors;
+pub(crate) mod entity_capability;
+pub(crate) mod goals;
+// hidden: a module of game-side types; mods use their re-exports
+#[doc(hidden)]
+pub mod health;
+// hidden: a module of game-side types; mods use their re-exports
+#[doc(hidden)]
+pub mod mobs;
+pub(crate) mod player_bots;
+pub(crate) mod types;
+pub(crate) mod unspawned_mob;

@@ -41,7 +41,7 @@ pub mod tests {
         assert_eq!(EffectKey::from_slot(speed_key.0), Ok(speed_key));
         assert!(EffectKey::from_slot(2).is_err());
         assert!(
-            crate::registry_keys::effect_id(speed_key).is_none(),
+            crate::content::registry_keys::effect_id(speed_key).is_none(),
             "startup has no resolved effects"
         );
         // Independent engine-index fixture: requested slots must not be confused
@@ -51,7 +51,7 @@ pub mod tests {
             ("key_test:later", 0),
             ("minecraft:poison", 1),
         ];
-        crate::registry_keys::resolve_effects(effects.iter().map(|(id, _)| *id), |id| {
+        crate::content::registry_keys::resolve_effects(effects.iter().map(|(id, _)| *id), |id| {
             effects
                 .iter()
                 .find(|(name, _)| *name == id)
@@ -62,26 +62,35 @@ pub mod tests {
         assert_eq!(keys[0], keys[2]);
         assert_eq!(keys[1], keys[3]);
         assert_eq!(
-            crate::registry_keys::effect_id(keys[0]),
+            crate::content::registry_keys::effect_id(keys[0]),
             Some("minecraft:speed")
         );
         assert_eq!(
-            crate::registry_keys::effect_id(keys[1]),
+            crate::content::registry_keys::effect_id(keys[1]),
             Some("key_test:later")
         );
-        assert_eq!(crate::registry_keys::effect_key_by_index(0), Some(keys[1]));
-        assert_eq!(crate::registry_keys::effect_index(keys[0]), Some(2));
-        assert_eq!(crate::registry_keys::effect_index(keys[1]), Some(0));
+        assert_eq!(
+            crate::content::registry_keys::effect_key_by_index(0),
+            Some(keys[1])
+        );
+        assert_eq!(
+            crate::content::registry_keys::effect_index(keys[0]),
+            Some(2)
+        );
+        assert_eq!(
+            crate::content::registry_keys::effect_index(keys[1]),
+            Some(0)
+        );
         for (id, index) in effects {
-            let key = crate::registry_keys::effect_key_by_index(index).unwrap();
-            assert_eq!(crate::registry_keys::effect_id(key), Some(id));
+            let key = crate::content::registry_keys::effect_key_by_index(index).unwrap();
+            assert_eq!(crate::content::registry_keys::effect_id(key), Some(id));
         }
 
         assert!(EffectKey::from_slot(u32::MAX).is_err());
         struct Table;
         impl mod_api::prelude::KeysBackend for Table {
             fn effect_key_id(&self, key: EffectKey) -> String {
-                crate::registry_keys::effect_id(key)
+                crate::content::registry_keys::effect_id(key)
                     .expect("invalid effect key slot")
                     .to_owned()
             }

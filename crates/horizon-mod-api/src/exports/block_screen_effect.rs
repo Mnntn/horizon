@@ -1,2 +1,1 @@
-mod block_screen_effect;
-pub use block_screen_effect::BlockScreenEffect;
+pub use block::block_screen_effect::BlockScreenEffect;

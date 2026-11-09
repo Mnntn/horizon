@@ -1,7 +1,7 @@
 id = "widget_example"
 name = "Widget Example"
 version = "0.1.0"
-description = "A screen of two text fields and two buttons built from mod_api::widgets: F8 opens it, Copy copies the first field into the second, Done closes it."
+description = "A screen of two text fields and two buttons built from mod_api::client::widgets: F8 opens it, Copy copies the first field into the second, Done closes it."
 api = "0.2"
 side = "client"
 capabilities = ["registries"]

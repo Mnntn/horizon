@@ -4,7 +4,7 @@ use super::{GoalCx, Resolved};
 use crate::mobs::Mob;
 use horizon_client::mobs::villager;
 use mod_api::ItemStack;
-use mod_api::{EffectKey, EquipmentSlot, Hand, LivingRef, NativeActiveEffect, Pose};
+use mod_api::{ActiveEffect, EffectKey, EquipmentSlot, Hand, LivingRef, Pose};
 
 impl GoalCx<'_, '_> {
     fn live_living_mob(&self, living: LivingRef) -> Option<&Mob> {
@@ -19,7 +19,7 @@ impl GoalCx<'_, '_> {
         &self,
         living: LivingRef,
         effect: EffectKey,
-    ) -> Option<NativeActiveEffect> {
+    ) -> Option<ActiveEffect> {
         let index = mod_api::__private::effect_index(effect)?;
         let mob = self.live_living_mob(living)?;
         let e = mob
@@ -30,7 +30,7 @@ impl GoalCx<'_, '_> {
         Some(super::super::native_living_effects::mob_effect(mob, e))
     }
 
-    pub(super) fn r_living_effects(&self, living: LivingRef) -> Option<Vec<NativeActiveEffect>> {
+    pub(super) fn r_living_effects(&self, living: LivingRef) -> Option<Vec<ActiveEffect>> {
         let mob = self.live_living_mob(living)?;
         Some(
             mob.extra

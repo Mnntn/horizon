@@ -2818,7 +2818,7 @@ impl Game<'_> {
             && mod_api::__private::listened(mod_api::HookId::ItemTooltip)
             && let Ok(stack) = stack.try_into_api()
         {
-            let display = mod_api::item_tooltip::TooltipDisplay::for_stack(&stack);
+            let display = mod_api::item::item_tooltip::TooltipDisplay::for_stack(&stack);
             let Ok(mut api_lines) = lines.try_into_api() else {
                 return lines;
             };

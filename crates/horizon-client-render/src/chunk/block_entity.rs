@@ -8,7 +8,7 @@ use horizon_client_core::{
 };
 use horizon_items::{banner_layer::BannerLayer, items::ItemStack};
 mod mod_models;
-pub use mod_api::containers::{ModContainer, ModEnergyBuffer, ModFluidTanks};
+pub use mod_api::item::containers::{ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use mod_models::{ModBlockEntity, ModBlockEntityFields, ModRevision};
 use std::{collections::HashMap, sync::Arc};
 use {

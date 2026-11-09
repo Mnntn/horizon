@@ -1,5 +1,4 @@
-mod recipe_rule;
-pub use recipe_rule::{
+pub use item::recipe_rule::{
     FireworkShape, FireworkShapeIngredient, RecipeJsonError, RecipeRule, RecipeTemplate,
     RecipeTrimPattern,
 };

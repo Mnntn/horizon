@@ -1,2 +1,1 @@
-mod world_fluid;
-pub use world_fluid::WorldFluid;
+pub use world::world_fluid::WorldFluid;

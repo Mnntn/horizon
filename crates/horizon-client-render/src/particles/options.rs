@@ -1,6 +1,6 @@
 //! Engine particle provider options, independent of API registry keys.
 use super::ParticleType;
-use mod_api::particles::PositionSource;
+use mod_api::client::particles::PositionSource;
 /// `ParticleOptions` with the parameters of the option classes used here.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods use the constructors

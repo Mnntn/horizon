@@ -289,10 +289,12 @@ pub(super) fn emit<'a>(
                 let lookup = match key_type.as_str() {
                     "BlockState" if table == "block" => format!("block_value({key})"),
                     "BlockState" => {
-                        format!("{table}(|| super::registry_keys::block_id({key}.block()))")
+                        format!(
+                            "{table}(|| super::content::registry_keys::block_id({key}.block()))"
+                        )
                     }
                     "& ItemStack" => {
-                        format!("{table}(|| super::registry_keys::item_id({key}.item()))")
+                        format!("{table}(|| super::content::registry_keys::item_id({key}.item()))")
                     }
                     "& str" => format!("{table}(|| Some({key}))"),
                     // An entity's type id need not be its block's: its own table.
@@ -373,8 +375,7 @@ pub(super) fn emit<'a>(
             struct OwnedLootContext;
             impl syn::visit_mut::VisitMut for OwnedLootContext {
                 fn visit_type_path_mut(&mut self, path: &mut syn::TypePath) {
-                    if path.path.segments.len() == 1
-                        && path.path.segments[0].ident == "NativeLootContext"
+                    if path.path.segments.len() == 1 && path.path.segments[0].ident == "LootContext"
                     {
                         path.path.segments[0].arguments = syn::PathArguments::None;
                     } else {
@@ -833,7 +834,7 @@ fn stack_crossing_routed(
         "GameRuleValue",
         "PlacementContext",
         "LootStack",
-        "NativeLootContext",
+        "LootContext",
         "ParticleOptions",
     ];
     const BLOCK_VALUES: &[&str] = &["BlockState", "LandingWrite"];
@@ -1884,7 +1885,7 @@ mod mod_api {{
     #[derive(Clone, Copy, Debug, PartialEq)] pub enum SettingValue {{ Toggle(bool), Choice(usize), Range(f64), Color(u32) }}
     pub struct Spec;
     impl Spec {{ pub fn store(&self, value: SettingValue) -> Option<String> {{ match value {{ SettingValue::Toggle(v) => Some(v.to_string()), _ => None }} }} pub fn read(&self, raw: Option<&str>) -> SettingValue {{ SettingValue::Toggle(raw == Some("true")) }} }}
-    pub mod crash {{ pub fn current_native_mod() -> Option<&'static str> {{ Some("a") }} }}
+    pub mod content {{ pub mod crash {{ pub fn current_native_mod() -> Option<&'static str> {{ Some("a") }} }} }}
     pub mod __private {{ pub fn setting(owner: &str, key: &str) -> Option<super::Spec> {{ (owner == "a" && key == "toggle").then_some(super::Spec) }} }}
 }}
 mod horizon_world {{ pub mod native_load_context {{ pub fn read_setting(dir: &std::path::Path, key: &str) -> Option<String> {{ std::fs::read_to_string(dir.join(key)).ok() }} }} }}

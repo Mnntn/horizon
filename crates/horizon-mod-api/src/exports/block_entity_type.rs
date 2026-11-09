@@ -1,2 +1,1 @@
-mod block_entity_type;
-pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder};
+pub use block::block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder};

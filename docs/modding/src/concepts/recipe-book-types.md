@@ -27,7 +27,7 @@ handle; it cannot directly mutate server state. Do not add player-id helpers to
 `Host`. Registration uses its existing registration receiver.
 
 Book identities are separate from `RecipeBookCategory` in
-`crates/horizon-mod-api/src/recipe_book.rs`. Categories group recipes and provide
+`crates/horizon-mod-api/src/item/recipe_book.rs`. Categories group recipes and provide
 icons; a book owns two flags. A screen can associate categories with a registered
 book explicitly. Neither category registration nor recipe-type registration
 implicitly registers a book. Display layout, unlocking and custom recipe displays

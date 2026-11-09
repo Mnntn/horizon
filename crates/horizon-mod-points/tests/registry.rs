@@ -7,7 +7,10 @@ use mod_points::{PointId, RegisterError, register, stop};
 use std::sync::atomic::Ordering;
 
 fn tick(_: mod_api::HostSide<'_>, args: &mut mod_points::TickArgs) {
-    assert_eq!(mod_api::crash::current_native_mod(), Some("tick_mod"));
+    assert_eq!(
+        mod_api::content::crash::current_native_mod(),
+        Some("tick_mod")
+    );
     args.cancel = true;
 }
 
@@ -139,7 +142,7 @@ fn one_list_registered_sealed_and_stopped() {
         args.cancel,
         "the checked function runs under its owner's guard and writes back"
     );
-    assert_eq!(mod_api::crash::current_native_mod(), None);
+    assert_eq!(mod_api::content::crash::current_native_mod(), None);
     assert!(mod_api::__private::set_mod_enabled("tick_mod", false));
     mod_points::__private::fire_api(PointId::Tick, &mut |_| heard += 1);
     mod_points::__private::fire_raw(PointId::Tick, "tick", &mut |_| raw_heard += 1);

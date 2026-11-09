@@ -10,6 +10,7 @@ fn fixture() -> (Manifest, Catalog) {
         }])).unwrap(),
         points: serde_json::from_value(serde_json::json!([{
             "name":"run", "target":"game::run", "raw":true, "at_return":true,
+            "returns":"cancel", "host":"none", "return_ty":"()",
             "listener":"game::__RunListener", "return_listener":"game::__RunReturnListener"
         }])).unwrap(),
         sites: serde_json::from_value(serde_json::json!([{
@@ -67,7 +68,7 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 (Kind::ModifyLocal, _) => Some(NoSlotReason::LocalSlotsPending),
                 (Kind::Field, _) => Some(NoSlotReason::ExtensionSlotsPending),
                 (Kind::Expression, _) => Some(NoSlotReason::SourcePending),
-                (Kind::Replace, _) => Some(NoSlotReason::ReplacePending),
+                (Kind::Replace, Access::Internals) => Some(NoSlotReason::ReplacePending),
                 (_, Access::Api) if call => Some(NoSlotReason::ApiSitesPending),
                 _ => None,
             };
@@ -88,14 +89,15 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
             );
             if access == Access::Api {
                 assert!(
-                    main.contains(if kind == Kind::Return {
-                        "mod_points::listeners::run_return"
-                    } else {
-                        "mod_points::listeners::run"
+                    main.contains(match kind {
+                        Kind::Return =>
+                            "mod_points::listeners::run_return(\"example\", 7, \"test\",",
+                        Kind::Replace =>
+                            "mod_points::replace!(run, cancel, none, \"example\", 7, \"test\",",
+                        _ => "mod_points::listeners::run(\"example\", 7, \"test\",",
                     }),
                     "{main}"
                 );
-                assert!(main.contains("(\"example\", 7, \"test\","), "{main}");
                 assert!(main.contains("mod_0::listen"), "{main}");
                 continue;
             }
@@ -155,6 +157,60 @@ fn an_api_listener_at_a_point_without_an_api_record_is_refused_naming_the_type()
     }
     // The native internals tier still listens there.
     manifest.inject[0] = inject(Access::Internals);
+    check(&catalog, &manifest).unwrap();
+}
+
+#[test]
+fn a_replace_at_a_point_whose_return_has_no_api_form_is_refused_naming_it() {
+    let (mut manifest, mut catalog) = fixture();
+    catalog.points[0].returns = "none".into();
+    catalog.points[0].raw_shape = Some(horizon_mod_point_emit::RawReturn {
+        return_ty: "Frame<'_>".into(),
+    });
+    manifest.inject.push(Inject {
+        id: "own".into(),
+        at: "game::run".into(),
+        kind: Kind::Replace,
+        with: "listen".into(),
+        access: Access::Api,
+        priority: 0,
+        hash: "signature".into(),
+        call: None,
+        nth: None,
+        ctx: None,
+    });
+    match check(&catalog, &manifest) {
+        Err(
+            error @ InjectError::NoSlot {
+                reason: NoSlotReason::ReplaceWithoutValue,
+                ..
+            },
+        ) => {
+            let text = error.to_string();
+            assert!(
+                text.contains("game::run") && text.contains("`Frame<'_>`"),
+                "{text}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    // A `Result<(), E>` point cancels with `Ok(())`, so a replace there is refused by its type.
+    catalog.points[0].returns = "cancel".into();
+    catalog.points[0].return_ty = Some("Result<(),StoreError>".into());
+    match check(&catalog, &manifest) {
+        Err(
+            error @ InjectError::NoSlot {
+                reason: NoSlotReason::ReplaceWithoutValue,
+                ..
+            },
+        ) => assert!(
+            error.to_string().contains("`Result<(),StoreError>`"),
+            "{error}"
+        ),
+        other => panic!("{other:?}"),
+    }
+    // A head listener at the same point is unaffected: it need not produce the value.
+    manifest.inject[0].kind = Kind::Head;
     check(&catalog, &manifest).unwrap();
 }
 

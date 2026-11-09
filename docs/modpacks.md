@@ -397,14 +397,23 @@ parameter, or a method reference or lambda that takes one event
 `neoforge` names, generated at build time from the Rust hook declarations (see the
 [hook notes](https://arismoko.github.io/horizon/reference/hook-notes.html)). An optional JSON
 file with `hooks` entries containing `name` and `neoforge` can replace those labels for a report.
-Over a folder of jars it ranks the names by how many mods use them. Each name gets one of four answers:
+Over a folder of jars it ranks the names by how many mods use them. Each name gets one of six answers:
 
 - a hook;
 - another phase's hook (`player_tick_post` for `PlayerTickEvent.Pre` when only Post is listed);
 - a hook whose label says why it isn't quite the counterpart;
 - data: the event is gone because vanilla made what it built into data, and the answer names the
   registries a port writes instead;
+- load phases: a mod-loading event Horizon has no hook for by design, and the answer says where a
+  port does that work instead;
 - none.
+
+The load-phase events follow the modding book's
+[load phases](https://arismoko.github.io/horizon/concepts/trait-mods.html#load-phases-and-access).
+`FMLCommonSetupEvent`'s work goes in `Hooks::register`, then the first server reload.
+`FMLLoadCompleteEvent`'s goes after the initial config and before `server_about_to_start`.
+`InterModEnqueueEvent` and `InterModProcessEvent` carried `InterModComms` messages. A Horizon
+dependent calls the library directly instead, after it in dependency order.
 
 Names NeoForge changed after 1.21.1 (`Capabilities.ItemHandler`, `Capabilities.EnergyStorage`,
 `AddReloadListenerEvent`) are looked up under their new ones. `VillagerTradesEvent` and

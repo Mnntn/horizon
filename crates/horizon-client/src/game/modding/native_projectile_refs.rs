@@ -10,7 +10,7 @@ use horizon_client::{
     projectiles::{OwnerFields, Projectile, ProjectileKind, Turn},
 };
 use horizon_core::geometry::Vec3;
-use mod_api::{EntityRef, NativeArrowPickup, NativeDeflection, PierceLevelError, ProjectileRef};
+use mod_api::{ArrowPickup, Deflection, EntityRef, PierceLevelError, ProjectileRef};
 
 /// Where a projectile handle's entity lives.
 #[derive(Clone, Copy)]
@@ -183,7 +183,7 @@ impl Game<'_> {
     pub(super) fn projectile_deflect(
         &mut self,
         projectile: ProjectileRef,
-        deflection: NativeDeflection,
+        deflection: Deflection,
         by: Option<EntityRef>,
         new_owner: Option<EntityRef>,
         by_attack: bool,
@@ -199,21 +199,21 @@ impl Game<'_> {
             return false;
         }
         let turn = match (deflection, by) {
-            (NativeDeflection::Reverse, _) => Turn::Reverse,
+            (Deflection::Reverse, _) => Turn::Reverse,
             (_, None) => Turn::Direction(None),
-            (NativeDeflection::AimDeflect, Some(by)) => {
+            (Deflection::AimDeflect, Some(by)) => {
                 let Some([x, y, z]) = self.entity_view_vector(by) else {
                     return false;
                 };
                 Turn::Direction(Some(Vec3::new(x, y, z)))
             }
-            (NativeDeflection::MomentumDeflect, Some(by)) => {
+            (Deflection::MomentumDeflect, Some(by)) => {
                 let Some(speed) = self.native_entity_known_speed(by) else {
                     return false;
                 };
                 Turn::Direction(Some(speed.normalize()))
             }
-            _ => unreachable!("(NativeDeflection, Option<EntityRef>): unhandled variant"),
+            _ => unreachable!("(Deflection, Option<EntityRef>): unhandled variant"),
         };
         match backing {
             // `deflect` takes the `EntityReference` overload of `setOwner`: an
@@ -249,12 +249,12 @@ impl Game<'_> {
     }
 
     /// `AbstractArrow.pickup`, for an arrow or a mob's trident.
-    pub(super) fn projectile_pickup(&self, projectile: ProjectileRef) -> Option<NativeArrowPickup> {
+    pub(super) fn projectile_pickup(&self, projectile: ProjectileRef) -> Option<ArrowPickup> {
         Some(
             match self.native_projectile(projectile)?.arrow.as_ref()?.pickup {
-                Pickup::Disallowed => NativeArrowPickup::Disallowed,
-                Pickup::Allowed => NativeArrowPickup::Allowed,
-                Pickup::CreativeOnly => NativeArrowPickup::CreativeOnly,
+                Pickup::Disallowed => ArrowPickup::Disallowed,
+                Pickup::Allowed => ArrowPickup::Allowed,
+                Pickup::CreativeOnly => ArrowPickup::CreativeOnly,
             },
         )
     }
@@ -264,7 +264,7 @@ impl Game<'_> {
     pub(super) fn projectile_set_pickup(
         &mut self,
         projectile: ProjectileRef,
-        pickup: NativeArrowPickup,
+        pickup: ArrowPickup,
     ) -> bool {
         let Some(index) = self.native_projectile_index(projectile) else {
             return false;
@@ -274,10 +274,10 @@ impl Game<'_> {
                 return false;
             };
             arrow.pickup = match pickup {
-                NativeArrowPickup::Disallowed => Pickup::Disallowed,
-                NativeArrowPickup::Allowed => Pickup::Allowed,
-                NativeArrowPickup::CreativeOnly => Pickup::CreativeOnly,
-                _ => unreachable!("NativeArrowPickup: unhandled variant"),
+                ArrowPickup::Disallowed => Pickup::Disallowed,
+                ArrowPickup::Allowed => Pickup::Allowed,
+                ArrowPickup::CreativeOnly => Pickup::CreativeOnly,
+                _ => unreachable!("ArrowPickup: unhandled variant"),
             };
             true
         })
@@ -386,7 +386,7 @@ mod tests {
     use super::*;
     use horizon_client::{mobs::Mob, motion::PlayerMotion};
     use horizon_core::random::RandomSource;
-    use mod_api::NativeWorldEpoch;
+    use mod_api::WorldEpoch;
 
     #[test]
     #[ignore = "needs prepared resources"]
@@ -557,8 +557,8 @@ mod tests {
                 assert_eq!(handle.set_pierce_level(game, level), Ok(()));
                 assert_eq!(handle.pierce_level(game), Ok(level));
             }
-            assert_eq!(handle.pickup(game), Some(NativeArrowPickup::Disallowed));
-            assert!(handle.set_pickup(game, NativeArrowPickup::CreativeOnly));
+            assert_eq!(handle.pickup(game), Some(ArrowPickup::Disallowed));
+            assert!(handle.set_pickup(game, ArrowPickup::CreativeOnly));
             assert_eq!(
                 game.creatures.projectiles[0].arrow.as_ref().unwrap().pickup,
                 Pickup::CreativeOnly
@@ -575,7 +575,7 @@ mod tests {
             // the scaled velocity.
             let draw = game.creatures.projectiles[0].random.0.clone().next_float();
             let yaw = game.creatures.projectiles[0].yaw;
-            assert!(handle.deflect(game, NativeDeflection::Reverse, None, None, false, [0.2; 3]));
+            assert!(handle.deflect(game, Deflection::Reverse, None, None, false, [0.2; 3]));
             let p = &game.creatures.projectiles[0];
             assert_eq!(
                 p.velocity,
@@ -589,7 +589,7 @@ mod tests {
             let look = game.entity_view_vector(mob).unwrap();
             assert!(handle.deflect(
                 game,
-                NativeDeflection::AimDeflect,
+                Deflection::AimDeflect,
                 Some(mob),
                 Some(mob),
                 true,
@@ -605,7 +605,7 @@ mod tests {
             // MOMENTUM_DEFLECT of a mob that has not moved has no direction.
             assert!(handle.deflect(
                 game,
-                NativeDeflection::MomentumDeflect,
+                Deflection::MomentumDeflect,
                 Some(mob),
                 None,
                 false,
@@ -632,13 +632,13 @@ mod tests {
             assert_eq!(ball.pickup(game), None);
             assert_eq!(ball.base_damage(game), None);
             assert!(!ball.set_critical(game, true));
-            assert!(ball.deflect(game, NativeDeflection::Reverse, None, None, false, [1.0; 3]));
+            assert!(ball.deflect(game, Deflection::Reverse, None, None, false, [1.0; 3]));
             assert_eq!(game.creatures.projectiles[1].acceleration, 0.05);
-            assert!(ball.deflect(game, NativeDeflection::Reverse, None, None, true, [1.0; 3]));
+            assert!(ball.deflect(game, Deflection::Reverse, None, None, true, [1.0; 3]));
             assert_eq!(game.creatures.projectiles[1].acceleration, 0.1);
 
             let stale = ProjectileRef::new(EntityRef::new(
-                NativeWorldEpoch::new(entity.epoch().get() + 1),
+                WorldEpoch::new(entity.epoch().get() + 1),
                 entity.id(),
             ));
             assert_eq!(stale.pierce_level(game), Err(PierceLevelError::Stale));
@@ -647,8 +647,8 @@ mod tests {
                 Err(PierceLevelError::Stale)
             );
             assert_eq!(stale.owner(game), None);
-            assert!(!stale.set_pickup(game, NativeArrowPickup::Allowed));
-            assert!(!stale.deflect(game, NativeDeflection::Reverse, None, None, false, [1.0; 3]));
+            assert!(!stale.set_pickup(game, ArrowPickup::Allowed));
+            assert!(!stale.deflect(game, Deflection::Reverse, None, None, false, [1.0; 3]));
             let taken = game.creatures.projectiles.lift();
             assert!(handle.base_damage(game).is_none());
             game.creatures.projectiles = taken;
@@ -711,7 +711,7 @@ mod tests {
             let draw = expect.next_float();
             assert!(trident.deflect(
                 game,
-                NativeDeflection::Reverse,
+                Deflection::Reverse,
                 None,
                 Some(player),
                 false,
@@ -729,7 +729,7 @@ mod tests {
             assert_eq!(game.world.random.clone().next_float(), level);
             // No owner for a trident a player threw: refused, nothing changed.
             let velocity = game.tridents[0].velocity;
-            assert!(!trident.deflect(game, NativeDeflection::Reverse, None, None, false, [1.0; 3]));
+            assert!(!trident.deflect(game, Deflection::Reverse, None, None, false, [1.0; 3]));
             assert_eq!(game.tridents[0].velocity, velocity);
 
             // A rocket: owner, then REVERSE, then an owner of none.
@@ -738,7 +738,7 @@ mod tests {
             assert_eq!(rocket.owner(game), Some(mob));
             assert_eq!(game.rockets[0].owner, Some(Who::Mob(99)));
             let _ = rocket_random.next_float();
-            assert!(rocket.deflect(game, NativeDeflection::Reverse, None, None, false, [0.5; 3]));
+            assert!(rocket.deflect(game, Deflection::Reverse, None, None, false, [0.5; 3]));
             assert_eq!(game.rockets[0].velocity, Vec3::new(-0.5, -1.0, -1.5));
             assert_eq!(
                 game.rockets[0].random.clone().next_float(),
@@ -797,14 +797,7 @@ mod tests {
                 game.creatures
                     .projectiles
                     .update(0, |p| p.no_deflect_ticks = left);
-                assert!(!charge.deflect(
-                    game,
-                    NativeDeflection::Reverse,
-                    None,
-                    None,
-                    true,
-                    [1.0; 3]
-                ));
+                assert!(!charge.deflect(game, Deflection::Reverse, None, None, true, [1.0; 3]));
                 let p = &game.creatures.projectiles[0];
                 assert_eq!(p.velocity, Vec3::new(0.0, 1.0, 0.0));
                 assert_eq!(p.owner, Some(Who::Mob(99)));
@@ -818,7 +811,7 @@ mod tests {
             let level = game.world.random.clone().next_float();
             let mut expect = game.creatures.projectiles[0].random.0.clone();
             let _ = expect.next_float();
-            assert!(charge.deflect(game, NativeDeflection::Reverse, None, None, true, [1.0; 3]));
+            assert!(charge.deflect(game, Deflection::Reverse, None, None, true, [1.0; 3]));
             assert_eq!(game.creatures.projectiles[0].owner, None);
             assert_eq!(game.world.random.clone().next_float(), level);
             assert_eq!(
@@ -834,18 +827,18 @@ mod tests {
             let arrow_ref = game
                 .projectile(game.entity(game.creatures.projectiles[1].id).unwrap())
                 .unwrap();
-            assert_eq!(arrow_ref.pickup(game), Some(NativeArrowPickup::Disallowed));
+            assert_eq!(arrow_ref.pickup(game), Some(ArrowPickup::Disallowed));
             assert!(arrow_ref.deflect(
                 game,
-                NativeDeflection::Reverse,
+                Deflection::Reverse,
                 None,
                 Some(player),
                 false,
                 [1.0; 3]
             ));
-            assert_eq!(arrow_ref.pickup(game), Some(NativeArrowPickup::Disallowed));
+            assert_eq!(arrow_ref.pickup(game), Some(ArrowPickup::Disallowed));
             assert!(arrow_ref.set_owner(game, Some(player)));
-            assert_eq!(arrow_ref.pickup(game), Some(NativeArrowPickup::Allowed));
+            assert_eq!(arrow_ref.pickup(game), Some(ArrowPickup::Allowed));
 
             // MOMENTUM_DEFLECT normalizes the known speed (the last move), not the velocity.
             game.mobs[0].previous = Vec3::new(0.0, 0.0, -3.0);
@@ -853,7 +846,7 @@ mod tests {
             game.mobs[0].velocity = Vec3::new(5.0, 0.0, 0.0);
             assert!(arrow_ref.deflect(
                 game,
-                NativeDeflection::MomentumDeflect,
+                Deflection::MomentumDeflect,
                 Some(mob),
                 None,
                 true,
@@ -891,7 +884,7 @@ mod tests {
                 .unwrap();
             assert!(arrow_ref.deflect(
                 game,
-                NativeDeflection::MomentumDeflect,
+                Deflection::MomentumDeflect,
                 Some(boat),
                 None,
                 true,

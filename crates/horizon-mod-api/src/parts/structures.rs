@@ -1,8 +1,8 @@
 use super::*;
 /// The structure types registered at startup, for the executable to hand to
 /// the engine's `StructureRegistry`.
-pub(crate) fn installed_structure_type_list() -> &'static [crate::structure_type::StructureTypeInfo]
-{
+pub(crate) fn installed_structure_type_list()
+-> &'static [crate::world::structure_type::StructureTypeInfo] {
     installed().map_or(&[], |installed| installed.structure_types.as_slice())
 }
 
@@ -120,6 +120,6 @@ impl StructuresRegistrar for PartRegistrar {
             return;
         }
         self.structure_types
-            .push(crate::structure_type::StructureTypeInfo { id: id.into(), ty });
+            .push(crate::world::structure_type::StructureTypeInfo { id: id.into(), ty });
     }
 }

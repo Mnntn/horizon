@@ -355,7 +355,7 @@ mod sprint_handle_tests {
     use horizon_client::{chunk::Chunk, motion::PlayerMotion};
     use horizon_core::geometry::Vec3;
     use horizon_protocol::connection::Pipe;
-    use mod_api::{ClientHost, EntityRef, NativeWorldEpoch};
+    use mod_api::{ClientHost, EntityRef, WorldEpoch};
     use std::sync::Arc;
 
     #[test]
@@ -409,7 +409,7 @@ mod sprint_handle_tests {
             let requests = game.particles.requested.as_ref().unwrap();
             assert_eq!(requests.len(), 1);
             assert_eq!(requests[0].1[1], 64.1);
-            let stale = EntityRef::new(NativeWorldEpoch::new(0), 7);
+            let stale = EntityRef::new(WorldEpoch::new(0), 7);
             assert!(!stale.sprint_particles(game));
             game.remote.as_mut().unwrap().logged_in = false;
             assert!(!entity.sprint_particles(game));

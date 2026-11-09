@@ -24,13 +24,17 @@ git -C "$root" archive HEAD | tar -x -C "$source"
 find "$source" -type l -delete
 printf '%s' "$revision" > "$source/.horizon-revision"
 
-# An installed, prepared version for the build to name, recorded as a native build of `revision`
-# so the launcher takes the commit from it instead of asking GitHub about it. The server export
-# reads none of its game files, so its prepared resources are an empty manifest.
+# What a player's launcher holds before this build: an installed, prepared base version `ci`,
+# and a native build of `revision` on it, so the launcher takes the commit from the build instead
+# of asking GitHub about it. Native builds read their base's prepared resources and carry none of
+# their own. The server export reads none of its game files, so they are an empty manifest.
+base=$data/versions/ci
+mkdir -p "$base/.local/horizon-client/26.3"
+touch "$base/.installed"
+echo '{}' > "$base/.local/horizon-client/26.3/horizon-resources.json"
 version=$data/versions/native-ci
-mkdir -p "$version/.local/horizon-client/26.3"
+mkdir -p "$version"
 touch "$version/.installed"
-echo '{}' > "$version/.local/horizon-client/26.3/horizon-resources.json"
 printf '{"base": "ci", "horizon": "%s", "target": "server"}\n' "$revision" > "$version/native-mods.json"
 
 mod=$scratch/mixins_check

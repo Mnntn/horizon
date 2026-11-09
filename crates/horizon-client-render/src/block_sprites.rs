@@ -10,7 +10,7 @@ use crate::{mesher::TintSource, models::catalog::BakedFace, streaming::WorkerCon
 use horizon_assets::model::Direction;
 use horizon_core::position::BlockPos;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
-pub use mod_api::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
+pub use mod_api::block::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 
 /// The two axes a side's `rect` and `uv` count along, as indices into (x, y, z): down and up across x then z; north
 /// and south across x then y; west and east across z then y. (The block's corner at 0, 0, 0 is 0 on each.)

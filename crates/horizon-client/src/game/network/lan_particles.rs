@@ -18,7 +18,7 @@ use horizon_protocol::{
     packets::play::{self, Clientbound as C},
 };
 use horizon_world::registry::BlockStateId;
-use mod_api::{SoundSource, particles::PositionSource};
+use mod_api::{SoundSource, client::particles::PositionSource};
 
 /// A particle request awaiting delivery to players in its level.
 pub(super) struct QueuedParticle {

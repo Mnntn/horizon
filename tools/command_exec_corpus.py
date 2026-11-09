@@ -1105,6 +1105,41 @@ def vehicle_saved_ground_and_fall():
                        f'/forceload remove {x0} {z0}')
 
 
+def ravager_saved_movement_speed():
+    """Ravager.aiStep sets the movement_speed base to 0.0 while biting, stunned or roaring, then lerps it back
+    toward 0.3. The instance exists only from that first aiStep (AttributeMap.getInstance makes it lazily), and
+    AttributeMap.pack saves it with the current base, so a reloaded ravager keeps its speed. Read after
+    summoning, after one and five ticks, after an unload and reload (frozen), and two ticks later.
+    """
+    x0, y0, z0 = 3904, 300, 3904
+    chunk = [[x0 >> 4, z0 >> 4]]
+    subjects = ['RoarTick:7', 'RoarTick:1', 'StunTick:3', 'AttackTick:5', 'AttackTick:0']
+    ops = [cmd(f'/forceload add {x0} {z0}', False), {'op': 'wait_chunks', 'chunks': chunk},
+           cmd(f'/fill {x0} {y0 - 1} {z0} {x0 + 15} {y0 - 1} {z0 + 15} stone', expect_result=256)]
+    for n, body in enumerate(subjects):
+        ops.append(cmd(f'/summon ravager {x0 + 2 + 3 * n}.5 {y0} {z0 + 8}.5 '
+                       f'{{Tags:["rav_speed_{n}"],PersistenceRequired:1b,{body}}}', expect_result=1))
+
+    def reads():
+        for n in range(len(subjects)):
+            ops.append(cmd(f'/data get entity @e[tag=rav_speed_{n},limit=1] attributes'))
+
+    reads()
+    ops.append({'op': 'tick', 'n': 1})
+    reads()
+    ops.append({'op': 'tick', 'n': 4})
+    reads()
+    ops += [cmd('/tick freeze', False), cmd(f'/forceload remove {x0} {z0}', False), {'op': 'tick', 'n': 60},
+            cmd(f'/execute unless loaded {x0} {y0} {z0}', expect_result=1),
+            cmd(f'/forceload add {x0} {z0}', False), {'op': 'wait_chunks', 'chunks': chunk}]
+    reads()
+    ops += [cmd('/tick unfreeze', False), {'op': 'tick', 'n': 2}]
+    reads()
+    return ops + setup(f'/kill @e[type=!player,x={x0},y={y0 - 8},z={z0},dx=16,dy=24,dz=16]',
+                       f'/fill {x0} {y0 - 1} {z0} {x0 + 15} {y0 - 1} {z0 + 15} air',
+                       f'/forceload remove {x0} {z0}')
+
+
 def vehicle_ground_and_fall():
     """Entity.load reads OnGround (getBooleanOr) and fall_distance (getDoubleOr) for every entity,
     and Entity.saveWithoutId writes the live values: boats, rafts and minecarts keep both. Frozen
@@ -6602,6 +6637,25 @@ def loaded_dead_mob():
     return ops + setup(f'/kill @e[type=!player,x={x0},y={y0 - 8},z={z0},dx=16,dy=32,dz=16]',
                        f'/fill {x0} {y0 - 1} {z0} {x0 + 15} {y0 - 1} {z0 + 15} air',
                        f'/forceload remove {x0} {z0}')
+def falling_block_fall_float():
+    """#13701: `Entity.checkFallDamage` adds each step down narrowed to a float (`fallDistance -= (float)ya`);
+    a falling block never runs `baseTick`, so it is never in water and every step counts."""
+    x0, y0, z0 = 4096 - 64, 260, 3648
+    ops = [cmd(f'/forceload add {x0} {z0}', False), {'op': 'wait_chunks', 'chunks': [[x0 >> 4, z0 >> 4]]},
+           cmd(f'/fill {x0} {y0 - 1} {z0} {x0 + 15} {y0 - 1} {z0 + 15} stone', False)]
+    sel = '@e[type=minecraft:falling_block,tag=fb_fall,limit=1]'
+    for block, y in (('sand', y0 + 6.5), ('anvil', y0 + 3.5)):
+        ops.append(cmd(f'/summon falling_block {x0 + 8}.5 {y} {z0 + 8}.5 '
+                       f'{{BlockState:{{Name:"minecraft:{block}"}},Time:1,Tags:["fb_fall"]}}', expect_result=1))
+        for _ in range(6):
+            ops.append({'op': 'tick', 'n': 1})
+            ops.append(cmd(f'/data get entity {sel} fall_distance'))
+            ops.append(cmd(f'/data get entity {sel} Pos[1]'))
+        ops.append(cmd(f'/kill @e[type=minecraft:falling_block,tag=fb_fall]', False))
+        ops.append(cmd(f'/fill {x0} {y0} {z0} {x0 + 15} {y0 + 8} {z0 + 15} air', False))
+    return ops + setup(f'/fill {x0} {y0 - 1} {z0} {x0 + 15} {y0 + 8} {z0 + 15} air', f'/forceload remove {x0} {z0}')
+
+
 def explosion_infested_blocks():
     """#11330: `Block.onExplosionHit` calls `spawnAfterBreak` before the drops, so a blast lets an
     infested block's silverfish out (`InfestedBlock.spawnInfestation`) while `block_drops` is on. The
@@ -6724,7 +6778,9 @@ def zombie_villager_summoned_data():
 def projectile_fall_distance():
     """#13702: `Entity.load` reads `fall_distance` for every entity and `saveWithoutId` writes it; a projectile
     moves by `setPos`, never through `Entity.move`, so in the air it keeps what it was given."""
-    x0, y0, z0 = 4096 - 96, 280, 3648
+    # Away from the cases at z 3648: unloading this chunk at the end would keep vanilla's chunks two
+    # columns away from entity ticking for a few ticks (the explosion and falling block cases next).
+    x0, y0, z0 = 4096 - 96, 280, 3392
     ops = [cmd(f'/forceload add {x0} {z0}', False), {'op': 'wait_chunks', 'chunks': [[x0 >> 4, z0 >> 4]]},
            cmd('/tick freeze', False)]
     kinds = [('fireball', ''), ('wither_skull', ''), ('small_fireball', ''), ('snowball', ''),
@@ -7325,6 +7381,7 @@ def groups():
         ('beacon levels load', beacon_levels_load()),
         ('zombie villager summoned data', zombie_villager_summoned_data()),
         ('loaded dead mob', loaded_dead_mob()),
+        ('falling block fall float', falling_block_fall_float()),
         ('explosion infested blocks', explosion_infested_blocks()),
         ('jigsaw default joint', jigsaw_default_joint()),
         ('command block auto load', command_block_auto_load()),
@@ -7422,6 +7479,7 @@ def groups():
         ('rocket data merge', rocket_data_merge()),
         ('vehicle ground and fall', vehicle_ground_and_fall()),
         ('vehicle saved ground and fall', vehicle_saved_ground_and_fall()),
+        ('ravager saved movement speed', ravager_saved_movement_speed()),
         # Last: it leaves the player in other food than it found.
         (player_food.GROUP, player_food.cases(cmd, setup)),
     ]

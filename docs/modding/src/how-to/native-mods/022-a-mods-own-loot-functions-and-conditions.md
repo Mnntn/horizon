@@ -15,7 +15,7 @@ gets an owned API `LootStack`: its resolved `ItemKey`, signed intermediate count
 (a book's stored ones), potion, ominous bottle amplifier, stew effects and ordered NBT component patches.
 Each patch is `(String, Option<Tag>)`; `None` removes a component, and repeated IDs apply in order.
 Unknown NBT values retain their exact type, including byte arrays and bytes. Names are API `Text` trees.
-The context is an owned `NativeLootContext`, including entity equipment and deferred exploration-map facts.
+The context is an owned `LootContext`, including entity equipment and deferred exploration-map facts.
 Conversion runs only after the subscription guard. Writeback validates the entire candidate before replacing
 the engine roll; an invalid candidate leaves the roll unchanged. Intermediate counts can be non-positive:
 these values are not occupied inventory stacks. A function that asks for a map's structure search (`map`/`exploration`) changes nothing there: the

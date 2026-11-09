@@ -1,2 +1,1 @@
-mod posed_parts;
-pub use posed_parts::{HiddenParts, HumanoidPart, PosedPart, PosedParts};
+pub use client::posed_parts::{HiddenParts, HumanoidPart, PosedPart, PosedParts};

@@ -29,7 +29,7 @@ arrival = 'transfer_arrival_rebinds_only_bound_owners_with_the_same_id'
 cases = [
     ('omit-removal-retire', join, 'entity.attachment_lifetime().retire();', ';', removal),
     ('wrong-arrival-epoch', levels, 'level.epoch(), id',
-     'mod_api::NativeWorldEpoch::new(level.epoch().get() + 1), id', arrival),
+     'mod_api::WorldEpoch::new(level.epoch().get() + 1), id', arrival),
     ('wrong-destination-index', levels, 'self.attachment_indexes.entry(self.dim)',
      'self.attachment_indexes.entry(source)', arrival),
     ('keep-source-join', travel,

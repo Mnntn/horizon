@@ -62,13 +62,7 @@ pub(super) fn main_rs(
             .flat_map(|(i, manifest)| {
                 let api_points = listed
                     .iter()
-                    .map(|point| horizon_mod_point_emit::Point {
-                        name: point.name.clone(),
-                        target: point.target.clone(),
-                        private: point.private,
-                        at_return: point.at_return,
-                        api_refusal: point.api_refusal.clone(),
-                    })
+                    .map(super::inject::ListedPoint::emitted)
                     .collect::<Vec<_>>();
                 horizon_mod_point_emit::api(manifest, &api_points, &format!("mod_{i}::"))
                     .expect("API slots checked")
@@ -628,7 +622,7 @@ mod tests {
         let dir = fixture();
         let mut manifest = horizon_mod_package::Package::read(&dir).unwrap().manifest;
         manifest.id = "fixture".into();
-        manifest.inject = [Kind::Head, Kind::Return]
+        manifest.inject = [Kind::Head, Kind::Return, Kind::Replace]
             .into_iter()
             .enumerate()
             .map(|(index, kind)| Inject {
@@ -652,6 +646,10 @@ mod tests {
             raw: true,
             at_return: true,
             api_refusal: None,
+            returns: "cancel".into(),
+            host: "both".into(),
+            raw_shape: None,
+            return_ty: Some("()".into()),
             listener: None,
             return_listener: None,
         }];
@@ -671,6 +669,7 @@ mod tests {
         assert_eq!(slots, concat!(
             "        mod_points::listeners::tick(\"fixture\", 12, \"listen_0\", mod_0::listen_0),\n",
             "        mod_points::listeners::tick_return(\"fixture\", 12, \"listen_1\", mod_0::listen_1),\n",
+            "        mod_points::replace!(tick, cancel, host, \"fixture\", 12, \"listen_2\", mod_0::listen_2),\n",
         ));
         fs::remove_dir_all(dir).unwrap();
     }

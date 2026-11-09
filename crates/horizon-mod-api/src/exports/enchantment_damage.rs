@@ -1,5 +1,4 @@
-mod enchantment_damage;
-pub use enchantment_damage::{
+pub use item::enchantment_damage::{
     EnchantmentDamageContext, EnchantmentDamageEffect, EnchantmentDamageEffects,
     EnchantmentDamageRegistry,
 };

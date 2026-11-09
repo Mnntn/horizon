@@ -1098,7 +1098,6 @@
   "optimization": "최적화",
   "played by {names}": "{names}에서 사용",
   "realistic": "현실적",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "완료 후 {command} 실행",
   "runs {command} first": "먼저 {command} 실행",
   "simplistic": "심플함",
@@ -1235,5 +1234,7 @@
   "NATIVE": "NATIVE",
   "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
   "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
-  "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here."
+  "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

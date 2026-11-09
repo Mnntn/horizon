@@ -10,11 +10,10 @@ use horizon_core::{
 };
 use horizon_items::items::ItemStack;
 use horizon_world::registry::BlockStateId;
-use mod_api::mod_chunk_tickets::ModTicket;
+use mod_api::world::mod_chunk_tickets::ModTicket;
 use mod_api::{
-    BlockHit, BlockTransformPreview, ChunkRef, ChunkStatus, DimensionKey, Hand, LevelRef,
-    LightLayer, MapState, NativeClipBlock, NativeClipFluid, NativeTicketOwner, PlayerRef,
-    RespawnData, TicketController, Vec3,
+    BlockHit, BlockTransformPreview, ChunkRef, ChunkStatus, ClipBlock, ClipFluid, DimensionKey,
+    Hand, LevelRef, LightLayer, MapState, PlayerRef, RespawnData, TicketController, Vec3,
 };
 
 fn block_pos([x, y, z]: [i32; 3]) -> BlockPos {
@@ -31,7 +30,7 @@ fn chunk_in_world(pos: [i32; 2]) -> bool {
 fn calling_mod_owns(controller: TicketController) -> bool {
     controller
         .owner()
-        .is_some_and(|owner| mod_api::crash::current_native_mod() == Some(owner))
+        .is_some_and(|owner| mod_api::content::crash::current_native_mod() == Some(owner))
 }
 
 /// The stored light of `layer` at `pos` in `world`, as the game's own light query reads it.
@@ -337,7 +336,7 @@ impl Game<'_> {
                 let (own, rest): (Vec<_>, Vec<_>) =
                     loaded.into_iter().partition(|t| t.controller == slot);
                 let mut validation =
-                    mod_api::mod_chunk_tickets::ControllerTickets::new(owner, own.clone());
+                    mod_api::world::mod_chunk_tickets::ControllerTickets::new(owner, own.clone());
                 self.native_validate_tickets(dim.id(), controller, &mut validation);
                 let removed = validation.into_removed();
                 loaded = rest;
@@ -369,7 +368,7 @@ impl Game<'_> {
         &mut self,
         chunk: ChunkRef,
         controller: TicketController,
-        owner: NativeTicketOwner,
+        owner: mod_api::TicketOwner,
         forced: bool,
         natural_spawning: bool,
     ) -> bool {
@@ -403,7 +402,7 @@ impl Game<'_> {
         &self,
         level: LevelRef,
         controller: TicketController,
-    ) -> Option<Vec<(NativeTicketOwner, [i32; 2], bool)>> {
+    ) -> Option<Vec<(mod_api::TicketOwner, [i32; 2], bool)>> {
         if !calling_mod_owns(controller) {
             return None;
         }
@@ -637,13 +636,7 @@ impl Game<'_> {
         from: [f64; 3],
         to: [f64; 3],
     ) -> Option<bool> {
-        let hit = self.level_clip(
-            level,
-            from,
-            to,
-            NativeClipBlock::Collider,
-            NativeClipFluid::None,
-        )?;
+        let hit = self.level_clip(level, from, to, ClipBlock::Collider, ClipFluid::None)?;
         Some(hit.miss)
     }
     /// Whether `level` is a current handle on the server: what the world's own data (its
@@ -845,7 +838,7 @@ mod tests {
     use super::super::api_values::TryIntoApi;
     use super::super::{Dim, native_entity_refs::tests::with_game};
     use horizon_core::position::BlockPos;
-    use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
+    use mod_api::{ChunkRef, LevelRef, LightLayer, WorldEpoch};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -1084,10 +1077,7 @@ mod tests {
             assert_eq!(level.best_neighbor_signal(host, [2, y, 1]), Some(15));
             assert!(level.has_neighbor_signal(host, [2, y, 1]));
             assert_eq!(level.signal(host, [4, y, 4], Direction::East), Some(9));
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             let other = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             for unavailable in [stale, other] {
                 assert_eq!(unavailable.signal(host, [1, y, 1], Direction::East), None);
@@ -1104,10 +1094,7 @@ mod tests {
 
         with_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
 
             // RespawnData.of: the yaw wraps to -180..180 and the pitch clamps to -90..90.
@@ -1248,7 +1235,7 @@ mod tests {
             game.border.set_center([12.0, -8.0]);
             game.border.set_size(40.0);
             assert_eq!(level.world_border(game), Some([-8.0, -28.0, 32.0, 12.0]));
-            let stale_epoch = NativeWorldEpoch::new(level.epoch().get() + 1);
+            let stale_epoch = WorldEpoch::new(level.epoch().get() + 1);
             let stale = LevelRef::new(stale_epoch, level.dimension());
             assert_eq!(stale.world_border(game), None);
             let unopened = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
@@ -1293,10 +1280,7 @@ mod tests {
                 "parked server level is not visible"
             );
             assert!(host.level("minecraft:the_nether").is_none());
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             assert_eq!(stale.height(host), None);
             game.remote.as_mut().unwrap().logged_in = false;
             assert_eq!(level.height(game), None, "logged out");
@@ -1535,10 +1519,7 @@ mod tests {
     fn an_explicit_fluid_tick_spreads_a_source_and_refuses_other_positions() {
         with_game(|game| {
             let level = game.level(game.dim.id()).unwrap();
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             let y = pool(game, &[([8, 0, 8], "minecraft:water", "0")]);
             let amounts = |game: &mut super::super::Game<'_>| {
@@ -1633,8 +1614,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn forced_chunks_of_a_parked_level_and_stale_handles() {
         with_chunk_streaming(|game| {
-            let stale_epoch =
-                NativeWorldEpoch::new(game.native_lifecycle.epoch().unwrap().get() + 1);
+            let stale_epoch = WorldEpoch::new(game.native_lifecycle.epoch().unwrap().get() + 1);
             let level = game.level(game.dim.id()).unwrap();
             let stale_level = mod_api::LevelRef::new(stale_epoch, level.dimension());
             let stale = ChunkRef::new(stale_level, [0, 0]);
@@ -1723,17 +1703,14 @@ mod tests {
             assert_eq!(game.world.random.next_long(), untouched.next_long());
 
             // A handle of an earlier open names nothing.
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                game.dim.key(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), game.dim.key());
             let host: &mut dyn ServerHost = game;
             assert!(stale.with_random(&mut *host, |r| r.next_int()).is_none());
         });
     }
 
-    fn in_mod(id: &'static str) -> mod_api::crash::NativeModGuard {
-        mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+    fn in_mod(id: &'static str) -> mod_api::content::crash::ModGuard {
+        mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
             id,
             hook: "test",
             part: None,
@@ -1824,7 +1801,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_tickets_are_scoped_by_owner_and_share_the_forceload_store() {
-        use mod_api::NativeTicketOwner::{Block, Entity};
+        use mod_api::TicketOwner::{Block, Entity};
         with_machines(|game| {
             let level = game.level(game.dim.id()).unwrap();
             let chunk = game.level_chunk_ref(level, [5, 6]).unwrap();
@@ -1896,7 +1873,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_tickets_save_apart_from_vanillas_tickets_and_release_with_the_world() {
-        use mod_api::NativeTicketOwner::{Block, Entity};
+        use mod_api::TicketOwner::{Block, Entity};
         with_machines(|game| {
             let level = game.level(game.dim.id()).unwrap();
             let chunk = game.level_chunk_ref(level, [-9, 4]).unwrap();
@@ -1962,7 +1939,7 @@ mod tests {
             let parked = mod_api::LevelRef::new(level.epoch(), other.key());
             let chunk = ChunkRef::new(parked, [2, 2]);
             let _guard = in_mod("machines");
-            let owner = mod_api::NativeTicketOwner::Block([32, 64, 32]);
+            let owner = mod_api::TicketOwner::Block([32, 64, 32]);
             assert!(!game.levels_to_tick().contains(&other));
             assert!(game.chunk_set_mod_forced(chunk, quarry(), owner, true, false));
             assert!(game.levels_to_tick().contains(&other));
@@ -2011,7 +1988,7 @@ mod tests {
             let chunk = game.level_chunk_ref(level, [3, 3]).unwrap();
             game.ui.registries.permission = 4;
             let _guard = in_mod("machines");
-            let owner = mod_api::NativeTicketOwner::Block([48, 64, 48]);
+            let owner = mod_api::TicketOwner::Block([48, 64, 48]);
             assert!(game.chunk_set_mod_forced(chunk, quarry(), owner, true, false));
             assert!(game.streaming.forced.contains(&(3, 3)));
             assert_eq!(query_result(game, "forceload query"), Some(0), "list form");
@@ -2029,7 +2006,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn natural_spawning_tickets_and_plain_ones_save_and_load_apart() {
-        use mod_api::NativeTicketOwner::Block;
+        use mod_api::TicketOwner::Block;
         with_machines(|game| {
             let level = game.level(game.dim.id()).unwrap();
             let plain = game.level_chunk_ref(level, [11, 12]).unwrap();
@@ -2081,7 +2058,7 @@ mod tests {
         use horizon_client::mobs::spawn_selection::{Category, SpawnPlayer, SpawnState};
         use horizon_client::motion::PlayerMotion;
         use horizon_core::geometry::Vec3;
-        use mod_api::NativeTicketOwner::Block;
+        use mod_api::TicketOwner::Block;
         use std::sync::Arc;
         with_machines(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
@@ -2252,7 +2229,7 @@ mod tests {
             let fresh = game.level_chunk_ref(level, [6, 6]).unwrap();
             {
                 let _guard = in_mod("machines");
-                let owner = mod_api::NativeTicketOwner::Block([1, 64, 1]);
+                let owner = mod_api::TicketOwner::Block([1, 64, 1]);
                 assert!(game.chunk_set_mod_forced(fresh, quarry(), owner, true, false));
             }
             game.validate_mod_chunk_tickets(game.dim);
@@ -2309,7 +2286,7 @@ mod tests {
                 game.level_brightness(level, LightLayer::Sky, [0, 320, 0]),
                 None
             );
-            let stale = LevelRef::new(NativeWorldEpoch::new(u64::MAX), game.dim.key());
+            let stale = LevelRef::new(WorldEpoch::new(u64::MAX), game.dim.key());
             assert_eq!(game.level_brightness(stale, LightLayer::Sky, lit), None);
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");
         });
@@ -2320,7 +2297,7 @@ mod tests {
 mod environment_read_tests {
     use crate::game::{Dim, native_entity_refs::tests::with_game};
     use horizon_client::chunk::Chunk;
-    use mod_api::{BiomeSearch, LevelRef, NativeWorldEpoch};
+    use mod_api::{BiomeSearch, LevelRef, WorldEpoch};
     use std::sync::Arc;
 
     fn paint_biome(game: &mut crate::game::Game<'_>, name: &str) {
@@ -2365,7 +2342,7 @@ mod environment_read_tests {
             );
             game.enter_level(Dim::Overworld).unwrap();
             let stale = LevelRef::new(
-                NativeWorldEpoch::new(overworld.epoch().get() + 1),
+                WorldEpoch::new(overworld.epoch().get() + 1),
                 overworld.dimension(),
             );
             assert_eq!(stale.biome_at(game, [8, 64, 8]), None);
@@ -2438,10 +2415,7 @@ mod environment_read_tests {
                 Some(0.5),
                 "parked collision shapes"
             );
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             assert_eq!(stale.block_floor_height(game, [5, 100, 8]), None);
         });
     }
@@ -2497,7 +2471,7 @@ mod environment_read_tests {
                 "parked level keeps its dimension's sky"
             );
             let stale = LevelRef::new(
-                NativeWorldEpoch::new(overworld.epoch().get() + 1),
+                WorldEpoch::new(overworld.epoch().get() + 1),
                 overworld.dimension(),
             );
             assert_eq!(stale.logical_height(game), None);
@@ -2620,7 +2594,7 @@ mod environment_read_tests {
                 .unwrap();
             assert_eq!(parked, found, "parked level retains its generator and seed");
             let stale = LevelRef::new(
-                NativeWorldEpoch::new(nether.epoch().get() + 1),
+                WorldEpoch::new(nether.epoch().get() + 1),
                 nether.dimension(),
             );
             assert_eq!(
@@ -2720,7 +2694,7 @@ mod environment_read_tests {
             );
             assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
             let stale = LevelRef::new(
-                NativeWorldEpoch::new(overworld.epoch().get() + 1),
+                WorldEpoch::new(overworld.epoch().get() + 1),
                 overworld.dimension(),
             );
             assert_eq!(

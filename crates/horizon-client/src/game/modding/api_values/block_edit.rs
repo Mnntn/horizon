@@ -10,9 +10,7 @@ pub(in crate::game) struct PreparedBlockEdit {
 }
 
 /// Resolve every palette state and compile every filter before a world mutation is possible.
-pub(in crate::game) fn prepare(
-    edit: &mod_api::game::NativeBlockEdit,
-) -> Result<PreparedBlockEdit, String> {
+pub(in crate::game) fn prepare(edit: &mod_api::BlockEdit) -> Result<PreparedBlockEdit, String> {
     if edit.filters.len() > 65_536 {
         return Err("more than 65536 filters".into());
     }
@@ -166,7 +164,7 @@ mod tests {
             StatePredicateTarget::Block(state.block()),
             vec![StateConstraint::new("unknown", "true")],
         ));
-        let mut edit = mod_api::game::NativeBlockEdit {
+        let mut edit = mod_api::BlockEdit {
             palette: vec![state],
             filters: vec![good, bad],
             runs: vec![],

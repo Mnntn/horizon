@@ -32,7 +32,7 @@ use horizon_core::{
     random::{LegacyRandom, RandomSource},
 };
 use horizon_protocol::entity_data::Value;
-use mod_api::NativeDragonPhase;
+use mod_api::DragonPhase;
 
 /// `HealOrHarmMobEffect.applyInstantaneousEffect` at an `AreaEffectCloud`'s
 /// 0.5 scale: `(int) (scale * (6 << amplifier) + 0.5)`.
@@ -807,7 +807,7 @@ impl Dragon {
         let hurting = horizon_client::health::Hurting::Dragon(self.id as i32, source);
         // The dragon's head turns with its body and never pitches.
         let view = horizon_world::view_direction::view_vector(0.0, self.yaw);
-        let victim = mod_api::health::Victim {
+        let victim = mod_api::entity::health::Victim {
             position: [self.position.x, self.position.y, self.position.z],
             view: [view.x, view.y, view.z],
         };
@@ -1035,12 +1035,12 @@ impl Dragon {
         }
     }
     /// The phase as a native mod sees it.
-    pub(super) fn native_phase(&self) -> NativeDragonPhase {
-        NativeDragonPhase::from_id(self.phase.id()).expect("the phases are the vanilla ones")
+    pub(super) fn native_phase(&self) -> DragonPhase {
+        DragonPhase::from_id(self.phase.id()).expect("the phases are the vanilla ones")
     }
     /// `EnderDragonPhaseManager.setPhase`: nothing when it is the phase it
     /// holds (a strafing dragon too), else the new phase begins fresh.
-    pub(super) fn set_native_phase(&mut self, phase: NativeDragonPhase) {
+    pub(super) fn set_native_phase(&mut self, phase: DragonPhase) {
         if phase != self.native_phase() {
             self.set_phase(Phase::from_id(phase.id()));
         }

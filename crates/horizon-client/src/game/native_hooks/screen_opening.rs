@@ -11,8 +11,8 @@ impl Game<'_> {
     /// server gives up.
     pub(in crate::game) fn native_screen_opening(
         &self,
-        current: &NativeScreenView<'_>,
-        new: &NativeScreenView<'_>,
+        current: &ScreenView<'_>,
+        new: &ScreenView<'_>,
         outcome: &mut Option<Answered<ScreenOpening>>,
     ) {
         self.fire_screen_opening(current, new, outcome);

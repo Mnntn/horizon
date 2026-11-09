@@ -962,7 +962,7 @@ mod tests {
     #[ignore = "requires prepared game resources"]
     fn block_menu_handle_and_use_each_count_the_guest_once() {
         use horizon_client::chunk::Chunk;
-        use mod_api::NativeBlockUpdateFlags;
+        use mod_api::BlockUpdateFlags;
         use std::sync::Arc;
         super::super::native_guest_turn_tests::with_guests(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -982,7 +982,7 @@ mod tests {
                     level,
                     [pos.0, pos.1, pos.2],
                     chest,
-                    NativeBlockUpdateFlags::NEIGHBORS
+                    BlockUpdateFlags::NEIGHBORS
                 ),
                 Ok(true)
             );
@@ -1056,7 +1056,7 @@ mod tests {
                 .unwrap();
             let at = [pos.0, pos.1, pos.2];
             assert_eq!(
-                game.level_set_block(level, at, shulker, NativeBlockUpdateFlags::NEIGHBORS),
+                game.level_set_block(level, at, shulker, BlockUpdateFlags::NEIGHBORS),
                 Ok(true)
             );
             assert!(
@@ -1077,7 +1077,7 @@ mod tests {
     #[ignore = "requires prepared game resources"]
     fn block_menu_click_keeps_spent_action_on_cancellation() {
         use horizon_client::{chunk::Chunk, lan::guest::GuestKind};
-        use mod_api::NativeBlockUpdateFlags;
+        use mod_api::BlockUpdateFlags;
         use std::sync::Arc;
         super::super::native_guest_turn_tests::with_guests(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -1092,7 +1092,7 @@ mod tests {
                 .default_state("minecraft:chest")
                 .unwrap();
             assert_eq!(
-                game.level_set_block(level, [0, 64, 0], chest, NativeBlockUpdateFlags::NEIGHBORS),
+                game.level_set_block(level, [0, 64, 0], chest, BlockUpdateFlags::NEIGHBORS),
                 Ok(true)
             );
             assert!(!game.lan_open_container(12, (2, 64, 0)));
@@ -1118,10 +1118,10 @@ mod tests {
             lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
         };
         use horizon_protocol::packets::{configuration::ClientInformation, play};
+        use mod_api::InteractionResult as Answer;
         use mod_api::{
             self, BlockPart, CloneItemStackEvent, Flow, Hooks, Host, ItemPart, ItemStack,
-            NativeInteractionResult as Answer, Registrar, ServerHost, UseItemOnEvent, UseOnEvent,
-            UseWithoutItemEvent,
+            Registrar, ServerHost, UseItemOnEvent, UseOnEvent, UseWithoutItemEvent,
         };
         use std::sync::{
             Arc, Mutex,
@@ -1153,7 +1153,7 @@ mod tests {
             empty_answer: Arc<Mutex<Option<Answer>>>,
             empty_food: Arc<Mutex<Option<i32>>>,
             empty_clicks: Arc<Mutex<Vec<(horizon_world::registry::BlockStateId, u128)>>>,
-            clicks: Arc<Mutex<Vec<(u128, mod_api::first_person::Hand)>>>,
+            clicks: Arc<Mutex<Vec<(u128, mod_api::client::first_person::Hand)>>>,
             item_uses: Arc<AtomicUsize>,
         }
         #[mod_api::horizon_part]
@@ -1171,7 +1171,7 @@ mod tests {
                             host,
                             event.click.pos,
                             state.try_into_api().unwrap(),
-                            mod_api::NativeBlockUpdateFlags::KNOWN_SHAPE,
+                            mod_api::BlockUpdateFlags::KNOWN_SHAPE,
                         ),
                         Ok(true)
                     );
@@ -1187,7 +1187,7 @@ mod tests {
                 host: &mut dyn ServerHost,
                 event: &mut UseWithoutItemEvent<'_>,
             ) -> Option<Answer> {
-                assert_eq!(event.click.hand, mod_api::first_person::Hand::Main);
+                assert_eq!(event.click.hand, mod_api::client::first_person::Hand::Main);
                 if let Some(level) = self.empty_food.lock().unwrap().take() {
                     let player = host.player(event.click.player).unwrap();
                     assert!(player.set_food_level(host, level));
@@ -1325,7 +1325,7 @@ mod tests {
 
                 // BlockState.useItemOn replaces the template. Only TryWithEmptyHand
                 // reaches useWithoutItem, which toggles this lever on the main hand.
-                use mod_api::first_person::Hand;
+                use mod_api::client::first_person::Hand;
                 use std::sync::atomic::Ordering::SeqCst;
                 let lever = game
                     .pack
@@ -1797,10 +1797,8 @@ mod tests {
     fn block_part_use_item_on_consumes_once() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
-        use mod_api::{
-            self, BlockPart, Hooks, NativeInteractionResult as Answer, Registrar, ServerHost,
-            UseItemOnEvent,
-        };
+        use mod_api::InteractionResult as Answer;
+        use mod_api::{self, BlockPart, Hooks, Registrar, ServerHost, UseItemOnEvent};
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering::SeqCst},
@@ -1867,10 +1865,8 @@ mod tests {
     fn replacing_empty_note_block_use_does_not_award_vanilla_stats() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
-        use mod_api::{
-            self, BlockPart, Hooks, NativeInteractionResult as Answer, Registrar, ServerHost,
-            UseWithoutItemEvent,
-        };
+        use mod_api::InteractionResult as Answer;
+        use mod_api::{self, BlockPart, Hooks, Registrar, ServerHost, UseWithoutItemEvent};
         use std::sync::{
             Arc,
             atomic::{AtomicBool, Ordering::SeqCst},

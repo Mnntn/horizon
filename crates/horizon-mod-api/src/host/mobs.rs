@@ -33,7 +33,7 @@ pub trait MobsBackend {
     /// Side: server.
     /// `EnderDragonPhaseManager.getCurrentPhase`.
     #[access(WorldOnly)]
-    fn dragon_phase(&self, dragon: DragonRef) -> Option<NativeDragonPhase>;
+    fn dragon_phase(&self, dragon: DragonRef) -> Option<DragonPhase>;
     /// Side: server.
     /// `EnderDragonFight.aliveCrystals`: the crystals the last scan found
     /// (every 100 ticks). None for a stale handle, a client, or a dragon
@@ -47,16 +47,16 @@ pub trait MobsBackend {
     fn dragon_previously_killed(&self, dragon: DragonRef) -> Option<bool>;
     /// Side: server.
     /// `GoalSelector.getRunningGoals` read wider: every goal of the goal
-    /// selector as a `NativeMobGoalEntry` (the priority, the kind id and
+    /// selector as a `MobGoalEntry` (the priority, the kind id and
     /// whether it runs), in registration order. None for a stale or
     /// unavailable mob, a client, and the dragon.
     #[access(WorldOnly)]
-    fn mob_goals(&self, mob: MobRef) -> Option<Vec<NativeMobGoalEntry>>;
+    fn mob_goals(&self, mob: MobRef) -> Option<Vec<MobGoalEntry>>;
     /// Side: server.
     /// Every goal of the target selector, as `goals` reads the goal
     /// selector's.
     #[access(WorldOnly)]
-    fn mob_target_goals(&self, mob: MobRef) -> Option<Vec<NativeMobGoalEntry>>;
+    fn mob_target_goals(&self, mob: MobRef) -> Option<Vec<MobGoalEntry>>;
     /// Side: server.
     /// `PathNavigation.isDone`; None for a stale or unavailable mob, or on a
     /// client, and for the dragon (no navigation).
@@ -217,7 +217,7 @@ pub trait MobsBackendMut {
     /// random draw. False for a stale handle or a client. The new phase
     /// runs from the dragon's next tick.
     #[access(WorldOnly)]
-    fn dragon_set_phase(&mut self, dragon: DragonRef, phase: NativeDragonPhase) -> bool;
+    fn dragon_set_phase(&mut self, dragon: DragonRef, phase: DragonPhase) -> bool;
     /// Side: server.
     /// `GoalSelector.addGoal(priority, goal)` on a mob's goal selector.
     /// Refuses a stale or unavailable mob, a client, and the dragon (it
@@ -231,12 +231,12 @@ pub trait MobsBackendMut {
     /// `add_target_goal`; both selectors take them, as vanilla's two
     /// selectors do.
     #[access(WorldOnly)]
-    fn mob_add_goal(&mut self, mob: MobRef, priority: i32, goal: &NativeGoal) -> bool;
+    fn mob_add_goal(&mut self, mob: MobRef, priority: i32, goal: &GoalSpec) -> bool;
     /// Side: server.
     /// `GoalSelector.addGoal` on the mob's target selector. The same rules
     /// as `add_goal`.
     #[access(WorldOnly)]
-    fn mob_add_target_goal(&mut self, mob: MobRef, priority: i32, goal: &NativeGoal) -> bool;
+    fn mob_add_target_goal(&mut self, mob: MobRef, priority: i32, goal: &GoalSpec) -> bool;
     /// Side: server.
     /// `GoalSelector.removeGoal` on the goal selector, by kind: every goal
     /// whose id, as `goals` reads it, is `id` goes (`removeAllGoals`), a

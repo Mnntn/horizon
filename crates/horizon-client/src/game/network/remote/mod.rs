@@ -1007,7 +1007,10 @@ impl Game<'_> {
             .settings
             .client_information(client_view_distance(self.settings.render_distance));
         if local.is_none() && !self.options.split_guest {
-            mod_api::crash::set_detail("Server", horizon_client::net::shown_address(address));
+            mod_api::content::crash::set_detail(
+                "Server",
+                horizon_client::net::shown_address(address),
+            );
         }
         // A signed-in account always plays under its own name; a splitscreen player signs in
         // with its own account when it picked one.
@@ -1615,7 +1618,7 @@ impl Game<'_> {
         };
         // A splitscreen player leaving says nothing of where P1 plays.
         if !self.options.split_guest {
-            mod_api::crash::clear_detail("Server");
+            mod_api::content::crash::clear_detail("Server");
         }
         self.clock = Default::default();
         self.adv = Default::default();
@@ -8902,13 +8905,14 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|stack| &*stack.item == "minecraft:debug_stick");
         if let Some(hit) = self.pick() {
-            use mod_api::{NativeInteractionResult as Answer, NativeTriState};
+            use mod_api::InteractionResult as Answer;
+            use mod_api::TriState;
             let spectator = self.spectator();
             // RightClickBlock on this client, where performUseItemOn starts
             // (a spectator's use only opens menus on the server): it may force
             // the block's use or the item's useOn, or answer for both.
             let (mut canceled, mut use_block, mut use_item) =
-                (None, NativeTriState::Default, NativeTriState::Default);
+                (None, TriState::Default, TriState::Default);
             if !spectator {
                 match self.right_click_block(&hit, hand, held.as_ref()) {
                     super::native_hooks::BlockClickAnswer::Go {
@@ -8940,7 +8944,7 @@ impl Game<'_> {
             let sneaking = self.remote_shift_down();
             let hands_full = self.stack_in(self.selected).is_some() || self.offhand.is_some();
             let block_used = canceled.is_none() && use_block.or(!(sneaking && hands_full));
-            let cooldown_forced = use_item == NativeTriState::True;
+            let cooldown_forced = use_item == TriState::True;
             let item_used = canceled.is_none()
                 && use_item.or(true)
                 && held.as_ref().is_some_and(|stack| {
@@ -9723,7 +9727,7 @@ impl Game<'_> {
             return false;
         }
         if let Some(answer) = self.right_click_item(hand, &held, self.pick().is_some()) {
-            let success = answer == mod_api::NativeInteractionResult::Success;
+            let success = answer == mod_api::InteractionResult::Success;
             if success {
                 self.with_hand(hand, Game::swing_arm);
             }
@@ -15107,7 +15111,7 @@ mod tests {
             connection::Pipe,
             packets::play::{Clientbound, Respawn, SpawnInfo},
         };
-        use mod_api::{EntityRef, NativeCrosshairTarget};
+        use mod_api::{CrosshairTarget, EntityRef};
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -15170,7 +15174,7 @@ mod tests {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.yaw = 0.0;
             game.pitch = 0.0;
-            let Some(NativeCrosshairTarget::Entity { entity, .. }) = game.crosshair_target() else {
+            let Some(CrosshairTarget::Entity { entity, .. }) = game.crosshair_target() else {
                 panic!("the crosshair hits the pig in front of the player");
             };
             assert_eq!(entity, current);

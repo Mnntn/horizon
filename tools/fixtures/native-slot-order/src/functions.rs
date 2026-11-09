@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 static HIGH: AtomicBool = AtomicBool::new(false);
 pub fn head(_: &mut Game<'_>, _: &mut __OnTickRateChangedRaw<'_>) {
     assert_eq!(
-        mod_api::crash::current_native_mod(),
+        mod_api::content::crash::current_native_mod(),
         Some("native_slot_order")
     );
     eprintln!("SLOT ORDER HEAD");

@@ -330,7 +330,7 @@ mod tests {
         AttachmentCodec, AttachmentType, index::AttachmentIndex,
         observer::IndexedAttachmentObserver,
     };
-    use mod_api::{AttachmentHolder, ChunkRef, DimensionKey, LevelRef, NativeWorldEpoch};
+    use mod_api::{AttachmentHolder, ChunkRef, DimensionKey, LevelRef, WorldEpoch};
     use std::sync::{Mutex, Weak, atomic::AtomicUsize};
 
     type Index = Arc<Mutex<AttachmentIndex<AttachmentHolder>>>;
@@ -351,7 +351,7 @@ mod tests {
     fn observe(map: &mut ChunkMap, index: &Index, dimension: DimensionKey) -> Arc<AtomicUsize> {
         let calls = Arc::new(AtomicUsize::new(0));
         let counter = calls.clone();
-        let level = LevelRef::new(NativeWorldEpoch::new(42), dimension);
+        let level = LevelRef::new(WorldEpoch::new(42), dimension);
         map.observe_attachments(Arc::new(IndexedAttachmentObserver::new(
             index,
             move |holder| {
@@ -392,7 +392,7 @@ mod tests {
         assert_eq!(
             old[0].holder,
             AttachmentHolder::Chunk(ChunkRef::new(
-                LevelRef::new(NativeWorldEpoch::new(42), DimensionKey::OVERWORLD),
+                LevelRef::new(WorldEpoch::new(42), DimensionKey::OVERWORLD),
                 [3, 5]
             ))
         );

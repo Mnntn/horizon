@@ -8,7 +8,7 @@
 //! change to their food or experience does.
 use super::Game;
 use horizon_client::entities::Experience;
-use mod_api::{NativePlayerExperience, PlayerRef};
+use mod_api::{PlayerExperience, PlayerRef};
 
 impl Game<'_> {
     /// Whether `player` still names the same player on this server.
@@ -93,17 +93,17 @@ impl Game<'_> {
     }
 
     /// `Player.experienceLevel`, `experienceProgress` and `totalExperience`.
-    pub(super) fn player_experience(&self, player: PlayerRef) -> Option<NativePlayerExperience> {
+    pub(super) fn player_experience(&self, player: PlayerRef) -> Option<PlayerExperience> {
         Some(match self.player_read_both(player)? {
             super::native_server::PlayerRead::Guest(g) => {
-                NativePlayerExperience::from(mod_api::__private::built::NativePlayerExperience {
+                PlayerExperience::from(mod_api::__private::built::PlayerExperience {
                     level: g.xp_level,
                     progress: g.xp_progress,
                     total: g.xp_total,
                 })
             }
             super::native_server::PlayerRead::Acting { .. } => {
-                NativePlayerExperience::from(mod_api::__private::built::NativePlayerExperience {
+                PlayerExperience::from(mod_api::__private::built::PlayerExperience {
                     level: self.experience.level,
                     progress: self.experience.progress,
                     total: self.experience.total,
@@ -174,7 +174,7 @@ mod tests {
     use super::*;
     use horizon_client::{items::ItemStack, motion::PlayerMotion};
     use horizon_core::geometry::Vec3;
-    use mod_api::{EntityRef, NativeWorldEpoch};
+    use mod_api::{EntityRef, WorldEpoch};
 
     /// The acting player with a body, as a hook's turn finds them.
     fn acting_player(game: &mut super::Game<'_>) -> PlayerRef {
@@ -262,7 +262,7 @@ mod tests {
         with_game(|game| {
             let player = acting_player(game);
             let stale = mod_api::__private::game::player_ref(
-                EntityRef::new(NativeWorldEpoch::new(u64::MAX), 7),
+                EntityRef::new(WorldEpoch::new(u64::MAX), 7),
                 player.uuid(),
             );
             assert!(!game.player_give_experience_points(stale, 10));

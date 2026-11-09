@@ -158,7 +158,7 @@ mod tests {
         use horizon_core::geometry::{Direction, Vec3};
         use mod_api::__private::part_tests::{ROBOT_FLUID, game_thread};
         use mod_api::{
-            ENERGY, ENTITY_ENERGY, ENTITY_FLUIDS, Holder, NativeBlockUpdateFlags, move_energy,
+            BlockUpdateFlags, ENERGY, ENTITY_ENERGY, ENTITY_FLUIDS, Holder, move_energy,
             move_resources,
         };
         with_game(|game| {
@@ -182,7 +182,7 @@ mod tests {
                 )]));
             let pos = [0, 64, 0];
             assert_eq!(
-                game.level_set_block(level, pos, block, NativeBlockUpdateFlags::NEIGHBORS),
+                game.level_set_block(level, pos, block, BlockUpdateFlags::NEIGHBORS),
                 Ok(true)
             );
             let mut fields = ModBlockEntityFields::default();
@@ -297,7 +297,7 @@ mod tests {
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
         use horizon_client::fast_hash::FxHashMap;
         use horizon_core::geometry::Direction;
-        use mod_api::{ENERGY, NativeBlockUpdateFlags, move_energy};
+        use mod_api::{BlockUpdateFlags, ENERGY, move_energy};
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -322,7 +322,7 @@ mod tests {
             game.world.block_entities.set_mod_energy(tables);
             let (from, to) = ([0, 64, 0], [2, 64, 0]);
             for (pos, energy) in [(from, 800), (to, 0)] {
-                let flags = NativeBlockUpdateFlags::NEIGHBORS;
+                let flags = BlockUpdateFlags::NEIGHBORS;
                 assert_eq!(game.level_set_block(level, pos, block, flags), Ok(true));
                 let mut fields = ModBlockEntityFields::default();
                 fields

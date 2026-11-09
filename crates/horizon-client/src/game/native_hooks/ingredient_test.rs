@@ -17,7 +17,7 @@ impl Game<'_> {
                 return Err(NotEnumerable);
             }
             if let Some((shape, children)) = &node.children {
-                if let mod_api::crafting::Shape::Intersection = shape
+                if let mod_api::item::crafting::Shape::Intersection = shape
                     && children.is_empty()
                 {
                     // The existing matcher defines all([]) as true. Such a programmatically
@@ -90,7 +90,7 @@ mod enumeration_tests {
                 // Parent display lists need not be trusted: use the actual engine shape rule.
                 let mut difference = mod_api::Ingredient::of(Vec::new());
                 difference.children = Some((
-                    mod_api::crafting::Shape::Difference,
+                    mod_api::item::crafting::Shape::Difference,
                     vec![planks.clone(), parse(r#""minecraft:birch_planks""#)],
                 ));
                 let keys = assert_exact(&difference);
@@ -103,7 +103,8 @@ mod enumeration_tests {
                 );
 
                 let mut universal = mod_api::Ingredient::of(Vec::new());
-                universal.children = Some((mod_api::crafting::Shape::Intersection, Vec::new()));
+                universal.children =
+                    Some((mod_api::item::crafting::Shape::Intersection, Vec::new()));
                 assert_eq!(
                     assert_exact(&universal).len(),
                     game.items().registry_order.len()
@@ -116,7 +117,10 @@ mod enumeration_tests {
                     Err(mod_api::IngredientKeysError::NotEnumerable)
                 );
                 let mut mixed = mod_api::Ingredient::of(Vec::new());
-                mixed.children = Some((mod_api::crafting::Shape::Compound, vec![plain, component]));
+                mixed.children = Some((
+                    mod_api::item::crafting::Shape::Compound,
+                    vec![plain, component],
+                ));
                 assert_eq!(
                     mixed.item_keys(host),
                     Err(mod_api::IngredientKeysError::NotEnumerable)

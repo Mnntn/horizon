@@ -10,7 +10,7 @@ use crate::{
     world::World,
 };
 use horizon_core::random::{LegacyRandom, RandomSource};
-pub use mod_api::fog::{FogData, FogType};
+pub use mod_api::client::fog::{FogData, FogType};
 use std::path::Path;
 
 /// Per-biome water fog end multipliers (`visual/water_fog_end_distance`).

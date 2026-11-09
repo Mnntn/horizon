@@ -93,6 +93,7 @@ struct Slot {
     kind: Kind,
     priority: i32,
     injection: &'static str,
+    replace: bool,
 }
 
 /// The list while mods load: registrations, and stops that came before the seal.
@@ -132,14 +133,28 @@ pub enum RegisterError {
     Sealed,
     /// The guest table requires a typed API listener.
     Unsupported,
+    /// A second `replace` listener at a place that already has one: two overwrites can't both win,
+    /// as with a mixin overwrite conflict. Names the mod and injection of each.
+    Replaced {
+        /// The mod and injection id already replacing the function.
+        first: (&'static str, &'static str),
+        /// The mod and injection id refused.
+        second: (&'static str, &'static str),
+    },
 }
 
 impl std::fmt::Display for RegisterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Sealed => "the game's points were already set",
-            Self::Unsupported => "the guest table requires a typed API listener",
-        })
+        match self {
+            Self::Sealed => f.write_str("the game's points were already set"),
+            Self::Unsupported => f.write_str("the guest table requires a typed API listener"),
+            Self::Replaced { first, second } => write!(
+                f,
+                "{}:{} replaces a function that {}:{} already replaces; only one replace \
+                 listener can own it",
+                second.0, second.1, first.0, first.1
+            ),
+        }
     }
 }
 
@@ -182,6 +197,8 @@ pub struct SlotListener {
     kind: Kind,
     priority: i32,
     injection: &'static str,
+    /// A `replace` listener: the function is its, so a second one at the place is refused.
+    replace: bool,
 }
 
 impl SlotListener {
@@ -199,6 +216,7 @@ impl SlotListener {
             kind: Kind::Raw(RawKind::Typed(function)),
             priority: 0,
             injection: "",
+            replace: false,
         }
     }
 
@@ -228,6 +246,7 @@ impl SlotListener {
             kind: Kind::Raw(RawKind::Erased(function)),
             priority: 0,
             injection: "",
+            replace: false,
         }
     }
 
@@ -250,6 +269,7 @@ impl SlotListener {
             kind: Kind::Raw(RawKind::Typed(function)),
             priority,
             injection,
+            replace: false,
         }
     }
 
@@ -264,6 +284,7 @@ impl SlotListener {
             kind: Kind::Api(ApiKind::Typed(function)),
             priority: 0,
             injection: "",
+            replace: false,
         }
     }
 
@@ -280,6 +301,7 @@ impl SlotListener {
             kind: Kind::Api(ApiKind::Forwarded(endpoint, export)),
             priority: 0,
             injection: "",
+            replace: false,
         }
     }
 
@@ -287,6 +309,13 @@ impl SlotListener {
     pub const fn ordered(mut self, priority: i32, injection: &'static str) -> Self {
         self.priority = priority;
         self.injection = injection;
+        self
+    }
+
+    /// Marks a `replace` listener ([`crate::replace!`]): registering a second one at the same
+    /// place is refused with [`RegisterError::Replaced`].
+    pub const fn replacing(mut self) -> Self {
+        self.replace = true;
         self
     }
 
@@ -318,6 +347,17 @@ impl SlotListener {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
     let mut open = open()?;
+    if slot.replace
+        && let Some((_, first)) = open
+            .slots
+            .iter()
+            .find(|(place, other)| *place == slot.place && other.replace)
+    {
+        return Err(RegisterError::Replaced {
+            first: (open.listeners[first.listener as usize].id, first.injection),
+            second: (slot.id, slot.injection),
+        });
+    }
     let listener = listener(&mut open, slot.id) as u32;
     open.slots.push((
         slot.place,
@@ -326,6 +366,7 @@ pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
             kind: slot.kind,
             priority: slot.priority,
             injection: slot.injection,
+            replace: slot.replace,
         },
     ));
     Ok(())
@@ -368,14 +409,18 @@ pub fn seal() {
     }
     for (place, site) in raw.iter_mut().enumerate() {
         if place < POINT_COUNT {
+            // A place's one `replace` listener runs after its other API listeners, so its outcome
+            // is the one the function takes ([`replaced`] reads it there).
             site.sort_by_key(|entry| {
                 (
                     std::cmp::Reverse(entry.kind.is_api()),
+                    entry.replace,
                     std::cmp::Reverse(entry.priority),
                 )
             });
             for group in site.chunk_by_mut(|a, b| {
                 a.kind.is_api() == b.kind.is_api()
+                    && a.replace == b.replace
                     && a.priority == b.priority
                     && a.listener == b.listener
             }) {
@@ -422,6 +467,18 @@ pub fn seal() {
             Ordering::Release,
         );
     }
+}
+
+/// Whether an active `replace` listener owns `place`: the seal puts it last among the place's API
+/// listeners. A stopped or disabled owner no longer replaces, and the function runs as written.
+pub(crate) fn replaced(place: PointId) -> bool {
+    let Some(sealed) = SEALED.get() else {
+        return false;
+    };
+    let slot = &sealed.slots[place as usize];
+    slot.entries[..slot.api_end]
+        .last()
+        .is_some_and(|entry| entry.replace && active(&sealed.listeners[entry.listener as usize]))
 }
 
 fn active(listener: &Owner) -> bool {

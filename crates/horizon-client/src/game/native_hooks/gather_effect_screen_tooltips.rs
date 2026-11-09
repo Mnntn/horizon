@@ -12,8 +12,8 @@ impl Game<'_> {
     /// a rendered panel is hovered, only while a mod listens. Client-side.
     pub(in crate::game) fn native_gather_effect_screen_tooltips(
         &self,
-        screen: &NativeScreenView<'_>,
-        effect: &NativeActiveEffect,
+        screen: &ScreenView<'_>,
+        effect: &ActiveEffect,
         tooltip: &mut Vec<(Text, u32)>,
     ) {
         self.fire_gather_effect_screen_tooltips(screen, effect, tooltip);

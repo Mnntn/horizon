@@ -40,7 +40,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "RenderAssets",
     "InstanceGroups",
     "Tags",
-    "menu::SlotView",
+    "item::menu::SlotView",
     "Registrar",
     "CapabilityProviders",
     "TicketValidation",
@@ -406,7 +406,9 @@ pub(super) fn surface<'a>(
     let dropped = excused_methods;
     // Track the source of checked codecs as a build-script dependency. Module
     // lookup loads it into Index even though call generation never parses its fields.
-    types.index.module("mod_api", &["wire_types".into()])?;
+    types
+        .index
+        .module("mod_api", &["wire".into(), "wire_types".into()])?;
     for owner in exports() {
         let (path, _) = owner_parts(owner)?;
         let Found::Item(id) = types.index.resolve_path(api, &path)? else {
@@ -666,7 +668,7 @@ pub(crate) fn owned_types(
     let codec = surface
         .types
         .index
-        .module("mod_api", &["wire_types".into()])?;
+        .module("mod_api", &["wire".into(), "wire_types".into()])?;
     let mut codecs = std::collections::HashSet::new();
     for item in surface.types.index.modules[codec].items.clone() {
         let Item::Impl(item) = item else {
@@ -845,7 +847,7 @@ mod tests {
                 assert!(
                     sources
                         .iter()
-                        .any(|p| p.ends_with("crates/horizon-mod-api/src/wire_types.rs"))
+                        .any(|p| p.ends_with("crates/horizon-mod-api/src/wire/wire_types.rs"))
                 );
             })
             .unwrap()

@@ -23,7 +23,7 @@ def old(path):
     return subprocess.check_output(['git', 'show', f'{BASE}:{path}'], text=True)
 
 
-phase = old('crates/horizon-mod-api/src/phase.rs')
+phase = old('crates/horizon-mod-api/src/world/phase.rs')
 metadata = set(re.findall(r'"(\w+)"', phase[phase.index('    let metadata ='):phase.index('    let settings =')]))
 expected = {}
 files = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', BASE, 'crates/horizon-client/src/game/host'], text=True).splitlines()

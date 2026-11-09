@@ -1,4 +1,4 @@
 mod stubs {
-    pub(super) struct NativeDespawn;
+    pub(super) struct Despawn;
     pub(super) struct MobRef;
 }

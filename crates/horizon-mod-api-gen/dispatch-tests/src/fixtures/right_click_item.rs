@@ -1,3 +1,3 @@
 mod stubs {
-    pub(super) struct NativeItemClick<'a>(pub &'a ());
+    pub(super) struct ItemClick<'a>(pub &'a ());
 }

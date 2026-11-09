@@ -10,7 +10,7 @@ use horizon_world::{
     registry::{BlockRegistry, BlockStateId},
 };
 use mod_api::BlockKey;
-use mod_api::{FluidKey, FluidState, LevelRef, NativeLifecycleContext, UnresolvedFluid};
+use mod_api::{FluidKey, FluidState, LevelRef, LifecycleContext, UnresolvedFluid};
 
 /// Why a server block cannot be read.
 #[allow(dead_code)]
@@ -340,7 +340,7 @@ impl Game<'_> {
     #[allow(dead_code)]
     pub(super) fn native_server_block(
         &self,
-        context: &NativeLifecycleContext,
+        context: &LifecycleContext,
         dimension: &str,
         pos: [i32; 3],
     ) -> Result<BlockState, NativeBlockReadError> {

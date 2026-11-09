@@ -3,7 +3,7 @@
 use super::*;
 use std::sync::Arc;
 
-/// A command argument type a mod registered, and the id a `NativeCommand` usage names.
+/// A command argument type a mod registered, and the id a `Command` usage names.
 #[derive(Clone)]
 pub(crate) struct CommandArgumentInfo {
     pub(crate) id: Box<str>,
@@ -18,7 +18,7 @@ pub(crate) fn installed_command_arguments() -> &'static [CommandArgumentInfo] {
 impl dyn Registrar + '_ {
     /// Register command argument type `name` (`machine` or `mymod:machine`), once, from
     /// `Hooks::register`: a usage then names it as an argument's kind,
-    /// `NativeCommand::new("machine use <machine:mymod:machine>")`, and the game parses and
+    /// `Command::new("machine use <machine:mymod:machine>")`, and the game parses and
     /// completes that argument with it. A name in another mod's namespace, an empty name, and an
     /// id registered twice refuse the mods at startup, naming the mod.
     pub fn register_command_argument<T: crate::CommandArgumentType>(

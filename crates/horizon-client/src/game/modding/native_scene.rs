@@ -8,7 +8,7 @@ use super::native_block_entity_draw::{BlockEntityDraw, place_turning};
 use glam::{Mat4, Vec3};
 use horizon_client::{block_entity_render::diffuse_lights, hud::HudBatch, mesher::Vertex};
 use horizon_world::level::data::state_flags;
-use mod_api::NativeSceneView;
+use mod_api::SceneView;
 /// Prepared scene data. Entity fields remain borrowed for the duration of the draw.
 pub(super) struct SceneBlock<'a> {
     pub pos: [i32; 3],
@@ -42,7 +42,7 @@ struct SceneQuad {
 /// up the screen's up; `yaw` turns it counterclockwise seen from above, and
 /// `pitch` tilts its top towards the viewer. The GUI's y runs down and its z
 /// towards the viewer, so the point reflection keeps the picture unmirrored.
-fn scene_matrix(rect: [f32; 4], view: NativeSceneView) -> Mat4 {
+fn scene_matrix(rect: [f32; 4], view: SceneView) -> Mat4 {
     let middle = Vec3::new((rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0, 0.0);
     Mat4::from_translation(middle)
         * Mat4::from_scale(Vec3::splat(-view.scale))
@@ -89,7 +89,7 @@ impl Game<'_> {
         batch: &mut HudBatch,
         rect: [f32; 4],
         blocks: &[SceneBlock<'_>],
-        view: NativeSceneView,
+        view: SceneView,
     ) {
         if !self.native_window() || !view.scale.is_finite() || view.scale <= 0.0 {
             return;
@@ -236,8 +236,8 @@ impl Game<'_> {
 mod tests {
     use super::*;
 
-    fn view(yaw: f32, pitch: f32) -> NativeSceneView {
-        NativeSceneView::new([0.5, 0.5, 0.5], yaw, pitch, 20.0)
+    fn view(yaw: f32, pitch: f32) -> SceneView {
+        SceneView::new([0.5, 0.5, 0.5], yaw, pitch, 20.0)
     }
 
     /// Unturned, the scene is seen from the north as a player at yaw 0 sees

@@ -35,6 +35,9 @@ pub struct GamePoint {
     /// What its listeners may do with the return: `cancel`, `result` (an API-typed value they
     /// may set at the head or change at the return) or `none`.
     pub returns: &'static str,
+    /// The function's return type as written (`()` when it has none). A `cancel` point that
+    /// returns `Result<(), E>` has no `replace` listener, which would have to produce it.
+    pub return_ty: String,
     /// Whether its API listeners run at the return: not when the value returned borrows.
     pub at_return: bool,
     /// Whether it has a raw form: native listeners with the receiver and every parameter by its
@@ -55,6 +58,19 @@ pub struct GamePoint {
     /// ([`point_shape::Shape::api_items`]).
     #[serde(skip)]
     api: [String; 3],
+}
+
+impl GamePoint {
+    /// The return type a `replace` at this point's head can't produce: none when it returns `()`
+    /// (the cancel is forced) or an API value (the listener's). The rule `horizon-mod-point-emit`
+    /// applies when a mod builds, kept for the loader of a module built elsewhere.
+    fn replace_refusal(&self) -> Option<&str> {
+        match self.returns {
+            "result" => None,
+            "cancel" if self.return_ty == "()" => None,
+            _ => Some(&self.return_ty),
+        }
+    }
 }
 
 /// A source file of the game's crates, with its module path and the `cfg`s it is compiled under.
@@ -885,6 +901,10 @@ fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> 
                 (point_shape::Returns::Value(_), true) => "result",
                 (point_shape::Returns::Opaque, true) => "none",
             },
+            return_ty: match &found.sig.output {
+                syn::ReturnType::Default => "()".to_owned(),
+                syn::ReturnType::Type(_, ty) => point_shape::spelling(ty),
+            },
             name: shape.name,
         });
     }
@@ -1146,7 +1166,7 @@ pub(crate) fn records_selected(
         quote!(#file)
     });
     let listeners = points.iter().map(|point| parse(&point.api[0]));
-    let variants = points.iter().map(|point| parse(&point.api[1]));
+    let variants: Vec<_> = points.iter().map(|point| parse(&point.api[1])).collect();
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
     let mut guest_functions = proc_macro2::TokenStream::new();
     let mut guest_entries = proc_macro2::TokenStream::new();
@@ -1202,7 +1222,12 @@ pub(crate) fn records_selected(
             let variant = quote::format_ident!("{}", point_shape::camel(&name));
             let target = &point.target;
             let at_return = name != point.name;
-            api_places.extend(quote! { (PointId::#variant, #target, #at_return), });
+            let replace_refusal = match point.replace_refusal().filter(|_| !at_return) {
+                Some(ty) => quote!(::std::option::Option::Some(#ty)),
+                None => quote!(::std::option::Option::None),
+            };
+            api_places
+                .extend(quote! { (PointId::#variant, #target, #at_return, #replace_refusal), });
             if selected.is_some_and(|names| !names.contains(&name)) {
                 continue;
             }
@@ -1211,19 +1236,29 @@ pub(crate) fn records_selected(
             });
         }
     }
-    let private_variants = sources.iter().map(|point| {
-        let head = quote::format_ident!("{}", point_shape::camel(&point.name));
-        let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
-        quote!(#head, #back,)
-    });
+    let private_variants: Vec<_> = sources
+        .iter()
+        .map(|point| {
+            let head = quote::format_ident!("{}", point_shape::camel(&point.name));
+            let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
+            quote!(#head, #back,)
+        })
+        .collect();
+    let ids: syn::ItemEnum = syn::parse2(quote! {
+        enum PointId { #(#variants)* #(#private_variants)* __Count }
+    })
+    .expect("point variants");
+    let debug_names = ids.variants.iter().map(|variant| variant.ident.to_string());
     quote! {
         #(#records)*
         /// The generated point export table and record layout, checked separately from the API layout.
         #[doc(hidden)]
         pub const POINT_LAYOUT: u64 = #layout;
-        /// API places as (place, target function, return phase), for manifest validation.
+        /// API places as (place, target function, return phase, the return type a `replace` there
+        /// can't produce), for manifest validation: a head whose return is neither `()` nor an
+        /// API value refuses a replacement when a module loads.
         #[doc(hidden)]
-        pub const API_PLACES: &[(PointId, &str, bool)] = &[#api_places];
+        pub const API_PLACES: &[(PointId, &str, bool, Option<&str>)] = &[#api_places];
         #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
         #[doc(hidden)]
         pub fn guest_dispatch(id: u32, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {
@@ -1247,9 +1282,17 @@ pub(crate) fn records_selected(
         /// A point's place: its head and return in catalog order.
         #[doc(hidden)]
         #[repr(usize)]
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        #[derive(Clone, Copy, PartialEq, Eq)]
         #[non_exhaustive]
         pub enum PointId { #(#variants)* #(#private_variants)* __Count }
+        // Deriving Debug creates an enormous match for this enum. Keep the exact
+        // unit-variant names without its compiler-memory cost.
+        impl ::std::fmt::Debug for PointId {
+            fn fmt(&self, formatter: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                static NAMES: [&str; PointId::__Count as usize + 1] = [#(#debug_names),*];
+                formatter.write_str(NAMES[*self as usize])
+            }
+        }
         /// The number of places, the length of the game's slot table.
         #[doc(hidden)]
         pub const POINT_COUNT: usize = PointId::__Count as usize;
@@ -1281,6 +1324,7 @@ mod tests {
                 record: shape.record().to_string(),
                 args: vec![],
                 returns: "cancel",
+                return_ty: "()".into(),
                 at_return: true,
                 raw: false,
                 raw_shape: None,
@@ -1319,6 +1363,93 @@ mod tests {
         assert!(!selected.contains("fn point_second"));
         assert!(selected.contains("table [PointId :: FirstReturn as usize]"));
         assert!(!selected.contains("table [PointId :: First as usize]"));
+    }
+
+    #[test]
+    fn point_id_debug_preserves_every_declared_variant() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let source = records(
+            &game_points(&root).unwrap(),
+            &source::build_input(&root).unwrap(),
+        );
+        let file = syn::parse_file(&source).unwrap();
+        let ids = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Enum(ids) if ids.ident == "PointId" => Some(ids),
+                _ => None,
+            })
+            .unwrap();
+        let debug = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Impl(item)
+                    if item.trait_.as_ref().is_some_and(|(_, path, _)| {
+                        path.segments.last().unwrap().ident == "Debug"
+                    }) =>
+                {
+                    Some(item)
+                }
+                _ => None,
+            })
+            .unwrap();
+        // Expected names and discriminant order come from the enum declarations,
+        // independently of the implementation's name table.
+        let variants: Vec<_> = ids.variants.iter().map(|variant| &variant.ident).collect();
+        let names: Vec<_> = variants.iter().map(|variant| variant.to_string()).collect();
+        let samples: Vec<_> = [
+            0,
+            variants.len() / 4,
+            variants.len() / 2,
+            variants.len() - 2,
+            variants.len() - 1,
+        ]
+        .into_iter()
+        .map(|index| variants[index])
+        .collect();
+        let program = quote! {
+            #ids
+            #debug
+            #[derive(Debug)]
+            enum Reference { #(#samples),* }
+            fn main() {
+                let cases = [#((PointId::#variants, #names)),*];
+                assert_eq!(cases.len(), PointId::__Count as usize + 1);
+                for (index, (place, expected)) in cases.into_iter().enumerate() {
+                    assert_eq!(place as usize, index);
+                    assert_eq!(format!("{place:?}"), expected);
+                    assert_eq!(format!("{place:#?}"), expected);
+                }
+                #(assert_eq!(format!("{:?}", PointId::#samples), format!("{:?}", Reference::#samples));)*
+            }
+        };
+        let directory = root
+            .join("target")
+            .join(format!("point-debug-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("main.rs");
+        let binary = directory.join("point-debug");
+        fs::write(&source, program.to_string()).unwrap();
+        let output = std::process::Command::new("rustc")
+            .args(["--edition=2024", "-o"])
+            .arg(&binary)
+            .arg(&source)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            std::process::Command::new(&binary)
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     /// The census: how many points have an API record, and why the others refuse.
@@ -1384,13 +1515,13 @@ mod tests {
         }
         for name in [
             "mod_api::ConnectionKind",
-            "mod_api::containers::ModRevision",
-            "mod_api::camera::UseItem",
+            "mod_api::item::containers::ModRevision",
+            "mod_api::client::camera::UseItem",
             "mod_api::wire::Id",
         ] {
             assert!(wire.contains(name), "supported public path {name} was lost");
         }
-        assert!(!wire.contains("mod_api::wire_slots::Id"));
+        assert!(!wire.contains("mod_api::wire::wire_slots::Id"));
     }
 
     fn point(attribute: &str, method: &str) -> Result<point_shape::Shape, String> {

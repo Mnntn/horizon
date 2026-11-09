@@ -9,8 +9,8 @@ impl Game<'_> {
     pub(in crate::game) fn native_use_item_on(
         &mut self,
         state: BlockStateId,
-        click: &NativeBlockClick<'_>,
-        answer: &mut Option<NativeInteractionResult>,
+        click: &BlockClick<'_>,
+        answer: &mut Option<mod_api::InteractionResult>,
     ) {
         self.fire_use_item_on(state, click, answer);
     }

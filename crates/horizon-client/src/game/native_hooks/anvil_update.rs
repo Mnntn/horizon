@@ -17,7 +17,7 @@ impl Game<'_> {
         player: u128,
         player_entity_id: i32,
         pos: [i32; 3],
-        update: &mut mod_api::menu::AnvilUpdate,
+        update: &mut mod_api::item::menu::AnvilUpdate,
         cancel: &mut bool,
     ) {
         self.fire_anvil_update(player, player_entity_id, pos, update, cancel);

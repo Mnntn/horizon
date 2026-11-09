@@ -149,7 +149,7 @@ impl Game<'_> {
         // A minecart spawner has no block.
         let source = cart
             .is_none()
-            .then(|| mod_api::NativeSpawner::Block(mod_api::BlockPos::new(key.0, key.1, key.2)));
+            .then(|| mod_api::SpawnSource::Block(mod_api::BlockPos::new(key.0, key.1, key.2)));
         let extras = {
             let mut level = self.natural_level();
             // A minecart spawner has no block to tell the spawn checks of.
@@ -229,7 +229,7 @@ impl Game<'_> {
         &self,
         l: &super::natural_spawning::GameLevel,
         r: &SpawnerSpawn,
-        source: Option<mod_api::NativeSpawner>,
+        source: Option<mod_api::SpawnSource>,
         planned: &mut Vec<Planned>,
         random: &mut horizon_core::random::LegacyRandom,
     ) -> Option<SpawnerAdded> {

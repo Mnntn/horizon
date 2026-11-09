@@ -9,7 +9,7 @@ use crate::{
 };
 use horizon_core::nbt::Tag;
 use mod_api::TooltipPlacement;
-pub use mod_api::item_tooltip::TooltipDisplay;
+pub use mod_api::item::item_tooltip::TooltipDisplay;
 /// Borrow the engine's modelled visibility without allocating an API stack.
 pub fn tooltip_display(stack: &ItemStack) -> TooltipDisplay<'_> {
     TooltipDisplay::from_component(

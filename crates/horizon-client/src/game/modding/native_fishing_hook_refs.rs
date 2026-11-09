@@ -47,7 +47,7 @@ mod tests {
     use super::*;
     use horizon_client::{mobs::Mob, motion::PlayerMotion};
     use horizon_core::geometry::Vec3;
-    use mod_api::NativeWorldEpoch;
+    use mod_api::WorldEpoch;
 
     #[test]
     #[ignore = "needs prepared resources"]
@@ -84,7 +84,7 @@ mod tests {
             assert_eq!(found, vec![entity]);
 
             let stale = FishingHookRef::new(EntityRef::new(
-                NativeWorldEpoch::new(entity.epoch().get() + 1),
+                WorldEpoch::new(entity.epoch().get() + 1),
                 id,
             ));
             assert_eq!(stale.open_water(game), None);

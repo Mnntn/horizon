@@ -7,7 +7,7 @@ import subprocess
 
 root = Path(__file__).resolve().parents[3]
 rt = root / "crates/horizon-mod-runtime/src/registry_keys.rs"
-api = root / "crates/horizon-mod-api/src/registry_keys.rs"
+api = root / "crates/horizon-mod-api/src/content/registry_keys.rs"
 game = root / "crates/horizon-client/src/game.rs"
 original = {p: p.read_text() for p in (rt, api, game)}
 lookup = "Some(BlockKey(*resolved_block_keys().get()?.slots.get(id)?))"

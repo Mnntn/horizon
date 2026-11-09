@@ -80,7 +80,7 @@ Restricted in-write `LevelHost` callbacks keep their existing write and random-d
 
 Item-model callbacks receive the owned stack and a separate `bundle_selected` number (`-1`
 means none). Runtime selection is not a persistent component. Drawing receives the API-owned
-`NativeItemDisplayContext`, not the renderer's enum.
+`ItemDisplayContext`, not the renderer's enum.
 
 ## The NBT escape
 

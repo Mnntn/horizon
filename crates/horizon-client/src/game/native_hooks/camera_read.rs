@@ -6,7 +6,7 @@ use super::*;
 impl Game<'_> {
     /// The most recently extracted world frame's camera, if one exists.
     /// During GUI rendering this is the current frame, including bob/spin and FOV.
-    pub(in crate::game) fn camera(&self) -> Option<NativeCamera> {
+    pub(in crate::game) fn camera(&self) -> Option<mod_api::Camera> {
         self.native_camera_frame.clone()
     }
     /// The entity the view follows (`Minecraft.getCameraEntity`): the entity a server attached

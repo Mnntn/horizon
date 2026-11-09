@@ -51,30 +51,30 @@ pub trait ClientSession {
     /// logged-in client world. External display names are not retained; memory
     /// connections have no address. Friend-invite secrets are redacted.
     fn client_server(&self) -> Option<ClientServer> {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "ClientSession::client_server",
             "client_server",
-            crate::phase::LoadAccess::ClientSetup,
+            crate::world::phase::LoadAccess::ClientSetup,
         )
     }
     /// Side: client.
     /// The applied language code, not a pending options selection. None outside
     /// a logged-in client world. Read is_paused for the applied pause state.
     fn client_language(&self) -> Option<String> {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "ClientSession::client_language",
             "client_language",
-            crate::phase::LoadAccess::ClientSetup,
+            crate::world::phase::LoadAccess::ClientSetup,
         )
     }
     /// Side: client.
     /// Existing local frame counters; None outside a logged-in client world.
     /// This read collects no history and sends nothing anywhere.
     fn client_frame_stats(&self) -> Option<ClientFrameStats> {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "ClientSession::client_frame_stats",
             "client_frame_stats",
-            crate::phase::LoadAccess::ClientSetup,
+            crate::world::phase::LoadAccess::ClientSetup,
         )
     }
 }
@@ -88,10 +88,10 @@ pub trait Commands {
     /// happens where no world is open to players, and nothing for a server
     /// whose mods never call it. API @API:refresh_commands@.
     fn refresh_commands(&mut self) {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "Commands::refresh_commands",
             "refresh_commands",
-            crate::phase::LoadAccess::WorldOnly,
+            crate::world::phase::LoadAccess::WorldOnly,
         )
     }
     /// Side: server.
@@ -99,10 +99,10 @@ pub trait Commands {
     /// vanilla's silence, send-command-feedback and block/cart track-output rules.
     /// Refuses text deeper than 512 component nodes before applying any changes.
     fn feedback(&mut self, line: Text) -> Result<(), TextFormError> {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "Commands::feedback",
             "feedback",
-            crate::phase::LoadAccess::WorldOnly,
+            crate::world::phase::LoadAccess::WorldOnly,
         )
     }
     /// Side: server.
@@ -114,10 +114,10 @@ pub trait Commands {
     /// acting player) are reachable; displaced outer players are excluded
     /// from name, UUID and selector resolution on this path only.
     fn run_command(&mut self, line: &str) -> bool {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "Commands::run_command",
             "run_command",
-            crate::phase::LoadAccess::WorldOnly,
+            crate::world::phase::LoadAccess::WorldOnly,
         )
     }
 }
@@ -126,10 +126,10 @@ pub trait Levels {
     /// Side: server.
     /// Loaded server levels, in vanilla dimension order. Empty without a server world.
     fn list_levels(&self) -> Vec<LevelRef> {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "Levels::list_levels",
             "list_levels",
-            crate::phase::LoadAccess::WorldOnly,
+            crate::world::phase::LoadAccess::WorldOnly,
         )
     }
 }
@@ -140,20 +140,20 @@ pub trait Messages {
     /// lets `text` through: true without a filter, None inside a player's
     /// hook (where the server is out of reach).
     fn text_allowed(&self, text: &str) -> Option<bool> {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "Messages::text_allowed",
             "text_allowed",
-            crate::phase::LoadAccess::WorldOnly,
+            crate::world::phase::LoadAccess::WorldOnly,
         )
     }
     /// Side: server.
     /// A system line in every player's chat and the server's log.
     /// Refuses text deeper than 512 component nodes before applying any changes.
     fn broadcast(&self, line: Text) -> Result<(), TextFormError> {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "Messages::broadcast",
             "broadcast",
-            crate::phase::LoadAccess::WorldOnly,
+            crate::world::phase::LoadAccess::WorldOnly,
         )
     }
 }
@@ -163,19 +163,19 @@ pub trait Players {
     /// The players on this server, in the order they joined. Empty on a
     /// client and in a world nobody else can join.
     fn server_players(&self) -> Vec<PlayerRef> {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "Players::server_players",
             "server_players",
-            crate::phase::LoadAccess::WorldOnly,
+            crate::world::phase::LoadAccess::WorldOnly,
         )
     }
     /// Side: server.
     /// Find a connected player by their account name, case-insensitively.
     fn player_by_name(&self, name: &str) -> Option<PlayerRef> {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "Players::player_by_name",
             "player_by_name",
-            crate::phase::LoadAccess::WorldOnly,
+            crate::world::phase::LoadAccess::WorldOnly,
         )
     }
     /// Side: server.
@@ -184,10 +184,10 @@ pub trait Players {
     /// `native_use_on`, `native_break_block`...): None outside such a
     /// hook.
     fn acting_player(&self) -> Option<PlayerRef> {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "Players::acting_player",
             "acting_player",
-            crate::phase::LoadAccess::WorldOnly,
+            crate::world::phase::LoadAccess::WorldOnly,
         )
     }
 }
@@ -199,10 +199,10 @@ pub trait RenderAssets {
     /// `client_resources_reloaded`, not each frame. Resource-pack overrides and other
     /// namespaces use the normal shared model store; no resource is read or baked here.
     fn model(&self, id: &Identifier) -> Result<ModelRef, ModelError> {
-        crate::phase::unprovided(
+        crate::world::phase::unprovided(
             "RenderAssets::model",
             "model",
-            crate::phase::LoadAccess::PublishedResources,
+            crate::world::phase::LoadAccess::PublishedResources,
         )
     }
 }

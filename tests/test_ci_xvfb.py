@@ -1,6 +1,7 @@
 """The headless-test wrapper supplies a real ready display and owns its lifetime."""
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -26,6 +27,9 @@ sys.exit(int(sys.argv[1]))
 
 @unittest.skipIf(os.name == "nt", "the wrapper passes a file descriptor to Xvfb, for Linux CI")
 class XvfbTests(unittest.TestCase):
+    # These integration checks need a real server; the fake-server failure check
+    # below still runs in offline tooling environments without Xvfb installed.
+    @unittest.skipUnless(shutil.which("Xvfb"), "Xvfb is required for the real-display integration test")
     def test_ready_display_replaces_inherited_session_and_is_cleaned_up(self):
         env = dict(os.environ, DISPLAY=":9999", WAYLAND_DISPLAY="owner-display",
                    XAUTHORITY="/nonexistent/owner-authority")
@@ -38,6 +42,7 @@ class XvfbTests(unittest.TestCase):
         self.assertIsNone(display["authority"])
         self.assertFalse(Path("/tmp/.X11-unix/X" + display["display"]).exists())
 
+    @unittest.skipUnless(shutil.which("Xvfb"), "Xvfb is required for the real-display integration test")
     def test_command_failure_is_preserved_and_display_is_cleaned_up(self):
         result = subprocess.run([sys.executable, WRAPPER, sys.executable, "-c", CONNECT, "7"],
                                 text=True, capture_output=True, timeout=45)

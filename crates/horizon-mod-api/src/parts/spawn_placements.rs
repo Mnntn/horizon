@@ -25,10 +25,10 @@ pub mod tests {
     #[cfg(test)]
     fn rule() -> SpawnPlacementRule {
         SpawnPlacementRule {
-            placement: NativeSpawnPlacementType::OnGround,
-            heightmap: NativeHeightmap::MotionBlockingNoLeaves,
+            placement: SpawnPlacementType::OnGround,
+            heightmap: Heightmap::MotionBlockingNoLeaves,
             spawnable_on: Some("minecraft:animals_spawnable_on".to_string()),
-            light: NativeSpawnLight::Bright,
+            light: SpawnLight::Bright,
             biome_tag: Some("minecraft:is_forest".to_string()),
         }
     }

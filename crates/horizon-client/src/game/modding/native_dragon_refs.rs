@@ -5,7 +5,7 @@ use super::{
     commands::Target,
     dragon::{Dragon, Fight},
 };
-use mod_api::{DragonRef, EntityRef, LivingRef, MobRef, NativeDragonPhase};
+use mod_api::{DragonPhase, DragonRef, EntityRef, LivingRef, MobRef};
 
 impl Game<'_> {
     /// The dragon an entity handle names now.
@@ -30,7 +30,7 @@ impl Game<'_> {
     }
 
     /// `EnderDragonPhaseManager.getCurrentPhase`.
-    pub(super) fn dragon_phase(&self, dragon: DragonRef) -> Option<NativeDragonPhase> {
+    pub(super) fn dragon_phase(&self, dragon: DragonRef) -> Option<DragonPhase> {
         Some(self.native_dragon(dragon.entity())?.native_phase())
     }
 
@@ -40,7 +40,7 @@ impl Game<'_> {
     /// nothing, as in vanilla (a strafing dragon keeps its player). No
     /// random draw. False for a stale handle or a client. The new phase
     /// runs from the dragon's next tick.
-    pub(super) fn dragon_set_phase(&mut self, dragon: DragonRef, phase: NativeDragonPhase) -> bool {
+    pub(super) fn dragon_set_phase(&mut self, dragon: DragonRef, phase: DragonPhase) -> bool {
         let Some(d) = self.native_dragon_mut(dragon.entity()) else {
             return false;
         };
@@ -144,7 +144,7 @@ mod tests {
     use horizon_core::geometry::Vec3;
     use horizon_core::nbt::Tag;
     use horizon_protocol::entity_data::{Value, serializer};
-    use mod_api::{MobRef, NativeWorldEpoch};
+    use mod_api::{MobRef, WorldEpoch};
 
     fn dragon_in(game: &mut Game<'_>) -> (EntityRef, DragonRef) {
         let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
@@ -252,7 +252,7 @@ mod tests {
             assert_eq!(mob.is_done(game), None);
 
             let stale = MobRef::new(EntityRef::new(
-                NativeWorldEpoch::new(entity.epoch().get() + 1),
+                WorldEpoch::new(entity.epoch().get() + 1),
                 15,
             ));
             assert!(!stale.set_aggressive(game, true));
@@ -268,30 +268,30 @@ mod tests {
             let (entity, dragon) = dragon_in(game);
             // A constructed dragon (as with /summon) hovers; only the fight's
             // create_new_dragon switches it to the holding pattern.
-            assert_eq!(dragon.phase(game), Some(NativeDragonPhase::Hover));
+            assert_eq!(dragon.phase(game), Some(DragonPhase::Hover));
             for (i, phase) in [
-                NativeDragonPhase::HoldingPattern,
-                NativeDragonPhase::StrafePlayer,
-                NativeDragonPhase::LandingApproach,
-                NativeDragonPhase::Landing,
-                NativeDragonPhase::Takeoff,
-                NativeDragonPhase::SittingFlaming,
-                NativeDragonPhase::SittingScanning,
-                NativeDragonPhase::SittingAttacking,
-                NativeDragonPhase::ChargingPlayer,
-                NativeDragonPhase::Dying,
-                NativeDragonPhase::Hover,
+                DragonPhase::HoldingPattern,
+                DragonPhase::StrafePlayer,
+                DragonPhase::LandingApproach,
+                DragonPhase::Landing,
+                DragonPhase::Takeoff,
+                DragonPhase::SittingFlaming,
+                DragonPhase::SittingScanning,
+                DragonPhase::SittingAttacking,
+                DragonPhase::ChargingPlayer,
+                DragonPhase::Dying,
+                DragonPhase::Hover,
             ]
             .into_iter()
             .enumerate()
             {
                 assert_eq!(phase.id(), i as i32);
-                assert_eq!(NativeDragonPhase::from_id(i as i32), Some(phase));
+                assert_eq!(DragonPhase::from_id(i as i32), Some(phase));
                 assert!(dragon.set_phase(game, phase));
                 assert_eq!(dragon.phase(game), Some(phase));
                 let state = game.lan_dragon_state().unwrap();
                 let synced = state.meta.iter().find(|m| m.0 == 16);
-                if phase == NativeDragonPhase::Hover {
+                if phase == DragonPhase::Hover {
                     assert_eq!(synced, None);
                 } else {
                     assert_eq!(synced, Some(&(16, serializer::INT, Value::Int(i as i32))));
@@ -301,12 +301,12 @@ mod tests {
                 let loaded = Dragon::from_nbt(&saved, 0).unwrap();
                 assert_eq!(loaded.native_phase(), phase);
             }
-            assert_eq!(NativeDragonPhase::from_id(11), None);
-            assert_eq!(NativeDragonPhase::from_id(-1), None);
+            assert_eq!(DragonPhase::from_id(11), None);
+            assert_eq!(DragonPhase::from_id(-1), None);
 
             // Setting the phase it holds changes nothing, a strafe included.
-            assert!(dragon.set_phase(game, NativeDragonPhase::Hover));
-            assert_eq!(dragon.phase(game), Some(NativeDragonPhase::Hover));
+            assert!(dragon.set_phase(game, DragonPhase::Hover));
+            assert_eq!(dragon.phase(game), Some(DragonPhase::Hover));
 
             // The fight: unloaded until the End loads it, and only the End's.
             assert_eq!(dragon.alive_crystals(game), None);
@@ -321,15 +321,15 @@ mod tests {
             assert_eq!(dragon.previously_killed(game), Some(true));
 
             let stale = DragonRef::new(EntityRef::new(
-                NativeWorldEpoch::new(entity.epoch().get() + 1),
+                WorldEpoch::new(entity.epoch().get() + 1),
                 15,
             ));
-            assert!(!stale.set_phase(game, NativeDragonPhase::Landing));
+            assert!(!stale.set_phase(game, DragonPhase::Landing));
             assert_eq!(stale.phase(game), None);
             assert_eq!(stale.alive_crystals(game), None);
             game.dragon.discard();
             assert_eq!(dragon.phase(game), None);
-            assert!(!dragon.set_phase(game, NativeDragonPhase::Landing));
+            assert!(!dragon.set_phase(game, DragonPhase::Landing));
         });
     }
 
@@ -350,28 +350,28 @@ mod tests {
                 victims: Vec::new(),
                 potion: None,
             };
-            assert!(dragon.set_phase(game, NativeDragonPhase::SittingFlaming));
+            assert!(dragon.set_phase(game, DragonPhase::SittingFlaming));
             game.breath_clouds.push(cloud(true));
             game.breath_clouds.push(cloud(false));
-            assert!(dragon.set_phase(game, NativeDragonPhase::Hover));
+            assert!(dragon.set_phase(game, DragonPhase::Hover));
             assert_eq!(game.breath_clouds.len(), 1, "the flame cloud is gone");
             assert!(!game.breath_clouds[0].from_dragon);
             // Back in and out within one hook leaves nothing of the old cloud.
-            assert!(dragon.set_phase(game, NativeDragonPhase::SittingFlaming));
+            assert!(dragon.set_phase(game, DragonPhase::SittingFlaming));
             game.breath_clouds.push(cloud(true));
-            assert!(dragon.set_phase(game, NativeDragonPhase::Hover));
-            assert!(dragon.set_phase(game, NativeDragonPhase::SittingFlaming));
+            assert!(dragon.set_phase(game, DragonPhase::Hover));
+            assert!(dragon.set_phase(game, DragonPhase::SittingFlaming));
             assert_eq!(game.breath_clouds.len(), 1);
             // The gameplay path leaves the flag for the tick.
             game.breath_clouds.push(cloud(true));
             game.dragon
                 .as_mut()
                 .unwrap()
-                .set_native_phase(NativeDragonPhase::Hover);
+                .set_native_phase(DragonPhase::Hover);
             game.dragon
                 .as_mut()
                 .unwrap()
-                .set_native_phase(NativeDragonPhase::SittingFlaming);
+                .set_native_phase(DragonPhase::SittingFlaming);
             game.tick_breath();
             assert!(game.breath_clouds.iter().all(|c| !c.from_dragon));
         });
@@ -476,14 +476,11 @@ mod tests {
             // A part cannot leave alone.
             assert!(!game.entity_discard(parts[0]));
             assert!(
-                !game.entity_remove(parts[7], mod_api::NativeRemovalReason::Killed)
+                !game.entity_remove(parts[7], mod_api::RemovalReason::Killed)
                     && game.entity(parts[7].id()).is_some()
             );
             // A handle of an earlier open names nothing.
-            let stale = EntityRef::new(
-                NativeWorldEpoch::new(entity.epoch().get() + 1),
-                parts[0].id(),
-            );
+            let stale = EntityRef::new(WorldEpoch::new(entity.epoch().get() + 1), parts[0].id());
             assert_eq!(game.entity_position(stale), None);
             assert_eq!(game.entity_bounding_box(stale), None);
             assert_eq!(game.entity_is_multipart(stale), None);
@@ -547,10 +544,7 @@ mod tests {
             let parts = game.entity_parts(dragon).unwrap();
             // The window's own player is not one, and a stale handle is none.
             assert_eq!(game.entity(7).map(|e| e.id()), Some(7));
-            let stale = EntityRef::new(
-                NativeWorldEpoch::new(dragon.epoch().get() + 1),
-                parts[3].id(),
-            );
+            let stale = EntityRef::new(WorldEpoch::new(dragon.epoch().get() + 1), parts[3].id());
             assert_eq!(game.entity_position(stale), None);
             game.remote.as_mut().unwrap().logged_in = false;
             assert_eq!(game.entity_position(parts[3]), None);

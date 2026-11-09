@@ -50,8 +50,9 @@ fn no_slot_reason(reason: NoSlotReason) -> &'static str {
         NoSlotReason::ExtensionSlotsPending => tr("extension slots pending (I6)"),
         NoSlotReason::ApiSitesPending => tr("API site listeners pending (U4c)"),
         NoSlotReason::SourcePending => tr("source injects pending (U5)"),
-        NoSlotReason::ReplacePending => tr("replace listeners pending (U9)"),
+        NoSlotReason::ReplacePending => tr("internals replace listeners pending (U9)"),
         NoSlotReason::NoApiRecord => tr("no API record: a parameter has no API type yet"),
+        NoSlotReason::ReplaceWithoutValue => tr("replace needs a return the API carries"),
     }
 }
 
@@ -72,6 +73,7 @@ mod tests {
             NoSlotReason::SourcePending,
             NoSlotReason::ReplacePending,
             NoSlotReason::NoApiRecord,
+            NoSlotReason::ReplaceWithoutValue,
         ];
         let mut errors: Vec<InjectError> = reasons
             .into_iter()

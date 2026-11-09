@@ -45,13 +45,13 @@ pub use players::{FakePlayer, FakePlayers};
 pub use registries::FakeRegistries;
 pub use services::{FakeCommands, FakeMessages};
 
-use crate::ticket_controller::{ControllerInfo, TEST_CONTROLLERS};
-use crate::transaction::{Transaction, TransactionSeal};
+use crate::item::transaction::{Transaction, TransactionSeal};
+use crate::runtime::Installed;
+use crate::world::ticket_controller::{ControllerInfo, TEST_CONTROLLERS};
 use crate::{
     Backend, BackendMut, BackendMutRef, BackendRef, BlockEntityRef, BlockEntityTypeKey, BlockSide,
-    ClientHost, Commands, EntityRef, FluidStack, Host, Installed, ItemPlace, ItemStack, LevelRef,
-    Messages, Mods, NativeWorldEpoch, PlayerRef, Players, ServerHost, TEST_MODS, Tag, Text,
-    TicketController,
+    ClientHost, Commands, EntityRef, FluidStack, Host, ItemPlace, ItemStack, LevelRef, Messages,
+    Mods, PlayerRef, Players, ServerHost, TEST_MODS, Tag, Text, TicketController, WorldEpoch,
 };
 
 /// The world epoch of every fake's handles.
@@ -81,7 +81,7 @@ pub fn with_mods<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
 /// Production installations are process-wide. Tests isolate them per thread; a worker
 /// using an owning thread's immutable resource graph must see that same installation.
 pub fn inherit_mods<A, R, F: FnOnce(&A) -> R + Send>(f: F) -> impl FnOnce(&A) -> R + Send {
-    let installed = crate::installed();
+    let installed = crate::runtime::installed();
     let parts = crate::parts::installed();
     move |argument| {
         struct Restore(
@@ -176,11 +176,12 @@ impl crate::prelude::BlockEntitiesHost for FakeHost {
 impl crate::prelude::EntitiesHost for FakeHost {
     fn level(&self, dimension: &str) -> Option<LevelRef> {
         let level = self.level.level();
-        (crate::registry_keys::dimension_id(level.dimension()) == Some(dimension)).then_some(level)
+        (crate::content::registry_keys::dimension_id(level.dimension()) == Some(dimension))
+            .then_some(level)
     }
     fn entity(&self, id: u32) -> Option<EntityRef> {
         let known = self.players.by_entity(id).is_some() || self.level.entity_at(id).is_some();
-        known.then(|| EntityRef::new(NativeWorldEpoch::new(FAKE_EPOCH), id))
+        known.then(|| EntityRef::new(WorldEpoch::new(FAKE_EPOCH), id))
     }
 }
 impl crate::prelude::PlayersHost for FakeHost {
@@ -190,7 +191,7 @@ impl crate::prelude::PlayersHost for FakeHost {
 }
 impl crate::prelude::ItemsHost for FakeHost {
     fn item_key(&self, id: &crate::Identifier) -> Option<crate::ItemKey> {
-        crate::registry_keys::item_key_by_identifier(id)
+        crate::content::registry_keys::item_key_by_identifier(id)
     }
     fn item_default_component(&self, item: crate::ItemKey, component: &str) -> Option<Tag> {
         self.registries
@@ -349,7 +350,7 @@ impl crate::prelude::EntitiesBackend for FakeHost {
 }
 impl crate::prelude::KeysBackend for FakeHost {
     fn item_key_id(&self, key: crate::ItemKey) -> String {
-        crate::registry_keys::item_id(key)
+        crate::content::registry_keys::item_id(key)
             .expect("fake item key belongs to its load")
             .to_owned()
     }
@@ -510,7 +511,7 @@ mod tests {
 
     fn water(amount: u32) -> FluidStack {
         FluidStack::new(
-            crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+            crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
             amount,
         )
     }
@@ -530,7 +531,7 @@ mod tests {
         }];
         host.level.block_entity([2, 64, 0]).tanks = vec![FakeTank {
             held: Some(FluidStack::new(
-                crate::registry_keys::fluid_key("minecraft:lava").unwrap(),
+                crate::content::registry_keys::fluid_key("minecraft:lava").unwrap(),
                 100,
             )),
             capacity: 1000,

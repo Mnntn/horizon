@@ -61,7 +61,7 @@ pub(crate) enum List {
 /// A named type's definition.
 #[derive(Debug)]
 pub(crate) struct Def {
-    /// Its path as the generated glue names it (`mod_api::NativeBlockClick`).
+    /// Its path as the generated glue names it (`mod_api::BlockClick`).
     pub(super) rust: String,
     /// Its lifetime parameters: it borrows when there are any.
     pub(super) lifetimes: usize,

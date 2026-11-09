@@ -83,7 +83,7 @@ pub mod tests {
 
     #[test]
     pub(crate) fn fluid_keys_resolve_declarations_after_requests_and_reject_unknown() {
-        use crate::registry_keys::{fluid_id, fluid_key, resolve_fluids};
+        use crate::content::registry_keys::{fluid_id, fluid_key, resolve_fluids};
         struct Request;
         #[mod_api::__subscriptions]
         impl Hooks for Request {
@@ -120,14 +120,18 @@ pub mod tests {
         for name in ["minecraft:water", "minecraft:lava", "maker:chocolate"] {
             let key = fluid_key(name).unwrap();
             assert_eq!(
-                crate::registry_keys::fluid_key_utf16(&name.encode_utf16().collect::<Vec<_>>()),
+                crate::content::registry_keys::fluid_key_utf16(
+                    &name.encode_utf16().collect::<Vec<_>>()
+                ),
                 Some(key)
             );
             assert_eq!(fluid_id(key), Some(name));
         }
         for path in ["water", "lava"] {
             assert_eq!(
-                crate::registry_keys::fluid_key_utf16(&path.encode_utf16().collect::<Vec<_>>()),
+                crate::content::registry_keys::fluid_key_utf16(
+                    &path.encode_utf16().collect::<Vec<_>>()
+                ),
                 fluid_key(path)
             );
         }
@@ -432,7 +436,7 @@ pub mod tests {
         FluidStack {
             components: Some(Box::new(crate::Components::from(components))),
             ..FluidStack::new(
-                crate::registry_keys::fluid_key("test:potion").unwrap(),
+                crate::content::registry_keys::fluid_key("test:potion").unwrap(),
                 amount,
             )
         }
@@ -456,7 +460,10 @@ pub mod tests {
         // The same fluid with other components, or another fluid, doesn't go in.
         for other in [
             potion(500, "minecraft:poison"),
-            FluidStack::new(crate::registry_keys::fluid_key("test:potion").unwrap(), 500),
+            FluidStack::new(
+                crate::content::registry_keys::fluid_key("test:potion").unwrap(),
+                500,
+            ),
         ] {
             world.tank(SOURCE, Some(other.clone()), true);
             assert_eq!(world.moved((SOURCE, None), (TANK, None), 4000), Ok(0));
@@ -465,7 +472,7 @@ pub mod tests {
         }
         // A drain-only tank has no capacity, and nothing moves.
         let water = FluidStack::new(
-            crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+            crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
             1000,
         );
         world.tank(SOURCE, Some(water.clone()), true);
@@ -482,7 +489,7 @@ pub mod tests {
         game_thread();
         let water = |amount| {
             FluidStack::new(
-                crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
                 amount,
             )
         };
@@ -536,7 +543,7 @@ pub mod tests {
         game_thread();
         let water = |amount| {
             Some(FluidStack::new(
-                crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
                 amount,
             ))
         };

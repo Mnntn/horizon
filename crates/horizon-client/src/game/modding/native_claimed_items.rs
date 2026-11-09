@@ -2,7 +2,7 @@
 //! first block along the view, across the distant terrain past the loaded chunks, and items whose
 //! right-click is the mod's alone, heard as use events the mod polls.
 use super::Game;
-pub use mod_api::game::{NativeHeldItem, NativeHit, NativeModEvent};
+pub use mod_api::game::{HeldItemSlot, ModEvent};
 use std::collections::BTreeMap;
 
 /// The farthest a ray along the view reaches, in blocks.
@@ -15,7 +15,7 @@ const EVENTS_MAX: usize = 256;
 /// A claimed item's use under way.
 struct ModUse {
     mod_id: String,
-    item: NativeHeldItem,
+    item: HeldItemSlot,
     /// The player's `using` while it is this use: its slot and ticks.
     slot: usize,
     ticks: u32,
@@ -25,7 +25,7 @@ struct ModUse {
 #[derive(Default)]
 pub(super) struct ModInput {
     claims: BTreeMap<String, Vec<String>>,
-    events: BTreeMap<String, Vec<NativeModEvent>>,
+    events: BTreeMap<String, Vec<ModEvent>>,
     using: Option<ModUse>,
 }
 
@@ -41,19 +41,19 @@ impl ModInput {
             .find(|(_, ids)| ids.iter().any(|i| i == item))
             .map(|(id, _)| id.as_str())
     }
-    fn push(&mut self, mod_id: &str, event: NativeModEvent) {
+    fn push(&mut self, mod_id: &str, event: ModEvent) {
         let events = self.events.entry(mod_id.to_owned()).or_default();
         if events.len() < EVENTS_MAX {
             events.push(event);
         }
     }
-    fn poll(&mut self, mod_id: &str) -> Vec<NativeModEvent> {
+    fn poll(&mut self, mod_id: &str) -> Vec<ModEvent> {
         self.events.remove(mod_id).unwrap_or_default()
     }
     /// Mod `mod_id`'s use of `item` in `slot` begins, ending any other first.
-    fn start(&mut self, mod_id: &str, item: NativeHeldItem, slot: usize) {
+    fn start(&mut self, mod_id: &str, item: HeldItemSlot, slot: usize) {
         self.end();
-        self.push(mod_id, NativeModEvent::UseStart(item.clone(), 0));
+        self.push(mod_id, ModEvent::UseStart(item.clone(), 0));
         self.using = Some(ModUse {
             mod_id: mod_id.to_owned(),
             item,
@@ -76,17 +76,17 @@ impl ModInput {
     /// The use under way ends: its mod hears `UseStop`.
     fn end(&mut self) {
         if let Some(u) = self.using.take() {
-            self.push(&u.mod_id, NativeModEvent::UseStop(u.item, u.ticks));
+            self.push(&u.mod_id, ModEvent::UseStop(u.item, u.ticks));
         }
     }
 }
 
 impl Game<'_> {
     /// The stack in inventory slot `slot` as a mod's events carry it.
-    fn mod_held(&self, slot: usize) -> Option<NativeHeldItem> {
+    fn mod_held(&self, slot: usize) -> Option<HeldItemSlot> {
         let stack = self.stack_in(slot)?;
         let extra = stack.extra.as_deref();
-        Some(NativeHeldItem {
+        Some(HeldItemSlot {
             id: mod_api::__private::item_key(&stack.item)?,
             count: stack.count,
             slot: slot as u32,
@@ -99,12 +99,12 @@ impl Game<'_> {
         })
     }
     /// The first block along the view within `distance` (at most 1024), past the loaded chunks over the distant terrain.
-    pub(super) fn raycast(&self, distance: f32) -> Option<NativeHit> {
+    pub(super) fn raycast(&self, distance: f32) -> Option<mod_api::Hit> {
         let (d, hit) = self.view_hit()?;
         (d <= distance.clamp(0.0, RAYCAST_MAX)).then_some(hit)
     }
     /// The first block along the view within `RAYCAST_MAX`, and its distance.
-    pub(super) fn view_hit(&self) -> Option<(f32, NativeHit)> {
+    pub(super) fn view_hit(&self) -> Option<(f32, mod_api::Hit)> {
         self.player.as_ref()?;
         let eye = self.eye_position()?;
         let dir = super::view_vector(self.yaw, self.pitch);
@@ -123,7 +123,7 @@ impl Game<'_> {
             .sqrt();
         Some((
             distance as f32,
-            NativeHit {
+            mod_api::Hit {
                 block_x: pos[0],
                 block_y: pos[1],
                 block_z: pos[2],
@@ -165,7 +165,7 @@ impl Game<'_> {
         self.native_input.claim(mod_id, ids);
     }
     /// Mod `mod_id`'s events since its last poll (at most 256 wait).
-    pub(super) fn poll(&mut self, mod_id: &str) -> Vec<NativeModEvent> {
+    pub(super) fn poll(&mut self, mod_id: &str) -> Vec<ModEvent> {
         self.native_input.poll(mod_id)
     }
     /// `use_hand`: a right-click with an item a mod claims starts its use for
@@ -227,8 +227,8 @@ mod input_tests {
         mod_api::__private::resolve_items(["minecraft:stick"]).unwrap();
     }
 
-    fn stick(slot: u32) -> NativeHeldItem {
-        NativeHeldItem {
+    fn stick(slot: u32) -> HeldItemSlot {
+        HeldItemSlot {
             id: mod_api::__private::item_key("minecraft:stick").unwrap(),
             count: 1,
             slot,
@@ -259,12 +259,12 @@ mod input_tests {
         keys();
         let mut input = ModInput::default();
         for _ in 0..EVENTS_MAX + 10 {
-            input.push("a", NativeModEvent::UseStart(stick(0), 0));
+            input.push("a", ModEvent::UseStart(stick(0), 0));
         }
-        input.push("b", NativeModEvent::UseStop(stick(0), 3));
+        input.push("b", ModEvent::UseStop(stick(0), 3));
         assert_eq!(input.poll("a").len(), EVENTS_MAX);
         assert!(input.poll("a").is_empty());
-        assert_eq!(input.poll("b"), vec![NativeModEvent::UseStop(stick(0), 3)]);
+        assert_eq!(input.poll("b"), vec![ModEvent::UseStop(stick(0), 3)]);
     }
 
     #[test]
@@ -281,8 +281,8 @@ mod input_tests {
         assert_eq!(
             input.poll("orbital"),
             vec![
-                NativeModEvent::UseStart(stick(2), 0),
-                NativeModEvent::UseStop(stick(2), 2),
+                ModEvent::UseStart(stick(2), 0),
+                ModEvent::UseStop(stick(2), 2),
             ]
         );
     }
@@ -299,7 +299,7 @@ mod input_tests {
         assert!(!input.owns(Some((0, 0))));
         assert_eq!(
             input.poll("orbital").last(),
-            Some(&NativeModEvent::UseStop(stick(0), 1))
+            Some(&ModEvent::UseStop(stick(0), 1))
         );
         // A reset the mod use never heard of (`Game.using` cleared alone):
         // the player's next use, from 0 ticks or in another slot, is still
@@ -314,6 +314,6 @@ mod input_tests {
         input.end();
         let events = input.poll("orbital");
         assert_eq!(events.len(), 2);
-        assert_eq!(events[1], NativeModEvent::UseStop(stick(0), 2));
+        assert_eq!(events[1], ModEvent::UseStop(stick(0), 2));
     }
 }

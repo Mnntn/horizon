@@ -35,7 +35,7 @@ The following documented `Game` helpers are not in the trait yet:
 - `with_mod_block_entity` is generic, so its signature cannot be called through `dyn Host`.
 
 Experience-orb values use vanilla's signed `i32` representation in
-`NativeExperienceOrb`, `ServerHost::set_experience_orb`, and the pickup and merge hooks.
+`ExperienceOrb`, `ServerHost::set_experience_orb`, and the pickup and merge hooks.
 Reading or changing a value preserves zero and negative saved values rather than
 clamping them through an unsigned representation. A negative value does not grant
 positive experience when picked up.

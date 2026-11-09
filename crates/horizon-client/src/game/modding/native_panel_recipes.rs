@@ -6,9 +6,8 @@
 use super::{
     Game,
     native_hooks::{
-        NativePanelEvent as BrowserEvent, NativeRecipeLayout as BrowserLayout,
-        NativeRecipeResult as BrowserResult, NativeRecipeView as BrowserRecipe,
-        NativeStack as BrowserStack,
+        NativeRecipeLayout as BrowserLayout, NativeRecipeResult as BrowserResult,
+        NativeRecipeView as BrowserRecipe, PanelEvent as BrowserEvent,
     },
     native_panel::{Layout, Owner, browser_stack, inside},
 };
@@ -16,6 +15,7 @@ use horizon_client::{
     hud::{HudBatch, rgba},
     items::ItemStack,
 };
+use mod_api::Stack as BrowserStack;
 use std::time::Instant;
 
 const SLOT: f32 = 18.0;

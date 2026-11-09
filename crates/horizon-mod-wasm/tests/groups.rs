@@ -4,13 +4,13 @@
 use mod_api::__private::game::{BackendRefOf, Fields};
 use mod_api::{
     Backend, BackendRef, BlockEntityRef, BlockEntityTypeKey, BoolGameRuleKey, Host, LevelRef,
-    NativeWorldEpoch, ServerChatEvent, ServerHost, Text,
+    ServerChatEvent, ServerHost, Text, WorldEpoch,
 };
 
 struct World;
 
 fn overworld() -> LevelRef {
-    LevelRef::new(NativeWorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD)
+    LevelRef::new(WorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD)
 }
 
 impl mod_api::prelude::LevelsBackend for World {

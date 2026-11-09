@@ -1,3 +1,3 @@
 mod api {
-    pub struct NativeArmorHurt;
+    pub struct ArmorHurt;
 }

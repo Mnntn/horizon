@@ -1,7 +1,7 @@
 //! The players fake: who is online, their inventories, and what the game told them.
 use super::FAKE_EPOCH;
 use crate::{
-    EntityRef, Hand, ItemPlace, ItemStack, LevelRef, NativeWorldEpoch, PlayerRef, Players, Text,
+    EntityRef, Hand, ItemPlace, ItemStack, LevelRef, PlayerRef, Players, Text, WorldEpoch,
 };
 use std::collections::BTreeMap;
 
@@ -43,7 +43,7 @@ impl FakePlayers {
     pub(super) fn handle(&self, uuid: u128) -> Option<PlayerRef> {
         let player = self.players.get(&uuid)?;
         Some(PlayerRef {
-            entity: EntityRef::new(NativeWorldEpoch::new(FAKE_EPOCH), player.entity),
+            entity: EntityRef::new(WorldEpoch::new(FAKE_EPOCH), player.entity),
             uuid,
         })
     }

@@ -1,2 +1,1 @@
-mod attachment_holder;
-pub use attachment_holder::AttachmentHolder;
+pub use entity::attachment_holder::AttachmentHolder;

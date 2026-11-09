@@ -4,7 +4,7 @@
 //! snapshot is intentionally not accepted: it cannot answer these reads.
 use super::{GoalCx, Resolved};
 use crate::mobs::{self, Mob};
-use mod_api::{LivingRef, MobRef, NativeMobGoalEntry, PathType, RaidRef};
+use mod_api::{LivingRef, MobGoalEntry, MobRef, PathType, RaidRef};
 
 impl GoalCx<'_, '_> {
     fn live_mob(&self, mob: MobRef) -> Option<&Mob> {
@@ -15,13 +15,13 @@ impl GoalCx<'_, '_> {
         }
     }
 
-    pub(super) fn r_mob_goals(&self, mob: MobRef) -> Option<Vec<NativeMobGoalEntry>> {
+    pub(super) fn r_mob_goals(&self, mob: MobRef) -> Option<Vec<MobGoalEntry>> {
         Some(
             self.live_mob(mob)?
                 .ai
                 .goals
                 .entries()
-                .map(|(priority, name, running)| NativeMobGoalEntry {
+                .map(|(priority, name, running)| MobGoalEntry {
                     priority,
                     id: super::super::native_mob_goals::goal_id(name),
                     running,
@@ -30,13 +30,13 @@ impl GoalCx<'_, '_> {
         )
     }
 
-    pub(super) fn r_mob_target_goals(&self, mob: MobRef) -> Option<Vec<NativeMobGoalEntry>> {
+    pub(super) fn r_mob_target_goals(&self, mob: MobRef) -> Option<Vec<MobGoalEntry>> {
         Some(
             self.live_mob(mob)?
                 .ai
                 .targets
                 .entries()
-                .map(|(priority, name, running)| NativeMobGoalEntry {
+                .map(|(priority, name, running)| MobGoalEntry {
                     priority,
                     id: super::super::native_mob_goals::goal_id(name),
                     running,

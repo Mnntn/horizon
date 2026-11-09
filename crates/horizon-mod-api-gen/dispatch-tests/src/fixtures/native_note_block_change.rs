@@ -1,3 +1,3 @@
 mod stubs {
-    pub(super) struct NativeNoteBlockChange;
+    pub(super) struct NoteBlockChange;
 }

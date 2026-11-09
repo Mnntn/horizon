@@ -270,7 +270,7 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
             game.mobs.push(mob(game, 43, "minecraft:pig"));
             let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
             // Hover is a sitting phase and correctly shrugs off arrows.
-            dragon.set_native_phase(mod_api::NativeDragonPhase::HoldingPattern);
+            dragon.set_native_phase(mod_api::DragonPhase::HoldingPattern);
             dragon.id = 44;
             game.dragon.replace(dragon);
             let mut arrow = Projectile::new(

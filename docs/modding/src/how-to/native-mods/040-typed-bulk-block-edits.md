@@ -3,7 +3,7 @@
 
 ### Typed bulk block edits
 
-`NativeBlockEdit.palette` contains complete `BlockState` values. Construct them with
+`BlockEdit.palette` contains complete `BlockState` values. Construct them with
 `BlockState::of(&host.block_states(), block, constraints)` (or change an existing state
 with `with`). `filters` contains owned `StatePredicate` values. `StatePredicate::block`
 validates property names and values strictly; `StatePredicate::tag` retains arbitrary
@@ -19,6 +19,6 @@ NBT is not representable. At most 65,536 filters are allowed. Unloaded chunks an
 out-of-height portions of runs are skipped. Edits preserve strict block-entity behavior,
 notify no neighbors and send whole changed chunks.
 
-`NativeColumnBlocks.palette` also contains complete `BlockState` values. States of the
+`ColumnBlocks.palette` also contains complete `BlockState` values. States of the
 same block with different properties have distinct entries. Only distinct numeric
 states are converted to API values, not each block in the returned columns.

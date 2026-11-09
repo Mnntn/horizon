@@ -7,15 +7,14 @@
 //! (`native_panel_event`). With no mod showing a panel, each hook here
 //! returns after one check.
 use super::{
-    Game, Screen,
-    native_hooks::{NativePanelEvent as BrowserEvent, NativeStack as BrowserStack},
-    native_panel_recipes::RecipePage,
+    Game, Screen, native_hooks::PanelEvent as BrowserEvent, native_panel_recipes::RecipePage,
 };
 use horizon_client::{
     hud::{HudBatch, rgba},
     items::ItemStack,
     ui::EditBox,
 };
+use mod_api::Stack as BrowserStack;
 
 /// One slot of the panel, in GUI pixels.
 const SLOT: f32 = 18.0;

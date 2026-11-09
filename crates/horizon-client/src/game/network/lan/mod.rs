@@ -2414,7 +2414,7 @@ impl Game<'_> {
         entity: u32,
         kept: Option<&ModifiedEffectParticles>,
         effects: impl Fn() -> I,
-        active: impl Fn(usize) -> mod_api::NativeActiveEffect,
+        active: impl Fn(usize) -> mod_api::ActiveEffect,
     ) -> Option<Option<ModifiedEffectParticles>> {
         if effects().next().is_none() {
             return kept.is_some().then_some(None);
@@ -4172,28 +4172,28 @@ fn describe_event(
 /// A client's settings as the mod API names them.
 fn client_info(
     i: &horizon_protocol::packets::configuration::ClientInformation,
-) -> mod_api::NativeClientInfo {
-    mod_api::NativeClientInfo {
+) -> mod_api::ClientInfo {
+    mod_api::ClientInfo {
         language: i.language.clone(),
         view_distance: i.view_distance,
         chat_visibility: match i.chat_visibility.rem_euclid(3) {
-            0 => mod_api::NativeChatVisibility::Full,
-            1 => mod_api::NativeChatVisibility::System,
-            _ => mod_api::NativeChatVisibility::Hidden,
+            0 => mod_api::ChatVisibility::Full,
+            1 => mod_api::ChatVisibility::System,
+            _ => mod_api::ChatVisibility::Hidden,
         },
         chat_colors: i.chat_colors,
         model_customisation: i.model_customisation,
         main_hand: if i.main_hand == 1 {
-            mod_api::NativeMainHand::Right
+            mod_api::MainHand::Right
         } else {
-            mod_api::NativeMainHand::Left
+            mod_api::MainHand::Left
         },
         text_filtering: i.text_filtering,
         allows_listing: i.allows_listing,
         particle_status: match i.particle_status.rem_euclid(3) {
-            0 => mod_api::NativeParticleStatus::All,
-            1 => mod_api::NativeParticleStatus::Decreased,
-            _ => mod_api::NativeParticleStatus::Minimal,
+            0 => mod_api::ParticleStatus::All,
+            1 => mod_api::ParticleStatus::Decreased,
+            _ => mod_api::ParticleStatus::Minimal,
         },
     }
 }

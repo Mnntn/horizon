@@ -1,7 +1,7 @@
 //! Local particle requests from native client hooks.
 use super::Game;
 use horizon_client::particles::ParticleOptions;
-use mod_api::particles::PositionSource;
+use mod_api::client::particles::PositionSource;
 
 fn finite_options(options: &ParticleOptions) -> bool {
     options.color.into_iter().all(f32::is_finite)

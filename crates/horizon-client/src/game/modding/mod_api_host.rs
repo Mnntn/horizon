@@ -567,7 +567,7 @@ impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLeve
         &mut self,
         pos: [i32; 3],
         state: mod_api::BlockState,
-        flags: mod_api::NativeBlockUpdateFlags,
+        flags: mod_api::BlockUpdateFlags,
     ) -> bool {
         let Ok(state) = state.try_into_engine(&()) else {
             return false;

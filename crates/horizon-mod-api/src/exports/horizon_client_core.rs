@@ -1,2 +1,1 @@
-mod suggestion;
-pub use suggestion::Suggestion;
+pub use command::suggestion::Suggestion;

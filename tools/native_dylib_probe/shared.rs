@@ -13,6 +13,6 @@ pub fn identity() -> [usize; 2] {
 }
 pub fn exchange(value: Vec<u8>) -> Vec<u8> {
     assert_eq!(value, [1, 2, 3]);
-    mod_api::crash::set_detail("linkage probe", "shared dependency");
+    mod_api::content::crash::set_detail("linkage probe", "shared dependency");
     vec![4, 5, 6]
 }

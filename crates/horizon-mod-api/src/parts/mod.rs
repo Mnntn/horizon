@@ -5,7 +5,7 @@
 //! also indexes the block parts by state, so the state-keyed hooks look theirs up without the
 //! block's name.
 use crate::BlockEntityTypeDecl;
-use crate::ticket_controller::{self, ControllerInfo};
+use crate::world::ticket_controller::{self, ControllerInfo};
 use crate::{
     BlockEntityPart, BlockPart, BlockSide, Capability, CapabilityKey, EntityCapabilityKey,
     EntityPart, EntityRef, FluidPart, HOOK_COUNT, HookId, Host, ItemCapabilityKey, ItemPart,

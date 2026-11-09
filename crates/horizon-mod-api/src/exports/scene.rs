@@ -1,2 +1,1 @@
-mod scene;
-pub use scene::{NativeSceneBlock, NativeSceneView, SceneBlockEntity};
+pub use client::scene::{SceneBlock, SceneBlockEntity, SceneView};

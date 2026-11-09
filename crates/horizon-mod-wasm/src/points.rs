@@ -2,9 +2,10 @@
 use crate::{CallClass, Refusal, WasmMod, WeakWasmMod, boundary::Frame};
 use horizon_mod_package::manifest::{
     Manifest,
-    inject::{Access, Kind},
+    inject::{Access, Inject, Kind},
 };
 use mod_points::__private::{Forward, PointHost, SlotListener};
+use mod_points::PointId;
 use std::cell::RefCell;
 
 struct Endpoint {
@@ -105,40 +106,118 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
         let inject = declared
             .remove(id.as_str())
             .ok_or_else(|| format!("undeclared point listener {id}"))?;
-        let Some(&(point, target, at_return)) = mod_points::API_PLACES
-            .iter()
-            .find(|(point, _, _)| *point as u32 == place)
-        else {
-            return Err(format!("{id}: no API record for place {place}"));
-        };
-        if inject.access != Access::Api
-            || !matches!(
-                inject.kind,
-                Kind::Head | Kind::ModifyArg | Kind::Replace | Kind::Return
-            )
-            || (inject.kind == Kind::Return) != at_return
-            || horizon_mod_point_emit::plain_path(&inject.at)
-                != horizon_mod_point_emit::plain_path(target)
-        {
-            return Err(format!(
-                "{id}: listener does not match its declared API head/return target"
-            ));
-        }
-        slots.push((point, index as u32, inject.priority, id));
+        let point = checked_place(&id, inject, place)?;
+        slots.push((
+            point,
+            index as u32,
+            inject.priority,
+            id,
+            inject.kind == Kind::Replace,
+        ));
     }
     if let Some(id) = declared.keys().next() {
         return Err(format!("unfilled point listener {id}"));
     }
     let owner = Box::leak(manifest.id.clone().into_boxed_str());
-    for (place, listener, priority, id) in slots {
+    for (place, listener, priority, id, replace) in slots {
         let endpoint = Box::leak(Box::new(Endpoint {
             owner,
             module: module.downgrade(),
             listener,
         }));
         let id = Box::leak(id.into_boxed_str());
-        let slot = SlotListener::forwarded(owner, place, endpoint, 0x8000_0000 + place as u32);
-        mod_points::register(&slot.ordered(priority, id)).map_err(|error| error.to_string())?;
+        let mut slot = SlotListener::forwarded(owner, place, endpoint, 0x8000_0000 + place as u32)
+            .ordered(priority, id);
+        // The guest's listener already owns the outcome (`mod_points::replace!`); the host's
+        // slot carries the mark, so a second replace at the place is refused for either target.
+        if replace {
+            slot = slot.replacing();
+        }
+        mod_points::register(&slot).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// The engine's API place `place` that a guest subscribed as its declared `inject`, checked
+/// against the game's own point list, not what the module says of itself: the target, the phase,
+/// and, for a `replace`, that its head returns `()` or an API value the listener can produce.
+fn checked_place(id: &str, inject: &Inject, place: u32) -> Result<PointId, String> {
+    let Some(&(point, target, at_return, replace_refusal)) = mod_points::API_PLACES
+        .iter()
+        .find(|(point, ..)| *point as u32 == place)
+    else {
+        return Err(format!("{id}: no API record for place {place}"));
+    };
+    if inject.access != Access::Api
+        || !matches!(
+            inject.kind,
+            Kind::Head | Kind::ModifyArg | Kind::Replace | Kind::Return
+        )
+        || (inject.kind == Kind::Return) != at_return
+        || horizon_mod_point_emit::plain_path(&inject.at)
+            != horizon_mod_point_emit::plain_path(target)
+    {
+        return Err(format!(
+            "{id}: listener does not match its declared API head/return target"
+        ));
+    }
+    if let Some(ty) = replace_refusal.filter(|_| inject.kind == Kind::Replace) {
+        return Err(format!(
+            "{id}: no replace listener at {target}: a replace returns the function's value, and \
+             `{ty}` has no API form"
+        ));
+    }
+    Ok(point)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inject(kind: Kind, at: &str) -> Inject {
+        Inject {
+            id: "own".into(),
+            at: at.into(),
+            kind,
+            with: "own".into(),
+            access: Access::Api,
+            priority: 0,
+            hash: "pin".into(),
+            call: None,
+            nth: None,
+            ctx: None,
+        }
+    }
+
+    /// A module built without the build tool may subscribe a `replace` anywhere: the loader
+    /// refuses one at a head whose return it can't produce, by the game's own point list.
+    #[test]
+    fn a_replace_is_checked_against_the_games_point_list_at_load() {
+        let heads = || {
+            mod_points::API_PLACES
+                .iter()
+                .filter(|(_, _, at_return, _)| !at_return)
+        };
+        let &(fallible, target, _, refusal) = heads()
+            .find(|(.., refusal)| refusal.is_some_and(|ty| ty.starts_with("Result")))
+            .expect("a game point returning Result<(), E> with an API record");
+        let error =
+            checked_place("own", &inject(Kind::Replace, target), fallible as u32).unwrap_err();
+        assert!(
+            error.contains(target) && error.contains(&format!("`{}`", refusal.unwrap())),
+            "{error}"
+        );
+        // An ordinary head listener there is unaffected.
+        assert_eq!(
+            checked_place("own", &inject(Kind::Head, target), fallible as u32),
+            Ok(fallible)
+        );
+        let &(owned, target, ..) = heads()
+            .find(|(.., refusal)| refusal.is_none())
+            .expect("a game point a replace can own");
+        assert_eq!(
+            checked_place("own", &inject(Kind::Replace, target), owned as u32),
+            Ok(owned)
+        );
+    }
 }

@@ -30,7 +30,7 @@ class ScreenMouseScrolledTests(unittest.TestCase):
         fixture = r"""
 use std::cell::RefCell;
 fn glfw_modifiers(bits: u32) -> u32 { bits }
-struct NativeScreenView<'a> { id: &'a str, mouse: [f32; 2] }
+struct ScreenView<'a> { id: &'a str, mouse: [f32; 2] }
 mod native_hooks {
     #[derive(Debug, PartialEq)]
     pub enum ScreenMousePost { Scroll([f64; 2]) }
@@ -39,11 +39,11 @@ struct Game { modifiers: u32, synthetic: bool, open: bool, cancel: bool,
     calls: RefCell<Vec<&'static str>>, scrolled: usize }
 impl Game {
     fn pad_synthetic_input(&self) -> bool { self.synthetic }
-    fn screen_view_now(&self) -> Option<NativeScreenView<'_>> {
-        self.open.then_some(NativeScreenView { id: "inventory", mouse: [7.0, 9.0] })
+    fn screen_view_now(&self) -> Option<ScreenView<'_>> {
+        self.open.then_some(ScreenView { id: "inventory", mouse: [7.0, 9.0] })
     }
     PRE
-    fn fire_screen_mouse_scrolled_pre(&self, screen: &NativeScreenView<'_>, scroll: [f64; 2], modifiers: u32, canceled: &mut bool) {
+    fn fire_screen_mouse_scrolled_pre(&self, screen: &ScreenView<'_>, scroll: [f64; 2], modifiers: u32, canceled: &mut bool) {
         assert_eq!((screen.id, screen.mouse, scroll, modifiers),
             ("inventory", [7.0, 9.0], [3.0, -2.0], 5));
         assert!(!*canceled);

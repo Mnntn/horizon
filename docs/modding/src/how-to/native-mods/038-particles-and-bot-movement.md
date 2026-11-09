@@ -20,8 +20,8 @@ for these parameter families. Sending an option performs no string parsing or re
 ### Bot movement and block collisions
 
 `PlayerRef::simulate_move` predicts one server player's movement tick from
-`NativePlayerInput`, using the game's movement implementation without replacing the
-live player's body. It returns `NativeSimulatedMove` with position, velocity, ground,
+`PlayerInput`, using the game's movement implementation without replacing the
+live player's body. It returns `SimulatedMove` with position, velocity, ground,
 horizontal-collision and sprinting results. It refuses stale or inaccessible players,
 dead players, spectators, riders and invalid numeric input. A supplied velocity is
 input to the prediction, not a write to the player.

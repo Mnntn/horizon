@@ -24,7 +24,7 @@ use horizon_core::{
     random::{LegacyRandom, RandomSource, WorldgenRandom, XoroshiroRandom},
 };
 use horizon_world::dimension_type::DimensionFacts;
-use mod_api::{NativeSpawnCheck, SpawnFlags, SpawnLimits};
+use mod_api::{SpawnCheck, SpawnFlags, SpawnLimits};
 use std::collections::HashMap;
 use {
     horizon_core::nbt::{Compound, Tag},
@@ -619,7 +619,7 @@ impl SpawnLevel for GameLevel<'_, '_> {
         if !mod_api::__private::listened(mod_api::HookId::MobSpawnPlacementCheck) {
             return vanilla;
         }
-        let mut result = NativeSpawnCheck::Default;
+        let mut result = SpawnCheck::Default;
         self.game.native_mob_spawn_placement_check(
             mod_api::__private::MobSpawnPlacementCheckCall {
                 dimension: self.game.dim.id(),
@@ -633,8 +633,8 @@ impl SpawnLevel for GameLevel<'_, '_> {
             },
         );
         match result {
-            NativeSpawnCheck::Succeed => true,
-            NativeSpawnCheck::Fail => false,
+            SpawnCheck::Succeed => true,
+            SpawnCheck::Fail => false,
             _ => vanilla,
         }
     }
@@ -716,8 +716,8 @@ impl NaturalLevel for GameLevel<'_, '_> {
         reason: Reason,
         at: [f64; 3],
         pending: spawn_selection::Pending,
-    ) -> NativeSpawnCheck {
-        let mut result = NativeSpawnCheck::Default;
+    ) -> SpawnCheck {
+        let mut result = SpawnCheck::Default;
         if !mod_api::__private::listened(mod_api::HookId::MobSpawnPositionCheck) {
             return result;
         }
@@ -1767,7 +1767,7 @@ mod tests {
     }
 
     /// Answers both spawn checks with one fixed result.
-    struct ChecksMod(NativeSpawnCheck);
+    struct ChecksMod(SpawnCheck);
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for ChecksMod {
         fn mob_spawn_placement_check(
@@ -1823,7 +1823,7 @@ mod tests {
                 );
                 (ok, random.next_int())
             };
-            let run = |answer: Option<NativeSpawnCheck>| {
+            let run = |answer: Option<SpawnCheck>| {
                 let go = || {
                     (
                         placement(&mut LegacyRandom::new(11)),
@@ -1848,8 +1848,8 @@ mod tests {
             let none = run(None);
             assert!(none.0.0, "the sulfur cube's predicate has no conditions");
             assert_eq!(none.1, (false, second), "vanilla's closure drew once");
-            assert_eq!(run(Some(NativeSpawnCheck::Default)), none);
-            let succeed = run(Some(NativeSpawnCheck::Succeed));
+            assert_eq!(run(Some(SpawnCheck::Default)), none);
+            let succeed = run(Some(SpawnCheck::Succeed));
             assert_eq!(
                 succeed.0,
                 (true, none.0.1),
@@ -1860,7 +1860,7 @@ mod tests {
                 (true, first),
                 "Succeed skips the checks and their draws"
             );
-            let fail = run(Some(NativeSpawnCheck::Fail));
+            let fail = run(Some(SpawnCheck::Fail));
             assert_eq!(fail.0, (false, none.0.1));
             assert_eq!(fail.1, (false, first));
         });
@@ -1886,7 +1886,7 @@ mod tests {
     /// Records both spawn checks and answers the position check with `answer`, reading the lent
     /// mob and changing nothing else.
     struct ContextMod {
-        answer: NativeSpawnCheck,
+        answer: SpawnCheck,
         log: Log,
     }
     #[mod_api::__subscriptions]
@@ -1965,7 +1965,7 @@ mod tests {
     /// Runs `go` with no mod (`None`), or with a position-check listener answering `answer`
     /// beside `extra` mods, and what that listener heard.
     fn with_checks<R>(
-        answer: Option<NativeSpawnCheck>,
+        answer: Option<SpawnCheck>,
         extra: impl Fn() -> Vec<mod_api::ModEntry>,
         go: impl FnOnce() -> R,
     ) -> (R, Vec<Heard>) {
@@ -2077,7 +2077,7 @@ mod tests {
                 "one provisional id per spawned mob"
             );
             let (listened, heard) =
-                with_checks(Some(NativeSpawnCheck::Default), spawns, || attempt(game));
+                with_checks(Some(SpawnCheck::Default), spawns, || attempt(game));
             assert_eq!(listened, unlistened, "same draws, ids and mobs");
             let positions: Vec<_> = heard.iter().filter(|h| h.hook == "position").collect();
             assert!(positions.len() >= unlistened.0.len());
@@ -2097,8 +2097,7 @@ mod tests {
                 );
                 assert!(positions.iter().any(|h| h.mob.as_ref() == Some(&reads)));
             }
-            let (refused, heard) =
-                with_checks(Some(NativeSpawnCheck::Fail), spawns, || attempt(game));
+            let (refused, heard) = with_checks(Some(SpawnCheck::Fail), spawns, || attempt(game));
             assert!(refused.0.is_empty(), "a failed check adds nothing");
             assert_eq!(refused.1, 0, "and gives each provisional id back");
             assert!(heard.iter().any(|h| h.hook == "position"));
@@ -2154,9 +2153,8 @@ mod tests {
             };
             let (unlistened, _) = with_checks(None, Vec::new, || tick(game, None));
             assert!(!unlistened.0.is_empty(), "the spawner spawns");
-            let (listened, heard) = with_checks(Some(NativeSpawnCheck::Default), Vec::new, || {
-                tick(game, None)
-            });
+            let (listened, heard) =
+                with_checks(Some(SpawnCheck::Default), Vec::new, || tick(game, None));
             assert_eq!(listened, unlistened, "same draws, ids and mobs");
             assert!(heard.iter().any(|h| h.hook == "placement"));
             for h in &heard {
@@ -2176,7 +2174,7 @@ mod tests {
                 );
             }
             let (refused, heard) =
-                with_checks(Some(NativeSpawnCheck::Fail), Vec::new, || tick(game, None));
+                with_checks(Some(SpawnCheck::Fail), Vec::new, || tick(game, None));
             assert!(heard.iter().any(|h| h.hook == "position"));
             assert_eq!(
                 (refused.0.len(), refused.1, refused.2),
@@ -2185,9 +2183,8 @@ mod tests {
             );
             // Entity data: the mob is loaded after the tick, so the lend is its kind and position.
             let health = || Some(("Health", Tag::Float(5.0f32.to_bits())));
-            let (_, heard) = with_checks(Some(NativeSpawnCheck::Default), Vec::new, || {
-                tick(game, health())
-            });
+            let (_, heard) =
+                with_checks(Some(SpawnCheck::Default), Vec::new, || tick(game, health()));
             let lent: Vec<_> = heard.iter().filter_map(|h| h.mob.clone()).collect();
             assert!(!lent.is_empty());
             for (kind, position, head) in lent {
@@ -2243,8 +2240,7 @@ mod tests {
             let (unlistened, _) = with_checks(None, Vec::new, || tick(game));
             assert_eq!(unlistened.0.len(), 1, "the trial spawner spawns one mob");
             assert!(unlistened.0[0].4, "a trial spawner's mob is persistent");
-            let (listened, heard) =
-                with_checks(Some(NativeSpawnCheck::Default), Vec::new, || tick(game));
+            let (listened, heard) = with_checks(Some(SpawnCheck::Default), Vec::new, || tick(game));
             assert_eq!(listened, unlistened, "same draws, ids and mob");
             let lent = (
                 Ok(mod_api::Identifier::parse(SULFUR_CUBE).unwrap()),
@@ -2259,8 +2255,7 @@ mod tests {
                     (SULFUR_CUBE, level, Some(trial))
                 );
             }
-            let (refused, heard) =
-                with_checks(Some(NativeSpawnCheck::Fail), Vec::new, || tick(game));
+            let (refused, heard) = with_checks(Some(SpawnCheck::Fail), Vec::new, || tick(game));
             assert!(heard.iter().any(|h| h.hook == "position"));
             assert_eq!(
                 (refused.0.len(), refused.1, refused.2),
@@ -2394,9 +2389,7 @@ mod tests {
     }
 
     /// Records the kind and reason of every `finalize_spawn` event.
-    struct RecordFinalize(
-        std::sync::Arc<std::sync::Mutex<Vec<(String, mod_api::NativeSpawnReason)>>>,
-    );
+    struct RecordFinalize(std::sync::Arc<std::sync::Mutex<Vec<(String, mod_api::SpawnReason)>>>);
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for RecordFinalize {
         fn finalize_spawn(
@@ -2450,7 +2443,7 @@ mod tests {
 
     /// Answers every `mob_despawn` event with the value in its cell and counts them.
     struct Despawns(
-        std::sync::Arc<std::sync::Mutex<mod_api::NativeDespawn>>,
+        std::sync::Arc<std::sync::Mutex<mod_api::Despawn>>,
         std::sync::Arc<std::sync::atomic::AtomicUsize>,
     );
     #[mod_api::__subscriptions]
@@ -2471,7 +2464,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
     fn mob_despawn_answers_override_vanilla_and_default_passes_through() {
         use super::super::native_entity_refs::tests::with_game;
-        use mod_api::NativeDespawn::{Allow, Default as Vanilla, Deny};
+        use mod_api::Despawn::{Allow, Default as Vanilla, Deny};
         use std::sync::atomic::Ordering::Relaxed;
         let answer = std::sync::Arc::new(std::sync::Mutex::new(Vanilla));
         let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -2568,7 +2561,7 @@ mod tests {
             player.x += 40.0;
             world.nearest_player = Some(player);
             horizon_client::mobs::ai::despawn_check(&mut mob, &world);
-            assert_eq!(mob.despawn, mod_api::NativeDespawn::Default);
+            assert_eq!(mob.despawn, mod_api::Despawn::Default);
             assert_ne!(
                 mob.random.next_int_bound(1 << 30),
                 untouched.next_int_bound(1 << 30),
@@ -2576,8 +2569,6 @@ mod tests {
             );
         });
     }
-
-    use mod_api::NativeSpawnReason;
 
     /// Answers the group size limit of a type, reading the mob it is lent.
     struct ZombieClusters;
@@ -2587,12 +2578,12 @@ mod tests {
             &self,
             host: &dyn mod_api::Host,
             mob: mod_api::UnspawnedMobRef,
-            reason: NativeSpawnReason,
-            _: Option<mod_api::NativeSpawner>,
+            reason: mod_api::SpawnReason,
+            _: Option<mod_api::SpawnSource>,
             vanilla: u32,
         ) -> Option<u32> {
             assert_eq!(mob.kind(host).unwrap().to_string(), "minecraft:zombie");
-            Some(if reason == NativeSpawnReason::Natural {
+            Some(if reason == mod_api::SpawnReason::Natural {
                 vanilla * 2
             } else {
                 1
@@ -2607,8 +2598,8 @@ mod tests {
             &self,
             _: &dyn mod_api::Host,
             _: mod_api::UnspawnedMobRef,
-            _: NativeSpawnReason,
-            _: Option<mod_api::NativeSpawner>,
+            _: mod_api::SpawnReason,
+            _: Option<mod_api::SpawnSource>,
             _: u32,
         ) -> Option<u32> {
             Some(9)
@@ -2656,10 +2647,19 @@ mod tests {
                 Mob::new(1, kind, Vec3::ZERO, 0.0)
             };
             let ask = |id: &str, reason| game.spawn_cluster_size(&mut mob(id), reason, None, 4);
-            assert_eq!(ask("minecraft:zombie", NativeSpawnReason::Natural), Some(8));
-            assert_eq!(ask("minecraft:zombie", NativeSpawnReason::Spawner), Some(1));
-            assert_eq!(ask("minecraft:skeleton", NativeSpawnReason::Natural), None);
-            assert_eq!(ask("minecraft:cow", NativeSpawnReason::Natural), None);
+            assert_eq!(
+                ask("minecraft:zombie", mod_api::SpawnReason::Natural),
+                Some(8)
+            );
+            assert_eq!(
+                ask("minecraft:zombie", mod_api::SpawnReason::Spawner),
+                Some(1)
+            );
+            assert_eq!(
+                ask("minecraft:skeleton", mod_api::SpawnReason::Natural),
+                None
+            );
+            assert_eq!(ask("minecraft:cow", mod_api::SpawnReason::Natural), None);
         });
     }
 }

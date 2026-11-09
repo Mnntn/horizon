@@ -21,7 +21,7 @@ impl Game<'_> {
         facing: Direction,
         state: BlockStateId,
         stack: &ItemStack,
-        answer: &mut Option<NativeDispensed>,
+        answer: &mut Option<mod_api::Dispensed>,
     ) {
         self.fire_dispense_method(dimension, pos, facing, state, stack, answer);
     }

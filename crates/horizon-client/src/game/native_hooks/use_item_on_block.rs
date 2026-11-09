@@ -7,9 +7,9 @@ impl Game<'_> {
     /// `cancellation_result` (initially `TryWithEmptyHand`).
     pub(in crate::game) fn native_use_item_on_block(
         &mut self,
-        click: &NativeBlockClick<'_>,
+        click: &BlockClick<'_>,
         phase: UsePhase,
-        cancellation_result: &mut NativeInteractionResult,
+        cancellation_result: &mut mod_api::InteractionResult,
         canceled: &mut bool,
     ) {
         self.fire_use_item_on_block(click, phase, cancellation_result, canceled);

@@ -1,6 +1,6 @@
 //! Callbacks into the executable for data-loading native trait mods.
 use crate::{
-    loot::{LootStack, NativeLootContext},
+    loot::{LootContext, LootStack},
     native_load_context::LoadContext,
 };
 use serde_json::{Map, Value};
@@ -10,8 +10,8 @@ use std::sync::OnceLock;
 pub struct NativeLoadHooks {
     pub loot_table_load: fn(&LoadContext, &str, &mut Value),
     pub modify_default_components: fn(&LoadContext, &str, &mut Map<String, Value>),
-    pub loot_function: fn(&str, &Value, &NativeLootContext<'_>, &mut LootStack),
-    pub loot_condition: fn(&str, &Value, &NativeLootContext<'_>, &mut bool),
+    pub loot_function: fn(&str, &Value, &LootContext<'_>, &mut LootStack),
+    pub loot_condition: fn(&str, &Value, &LootContext<'_>, &mut bool),
 }
 
 static HOOKS: OnceLock<NativeLoadHooks> = OnceLock::new();
@@ -40,7 +40,7 @@ pub(crate) fn modify_default_components(
 pub(crate) fn loot_function(
     kind: &str,
     data: &Value,
-    ctx: &NativeLootContext<'_>,
+    ctx: &LootContext<'_>,
     stack: &mut LootStack,
 ) {
     if let Some(hooks) = HOOKS.get() {
@@ -48,12 +48,7 @@ pub(crate) fn loot_function(
     }
 }
 
-pub(crate) fn loot_condition(
-    kind: &str,
-    data: &Value,
-    ctx: &NativeLootContext<'_>,
-    holds: &mut bool,
-) {
+pub(crate) fn loot_condition(kind: &str, data: &Value, ctx: &LootContext<'_>, holds: &mut bool) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.loot_condition)(kind, data, ctx, holds);
     }

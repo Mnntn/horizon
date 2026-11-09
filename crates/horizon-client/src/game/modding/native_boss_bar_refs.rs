@@ -420,7 +420,7 @@ mod tests {
             // A player handle from an earlier session cannot edit membership.
             let stale = mod_api::__private::game::player_ref(
                 mod_api::EntityRef::new(
-                    mod_api::NativeWorldEpoch::new(b.entity().epoch().get() + 1),
+                    mod_api::WorldEpoch::new(b.entity().epoch().get() + 1),
                     b.entity().id(),
                 ),
                 456,

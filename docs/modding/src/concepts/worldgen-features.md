@@ -42,7 +42,7 @@ These are verified source entry points at the base above, not proof of complete 
 | Growth configured and placed routes | `crates/horizon-world/src/level/growth.rs:291`, `:339` document the two placement paths; lift effects into the existing action transaction. |
 | Catalog decoding | `crates/horizon-world/src/worldgen/feature_catalog.rs:111` owns placed_feature; resolve custom implementations here through the shared candidate decoder. |
 | Shared target | `crates/horizon-world/src/worldgen/feature.rs:30` owns FeatureWorld; bridge this boundary rather than introducing a second block store. |
-| Structure contexts | `crates/horizon-mod-api/src/structure_type.rs` owns GenerationContext and PieceContext; reuse principles, retain separate registration and behavior. |
+| Structure contexts | `crates/horizon-mod-api/src/world/structure_type.rs` owns GenerationContext and PieceContext; reuse principles, retain separate registration and behavior. |
 
 Initial world load, datapack reload, remote world authority, worker cancellation and chunk installation must be traced through their owning lifecycle coordinator before coding. Remote clients never independently execute authoritative mod generation. This note does not assert uninspected file:line owners for those routes.
 

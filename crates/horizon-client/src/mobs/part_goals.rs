@@ -14,8 +14,8 @@ use super::{
     goals::{Cx, Goal as EngineGoal, GoalSelector},
 };
 use mod_api::{
-    NativeWorldEpoch,
-    crash::{NativeModCall, enter_native_mod},
+    WorldEpoch,
+    content::crash::{ModCall, enter_native_mod},
 };
 
 /// The native side a mod goal runs against (the `mob_hooks` pattern): the
@@ -25,7 +25,7 @@ use mod_api::{
 /// wherever no mod attached an entity part — so no other side runs one.
 pub trait GoalHost {
     /// The handles' epoch: a handle of an earlier world refuses.
-    fn epoch(&self) -> Option<NativeWorldEpoch>;
+    fn epoch(&self) -> Option<WorldEpoch>;
     /// Whether a merchant lent to this tick remains available to server hooks.
     fn merchant_is_live(&self, mob: &Mob) -> bool;
     /// Read the current offers, including a guest's more recent trade session.
@@ -151,7 +151,7 @@ pub fn attach(m: &mut Mob) {
     }
     let (id, mob_id) = (m.id, &m.kind.id);
     for attached in list {
-        let _guard = enter_native_mod(NativeModCall {
+        let _guard = enter_native_mod(ModCall {
             id: attached.mod_id(),
             hook: "register_goals",
             part: Some(attached.type_name()),

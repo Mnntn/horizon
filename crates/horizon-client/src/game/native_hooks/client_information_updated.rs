@@ -13,8 +13,8 @@ impl Game<'_> {
         player: u128,
         player_entity_id: i32,
         name: &str,
-        old: &mod_api::NativeClientInfo,
-        new: &mod_api::NativeClientInfo,
+        old: &mod_api::ClientInfo,
+        new: &mod_api::ClientInfo,
     ) {
         self.fire_client_information_updated(player, player_entity_id, name, old, new);
     }

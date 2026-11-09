@@ -53,7 +53,7 @@ for record in import_edits:
 checked = 0
 for name in subprocess.check_output(['git', 'diff', '--name-only', '--diff-filter=M', BASE, '--', '*.rs'], text=True).splitlines():
     if name.startswith(('crates/horizon-mod-api-gen/', 'crates/horizon-mod-api-macros/', 'crates/horizon-mod-api/src/host/', 'crates/horizon-mod-api/src/hooks/')) or name in {
-        'crates/horizon-mod-api/src/phase.rs', 'crates/horizon-client/src/game/host/mod.rs',
+        'crates/horizon-mod-api/src/world/phase.rs', 'crates/horizon-client/src/game/host/mod.rs',
     }:
         continue
     source = subprocess.check_output(['git', 'show', f'{BASE}:{name}'], text=True)

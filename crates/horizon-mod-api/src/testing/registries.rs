@@ -25,7 +25,7 @@ impl FakeRegistries {
                 .expect("empty fake registration has no errors");
         }
         let ids: Vec<_> = ids.into_iter().map(|id| id.to_string()).collect();
-        crate::registry_keys::resolve_items(ids.iter().map(String::as_str))
+        crate::content::registry_keys::resolve_items(ids.iter().map(String::as_str))
     }
     pub(super) fn resolved_item_id(key: crate::ItemKey) -> Option<&'static str> {
         crate::parts::installed()?.resolved_items.get()?.id(key.0)
@@ -79,7 +79,7 @@ impl FakeRegistries {
 // A fake has an authoritative empty tag registry; it never invents members.
 impl crate::Tags for FakeRegistries {
     fn key(&self, id: &crate::Identifier) -> Option<crate::TagKey> {
-        crate::tags::tag_key(id)
+        crate::world::tags::tag_key(id)
     }
     fn is_in_tag(&self, item: crate::ItemKey, _: crate::TagKey) -> Option<bool> {
         Self::resolved_item_id(item)?;

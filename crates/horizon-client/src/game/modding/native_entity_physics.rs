@@ -48,7 +48,7 @@ mod tests {
         use horizon_client::motion::PlayerMotion;
         use horizon_client::projectiles::{Projectile, ProjectileKind};
         use horizon_core::geometry::Vec3;
-        use mod_api::NativeWorldEpoch;
+        use mod_api::WorldEpoch;
 
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -132,7 +132,7 @@ mod tests {
             ));
             let boat = game.entity(44).unwrap();
             assert_eq!(boat.no_physics(game), None);
-            let stale = EntityRef::new(NativeWorldEpoch::new(mob.epoch().get() + 1), mob.id());
+            let stale = EntityRef::new(WorldEpoch::new(mob.epoch().get() + 1), mob.id());
             assert_eq!(stale.no_physics(game), None);
         });
     }

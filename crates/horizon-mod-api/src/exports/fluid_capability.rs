@@ -1,5 +1,4 @@
-mod fluid_capability;
-pub use fluid_capability::{
+pub use block::fluid_capability::{
     FLUIDS, FluidIngredient, FluidIngredientError, FluidResource, FluidStack, ITEM_FLUIDS,
     SizedFluidIngredient,
 };

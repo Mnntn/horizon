@@ -1362,7 +1362,7 @@ pub struct Extra {
     pub sitting: bool,
     /// `Parrot.partyParrot` and `jukebox`: the playing jukebox it dances to.
     pub party_jukebox: Option<[i32; 3]>,
-    /// The owner's UUID (tamed animals).
+    /// The owner's UUID: a tamed animal's, or the reference a vex was loaded with.
     pub owner: Option<[i32; 4]>,
     /// `Vindicator.isJohnny`: a custom name that was ever `Johnny`, which
     /// `setCustomName` latches and nothing clears.
@@ -1897,7 +1897,7 @@ pub struct Mob {
     /// Set by `remove`: the mob disappears without dying (conversion, despawn, pickup).
     pub removed: bool,
     /// What `mob_despawn` answered for this tick, read and reset by `check_despawn`.
-    pub despawn: mod_api::NativeDespawn,
+    pub despawn: mod_api::Despawn,
     /// Client-side animation clocks (attack swing, eating, shaking...).
     pub anim: anim::AnimState,
     /// Attribute values that differ per mob (slime size, babies, effects).
@@ -4083,7 +4083,7 @@ impl Mob {
             last_direct: None,
             combat: combat::Tracker::default(),
             removed: false,
-            despawn: mod_api::NativeDespawn::Default,
+            despawn: mod_api::Despawn::Default,
             custom_name: None,
             custom_name_text: None,
             name_visible: false,

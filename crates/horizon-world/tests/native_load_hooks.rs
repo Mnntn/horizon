@@ -71,7 +71,7 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     }
     std::fs::remove_dir_all(&root).unwrap();
 
-    let ctx = loot::NativeLootContext {
+    let ctx = loot::LootContext {
         entity: None,
         damage: None,
         player: None,

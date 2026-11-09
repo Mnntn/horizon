@@ -1,2 +1,1 @@
-mod level_write_error;
-pub use level_write_error::LevelWriteError;
+pub use world::level_write_error::LevelWriteError;

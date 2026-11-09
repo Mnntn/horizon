@@ -15,7 +15,7 @@ use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::level_sounds::LevelSound;
 use super::{
     Dim, Game, Hand, InteractTarget, entity_culling::EntityCullDecision,
-    native_mob_draw::NativePlayerRender, native_projectiles::Impact, view_vector,
+    native_mob_draw::PlayerRender, native_projectiles::Impact, view_vector,
 };
 use horizon_assets::item_model::DisplayContext;
 use horizon_client::actions::Action;
@@ -44,7 +44,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
-use mod_api::{EquipmentSlot, NativeLootDrops, SoundSource};
+use mod_api::{EquipmentSlot, LootDrops, SoundSource};
 use std::sync::Arc;
 
 /// `AbstractArrow.onHitEntity` when `hurtOrSimulate` returned false.
@@ -902,13 +902,13 @@ impl Game<'_> {
                 .find(|m| m.id == id)
                 .map(super::native_hooks::mob_kind)
                 .unwrap_or_default();
-            let mut entries = vec![mod_api::NativeArmorHurt {
+            let mut entries = vec![mod_api::ArmorHurt {
                 slot: EquipmentSlot::Body,
                 stack: body_snapshot,
                 damage: super::durability_damage(damage),
                 new_damage: super::durability_damage(damage),
             }];
-            let hit = mod_api::health::HurtSource {
+            let hit = mod_api::entity::health::HurtSource {
                 damage_type: name,
                 causing: 0,
                 direct: 0,
@@ -1302,7 +1302,7 @@ impl Game<'_> {
         &mut self,
         mob: &mut Mob,
         reason: SpawnReason,
-        spawner: Option<mod_api::NativeSpawner>,
+        spawner: Option<mod_api::SpawnSource>,
     ) -> Finalized {
         let mut group = None;
         let (outcome, difficulty) = self.finalize_spawn_event(mob, reason, spawner, &mut group);
@@ -1320,7 +1320,7 @@ impl Game<'_> {
         &self,
         mob: &mut Mob,
         reason: SpawnReason,
-        spawner: Option<mod_api::NativeSpawner>,
+        spawner: Option<mod_api::SpawnSource>,
         group: &mut Option<Group>,
     ) -> (Finalized, spawning::LocalDifficulty) {
         let at = [mob.position.x, mob.position.y, mob.position.z];
@@ -1339,7 +1339,7 @@ impl Game<'_> {
         &self,
         mob: &mut Mob,
         reason: SpawnReason,
-        spawner: Option<mod_api::NativeSpawner>,
+        spawner: Option<mod_api::SpawnSource>,
         vanilla: u32,
     ) -> Option<u32> {
         if !mod_api::__private::has_entity_parts() {
@@ -1354,11 +1354,12 @@ impl Game<'_> {
         let at = [mob.position.x, mob.position.y, mob.position.z];
         self.lend_unspawned(&kind, at, Some(mob), |lent, _| {
             list.iter().find_map(|attached| {
-                let _guard = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
-                    id: attached.mod_id(),
-                    hook: "spawn_cluster_size",
-                    part: Some(attached.type_name()),
-                });
+                let _guard =
+                    mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
+                        id: attached.mod_id(),
+                        hook: "spawn_cluster_size",
+                        part: Some(attached.type_name()),
+                    });
                 attached
                     .part()
                     .spawn_cluster_size(self, lent, reason, spawner, vanilla)
@@ -1373,7 +1374,7 @@ impl Game<'_> {
         kind: &str,
         at: [f64; 3],
         reason: SpawnReason,
-        spawner: Option<mod_api::NativeSpawner>,
+        spawner: Option<mod_api::SpawnSource>,
     ) -> (Finalized, spawning::LocalDifficulty) {
         let difficulty = self.local_difficulty(at);
         if !mod_api::__private::listened(mod_api::HookId::FinalizeSpawn) {
@@ -1389,12 +1390,12 @@ impl Game<'_> {
         kind: &str,
         at: [f64; 3],
         reason: SpawnReason,
-        spawner: Option<mod_api::NativeSpawner>,
+        spawner: Option<mod_api::SpawnSource>,
         difficulty: spawning::LocalDifficulty,
         mob: Option<&mut Mob>,
         group: &mut Option<Group>,
     ) -> (Finalized, spawning::LocalDifficulty) {
-        let mut heard = mod_api::NativeDifficulty::from(difficulty);
+        let mut heard = mod_api::Difficulty::from(difficulty);
         let (mut spawn_cancelled, mut skip) = (false, false);
         let given = group
             .as_ref()
@@ -1631,7 +1632,7 @@ impl Game<'_> {
             // The aborted pass never applies retention, including previously
             // finished despawn answers. Do not carry those into the retry.
             for m in &mut mobs {
-                m.despawn = mod_api::NativeDespawn::default();
+                m.despawn = mod_api::Despawn::default();
             }
         }
         lent.give_back(&mut self.world);
@@ -2290,7 +2291,7 @@ impl Game<'_> {
             }
         }
         let table = drops::death_loot_table(m, death.mob_drops).filter(|t| loot.has_table(t));
-        let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
+        let context = LootDrops::from(mod_api::__private::built::LootDrops {
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
             origin: [m.position.x, m.position.y, m.position.z],
@@ -8716,7 +8717,7 @@ impl Game<'_> {
             let who = is_player
                 .then(|| self.remote_player_name(mob.id))
                 .flatten()
-                .map(|name| NativePlayerRender { name, local: false });
+                .map(|name| PlayerRender { name, local: false });
             let mut hidden = mod_api::HiddenParts::default();
             let modded = if layers_only {
                 false
@@ -12395,10 +12396,10 @@ mod armor_destroy_tests {
         });
     }
     use crate::game::{answered_wear, durability_damage, native_entity_refs::tests::with_game};
-    use mod_api::{EquipmentSlot, NativeArmorHurt};
+    use mod_api::EquipmentSlot;
 
-    fn entry(slot: EquipmentSlot, new_damage: f32) -> NativeArmorHurt {
-        NativeArmorHurt {
+    fn entry(slot: EquipmentSlot, new_damage: f32) -> mod_api::ArmorHurt {
+        mod_api::ArmorHurt {
             slot,
             stack: mod_api::ItemStack::new(
                 mod_api::__private::item_key("minecraft:diamond_helmet").unwrap(),
@@ -13137,7 +13138,7 @@ mod chorus_projectile_drop_tests {
         )
         .unwrap();
         game.native_lifecycle
-            .begin_open(mod_api::NativeAuthority::IntegratedServer);
+            .begin_open(mod_api::Authority::IntegratedServer);
         game.build_registries();
         game.set_allow_commands(true);
 

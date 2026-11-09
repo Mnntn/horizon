@@ -153,8 +153,8 @@ mod model_layers {
 /// stops later mods. The fork's existing typed event owns this moment.
 #[test]
 fn an_anvil_update_is_changed_in_turn_and_cancel_stops_later_mods() {
-    use mod_api::menu::AnvilUpdate;
-    use mod_api::stations::AnvilResult;
+    use mod_api::item::menu::AnvilUpdate;
+    use mod_api::item::stations::AnvilResult;
     use mod_api::{AnvilUpdateEvent, Flow, Host, HostSide, ItemStack, ServerHost};
     fn key(id: &str) -> mod_api::ItemKey {
         mod_api::__private::item_key(id).unwrap()

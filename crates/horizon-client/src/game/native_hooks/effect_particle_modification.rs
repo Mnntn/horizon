@@ -13,7 +13,7 @@ impl Game<'_> {
     pub(in crate::game) fn native_effect_particle_modification(
         &self,
         entity: LivingRef,
-        effect: &NativeActiveEffect,
+        effect: &ActiveEffect,
         original_particle: &ParticleOptions,
         particle: &mut Option<ParticleOptions>,
         visible: &mut bool,

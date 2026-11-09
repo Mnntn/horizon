@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE = '483e1ff91d'
-SOURCE = 'crates/horizon-mod-api/src/merchant.rs'
+SOURCE = 'crates/horizon-mod-api/src/item/merchant.rs'
 original = subprocess.check_output(['git', 'show', f'{BASE}:{SOURCE}'], cwd=ROOT, text=True)
 old = '''//! Moved here from the game so mods can name it.
 #[allow(unused_imports)]
@@ -26,7 +26,7 @@ output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(original.replace(old, new))
 parent = ROOT / 'crates/horizon-client/src/merchant.rs'
 text = parent.read_text()
-old_use = 'pub use mod_api::merchant::{ItemCost, MerchantOffer};'
+old_use = 'pub use mod_api::item::merchant::{ItemCost, MerchantOffer};'
 assert text.count(old_use) == 1
 parent.write_text(text.replace(old_use, 'mod offer;\npub use offer::{ItemCost, MerchantOffer};'))
 print('Restored engine offer operations; only module imports changed')

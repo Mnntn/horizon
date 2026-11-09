@@ -745,7 +745,7 @@ mod tests {
                 for block in ["minecraft:stone", "minecraft:chest"] {
                     let state = host.block_state_id(block).unwrap();
                     assert_eq!(
-                        level.set_block(host, [0, 64, 0], state, NativeBlockUpdateFlags::NEIGHBORS),
+                        level.set_block(host, [0, 64, 0], state, BlockUpdateFlags::NEIGHBORS),
                         Ok(true)
                     );
                 }
@@ -804,12 +804,7 @@ mod tests {
             ] {
                 let state = game.pack.assets.registry.default_state(name).unwrap();
                 assert_eq!(
-                    game.level_set_block(
-                        level,
-                        [x, 64, 0],
-                        state,
-                        NativeBlockUpdateFlags::NEIGHBORS
-                    ),
+                    game.level_set_block(level, [x, 64, 0], state, BlockUpdateFlags::NEIGHBORS),
                     Ok(true)
                 );
             }
@@ -825,12 +820,7 @@ mod tests {
                 let previous = if case != "replacement" {
                     let state = game.world.block(0, 64, 0);
                     assert_eq!(
-                        game.level_set_block(
-                            level,
-                            [5, 64, 0],
-                            state,
-                            NativeBlockUpdateFlags::NEIGHBORS
-                        ),
+                        game.level_set_block(level, [5, 64, 0], state, BlockUpdateFlags::NEIGHBORS),
                         Ok(true)
                     );
                     let other = game.block_entity(level, [5, 64, 0]).unwrap();
@@ -967,12 +957,7 @@ mod tests {
                     })
                     .unwrap();
                 assert_eq!(
-                    game.level_set_block(
-                        level,
-                        [x, 64, 0],
-                        state,
-                        NativeBlockUpdateFlags::NEIGHBORS
-                    ),
+                    game.level_set_block(level, [x, 64, 0], state, BlockUpdateFlags::NEIGHBORS),
                     Ok(true)
                 );
             }
@@ -1002,7 +987,7 @@ mod tests {
     fn viewers_follow_open_menus_per_level_and_leave_out_fake_players() {
         use super::super::Dim;
         use horizon_world::chunk::BlockState;
-        use mod_api::{EntityRef, Host, NativeBlockUpdateFlags};
+        use mod_api::{BlockUpdateFlags, EntityRef, Host};
         super::super::native_guest_turn_tests::with_guests(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -1026,12 +1011,7 @@ mod tests {
                     })
                     .unwrap();
                 assert_eq!(
-                    game.level_set_block(
-                        level,
-                        [x, 64, 0],
-                        state,
-                        NativeBlockUpdateFlags::NEIGHBORS
-                    ),
+                    game.level_set_block(level, [x, 64, 0], state, BlockUpdateFlags::NEIGHBORS),
                     Ok(true)
                 );
                 game.block_entity(level, [x, 64, 0]).unwrap()
@@ -1120,7 +1100,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn writes_merge_data_name_and_roll_back_with_a_transaction() {
         use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
-        use mod_api::NativeBlockUpdateFlags;
+        use mod_api::BlockUpdateFlags;
         if run_fresh_cases(
             "game::native_block_entity_refs::tests::writes_merge_data_name_and_roll_back_with_a_transaction",
             "HORIZON_VANILLA_BE_REGISTRY_CHILD",
@@ -1139,7 +1119,7 @@ mod tests {
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             let level = game.level("minecraft:overworld").unwrap();
-            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            let flags = BlockUpdateFlags::NEIGHBORS;
             let states = ["minecraft:chest", "minecraft:daylight_detector"];
             for (i, name) in states.into_iter().enumerate() {
                 let state = game.pack.assets.registry.default_state(name).unwrap();
@@ -1280,7 +1260,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_abort_puts_back_the_lock_and_the_loot_table_roll() {
         use super::super::native_entity_refs::tests::with_game;
-        use mod_api::NativeBlockUpdateFlags;
+        use mod_api::BlockUpdateFlags;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -1288,7 +1268,7 @@ mod tests {
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             let level = game.level("minecraft:overworld").unwrap();
             let chest = game.pack.assets.registry.default_state("minecraft:chest");
-            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            let flags = BlockUpdateFlags::NEIGHBORS;
             assert_eq!(
                 game.level_set_block(level, [0, 64, 0], chest.unwrap(), flags),
                 Ok(true)
@@ -1333,13 +1313,13 @@ mod tests {
         use super::super::mod_api_host::LevelTicks;
         use super::super::native_entity_refs::tests::with_game;
         use horizon_world::chunk::BlockState;
-        use mod_api::{LevelWriteHost, NativeBlockUpdateFlags};
+        use mod_api::{BlockUpdateFlags, LevelWriteHost};
 
         fn write(
             game: &mut Game<'_>,
             pos: [i32; 3],
             state: mod_api::BlockState,
-            flags: NativeBlockUpdateFlags,
+            flags: BlockUpdateFlags,
         ) -> bool {
             game.with_level(|_, level, ticks| {
                 LevelWriteHost::set_block(&mut LevelTicks { level, ticks }, pos, state, flags)
@@ -1371,7 +1351,7 @@ mod tests {
             let api_chest = chest.try_into_api().unwrap();
             let api_young = young.try_into_api().unwrap();
             let api_grown = grown.try_into_api().unwrap();
-            let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::KNOWN_SHAPE;
+            let flags = BlockUpdateFlags::NEIGHBORS | BlockUpdateFlags::KNOWN_SHAPE;
             let key = (0, 64, 0);
 
             assert!(write(game, [0, 64, 0], api_stone, flags));

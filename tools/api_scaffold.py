@@ -2,13 +2,12 @@
 """First-pass scaffolding of missing mod_api types, written as ordinary hand-editable source.
 
 For each engine type in the allow-list (api_scaffold.toml) it adds, never overwriting:
-  * the API type to crates/horizon-mod-api/src/<topic>.rs (a mirror, or an `XRef` handle);
+  * the API type to crates/horizon-mod-api/src/<domain>/<topic>.rs (a mirror, or an `XRef` handle);
   * its re-export to src/exports/<topic>.rs;
   * for a handle with methods, a `<Name>Backend` host area to src/host/<topic>.rs;
   * both conversions to crates/horizon-client/src/game/modding/api_values/<topic>.rs.
 It refuses when the type or its `<Name>Backend` already exists in crates/horizon-mod-api/src, and never
-targets lib.rs. Conversions in the client crate are not checked. A handle also gets hand-written opaque
-`Wire` and `Fields` impls; other kinds get their `Wire` impls from horizon-mod-api-gen.
+targets lib.rs. Conversions in the client crate are not checked. Every emitted value explicitly derives `Wire`; handles also get a `Fields` impl.
 
   api_scaffold.py --dry-run [--inventory points-inventory-runtime.json] [--report out.md]
   api_scaffold.py --apply
@@ -24,6 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 API = Path('crates/horizon-mod-api/src')
 CONV = Path('crates/horizon-client/src/game/modding/api_values')
+DOMAINS = ('world', 'block', 'item', 'entity', 'client', 'command', 'text', 'content', 'wire')
 SKIP = set('Option Vec Result R Box Self dyn mut str String Path static Game Host super std path crate fn impl '
            'Fn FnMut FnOnce Cow HashMap HashSet Rc Arc i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 usize isize '
            'f32 f64 bool char'.split())
@@ -49,10 +49,14 @@ def check_entry(e):
     """Validate an allow-list entry once, where it enters; everything after trusts it."""
     if e.get('kind') not in ('struct', 'enum', 'handle'):
         raise Refuse(f"{e.get('engine')}: kind must be struct, enum or handle")
+    if e.get('domain') not in DOMAINS:
+        raise Refuse(f"domain {e.get('domain')!r} must be one of {', '.join(sorted(DOMAINS))}")
     ident('topic', e.get('topic'))
     if e['topic'] != e['topic'].lower():
         raise Refuse(f"topic {e['topic']!r} must be a lower-case module name")
-    ident('api name', api_name(e))
+    name = ident('api name', api_name(e))
+    if name.startswith('Native'):
+        raise Refuse(f'api name {name!r} must not use the Native prefix')
     for v in e.get('variants', []):
         ident('variant', v)
     for f in e.get('fields', []):
@@ -71,18 +75,19 @@ def split_field(spec):
 
 
 def api_name(entry):
-    return entry.get('name') or (entry['engine'].split('::')[-1] + ('Ref' if entry['kind'] == 'handle' else ''))
+    return entry.get('name') or (entry['engine'].split('::')[-1].removeprefix('Native')
+                                 + ('Ref' if entry['kind'] == 'handle' else ''))
 
 
 def mirror_source(e, name):
     exhaustive = e.get('exhaustive')
     if e['kind'] == 'enum':
         body = ''.join(f'    /// `{v}`.\n    {v},\n' for v in e['variants'])
-        return (f"/// {e['doc']}\n#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\n#[non_exhaustive]\n"
+        return (f"/// {e['doc']}\n#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]\n#[non_exhaustive]\n"
                 f'pub enum {name} {{\n{body}}}\n')
     fields = [split_field(f) for f in e['fields']]
     body = ''.join(f'    /// The `{n}` component.\n    pub {n}: {t},\n' for n, t in fields)
-    head = f"/// {e['doc']}\n#[derive(Clone, Copy, Debug, PartialEq)]\n"
+    head = f"/// {e['doc']}\n#[derive(Clone, Copy, Debug, PartialEq, horizon_mod_api_macros::Wire)]\n"
     if exhaustive:
         head += f'// exhaustive: {exhaustive}\n'
         tail = ''
@@ -96,19 +101,14 @@ def mirror_source(e, name):
 
 
 def handle_source(e, name):
-    return (f"/// {e['doc']}\n#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\n"
+    return (f"/// {e['doc']}\n#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]\n"
             '// exhaustive: its fields are private, so mods cannot build or destructure it\n'
-            f'pub struct {name} {{\n    pub(crate) epoch: crate::NativeWorldEpoch,\n    pub(crate) id: u64,\n}}\n\n'
+            f'pub struct {name} {{\n    pub(crate) epoch: crate::WorldEpoch,\n    pub(crate) id: u64,\n}}\n\n'
             f'impl {name} {{\n    /// Create a handle for the game.\n'
             '    // hidden: a game-side helper, not part of the mod surface\n    #[doc(hidden)]\n'
-            '    pub fn new(epoch: crate::NativeWorldEpoch, id: u64) -> Self {\n        Self { epoch, id }\n    }\n}\n\n'
-            # Opaque handles get a hand-written Wire impl here (as `BossBarRef`), and the game reads them through `Fields`.
-            f'impl crate::wire::Wire for {name} {{\n    const MIN: usize = 16;\n'
-            '    fn put(&self, out: &mut crate::wire::Writer) {\n        out.put(&self.epoch);\n        out.put(&self.id);\n    }\n'
-            '    fn take(input: &mut crate::wire::Reader<\'_>) -> Result<Self, crate::wire::WireError> {\n'
-            '        Ok(Self { epoch: input.take()?, id: input.take()? })\n    }\n}\n\n'
-            f'/// What the game reads of a [`{name}`].\n#[doc(hidden)]\npub struct {name}Fields {{\n'
-            '    pub epoch: crate::NativeWorldEpoch,\n    pub id: u64,\n}\n\n'
+            '    pub fn new(epoch: crate::WorldEpoch, id: u64) -> Self {\n        Self { epoch, id }\n    }\n}\n\n'
+            f'/// What the game reads of a [`{name}`].\n#[doc(hidden)]\n#[derive(horizon_mod_api_macros::Wire)]\npub struct {name}Fields {{\n'
+            '    pub epoch: crate::WorldEpoch,\n    pub id: u64,\n}\n\n'
             f'impl crate::__private::game::Fields for {name} {{\n    type Fields<\'a> = {name}Fields;\n'
             f'    fn fields(&self) -> {name}Fields {{\n        {name}Fields {{ epoch: self.epoch, id: self.id }}\n    }}\n}}\n')
 
@@ -209,9 +209,9 @@ class Plan:
 
 def scaffold(entry, plan):
     check_entry(entry)
-    name, topic = api_name(entry), entry['topic']
-    if topic == 'lib':
-        raise Refuse(f'{name}: lib.rs is never a target')
+    name, topic, domain = api_name(entry), entry['topic'], entry['domain']
+    if topic in ('lib', 'mod'):
+        raise Refuse(f'{name}: {topic}.rs is never a target')
     declared = re.compile(rf'\b(struct|enum|trait|type)\s+({name}|{name.removesuffix("Ref")}Backend)\b')
     for p in (plan.root / API).rglob('*.rs'):
         if declared.search(p.read_text()):
@@ -221,9 +221,12 @@ def scaffold(entry, plan):
             raise Refuse(f'{name}: declared twice in this run')
     src = handle_source(entry, name) if entry['kind'] == 'handle' else mirror_source(entry, name)
     doc = f"//! {entry.get('topic_doc', topic.replace('_', ' ').capitalize() + ' values.')}\n"
-    plan.append(API / f'{topic}.rs', src, doc + '\n')
-    plan.append(API / 'exports' / f'{topic}.rs', f'pub use crate::{topic}::{name};\n',
-                f'// hidden: a module of game-side types; mods use their re-exports\n#[doc(hidden)]\npub mod {topic};\n')
+    target = API / domain / f'{topic}.rs'
+    plan.append(target, src, doc + '\n')
+    if target in plan.created:
+        plan.append(API / domain / 'mod.rs', f'pub(crate) mod {topic};\n')
+        plan.created.discard(target)
+    plan.append(API / 'exports' / f'{topic}.rs', f'pub use crate::{domain}::{topic}::{name};\n')
     if entry.get('methods'):
         header = '//! Host method declarations; access defaults and game forwarders are generated.\n#![allow(unused_variables)]\nuse crate::*;\n\n'
         plan.append(API / 'host' / f'{topic}.rs', backend_source(entry, name), header)

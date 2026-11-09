@@ -40,7 +40,7 @@ pub trait RaidsBackend {
     /// Side: server.
     /// `Raid.RaidStatus`.
     #[access(WorldOnly)]
-    fn raid_status(&self, raid: RaidRef) -> Option<NativeRaidStatus>;
+    fn raid_status(&self, raid: RaidRef) -> Option<RaidStatus>;
     /// Side: server.
     /// `Raid.getTotalHealth`: the health of every raider that joined, which
     /// the boss bar divides by.

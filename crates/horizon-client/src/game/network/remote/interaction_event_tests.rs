@@ -13,11 +13,11 @@ use horizon_client::{
 use horizon_core::geometry::Vec3;
 use horizon_core::nbt::Tag;
 use horizon_protocol::{connection::Pipe, packets::configuration::ClientInformation};
+use mod_api::InteractionResult as Answer;
 use mod_api::{
     self, BlockPart, ENTITY_ITEMS, Flow, Hooks, HostSide, HostTransaction, ItemPart, ItemResource,
-    LogicalSide, NativeInteractionResult as Answer, NativeTriState, Registrar,
-    RightClickBlockEvent, RightClickItemEvent, ServerHost, UseItemEvent, UseItemOnBlockEvent,
-    UseItemOnEvent, UseOnEvent, UsePhase,
+    LogicalSide, Registrar, RightClickBlockEvent, RightClickItemEvent, ServerHost, TriState,
+    UseItemEvent, UseItemOnBlockEvent, UseItemOnEvent, UseOnEvent, UsePhase,
 };
 use std::sync::{
     Arc, Mutex,
@@ -48,8 +48,8 @@ struct Controls {
     expected_hand: Option<Hand>,
     /// Every hand `use_item_on_block` fired for, in order, instead of asserting one.
     hands: Option<Vec<Hand>>,
-    use_block: NativeTriState,
-    use_item: NativeTriState,
+    use_block: TriState,
+    use_item: TriState,
 }
 
 #[derive(Clone, Default)]
@@ -414,8 +414,8 @@ fn phase_events_replace_the_behaviour_before_its_part_on_both_sides() {
 
                 // The phase event is later than RightClickBlock's choices.
                 *observer.0.lock().unwrap() = Controls {
-                    use_block: NativeTriState::False,
-                    use_item: NativeTriState::False,
+                    use_block: TriState::False,
+                    use_item: TriState::False,
                     ..Controls::default()
                 };
                 assert!(!use_block(game, client));
@@ -424,7 +424,7 @@ fn phase_events_replace_the_behaviour_before_its_part_on_both_sides() {
                 // ItemStack.useOn passes before Item.useOn in adventure mode.
                 game.set_mode_id(2);
                 *observer.0.lock().unwrap() = Controls {
-                    use_block: NativeTriState::False,
+                    use_block: TriState::False,
                     ..Controls::default()
                 };
                 assert!(!use_block(game, client));
@@ -440,7 +440,7 @@ fn phase_events_replace_the_behaviour_before_its_part_on_both_sides() {
                         )),
                     );
                 *observer.0.lock().unwrap() = Controls {
-                    use_block: NativeTriState::False,
+                    use_block: TriState::False,
                     item_on_answer: Some(Answer::Success),
                     ..Controls::default()
                 };
@@ -547,7 +547,7 @@ fn canceled_item_results_keep_the_stack_wrappers_side_effects() {
                     game.cooldowns.remove("test:item_events");
                     game.inventory[game.selected] = Some(cooling_stack("minecraft:milk_bucket"));
                     *observer.0.lock().unwrap() = Controls {
-                        use_block: NativeTriState::False,
+                        use_block: TriState::False,
                         item_on_answer: Some(answer),
                         consume_item: answer.consumes_action(),
                         ..Controls::default()

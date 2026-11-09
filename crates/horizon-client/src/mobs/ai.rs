@@ -2694,8 +2694,8 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
     // `MobDespawnEvent` comes first in NeoForge's `Mob.checkDespawn`, so an answer
     // other than `Default` skips vanilla's checks and their `nextInt(800)` draw.
     match std::mem::take(&mut m.despawn) {
-        mod_api::NativeDespawn::Allow => return false,
-        mod_api::NativeDespawn::Deny => return true,
+        mod_api::Despawn::Allow => return false,
+        mod_api::Despawn::Deny => return true,
         _ => {}
     }
     // Mob.checkDespawn discards disallowed types even when persistent or NoAI.

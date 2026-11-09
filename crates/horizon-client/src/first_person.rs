@@ -7,7 +7,7 @@
 //! `continueDestroyBlock`, `stopDestroyBlock`).
 //!
 //! What those read and do in the world is behind [`HandWorld`].
-pub use mod_api::first_person::Hand;
+pub use mod_api::client::first_person::Hand;
 
 /// The ranged item state read by the first-person hand renderer.
 #[derive(Clone, Copy, Debug)]

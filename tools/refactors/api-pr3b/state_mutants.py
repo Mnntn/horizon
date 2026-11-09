@@ -17,7 +17,7 @@ parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--group", choices=["state", "range", "write"], default="state")
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
-facade = root / "crates/horizon-mod-api/src/block_state.rs"
+facade = root / "crates/horizon-mod-api/src/block/block_state.rs"
 values = root / "crates/horizon-client/src/game/modding/api_values.rs"
 renderer = root / "crates/horizon-client-render/src/mesher/mod_tint.rs"
 service = ["cargo", "test", "-p", "horizon-mod-api", "--lib", "metadata_service_reads_edits_and_refuses_invalid_transport"]
@@ -33,7 +33,7 @@ cases = [
     ("region_returns_air_for_every_state", renderer, "*states\n            .get(self.state_id(pos) as usize)\n            .unwrap_or(&states[0])", "{ let _ = pos; states[0] }", tint),
 ]
 if args.group == "range":
-    span = root / "crates/horizon-mod-api/src/block_state_range.rs"
+    span = root / "crates/horizon-mod-api/src/block/block_state_range.rs"
     definitions = root / "crates/horizon-mod-runtime/src/block_definitions.rs"
     focused = ["cargo", "test", "-p", "horizon-mod-api", "--lib", "local_range_validates_transport_and_never_wraps_ordinals"]
     cases = [
@@ -45,7 +45,7 @@ if args.group == "range":
     ]
 if args.group == "write":
     native = root / "crates/horizon-client/src/game/modding/native_entity_refs.rs"
-    errors = root / "crates/horizon-mod-api/src/level_write_error.rs"
+    errors = root / "crates/horizon-mod-api/src/world/level_write_error.rs"
     generator = root / "crates/horizon-mod-api-gen/src/host.rs"
     focused = ["cargo", "test", "-p", "horizon-client", "--lib", "level_block_writes_validate_and_change_world"]
     cases = [

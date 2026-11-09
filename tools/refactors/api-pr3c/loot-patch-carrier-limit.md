@@ -7,7 +7,7 @@ No API, engine, dispatch or particle behavior is changed by this report.
 
 At integration base `a819320057`, `horizon-world/src/loot.rs` declares
 `LootStack.components: Vec<(String, serde_json::Value)>`. JSON null means removal.
-The proposed API snapshot in `horizon-mod-api/src/snapshots.rs` instead carries
+The proposed API snapshot in `horizon-mod-api/src/world/snapshots.rs` instead carries
 `Vec<(String, Option<Tag>)>`. Unknown component values must keep their NBT types.
 
 The existing production functions `scoreboard::tag_to_json` and

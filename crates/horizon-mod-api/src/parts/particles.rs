@@ -50,13 +50,13 @@ mod tests {
         .unwrap();
         let keys = keys.lock().unwrap();
         assert!(
-            crate::particle_keys::resolve_particles(["minecraft:smoke"], |_| Some(
+            crate::client::particle_keys::resolve_particles(["minecraft:smoke"], |_| Some(
                 horizon_mod_runtime::registry_keys::ParticleKind::Custom
             ))
             .is_err()
         );
-        assert!(!crate::particle_keys::particles_resolved());
-        crate::particle_keys::resolve_particles(["minecraft:smoke", "test:spark"], |id| {
+        assert!(!crate::client::particle_keys::particles_resolved());
+        crate::client::particle_keys::resolve_particles(["minecraft:smoke", "test:spark"], |id| {
             Some(if id == "minecraft:smoke" {
                 horizon_mod_runtime::registry_keys::ParticleKind::Vanilla(5)
             } else {
@@ -65,12 +65,15 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            crate::particle_keys::particle_name(keys[0]),
+            crate::client::particle_keys::particle_name(keys[0]),
             Some("test:spark")
         );
-        assert_eq!(crate::particle_keys::particle_vanilla_key(5), Some(keys[1]));
         assert_eq!(
-            crate::particle_keys::particle_kind(keys[0]),
+            crate::client::particle_keys::particle_vanilla_key(5),
+            Some(keys[1])
+        );
+        assert_eq!(
+            crate::client::particle_keys::particle_kind(keys[0]),
             Some(horizon_mod_runtime::registry_keys::ParticleKind::Custom)
         );
     }

@@ -514,7 +514,7 @@ mod tests {
         use horizon_client::entities::ArmorStand;
         use horizon_client::items::ItemStack;
         use horizon_core::geometry::Vec3;
-        use mod_api::NativeWorldEpoch;
+        use mod_api::WorldEpoch;
 
         with_player(|game, player| {
             game.player.as_mut().unwrap().fire_ticks = 0;
@@ -561,7 +561,7 @@ mod tests {
             ));
             let boat = game.entity(44).unwrap();
             assert_eq!(boat.fire_ticks(game), None);
-            let stale = EntityRef::new(NativeWorldEpoch::new(mob.epoch().get() + 1), mob.id());
+            let stale = EntityRef::new(WorldEpoch::new(mob.epoch().get() + 1), mob.id());
             assert_eq!(stale.fire_ticks(game), None);
         });
     }
@@ -573,7 +573,7 @@ mod tests {
         use horizon_client::entities::ExperienceOrb;
         use horizon_client::items::ItemStack;
         use horizon_core::geometry::Vec3;
-        use mod_api::NativeWorldEpoch;
+        use mod_api::WorldEpoch;
 
         with_player(|game, player| {
             assert_eq!(player.tick_count(game), None);
@@ -640,7 +640,7 @@ mod tests {
             ));
             let boat = game.entity(45).unwrap();
             assert_eq!(boat.tick_count(game), None);
-            let stale = EntityRef::new(NativeWorldEpoch::new(mob.epoch().get() + 1), mob.id());
+            let stale = EntityRef::new(WorldEpoch::new(mob.epoch().get() + 1), mob.id());
             assert_eq!(stale.tick_count(game), None);
         });
     }
@@ -657,7 +657,7 @@ mod tests {
         use horizon_client::items::ItemStack;
         use horizon_client::projectiles::{Projectile, ProjectileKind};
         use horizon_core::{geometry::Vec3, position::BlockPos};
-        use mod_api::NativeWorldEpoch;
+        use mod_api::WorldEpoch;
 
         with_guests(|game| {
             // Players keep their own state: in place during their turn, beside the hub otherwise.
@@ -791,7 +791,7 @@ mod tests {
             ));
             let charge = game.entity(game.creatures.projectiles[2].id).unwrap();
             assert_eq!(charge.portal_cooldown(game), None);
-            let stale = EntityRef::new(NativeWorldEpoch::new(mob.epoch().get() + 1), mob.id());
+            let stale = EntityRef::new(WorldEpoch::new(mob.epoch().get() + 1), mob.id());
             assert_eq!(stale.portal_cooldown(game), None);
             game.enter_level(Dim::Nether).unwrap();
             assert_eq!(mob.portal_cooldown(game), None);
@@ -860,7 +860,7 @@ mod tests {
                 Some(false),
                 "live secondary use, not last tick's body flag"
             );
-            let stale = EntityRef::new(mod_api::NativeWorldEpoch::new(0), 7);
+            let stale = EntityRef::new(mod_api::WorldEpoch::new(0), 7);
             assert_eq!(stale.is_shift_key_down(game), None);
             game.remote.as_mut().unwrap().logged_in = false;
             assert!(game.local_player().is_none());

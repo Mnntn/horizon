@@ -4,10 +4,10 @@ Four hooks stand in for the checks and setup around a mob. All run on the server
 
 | Moment | Hook | Answer |
 |---|---|---|
-| The spawn predicate for a type and position | `mob_spawn_placement_check` | `NativeSpawnCheck::{Default, Succeed, Fail}` |
-| The mob's own position and obstruction checks | `mob_spawn_position_check` | `NativeSpawnCheck::{Default, Succeed, Fail}` |
+| The spawn predicate for a type and position | `mob_spawn_placement_check` | `SpawnCheck::{Default, Succeed, Fail}` |
+| The mob's own position and obstruction checks | `mob_spawn_position_check` | `SpawnCheck::{Default, Succeed, Fail}` |
 | Just before `finalizeSpawn` | `finalize_spawn` | `Flow::Cancel`, `spawn_cancelled`, a new `difficulty`, edits to `mob`, a new `group` |
-| Each tick, before a mob's `checkDespawn` | `mob_despawn` | `NativeDespawn::{Default, Allow, Deny}` |
+| Each tick, before a mob's `checkDespawn` | `mob_despawn` | `Despawn::{Default, Allow, Deny}` |
 
 ## Saying where a mod mob spawns
 
@@ -15,10 +15,10 @@ Four hooks stand in for the checks and setup around a mob. All run on the server
 
 ```rust,ignore
 r.declare_spawn_placement("ghoul", mod_api::SpawnPlacementRule {
-    placement: mod_api::NativeSpawnPlacementType::OnGround,
-    heightmap: mod_api::NativeHeightmap::MotionBlockingNoLeaves,
+    placement: mod_api::SpawnPlacementType::OnGround,
+    heightmap: mod_api::Heightmap::MotionBlockingNoLeaves,
     spawnable_on: Some("mymod:ghoul_ground".to_owned()), // a block tag the block below is in
-    light: mod_api::NativeSpawnLight::Dark,              // Any, Dark (a monster's) or Bright (an animal's)
+    light: mod_api::SpawnLight::Dark,              // Any, Dark (a monster's) or Bright (an animal's)
     biome_tag: Some("mymod:haunted".to_owned()),         // a biome tag the spot's biome is in
 }).unwrap();
 ```
@@ -32,14 +32,14 @@ The placement type is `SpawnPlacements.isSpawnPositionOk`'s first check, and the
 `mob_spawn_placement_check` and `mob_spawn_position_check` both get the `level` the mob would join (a `LevelRef`, so a
 listener can read the blocks around `pos` through the host) and the `spawner` that asked: `Spawner::Block { pos }` for a
 spawner block, `Spawner::Trial { pos }` for a trial spawner, and `None` for natural spawning, chunk generation, patrols,
-sieges, reinforcements and a spawner minecart. Set `*event.result` to `NativeSpawnCheck::Succeed` or `Fail` to force the
+sieges, reinforcements and a spawner minecart. Set `*event.result` to `SpawnCheck::Succeed` or `Fail` to force the
 check; `Default` keeps vanilla's answer.
 
 ```rust,ignore
 fn mob_spawn_placement_check(&self, _: &dyn mod_api::Host, event: &mut mod_api::MobSpawnPlacementCheckEvent<'_>) {
     // spawner blocks work as usual; nothing else spawns zombies here
     if event.kind == "minecraft:zombie" && event.spawner.is_none() {
-        *event.result = mod_api::NativeSpawnCheck::Fail;
+        *event.result = mod_api::SpawnCheck::Fail;
     }
 }
 ```
@@ -53,7 +53,7 @@ nothing from the level's random, so a listener that answers `Default` changes no
 ```rust,ignore
 fn mob_spawn_position_check(&self, host: &dyn mod_api::Host, event: &mut mod_api::MobSpawnPositionCheckEvent<'_>) {
     if event.mob.custom_name(host).is_ok_and(|name| name.is_some()) {
-        *event.result = mod_api::NativeSpawnCheck::Succeed;
+        *event.result = mod_api::SpawnCheck::Succeed;
     }
 }
 ```
@@ -68,7 +68,7 @@ check, and a spawner or trial spawner whose spawn data carries entity data, whic
 
 ```rust,ignore
 fn finalize_spawn(&self, _: &dyn mod_api::Host, event: &mut mod_api::FinalizeSpawnEvent<'_>) -> mod_api::Flow {
-    if event.kind == "minecraft:zombie" && event.reason == mod_api::NativeSpawnReason::Natural {
+    if event.kind == "minecraft:zombie" && event.reason == mod_api::SpawnReason::Natural {
         event.spawn_cancelled = true;
     }
     mod_api::Flow::Continue
@@ -113,7 +113,7 @@ again with a handle of its own.
 The hook still fires on replayed ticks with the read-only host, so the editor and `group` are the only things a
 listener changes, and it must change them the same way every time: a pure function of the event.
 
-`event.group` is the pack's `SpawnGroupData` as plain data (`NativeSpawnGroup`, variants named as vanilla saves them):
+`event.group` is the pack's `SpawnGroupData` as plain data (`SpawnGroup`, variants named as vanilla saves them):
 read it, change it, set it or clear it, and finalization reads what is left. Every site the hook fires at hands it
 `None` today: the game does not yet thread group data from one member of a natural spawning pack to the next, and
 chunk generation's animals share it only inside the generator, out of the hook's reach. Setting a group still reaches this
@@ -133,8 +133,8 @@ impl mod_api::EntityPart for ZombiePacks {
         &self,
         _: &dyn mod_api::Host,
         _: mod_api::UnspawnedMobRef,
-        _: mod_api::NativeSpawnReason,
-        _: Option<mod_api::NativeSpawner>,
+        _: mod_api::SpawnReason,
+        _: Option<mod_api::SpawnSource>,
         vanilla: u32,
     ) -> Option<u32> {
         Some(vanilla * 2)
@@ -151,7 +151,7 @@ Only natural spawning's packs ask it: vanilla has no group limit anywhere else. 
 ```rust,ignore
 fn mob_despawn(&self, _: &dyn mod_api::Host, event: &mut mod_api::MobDespawnEvent<'_>) {
     if event.kind == "minecraft:zombie" {
-        *event.result = mod_api::NativeDespawn::Deny;
+        *event.result = mod_api::Despawn::Deny;
     }
 }
 ```

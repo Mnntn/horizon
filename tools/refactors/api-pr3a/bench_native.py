@@ -56,7 +56,7 @@ def main():
     report("construct/plain", || { black_box(mod_api::ItemStack::new(black_box(key), black_box(1)).unwrap()); });
     report("read/plain", || { black_box((black_box(&api).item() == key, black_box(&api).count())); });
     report("clone/plain", || { black_box(black_box(&api).clone()); });''')
-        template = template.replace("// RECORD_SIZE", 'println!("SIZE,stack_record,{}", std::mem::size_of::<mod_api::item_stack::StackRecord>());')
+        template = template.replace("// RECORD_SIZE", 'println!("SIZE,stack_record,{}", std::mem::size_of::<mod_api::item::item_stack::StackRecord>());')
     else:
         template = template.replace("// API_REPORT", '''report("construct/plain", || { black_box(EngineStack::new(black_box("minecraft:stick"), black_box(1))); });
     report("read/plain", || { black_box((black_box(&plain).item.as_ref() == "minecraft:stick", black_box(&plain).count)); });

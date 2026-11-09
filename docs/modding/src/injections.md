@@ -116,7 +116,18 @@ hash or missing target is refused, not silently redirected. Points order by desc
 then registration (dependency) order; ties within a mod use inject id. Sites retain priority, mod id
 and inject id order. `modify_arg` is accepted on listed head slots but is a typed refusal on the
 source route. `modify_call_arg` remains a typed refusal until its operand payload is specified.
-Native API call sites, API source injects, `replace`, locals and extension fields remain refused.
+An API `replace` owns the function, as a mixin overwrite does: its function takes the head's inputs
+and returns the point's return type, which the caller gets, and the body never runs. At a point
+returning `()` it returns `()` and the cancel is forced. It runs after the point's other API head
+listeners, whatever its priority, so they may change its inputs but not its outcome; internals head
+listeners run after it and can't undo it either. A point whose return has no API form refuses it at
+load, naming the point and type, and so does one returning `Result<(), E>`, whose cancel would
+answer `Ok(())`; a wasm module built without `cargo horizon-mod` is held to the same check when it
+loads. A second `replace` at one point is refused at registration, naming both mods. A replacing
+mod that stops or is disabled hands the function back: it runs as written again.
+Native and wasm share it through `mod_points::replace!`.
+Native API call sites, API source injects, internals `replace`, locals and extension fields remain
+refused.
 The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
 API head/return functions also load from wasm, with the same record.
 

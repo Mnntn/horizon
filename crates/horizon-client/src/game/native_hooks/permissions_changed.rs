@@ -15,8 +15,8 @@ impl Game<'_> {
         player: u128,
         player_entity_id: Option<i32>,
         name: &str,
-        old: NativePermissionLevel,
-        new: NativePermissionLevel,
+        old: PermissionLevel,
+        new: PermissionLevel,
         cancel: &mut bool,
     ) {
         self.fire_permissions_changed(player, player_entity_id, name, old, new, cancel);

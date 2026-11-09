@@ -1,4 +1,3 @@
-mod structure_template;
-pub use structure_template::{
+pub use world::structure_template::{
     StructureMirror, StructureRotation, StructureTemplateBlock, StructureTemplateSnapshot,
 };

@@ -10,7 +10,7 @@
 //! merged each time the server's tables are built: a world's first open and
 //! every `/reload`.
 use super::Game;
-pub use mod_api::game::NativeDataMapType;
+pub use mod_api::game::DataMapType;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 const REGISTRIES: [(&str, &str); 2] = [("minecraft:item", "item"), ("minecraft:block", "block")];
 
 /// The registries `types` are for that have data maps, in `REGISTRIES` order.
-pub(crate) fn registries_of(types: &[NativeDataMapType]) -> Vec<&'static str> {
+pub(crate) fn registries_of(types: &[DataMapType]) -> Vec<&'static str> {
     REGISTRIES
         .iter()
         .map(|(registry, _)| *registry)
@@ -115,7 +115,7 @@ impl DataMaps {
     /// registry or a bad id is left out with a warning; a file that isn't a
     /// data map is skipped alone.
     pub(crate) fn load(
-        types: &[NativeDataMapType],
+        types: &[DataMapType],
         overlay: &horizon_world::loot::PackOverlay<'_>,
         item_tags: &HashMap<String, HashSet<String>>,
         block_tags: &HashMap<String, HashSet<String>>,
@@ -259,8 +259,8 @@ mod tests {
             .collect()
     }
 
-    fn ty(id: &str, registry: &str) -> NativeDataMapType {
-        NativeDataMapType {
+    fn ty(id: &str, registry: &str) -> DataMapType {
+        DataMapType {
             id: id.to_owned(),
             registry: registry.to_owned(),
         }

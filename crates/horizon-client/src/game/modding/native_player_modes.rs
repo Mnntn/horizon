@@ -7,7 +7,7 @@ use super::Game;
 use super::native_entity_refs::block_face_direction;
 use super::native_server::PlayerRead;
 use horizon_client::items::ItemStack;
-use mod_api::{GameMode, NativeBlockFace, PlayerRef};
+use mod_api::{BlockFace, GameMode, PlayerRef};
 
 impl Game<'_> {
     /// The player's permission level, 0 to 4 (`Player.permissions()`,
@@ -64,7 +64,7 @@ impl Game<'_> {
         &self,
         player: PlayerRef,
         pos: [i32; 3],
-        face: NativeBlockFace,
+        face: BlockFace,
         stack: &ItemStack,
     ) -> Option<bool> {
         if let PlayerRead::Guest(guest) = self.player_handle_read(player)?
@@ -95,7 +95,7 @@ mod tests {
     use horizon_client::{chunk::Chunk, items::ItemStack};
     use horizon_core::nbt::Tag;
     use mod_api::__private::game::*;
-    use mod_api::NativeBlockFace;
+    use mod_api::BlockFace;
     use std::sync::Arc;
 
     fn set_mode(game: &mut Game<'_>, uuid: u128, mode: i32) {
@@ -140,7 +140,7 @@ mod tests {
             let on_stone = test_snapshot(&placing_on("minecraft:stone"));
             let on_dirt = test_snapshot(&placing_on("minecraft:dirt"));
             let up = |player: mod_api::PlayerRef, game: &Game<'_>, stack| {
-                player.may_use_item_at(game, [5, 64, 5], NativeBlockFace::Up, stack)
+                player.may_use_item_at(game, [5, 64, 5], BlockFace::Up, stack)
             };
 
             // Survival builds with anything.
@@ -151,7 +151,7 @@ mod tests {
             assert_eq!(up(adventurer, game, &on_stone), Some(true));
             // The same placed position clicked on a side face lies against air.
             assert_eq!(
-                adventurer.may_use_item_at(game, [5, 64, 5], NativeBlockFace::North, &on_stone),
+                adventurer.may_use_item_at(game, [5, 64, 5], BlockFace::North, &on_stone),
                 Some(false)
             );
             // The acting player in their own turn answers alike.

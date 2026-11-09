@@ -7,7 +7,7 @@ use horizon_client::{
     mobs::Mob,
     raid::{Raid, Raids, Status},
 };
-use mod_api::{EntityRef, LevelRef, MobRef, NativeRaidStatus, RaidRef};
+use mod_api::{EntityRef, LevelRef, MobRef, RaidRef, RaidStatus};
 
 impl Game<'_> {
     // Diverges from upstream: handles resolve the requested server level without
@@ -130,12 +130,12 @@ impl Game<'_> {
     }
 
     /// `Raid.RaidStatus`.
-    pub(super) fn raid_status(&self, raid: RaidRef) -> Option<NativeRaidStatus> {
+    pub(super) fn raid_status(&self, raid: RaidRef) -> Option<RaidStatus> {
         Some(match self.native_raid_data(raid)?.status {
-            Status::Ongoing => NativeRaidStatus::Ongoing,
-            Status::Victory => NativeRaidStatus::Victory,
-            Status::Loss => NativeRaidStatus::Loss,
-            Status::Stopped => NativeRaidStatus::Stopped,
+            Status::Ongoing => RaidStatus::Ongoing,
+            Status::Victory => RaidStatus::Victory,
+            Status::Loss => RaidStatus::Loss,
+            Status::Stopped => RaidStatus::Stopped,
         })
     }
 
@@ -214,10 +214,10 @@ mod tests {
     use super::*;
     use horizon_client::mobs::{Mob, raider};
     use horizon_core::geometry::Vec3;
-    use mod_api::{Hooks, NativeWorldEpoch, RaidStateChangeEvent, ServerHost};
+    use mod_api::{Hooks, RaidStateChangeEvent, ServerHost, WorldEpoch};
     use std::sync::{Arc, Mutex};
 
-    type RaidObservation = (RaidRef, String, Option<NativeRaidStatus>, bool);
+    type RaidObservation = (RaidRef, String, Option<RaidStatus>, bool);
     struct RaidObserver(Arc<Mutex<Vec<RaidObservation>>>);
 
     #[mod_api::__subscriptions]
@@ -283,39 +283,19 @@ mod tests {
                 assert_eq!(records.len(), 4);
                 assert_eq!(
                     records[0],
-                    (
-                        raid,
-                        "triggered".into(),
-                        Some(NativeRaidStatus::Ongoing),
-                        false
-                    )
+                    (raid, "triggered".into(), Some(RaidStatus::Ongoing), false)
                 );
                 assert_eq!(
                     records[1],
-                    (
-                        raid,
-                        "stopped".into(),
-                        Some(NativeRaidStatus::Stopped),
-                        true
-                    )
+                    (raid, "stopped".into(), Some(RaidStatus::Stopped), true)
                 );
                 assert_eq!(
                     records[2],
-                    (
-                        other,
-                        "stopped".into(),
-                        Some(NativeRaidStatus::Stopped),
-                        true
-                    )
+                    (other, "stopped".into(), Some(RaidStatus::Stopped), true)
                 );
                 assert_eq!(
                     records[3],
-                    (
-                        tick_raid,
-                        "stopped".into(),
-                        Some(NativeRaidStatus::Stopped),
-                        true
-                    )
+                    (tick_raid, "stopped".into(), Some(RaidStatus::Stopped), true)
                 );
             })
         });
@@ -384,7 +364,7 @@ mod tests {
             );
             assert!(!game.raid_is_started(raid));
             assert!(game.raid_is_active(raid));
-            assert_eq!(game.raid_status(raid), Some(NativeRaidStatus::Ongoing));
+            assert_eq!(game.raid_status(raid), Some(RaidStatus::Ongoing));
             assert_eq!(game.raid_total_health(raid), Some(0.0));
             assert_eq!(game.raid_bar_progress(raid), Some(0.0));
             assert_eq!(game.raid_heroes(raid), Some(Vec::new()));
@@ -413,7 +393,7 @@ mod tests {
             assert_eq!(game.raid_omen_level(raid), Some(5));
 
             assert!(game.raid_stop(raid));
-            assert_eq!(game.raid_status(raid), Some(NativeRaidStatus::Stopped));
+            assert_eq!(game.raid_status(raid), Some(RaidStatus::Stopped));
             assert!(!game.raid_is_active(raid));
             assert!(!game.raid_stop(raid));
             assert_eq!(game.level_raid_at(level, [10, 70, 10]), None);
@@ -463,7 +443,7 @@ mod tests {
             assert_eq!(raid.has_bonus_wave(game), Some(true));
             assert_eq!(raid.is_started(game), started);
             assert!(raid.is_active(game));
-            assert_eq!(raid.status(game), Some(NativeRaidStatus::Ongoing));
+            assert_eq!(raid.status(game), Some(RaidStatus::Ongoing));
             assert_eq!(raid.total_health(game), total);
             assert_eq!(raid.living_health(game), Some(12.0));
             assert_eq!(raid.bar_progress(game), progress);
@@ -480,7 +460,7 @@ mod tests {
             game.native_level_raids_mut(level).unwrap().dirty = false;
             assert!(raid.stop(game));
             assert!(!raid.stop(game));
-            assert_eq!(raid.status(game), Some(NativeRaidStatus::Stopped));
+            assert_eq!(raid.status(game), Some(RaidStatus::Stopped));
             assert!(!raid.is_active(game));
             assert!(other.is_active(game));
             assert_eq!(game.dim, super::super::Dim::Nether);
@@ -501,7 +481,7 @@ mod tests {
                     .is_some()
             );
             assert_eq!(raid.omen_level(game), Some(i32::MAX));
-            assert_eq!(raid.status(game), Some(NativeRaidStatus::Stopped));
+            assert_eq!(raid.status(game), Some(RaidStatus::Stopped));
             assert_eq!(raid.raiders(game), Some(vec![member]));
             assert!(
                 game.enter_command_level(super::super::Dim::Nether)
@@ -523,10 +503,7 @@ mod tests {
             let level = game.level(game.dim.id()).unwrap();
             assert!(game.raid_command_create([10, 70, 10], 1));
             let raid = game.level_raid_at(level, [10, 70, 10]).unwrap();
-            let later = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let later = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             let stale = RaidRef::new(later, raid.id());
             assert_eq!(game.raid_center(stale), None);
             assert!(!game.raid_is_active(stale));
@@ -537,7 +514,7 @@ mod tests {
             let parked = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             assert_eq!(game.raid_status(RaidRef::new(parked, raid.id())), None);
             assert_eq!(game.level_raid(level, raid.id() + 7), None);
-            assert_eq!(game.raid_status(raid), Some(NativeRaidStatus::Ongoing));
+            assert_eq!(game.raid_status(raid), Some(RaidStatus::Ongoing));
 
             game.options.execution_role = ExecutionRole::Client;
             assert_eq!(game.raid_center(raid), None);

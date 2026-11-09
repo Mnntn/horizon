@@ -244,7 +244,7 @@ pub(super) mod tests {
                 assert_eq!(other.ambient_mood(game), None);
             }
             game.native_lifecycle
-                .begin_open(mod_api::NativeAuthority::RemoteClient);
+                .begin_open(mod_api::Authority::RemoteClient);
             assert_eq!(player.block_breaking(game), None, "the old epoch is stale");
             assert_eq!(player.ambient_mood(game), None);
             let current = game.local_player().unwrap();

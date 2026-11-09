@@ -69,7 +69,7 @@ pub mod at_a_point {
     // ANCHOR_END: points
 }
 
-/// A mod screen built from `mod_api::widgets`.
+/// A mod screen built from `mod_api::client::widgets`.
 pub mod widget_screen;
 
 /// A mod's own tooltip for a text component's item hover.

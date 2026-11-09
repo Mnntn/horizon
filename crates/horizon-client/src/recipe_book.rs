@@ -10,7 +10,7 @@ use crate::{
 use horizon_core::nbt::Tag;
 use horizon_protocol::packets::recipes::{HolderSet, RecipeBookEntry, RecipeDisplay, SlotDisplay};
 use horizon_world::loot::PackOverlay;
-pub use mod_api::recipe_book::RecipeBookCategory;
+pub use mod_api::item::recipe_book::RecipeBookCategory;
 use std::collections::{BTreeSet, HashMap};
 
 /// Validate declarations once per recipe table. The first valid declaration

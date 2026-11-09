@@ -205,10 +205,7 @@ impl Game<'_> {
     /// playing with no screen, nor while the server pack prompt or a book
     /// hides the open screen (`hud_layers` draws `Playing` then), and None
     /// with no mod listening to a render hook, so nothing is built then.
-    pub(super) fn screen_render_view(
-        &self,
-        batch: &HudBatch,
-    ) -> Option<mod_api::NativeScreenView<'_>> {
+    pub(super) fn screen_render_view(&self, batch: &HudBatch) -> Option<mod_api::ScreenView<'_>> {
         let screen = self.screen;
         if screen == Screen::Playing
             || self.server_packs.prompt.is_some()
@@ -228,7 +225,7 @@ impl Game<'_> {
     pub(super) fn title_screen_render_view(
         &self,
         batch: &HudBatch,
-    ) -> Option<mod_api::NativeScreenView<'_>> {
+    ) -> Option<mod_api::ScreenView<'_>> {
         if self.screen != Screen::Playing
             || self.screen_over_playing()
             || self.remote_loading()

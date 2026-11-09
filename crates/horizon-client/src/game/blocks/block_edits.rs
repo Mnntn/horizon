@@ -3,8 +3,6 @@
 //! at once through `World::edit_runs`, with what `fill ... strict` does for
 //! the block entities and the watched blocks of each block changed.
 use super::Game;
-use super::native_world_columns::NativeColumnBlocks as ColumnBlocks;
-use super::native_world_edit::{NativeBlockEdit as BlockEdit, NativeHeightmap as Heightmap};
 use horizon_client::{
     block_edit::Run,
     chunk::ColumnLayout,
@@ -15,6 +13,9 @@ use horizon_client::{
 use horizon_world::{
     heightmap::HeightmapType, registry::BlockStateId, worldgen::terrain::TerrainBlockStates,
 };
+use mod_api::BlockEdit;
+use mod_api::ColumnBlocks;
+use mod_api::Heightmap;
 use std::sync::Arc;
 
 /// A change `World::edit_runs` reported: position, previous and new state.
@@ -420,8 +421,8 @@ fn replace_block_entities(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::native_world_edit::NativeBlockRun as BlockRun;
     use horizon_client::chunk::Chunk;
+    use mod_api::BlockRun;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

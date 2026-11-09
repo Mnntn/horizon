@@ -627,8 +627,8 @@ mod tests {
     use mod_api::HostTransaction;
     use mod_api::ServerHost;
     use mod_api::{
-        BlockSide, FLUIDS, FluidStack, ITEMS, ItemResource, NativeAuthority,
-        NativeBlockUpdateFlags, Transaction,
+        Authority, BlockSide, BlockUpdateFlags, FLUIDS, FluidStack, ITEMS, ItemResource,
+        Transaction,
     };
     use std::{sync::Arc, time::Instant};
 
@@ -665,7 +665,7 @@ mod tests {
                 let level = host.level("minecraft:overworld").unwrap();
                 let hand = mod_api::ItemPlace::PlayerHand {
                     player: event.player,
-                    hand: mod_api::first_person::Hand::Main,
+                    hand: mod_api::client::first_person::Hand::Main,
                 };
                 self.seen.lock().unwrap().push((
                     level.block_state(host, [2, 64, 2]),
@@ -1020,7 +1020,7 @@ mod tests {
                 ([4, 64, 0], "minecraft:jukebox"),
             ] {
                 let state = game.pack.assets.registry.default_state(id).unwrap();
-                game.level_set_block(level, pos, state, NativeBlockUpdateFlags::NEIGHBORS)
+                game.level_set_block(level, pos, state, BlockUpdateFlags::NEIGHBORS)
                     .unwrap();
             }
             let mut large = ItemStack::new("minecraft:stick", 1);
@@ -1131,7 +1131,7 @@ mod tests {
                 .registry
                 .default_state("minecraft:chest")
                 .unwrap();
-            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            let flags = BlockUpdateFlags::NEIGHBORS;
             game.level_set_block(level, [0, 64, 4], hopper, flags)
                 .unwrap();
             if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(0, 64, 4))
@@ -1232,7 +1232,7 @@ mod tests {
             .chunks
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
-            .begin_open(NativeAuthority::IntegratedServer);
+            .begin_open(Authority::IntegratedServer);
         super::super::native_entity_refs::tests::resolve_parts(&game).unwrap();
         // Pins the opaque backend: a real game always hands one out, so a None
         // from Host::backend is a bug, never a fallback.
@@ -1248,7 +1248,7 @@ mod tests {
         let full = registry.resolve(&full).unwrap();
         let empty = registry.default_state("minecraft:cauldron").unwrap();
         let jukebox = registry.default_state("minecraft:jukebox").unwrap();
-        let flags = NativeBlockUpdateFlags::NEIGHBORS;
+        let flags = BlockUpdateFlags::NEIGHBORS;
         assert_eq!(
             game.level_set_block(level, [0, 64, 0], chest, flags),
             Ok(true)
@@ -1432,7 +1432,7 @@ mod tests {
         let me = game.native_acting_id();
         let hand = mod_api::ItemPlace::PlayerHand {
             player: me,
-            hand: mod_api::first_person::Hand::Main,
+            hand: mod_api::client::first_person::Hand::Main,
         };
         let water = ItemResource::of(&bucket("minecraft:water_bucket", 1).try_into_api().unwrap());
         let host: &mut dyn ServerHost = &mut game;
@@ -1626,12 +1626,7 @@ mod tests {
         for (id, moved) in [("test:pipe", 1), ("test:greedy", 0)] {
             let state = game.pack.assets.registry.default_state(id).unwrap();
             assert_eq!(
-                game.level_set_block(
-                    level,
-                    [1, 64, 4],
-                    state,
-                    mod_api::NativeBlockUpdateFlags::NONE
-                ),
+                game.level_set_block(level, [1, 64, 4], state, mod_api::BlockUpdateFlags::NONE),
                 Ok(true)
             );
             if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(0, 64, 4))

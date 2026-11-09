@@ -8,7 +8,7 @@ use super::entity::{Entity as _, EntityHandle, with_entity, with_entity_mut};
 use super::{Game, commands::Target};
 use horizon_core::geometry::{Aabb, Axis, Vec3};
 use horizon_core::position::BlockPos;
-use mod_api::{EntityRef, NativeClipBlock, NativeClipFluid, NativeClipHit};
+use mod_api::{ClipBlock, ClipFluid, ClipHit, EntityRef};
 
 /// `Entity.calculateViewVector` for a look turned `pitch_offset` degrees down: the unit
 /// vector along `yaw` and `pitch + pitch_offset`.
@@ -294,7 +294,7 @@ impl Game<'_> {
     }
     /// What the entity looks at within `distance` blocks of its eyes: `Entity.pick`'s block
     /// ray along the view vector, outlines and no fluids.
-    pub(super) fn entity_pick(&self, entity: EntityRef, distance: f64) -> Option<NativeClipHit> {
+    pub(super) fn entity_pick(&self, entity: EntityRef, distance: f64) -> Option<ClipHit> {
         if !(distance.is_finite() && distance >= 0.0) {
             return None;
         }
@@ -304,8 +304,8 @@ impl Game<'_> {
             self.entity_level(entity)?,
             from,
             to,
-            NativeClipBlock::Outline,
-            NativeClipFluid::None,
+            ClipBlock::Outline,
+            ClipFluid::None,
         )
     }
     /// The square of the distance from the entity's feet to `pos`
@@ -393,7 +393,7 @@ mod tests {
     fn on_block_picks_the_support_nearest_the_entity_and_pick_clips_blocks() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::{chunk::Chunk, mobs::Mob};
-        use mod_api::NativeBlockFace;
+        use mod_api::BlockFace;
         use std::sync::Arc;
         with_game(|game| {
             game.world
@@ -446,7 +446,7 @@ mod tests {
             let hit = game.entity_pick(entity, 3.0).unwrap();
             assert!(!hit.miss);
             assert_eq!(hit.block, wall);
-            assert_eq!(hit.face, NativeBlockFace::North);
+            assert_eq!(hit.face, BlockFace::North);
             assert_near(hit.location, [0.5, eyes[1], 2.0]);
             // Too short a ray misses, as does one over an empty column.
             assert!(game.entity_pick(entity, 1.0).unwrap().miss);
@@ -456,7 +456,7 @@ mod tests {
             game.mobs[0].position = Vec3::new(1.5, 65.0, 0.5);
             game.mobs[0].head_pitch = 90.0;
             let down = game.entity_pick(entity, 3.0).unwrap();
-            assert_eq!((down.block, down.face), ([1, 64, 0], NativeBlockFace::Up));
+            assert_eq!((down.block, down.face), ([1, 64, 0], BlockFace::Up));
             assert_near(down.location, [1.5, 65.0, 0.5]);
             // Looking down 45 degrees tilts the up vector forward.
             game.mobs[0].head_pitch = 45.0;
@@ -471,8 +471,7 @@ mod tests {
             // A ray without a length, or with none, or from a stale handle: nothing.
             assert!(game.entity_pick(entity, -1.0).is_none());
             assert!(game.entity_pick(entity, f64::NAN).is_none());
-            let stale =
-                EntityRef::new(mod_api::NativeWorldEpoch::new(entity.epoch().get() + 1), 40);
+            let stale = EntityRef::new(mod_api::WorldEpoch::new(entity.epoch().get() + 1), 40);
             assert!(game.entity_pick(stale, 3.0).is_none());
             assert!(game.entity_on_block(stale).is_none());
             assert!(game.entity_up_vector(stale).is_none());

@@ -1,2 +1,1 @@
-mod packets;
-pub use packets::{SendPacketError, ServerboundPlayPacket};
+pub use content::packets::{SendPacketError, ServerboundPlayPacket};

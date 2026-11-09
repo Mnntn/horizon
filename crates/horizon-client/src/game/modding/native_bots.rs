@@ -9,7 +9,7 @@ use horizon_client::sprint::Keys;
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::block_collision_scan::BlockCollisionScan;
 use horizon_world::collision_context::CollisionContext;
-use mod_api::{NativePlayerInput, NativeSimulatedMove};
+use mod_api::{PlayerInput, SimulatedMove};
 use std::ops::ControlFlow;
 
 /// The most block cells `native_collision_boxes` looks at: a box of about 100 blocks a side.
@@ -17,7 +17,7 @@ const COLLISION_CELLS: usize = 1_000_000;
 
 /// The keys a bot's input presses: the direction flags by sign (sprint and the server's input
 /// packet read them), and the exact move vector when it isn't a key's (a stick's).
-fn input_keys(input: &NativePlayerInput) -> Option<Keys> {
+fn input_keys(input: &PlayerInput) -> Option<Keys> {
     if !(input.forward.is_finite() && input.strafe.is_finite()) {
         return None;
     }
@@ -37,7 +37,7 @@ fn input_keys(input: &NativePlayerInput) -> Option<Keys> {
 }
 
 /// `LocalPlayer.aiStep`'s sprint: it needs a forward impulse (`hasForwardImpulse`).
-fn sprints(input: &NativePlayerInput) -> bool {
+fn sprints(input: &PlayerInput) -> bool {
     input.sprint && input.forward > 1.0e-5
 }
 
@@ -71,8 +71,8 @@ impl Game<'_> {
     pub(super) fn player_simulate_move(
         &mut self,
         player: mod_api::PlayerRef,
-        input: NativePlayerInput,
-    ) -> Option<NativeSimulatedMove> {
+        input: PlayerInput,
+    ) -> Option<SimulatedMove> {
         if !self.native_authoritative() || !(input.yaw.is_finite() && input.pitch.is_finite()) {
             return None;
         }
@@ -108,7 +108,7 @@ impl Game<'_> {
         .replayed_tick(keys, sprints(&input))
         .ok()?;
         let (p, v) = (body.position, body.velocity);
-        let mut result = NativeSimulatedMove::default();
+        let mut result = SimulatedMove::default();
         result.position = [p.x, p.y, p.z];
         result.velocity = [v.x, v.y, v.z];
         result.on_ground = body.ground.on_ground;
@@ -234,8 +234,8 @@ impl Game<'_> {
 mod tests {
     use super::*;
 
-    fn input(forward: f32, strafe: f32) -> NativePlayerInput {
-        let mut input = NativePlayerInput::default();
+    fn input(forward: f32, strafe: f32) -> PlayerInput {
+        let mut input = PlayerInput::default();
         input.forward = forward;
         input.strafe = strafe;
         input

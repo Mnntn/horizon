@@ -40,11 +40,12 @@ fn modprofile_state_and_report_side_effects() {
     // This guard predates profiling, so it holds no active profiler reservation.
     // Omitting the reentrant check then fails an assertion, rather than hanging
     // while a stop waits for its own profiled guard.
-    let unprofiled_guard = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
-        id: "preexisting_call",
-        hook: "tick",
-        part: None,
-    });
+    let unprofiled_guard =
+        mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
+            id: "preexisting_call",
+            hook: "tick",
+            part: None,
+        });
     assert_eq!(
         run(Action::Start, &dir).unwrap()[0].translation_key(),
         Some("horizon.modprofile.started")
@@ -65,7 +66,7 @@ fn modprofile_state_and_report_side_effects() {
     assert!(run(Action::Report, &dir).is_err());
     assert!(profiler::is_enabled());
     assert!(!dir.join("profiles").exists());
-    let guard = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+    let guard = mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
         id: "profile_test",
         hook: "tick",
         part: None,

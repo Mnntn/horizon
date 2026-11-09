@@ -69,7 +69,7 @@ impl DrawContext for GameDrawContext<'_, '_> {
     fn fluid(&mut self, fluid: &str, at: [f32; 2], size: f32) {
         self.game.native_fluid(&mut *self.surface, fluid, at, size)
     }
-    fn draw_scene(&mut self, rect: [f32; 4], blocks: &[NativeSceneBlock], view: NativeSceneView) {
+    fn draw_scene(&mut self, rect: [f32; 4], blocks: &[mod_api::SceneBlock], view: SceneView) {
         let Ok(blocks) =
             crate::game::api_values::aggregates::SourceScene(blocks).try_into_engine(&())
         else {
@@ -171,7 +171,7 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
     fn item(
         &mut self,
         stack: &ItemStack,
-        display: NativeItemDisplayContext,
+        display: ItemDisplayContext,
         owner_yaw: Option<f32>,
         seed: i32,
     ) -> bool {

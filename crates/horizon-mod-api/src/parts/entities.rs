@@ -163,7 +163,6 @@ impl dyn Registrar + '_ {
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
-    use super::*;
     use crate::parts::tests::*;
     use crate::*;
 
@@ -246,7 +245,7 @@ pub mod tests {
         fn resource(&self, host: &mut dyn ServerHost, _: usize) -> Option<FluidResource> {
             (self.amount(host, 0) > 0).then(|| {
                 FluidResource::of(&FluidStack::new(
-                    crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                    crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
                     1,
                 ))
             })
@@ -261,7 +260,7 @@ pub mod tests {
             if index == 0
                 && resource
                     == &FluidResource::of(&FluidStack::new(
-                        crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                        crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
                         1,
                     ))
             {

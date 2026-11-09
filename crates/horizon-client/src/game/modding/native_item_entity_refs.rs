@@ -134,7 +134,7 @@ mod tests {
     use crate::game::api_values::test_snapshot;
     use horizon_client::{entities::ArmorStand, mobs::Mob};
     use horizon_core::geometry::Vec3;
-    use mod_api::NativeWorldEpoch;
+    use mod_api::WorldEpoch;
 
     #[test]
     #[ignore = "needs prepared resources"]
@@ -197,7 +197,7 @@ mod tests {
                 .push(ArmorStand::new(100, Vec3::ZERO, 0.0));
             assert!(game.item_entity(game.entity(100).unwrap()).is_none());
             let stale = ItemEntityRef::new(EntityRef::new(
-                NativeWorldEpoch::new(entity.epoch().get() + 1),
+                WorldEpoch::new(entity.epoch().get() + 1),
                 entity.id(),
             ));
             assert_eq!(stale.age(game), None);

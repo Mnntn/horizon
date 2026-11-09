@@ -10,7 +10,7 @@ impl Game<'_> {
     /// `explosion_prime`, which a cancel skips. Server-side.
     pub(in crate::game) fn native_explosion_start(
         &mut self,
-        explosion: &NativeExplosionStart<'_>,
+        explosion: &ExplosionStart<'_>,
         cancel: &mut bool,
     ) {
         self.fire_explosion_start(explosion, cancel);

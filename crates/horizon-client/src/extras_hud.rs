@@ -4,7 +4,7 @@ use crate::{
     extras::Corner,
     hud::{HudAtlas, HudBatch, Rect, rgba},
 };
-pub use mod_api::extras_hud::Corners;
+pub use mod_api::client::extras_hud::Corners;
 
 const BACKGROUND: u32 = 0x7800_0000;
 

@@ -67,7 +67,7 @@ pub trait RecipesClientHost {
     /// `native_panel_event`. The panel is the last mod's to show one; empty
     /// items and no recipe page take yours away.
     #[access(WorldOnly)]
-    fn panel_items(&mut self, mod_id: &str, items: Vec<NativeStack>);
+    fn panel_items(&mut self, mod_id: &str, items: Vec<Stack>);
     /// Side: client.
     /// Places a recipe in the open screen's grid as a click in the recipe
     /// book does (`ServerboundPlaceRecipePacket`): the inventory's grid or a

@@ -22,6 +22,50 @@ pub use guest::register;
 pub use registry::register;
 pub use registry::{RegisterError, stop};
 
+/// A `replace` listener at a point's head: the function is the listener's, as with a mixin
+/// overwrite, so the body never runs and the listener produces the outcome. It runs after the
+/// place's other API head listeners whatever its priority (they may change its inputs, not its
+/// outcome), and the point keeps its outcome through the internals listeners after it.
+///
+/// `replace!(place, returns, host, mod_id, priority, inject_id, listener)`. `returns` is the
+/// point's `returns` in `points.json`: at a `cancel` point the listener returns `()` and the cancel
+/// is forced; at a `result` point it returns the record's `result` type, which the function
+/// returns. A point whose return has no API form (`none`) has no replace listener. `host` is `host`
+/// when the point's API listeners take one, `none` otherwise. The slot is marked
+/// [`__private::SlotListener::replacing`], so a second replace listener at the place is refused.
+///
+/// The launcher's generated `main` and `cargo horizon-mod build --wasm` both emit it, so native
+/// and wasm mods share one contract.
+#[macro_export]
+macro_rules! replace {
+    ($place:ident, cancel, host, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $crate::listeners::$place($id, $priority, $inject, |host, args| {
+            $listener(host, args);
+            args.cancel = true;
+        })
+        .replacing()
+    };
+    ($place:ident, cancel, none, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $crate::listeners::$place($id, $priority, $inject, |args| {
+            $listener(args);
+            args.cancel = true;
+        })
+        .replacing()
+    };
+    ($place:ident, result, host, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $crate::listeners::$place($id, $priority, $inject, |host, args| {
+            args.result = ::core::option::Option::Some($listener(host, args));
+        })
+        .replacing()
+    };
+    ($place:ident, result, none, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $crate::listeners::$place($id, $priority, $inject, |args| {
+            args.result = ::core::option::Option::Some($listener(args));
+        })
+        .replacing()
+    };
+}
+
 #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
 pub mod guest;
 
@@ -32,6 +76,13 @@ pub mod __private {
     pub use crate::registry::{
         ApiKind, Forward, POINTS, PointHost, RawKind, SITES, SlotListener, seal, wrap,
     };
+
+    /// Whether an active `replace` listener owns `place`'s outcome. A point's head checks it
+    /// around its internals listeners, which run after the API ones and may not undo it.
+    #[inline]
+    pub fn replaced(place: PointId) -> bool {
+        crate::registry::replaced(place)
+    }
 
     /// Runs the checked API functions and forwarding endpoints under their owner guards.
     #[cold]

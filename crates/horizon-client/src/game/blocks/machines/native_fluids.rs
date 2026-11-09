@@ -554,7 +554,7 @@ mod tests {
     fn a_cauldron_move_the_target_takes_part_of_gives_the_whole_levels_that_fit() {
         use super::super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
-        use mod_api::{FLUIDS, NativeBlockUpdateFlags, move_resources};
+        use mod_api::{BlockUpdateFlags, FLUIDS, move_resources};
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -570,7 +570,7 @@ mod tests {
             };
             let (full, one) = (water(game, 3), water(game, 1));
             let (from, to) = ([0, 64, 0], [2, 64, 0]);
-            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            let flags = BlockUpdateFlags::NEIGHBORS;
             assert_eq!(game.level_set_block(level, from, full, flags), Ok(true));
             assert_eq!(game.level_set_block(level, to, one, flags), Ok(true));
             // The target has room for two levels: the bucket the source first gives doesn't
@@ -762,7 +762,7 @@ mod tests {
             fast_hash::FxHashMap,
         };
         use mod_api::{
-            FLUIDS, FluidResource, Hooks, ModEntry, Mods, NativeBlockUpdateFlags, Registrar,
+            BlockUpdateFlags, FLUIDS, FluidResource, Hooks, ModEntry, Mods, Registrar,
             move_resources,
         };
 
@@ -833,7 +833,7 @@ mod tests {
                 let (from, to) = ([0, 64, 0], [2, 64, 0]);
                 for pos in [from, to] {
                     assert_eq!(
-                        game.level_set_block(level, pos, block, NativeBlockUpdateFlags::NEIGHBORS),
+                        game.level_set_block(level, pos, block, BlockUpdateFlags::NEIGHBORS),
                         Ok(true)
                     );
                     game.world.block_entities.insert(
@@ -879,12 +879,7 @@ mod tests {
                 game.set_tank_state(from, &tanks(&[(Some("othermod:fluid"), 1000), (None, 0)]));
                 let pipe_target = [4, 64, 0];
                 assert_eq!(
-                    game.level_set_block(
-                        level,
-                        pipe_target,
-                        block,
-                        NativeBlockUpdateFlags::NEIGHBORS
-                    ),
+                    game.level_set_block(level, pipe_target, block, BlockUpdateFlags::NEIGHBORS),
                     Ok(true)
                 );
                 game.world.block_entities.insert(

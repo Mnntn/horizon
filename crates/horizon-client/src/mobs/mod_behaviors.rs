@@ -9,7 +9,7 @@ use super::{Mob, MobWorld, Species, brain::Timed, part_goals::BehaviorOp};
 use horizon_core::random::LegacyRandom;
 use mod_api::{
     BehaviorRegistrarBackend, RegisteredBehavior,
-    crash::{NativeModCall, enter_native_mod},
+    content::crash::{ModCall, enter_native_mod},
 };
 
 /// One mod behavior, wrapped for a brain's list: the mod and part a panic in
@@ -359,7 +359,7 @@ pub fn attach(mob_id: &str, backend: &mut dyn BehaviorRegistrarBackend) {
         return;
     }
     for attached in list {
-        let _guard = enter_native_mod(NativeModCall {
+        let _guard = enter_native_mod(ModCall {
             id: attached.mod_id(),
             hook: "register_behaviors",
             part: Some(attached.type_name()),

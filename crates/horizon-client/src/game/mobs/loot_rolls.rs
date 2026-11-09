@@ -7,7 +7,7 @@ use horizon_client::items::{ItemStack, Items};
 use horizon_client::mobs::drops::{DeathRolls, roll_asked};
 use horizon_client::random_sequences::RandomSequences;
 use horizon_core::random::LegacyRandom;
-use mod_api::health::HurtSource;
+use mod_api::entity::health::HurtSource;
 use mod_api::{EntityRef, LivingRef};
 
 /// A table's rolls with a mod listening to `enchanted_entity_loot`: the

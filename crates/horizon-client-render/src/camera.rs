@@ -30,7 +30,7 @@
 //! The float arithmetic follows vanilla and JOML's default (non-FMA,
 //! non-fast-math) code paths operation by operation.
 use horizon_core::geometry::trig;
-pub use mod_api::camera::{
+pub use mod_api::client::camera::{
     CameraEntity, CameraType, FovPlayer, LivingCamera, UseItem, lerp, wrap_degrees,
 };
 

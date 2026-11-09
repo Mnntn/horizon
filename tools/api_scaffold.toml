@@ -1,6 +1,7 @@
 # Allow-list of engine types the scaffold may mirror or wrap. One [[type]] per type.
 #   kind    = "struct" | "enum" (value mirror) | "handle" (an `XRef`, name defaults to <Engine>Ref)
-#   topic   = file stem in crates/horizon-mod-api/src (an existing file is appended to; lib is refused)
+#   domain  = world | block | item | entity | client | command | text | content | wire
+#   topic   = file stem in crates/horizon-mod-api/src/<domain> (an existing file is appended to; lib is refused)
 #   fields  = ["x: i32", ...] for a struct; variants = [...] for an enum
 #   exhaustive = "reason" keeps a struct exhaustive with public fields; otherwise it is non_exhaustive + new()
 #   engine_read / engine_new = how to read each field off the engine value and build it, when the engine
@@ -10,6 +11,7 @@
 [[type]]
 engine = "horizon_core::geometry::Aabb"
 kind = "struct"
+domain = "world"
 topic = "aabb"
 doc = "An axis-aligned box of doubles, as vanilla's `AABB`: the corner with the smaller coordinates first."
 exhaustive = "a box is its two corners, as vanilla's `AABB`"
@@ -24,6 +26,7 @@ engine_new = "horizon_core::geometry::Aabb::new(horizon_core::geometry::Vec3::ne
 [[type]]
 engine = "horizon_client::game::entities::boats::Boat"
 kind = "handle"
+domain = "entity"
 topic = "boat"
 doc = "A vanilla `Boat` of an open world; it reads as stale once that world closes."
 methods = [
@@ -33,5 +36,6 @@ methods = [
 [[type]]
 engine = "horizon_client::game::blocks::maps::MapData"
 kind = "handle"
+domain = "world"
 topic = "map_data"
 doc = "A vanilla `MapItemSavedData` of an open world; it reads as stale once that world closes."

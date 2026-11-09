@@ -1222,7 +1222,6 @@
   "extension slots pending (I6)": "extension slots pending (I6)",
   "API site listeners pending (U4c)": "API site listeners pending (U4c)",
   "source injects pending (U5)": "source injects pending (U5)",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "no API record: a parameter has no API type yet": "no API record: a parameter has no API type yet",
   "This version supplies resources to native build {build}. Remove that build first.": "This version supplies resources to native build {build}. Remove that build first.",
   "This native build needs its base version {base}; reinstall it.": "This native build needs its base version {base}; reinstall it.",
@@ -1235,5 +1234,7 @@
   "NATIVE": "NATIVE",
   "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
   "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
-  "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here."
+  "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

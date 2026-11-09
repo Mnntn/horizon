@@ -118,7 +118,7 @@ pub(super) mod tests {
     use horizon_core::geometry::Vec3;
     use horizon_protocol::packets::{configuration::ClientInformation, play::Clientbound};
     use mod_api::__private::game::*;
-    use mod_api::{NativeWorldEpoch, SoundSource};
+    use mod_api::{SoundSource, WorldEpoch};
     use std::sync::{
         Arc,
         atomic::{AtomicI32, AtomicUsize},
@@ -238,7 +238,7 @@ pub(super) mod tests {
             // A stale handle and an offline player fail.
             let stale = mod_api::__private::game::player_ref(
                 mod_api::EntityRef::new(
-                    NativeWorldEpoch::new(pa.entity().epoch().get() + 1),
+                    WorldEpoch::new(pa.entity().epoch().get() + 1),
                     pa.entity().id(),
                 ),
                 pa.fields().uuid,

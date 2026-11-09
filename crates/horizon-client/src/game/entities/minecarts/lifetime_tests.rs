@@ -283,7 +283,7 @@ fn bound_cart_case(kind: CartKind, action: impl FnOnce(&mut Game<'_>)) {
             Ok(40)
         );
         let live = game.entity(71).unwrap();
-        assert!(game.entity_remove(live, mod_api::NativeRemovalReason::Discarded));
+        assert!(game.entity_remove(live, mod_api::RemovalReason::Discarded));
         let clone = game.carts[0].clone();
         assert!(!game.store_cart_back(0, clone));
         game.native_removals_flush();

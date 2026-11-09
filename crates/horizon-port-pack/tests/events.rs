@@ -202,13 +202,53 @@ fn trade_events_are_answered_by_the_trade_registries() {
     );
     let report = events::table(&mods, &c);
     assert!(
-        report.contains("1 names: 0 with a hook, 0 with another phase's, 0 noted as not quite one, 1 made data, 0 with none."),
+        report.contains("1 names: 0 with a hook, 0 with another phase's, 0 noted as not quite one, 1 made data, 0 answered by the load phases, 0 with none."),
         "{report}"
     );
     assert!(
         report.contains(
             "| 1 | `VillagerTradesEvent` | data: `trade_set`, `villager_trade` | trader |"
         ),
+        "{report}"
+    );
+}
+
+#[test]
+fn setup_and_intermod_events_are_answered_by_the_load_phases() {
+    let c = Catalog::parse(LABELS).unwrap();
+    let direct = (
+        Status::Loading("a direct call, in dependency order".to_owned()),
+        None,
+    );
+    assert_eq!(c.status("InterModEnqueueEvent"), direct);
+    assert_eq!(c.status("InterModProcessEvent"), direct);
+    let setup = "`Hooks::register`, then the first server reload";
+    assert_eq!(
+        c.status("FMLCommonSetupEvent"),
+        (Status::Loading(setup.to_owned()), None)
+    );
+    let complete = "after the initial config, before `server_about_to_start`";
+    assert_eq!(
+        c.status("FMLLoadCompleteEvent"),
+        (Status::Loading(complete.to_owned()), None)
+    );
+    let mut mods = BTreeMap::new();
+    mods.insert(
+        "ae2".to_owned(),
+        BTreeSet::from([
+            "FMLCommonSetupEvent".to_owned(),
+            "InterModEnqueueEvent".to_owned(),
+        ]),
+    );
+    let report = events::table(&mods, &c);
+    assert!(
+        report.contains("2 names: 0 with a hook, 0 with another phase's, 0 noted as not quite one, 0 made data, 2 answered by the load phases, 0 with none."),
+        "{report}"
+    );
+    assert!(
+        report.contains(&format!(
+            "| 1 | `FMLCommonSetupEvent` | load phases: {setup} | ae2 |"
+        )),
         "{report}"
     );
 }

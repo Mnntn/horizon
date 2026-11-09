@@ -1,10 +1,9 @@
 mod __private {
     mod built {
         pub use crate::built::{
-            ChannelRef, NativeActiveEffect, NativeBlockClick, NativeExplosionStart,
-            NativeItemClick, NativeItemFished, NativeLifecycleContext, NativeLootDrops,
-            NativePlayerAbilities, NativePlayerExperience, NativePlayerFood, NativePortalShape,
-            NativeScreenView, NativeServerPlayer, SoundPlay, ToolUse,
+            ActiveEffect, BlockClick, ChannelRef, ExplosionStart, ItemClick, ItemFished,
+            LifecycleContext, LootDrops, PlayerAbilities, PlayerExperience, PlayerFood,
+            PortalShape, ScreenView, ServerPlayer, SoundPlay, ToolUse,
         };
     }
 }

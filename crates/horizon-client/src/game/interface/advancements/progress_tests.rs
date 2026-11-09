@@ -15,7 +15,7 @@ const DATE: &str = "2020-01-02 03:04:05 +0000";
 struct Observation {
     player: u128,
     criterion: String,
-    kind: NativeProgressType,
+    kind: ProgressType,
     progress: AdvancementProgress,
     rewarded: Option<bool>,
 }
@@ -196,7 +196,7 @@ fn progress_events_capture_each_players_full_mutation_state() {
             let first: Vec<_> = events.iter().filter(|event| event.player == 12).collect();
             assert_eq!(first.len(), 1);
             assert_eq!(first[0].criterion, "alpha");
-            assert_eq!(first[0].kind, NativeProgressType::Grant);
+            assert_eq!(first[0].kind, ProgressType::Grant);
             assert_eq!(
                 first[0].rewarded,
                 Some(false),
@@ -346,11 +346,11 @@ fn progress_events_capture_each_players_full_mutation_state() {
                     .map(|event| (event.criterion.as_str(), event.kind))
                     .collect::<Vec<_>>(),
                 vec![
-                    ("beta", NativeProgressType::Grant),
-                    ("gamma", NativeProgressType::Grant),
-                    ("alpha", NativeProgressType::Revoke),
-                    ("beta", NativeProgressType::Revoke),
-                    ("gamma", NativeProgressType::Revoke),
+                    ("beta", ProgressType::Grant),
+                    ("gamma", ProgressType::Grant),
+                    ("alpha", ProgressType::Revoke),
+                    ("beta", ProgressType::Revoke),
+                    ("gamma", ProgressType::Revoke),
                 ]
             );
             assert_progress(&events[0].progress, [true, true, false], 1, false);
@@ -403,7 +403,7 @@ fn progress_events_capture_each_players_full_mutation_state() {
             assert!(
                 events
                     .iter()
-                    .all(|event| event.kind == NativeProgressType::Grant
+                    .all(|event| event.kind == ProgressType::Grant
                         && event.rewarded == Some(false))
             );
             let first: Vec<_> = events.iter().filter(|event| event.player == 12).collect();

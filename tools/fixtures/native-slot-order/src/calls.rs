@@ -8,7 +8,7 @@ static BEFORE: AtomicBool = AtomicBool::new(false);
 static AFTER: AtomicBool = AtomicBool::new(false);
 pub fn before(_: Receiver<'_, '_>, args: &mut Args) {
     assert_eq!(
-        mod_api::crash::current_native_mod(),
+        mod_api::content::crash::current_native_mod(),
         Some("native_slot_order")
     );
     BEFORE.store(true, Ordering::SeqCst);

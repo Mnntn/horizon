@@ -207,9 +207,7 @@ fn the_fluid_ray_passes_through_the_hollow_of_a_torch() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn right_click_block_controls_cauldron_use() {
-    use mod_api::{
-        self, Flow, Hooks, NativeBlockUpdateFlags, NativeTriState, RightClickBlockEvent,
-    };
+    use mod_api::{self, BlockUpdateFlags, Flow, Hooks, RightClickBlockEvent, TriState};
     use std::sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -227,11 +225,11 @@ fn right_click_block_controls_cauldron_use() {
                 return Flow::Cancel;
             }
             *event.use_block = if self.0.load(Ordering::SeqCst) {
-                NativeTriState::True
+                TriState::True
             } else {
-                NativeTriState::False
+                TriState::False
             };
-            *event.use_item = NativeTriState::False;
+            *event.use_item = TriState::False;
             Flow::Continue
         }
     }
@@ -256,7 +254,7 @@ fn right_click_block_controls_cauldron_use() {
             .default_state("minecraft:cauldron")
             .unwrap();
         assert_eq!(
-            game.level_set_block(level, [0, 64, 0], empty, NativeBlockUpdateFlags::NEIGHBORS),
+            game.level_set_block(level, [0, 64, 0], empty, BlockUpdateFlags::NEIGHBORS),
             Ok(true)
         );
         game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
@@ -272,7 +270,7 @@ fn right_click_block_controls_cauldron_use() {
         game.use_hand(Some(&hit)).unwrap();
         assert_ne!(game.world.block(0, 64, 0), empty);
         assert_eq!(
-            game.level_set_block(level, hit.pos, empty, NativeBlockUpdateFlags::NEIGHBORS),
+            game.level_set_block(level, hit.pos, empty, BlockUpdateFlags::NEIGHBORS),
             Ok(true)
         );
         game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
@@ -288,7 +286,7 @@ fn right_click_block_controls_cauldron_use() {
             .default_state("minecraft:campfire")
             .unwrap();
         assert_eq!(
-            game.level_set_block(level, hit.pos, campfire, NativeBlockUpdateFlags::NEIGHBORS),
+            game.level_set_block(level, hit.pos, campfire, BlockUpdateFlags::NEIGHBORS),
             Ok(true)
         );
         let entity = game.new_block_entity("minecraft:campfire").unwrap();
@@ -309,7 +307,7 @@ fn right_click_block_controls_cauldron_use() {
             .default_state("minecraft:oak_fence")
             .unwrap();
         assert_eq!(
-            game.level_set_block(level, hit.pos, fence, NativeBlockUpdateFlags::NEIGHBORS),
+            game.level_set_block(level, hit.pos, fence, BlockUpdateFlags::NEIGHBORS),
             Ok(true)
         );
         let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
@@ -348,7 +346,7 @@ fn right_click_block_controls_cauldron_use() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn fence_ties_without_a_lead_only_on_main_hand() {
     use horizon_client::mobs::leash::Holder;
-    use mod_api::NativeBlockUpdateFlags;
+    use mod_api::BlockUpdateFlags;
     super::native_entity_refs::tests::with_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.world
@@ -362,7 +360,7 @@ fn fence_ties_without_a_lead_only_on_main_hand() {
             .default_state("minecraft:oak_fence")
             .unwrap();
         assert_eq!(
-            game.level_set_block(level, [0, 64, 0], fence, NativeBlockUpdateFlags::NEIGHBORS),
+            game.level_set_block(level, [0, 64, 0], fence, BlockUpdateFlags::NEIGHBORS),
             Ok(true)
         );
         let hit = Hit {
@@ -464,7 +462,7 @@ fn an_unclean_start_leaves_fullscreen_and_keeps_the_packs() {
     assert!(settings.fullscreen);
 }
 
-/// `NativeScreenView.id` (the `screen_render_post` hook) is a mod's
+/// `ScreenView.id` (the `screen_render_post` hook) is a mod's
 /// contract: every `Screen` has its own id, and it does not change.
 /// `Screen::id`'s match makes a new variant give itself one; this list
 /// makes the test cover it too.

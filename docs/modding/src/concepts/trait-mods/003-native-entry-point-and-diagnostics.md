@@ -15,8 +15,8 @@ id for startup errors and hook panics. The game stops. A point listener's panic 
 method; render hooks are not named yet.
 
 A native runtime that hosts converted packages (Portizon's wasm packages, a Java interpreter's jars)
-declares the packages it loaded with `mod_api::crash::ConvertedPackages::new(runtime_id, ids)` and
-marks a guest call with `mod_api::crash::ConvertedPackage::enter(export, site)`. The scope nests,
+declares the packages it loaded with `mod_api::content::crash::ConvertedPackages::new(runtime_id, ids)` and
+marks a guest call with `mod_api::content::crash::ConvertedPackage::enter(export, site)`. The scope nests,
 restores the previous one on return and while a panic unwinds, and adds `in converted package <id>,
 export <export>, call site <site>` below the runtime's `in native mod` line in the report. A package
 id the runtime did not declare is refused, as is a scope entered while another mod's call is the

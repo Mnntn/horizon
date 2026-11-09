@@ -1,2 +1,1 @@
-mod block_state;
-pub use block_state::BlockState;
+pub use block::block_state::BlockState;

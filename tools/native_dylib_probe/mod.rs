@@ -19,8 +19,8 @@ pub fn probe_exchange(value: Vec<u8>) -> Vec<u8> {
     vec![4, 5, 6]
 }
 #[unsafe(no_mangle)]
-pub fn probe_enter() -> mod_api::crash::NativeModGuard {
-    mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+pub fn probe_enter() -> mod_api::content::crash::ModGuard {
+    mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
         id: "mod",
         hook: "cross-image",
         part: None,
@@ -28,7 +28,7 @@ pub fn probe_enter() -> mod_api::crash::NativeModGuard {
 }
 #[unsafe(no_mangle)]
 pub fn probe_tls(expected: Option<&str>) {
-    assert_eq!(mod_api::crash::current_native_mod(), expected);
+    assert_eq!(mod_api::content::crash::current_native_mod(), expected);
     assert_eq!(
         mod_points::__private::POINTS[0].load(std::sync::atomic::Ordering::SeqCst),
         expected.is_some()

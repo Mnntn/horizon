@@ -1,3 +1,3 @@
 mod stubs {
-    pub(super) struct NativeItemFished<'a>(pub &'a ());
+    pub(super) struct ItemFished<'a>(pub &'a ());
 }

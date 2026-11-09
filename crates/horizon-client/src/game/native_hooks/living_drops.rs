@@ -23,7 +23,7 @@ impl Game<'_> {
     /// in vanilla). Experience orbs are not in the list
     /// (`native_living_experience_drop`); a spectator, who drops nothing,
     /// doesn't call this. Item entity state such as no-gravity, owner and
-    /// lifetime isn't in `NativeItemDrop`. Server-side.
+    /// lifetime isn't in `ItemDrop`. Server-side.
     pub(in crate::game) fn native_living_drops(
         &mut self,
         call: mod_api::__private::LivingDropsCall<'_>,

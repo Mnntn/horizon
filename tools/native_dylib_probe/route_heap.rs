@@ -58,10 +58,10 @@ fn main() {
     }
     let executable = Box::new([0u8; 64]);
     rows.push(("executable Box".into(), process_heap(executable.as_ptr())));
-    mod_api::crash::set_detail("allocator probe", "game");
-    let game_copy = mod_api::crash::details();
+    mod_api::content::crash::set_detail("allocator probe", "game");
+    let game_copy = mod_api::content::crash::details();
     rows.push((
-        "mod_api::crash::details() Vec".into(),
+        "mod_api::content::crash::details() Vec".into(),
         process_heap(game_copy.as_ptr().cast()),
     ));
     let json: Vec<_> = rows

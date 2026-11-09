@@ -2177,7 +2177,7 @@ pub use item_stack::ItemStack;
 pub struct Ignored;
 #[cfg(feature = "shapes")]
 pub mod first {
-    use crate::item_stack::ItemStack;
+    use crate::item::item_stack::ItemStack;
     pub enum Kind { Stack(Box<ItemStack>) }
 }
 pub mod second { pub enum Kind { Empty } }

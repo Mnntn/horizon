@@ -1,2 +1,1 @@
-mod read_error;
-pub use read_error::LevelReadError;
+pub use world::read_error::LevelReadError;

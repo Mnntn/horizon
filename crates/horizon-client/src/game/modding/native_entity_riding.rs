@@ -927,7 +927,7 @@ mod tests {
             let rider = game.entity(50).unwrap();
             let vehicle = game.entity(51).unwrap();
             let stale = mod_api::EntityRef::new(
-                mod_api::NativeWorldEpoch::new(rider.epoch().get().wrapping_add(1)),
+                mod_api::WorldEpoch::new(rider.epoch().get().wrapping_add(1)),
                 rider.id(),
             );
             assert!(!game.entity_start_riding(stale, vehicle, true));
@@ -946,7 +946,7 @@ mod tests {
     }
     fn stale(entity: EntityRef) -> EntityRef {
         EntityRef::new(
-            mod_api::NativeWorldEpoch::new(entity.epoch().get().wrapping_add(1)),
+            mod_api::WorldEpoch::new(entity.epoch().get().wrapping_add(1)),
             entity.id(),
         )
     }

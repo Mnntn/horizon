@@ -18,15 +18,15 @@ pub trait DisplaysBackend {
     /// Side: server.
     /// Which `Display` subclass the entity is.
     #[access(WorldOnly)]
-    fn display_kind(&self, display: DisplayRef) -> Option<NativeDisplayKind>;
+    fn display_kind(&self, display: DisplayRef) -> Option<DisplayKind>;
     /// Side: server.
     /// `Display.createTransformation`: the transformation as shown.
     #[access(WorldOnly)]
-    fn display_transformation(&self, display: DisplayRef) -> Option<NativeTransformation>;
+    fn display_transformation(&self, display: DisplayRef) -> Option<Transformation>;
     /// Side: server.
     /// `Display.getBillboardConstraints`.
     #[access(WorldOnly)]
-    fn display_billboard(&self, display: DisplayRef) -> Option<NativeBillboard>;
+    fn display_billboard(&self, display: DisplayRef) -> Option<Billboard>;
     /// Side: server.
     /// `Display.getBrightnessOverride`: block and sky light, 0 to 15 each, or None for no override.
     #[access(WorldOnly)]
@@ -100,7 +100,7 @@ pub trait DisplaysBackend {
     /// Side: server.
     /// `TextDisplay.getAlign`, from the left and right flags.
     #[access(WorldOnly)]
-    fn display_alignment(&self, display: DisplayRef) -> Option<NativeTextAlignment>;
+    fn display_alignment(&self, display: DisplayRef) -> Option<TextAlignment>;
     /// Side: server.
     /// `BlockDisplay.getBlockState`; None for another kind of display.
     #[access(WorldOnly)]
@@ -112,7 +112,7 @@ pub trait DisplaysBackend {
     /// Side: server.
     /// `ItemDisplay.getItemTransform`: how the item is displayed.
     #[access(WorldOnly)]
-    fn display_item_context(&self, display: DisplayRef) -> Option<NativeItemDisplayContext>;
+    fn display_item_context(&self, display: DisplayRef) -> Option<ItemDisplayContext>;
 }
 /// The handles' writes of the `displays` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -127,12 +127,12 @@ pub trait DisplaysBackendMut {
     fn display_set_transformation(
         &mut self,
         display: DisplayRef,
-        transformation: NativeTransformation,
+        transformation: Transformation,
     ) -> bool;
     /// Side: server.
     /// `Display.setBillboardConstraints`.
     #[access(WorldOnly)]
-    fn display_set_billboard(&mut self, display: DisplayRef, billboard: NativeBillboard) -> bool;
+    fn display_set_billboard(&mut self, display: DisplayRef, billboard: Billboard) -> bool;
     /// Side: server.
     /// `Display.setBrightnessOverride`; None clears the override. False for a
     /// light level above 15.
@@ -210,11 +210,7 @@ pub trait DisplaysBackendMut {
     /// Side: server.
     /// Sets the alignment; false for another kind of display.
     #[access(WorldOnly)]
-    fn display_set_alignment(
-        &mut self,
-        display: DisplayRef,
-        alignment: NativeTextAlignment,
-    ) -> bool;
+    fn display_set_alignment(&mut self, display: DisplayRef, alignment: TextAlignment) -> bool;
     /// Side: server.
     /// `BlockDisplay.setBlockState`; false for another kind of display or an unknown state.
     #[access(WorldOnly)]
@@ -233,6 +229,6 @@ pub trait DisplaysBackendMut {
     fn display_set_item_context(
         &mut self,
         display: DisplayRef,
-        context: NativeItemDisplayContext,
+        context: ItemDisplayContext,
     ) -> bool;
 }

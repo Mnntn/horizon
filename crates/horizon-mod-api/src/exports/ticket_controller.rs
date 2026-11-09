@@ -1,2 +1,1 @@
-mod ticket_controller;
-pub use ticket_controller::TicketController;
+pub use world::ticket_controller::TicketController;

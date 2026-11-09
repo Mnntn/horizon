@@ -14,7 +14,7 @@ pub trait Hooks {
         side = "both",
         contract = "listen",
         neoforge = "ItemAttributeModifierEvent",
-        target = "mod_api::item_attributes::native_item_attribute_modifier"
+        target = "mod_api::item::item_attributes::native_item_attribute_modifier"
     )]
     fn item_attribute_modifier();
 }

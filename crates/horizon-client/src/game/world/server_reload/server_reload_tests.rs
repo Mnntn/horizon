@@ -903,8 +903,8 @@ fn server_completion_reads_published_data_without_world_access_on_first_open() {
 #[ignore = "needs prepared resources"]
 fn data_maps_updated_fires_for_each_registry_on_first_open_and_every_reload() {
     use mod_api::{
-        DataMapTypesEvent, DataMapsUpdateCause, DataMapsUpdatedEvent, DataPackFilesEvent, HostSide,
-        NativeDataMapType, ServerHost,
+        DataMapType, DataMapTypesEvent, DataMapsUpdateCause, DataMapsUpdatedEvent,
+        DataPackFilesEvent, HostSide, ServerHost,
     };
     use std::sync::atomic::AtomicUsize;
 
@@ -919,7 +919,7 @@ fn data_maps_updated_fires_for_each_registry_on_first_open_and_every_reload() {
                 ("probe:fuel", "minecraft:item"),
                 ("probe:hardness", "minecraft:block"),
             ] {
-                event.types.push(NativeDataMapType {
+                event.types.push(DataMapType {
                     id: id.into(),
                     registry: registry.into(),
                 });

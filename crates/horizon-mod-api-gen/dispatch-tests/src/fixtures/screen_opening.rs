@@ -28,7 +28,7 @@ fn an_answer_names_the_mod_that_gave_it() {
         ModEntry::new("late", Box::new(Opener)),
     ];
     install(mods.into());
-    let view = NativeScreenView(&());
+    let view = ScreenView(&());
     let mut outcome = None;
     dispatch_screen_opening(&TestHost, &view, &view, &mut outcome);
     assert_eq!(

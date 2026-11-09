@@ -56,7 +56,7 @@ owners, not proof that proposed dispatch already exists.
 
 | Route | Current owner | Required integration |
 | --- | --- | --- |
-| Item declaration and humanoid pose | `crates/horizon-mod-api/src/content_declarations.rs:228`; `crates/horizon-mod-api/src/hooks/get_arm_pose.rs:23` | Reuse one resolved pose path for player and humanoid consumers. |
+| Item declaration and humanoid pose | `crates/horizon-mod-api/src/content/content_declarations.rs:228`; `crates/horizon-mod-api/src/hooks/get_arm_pose.rs:23` | Reuse one resolved pose path for player and humanoid consumers. |
 | Block particle sprite and destroy particles | `crates/horizon-client/src/game/blocks/block_particles.rs:47`, `:83` | Resolve block extension through the existing particle owner; hit route still needs caller audit. |
 | Fluid box drawing and appearance lookup | `crates/horizon-client/src/game/modding/native_fluid_render.rs:15`, `:40` | Reuse appearance; this box route alone does not establish terrain/camera coverage. |
 | Mob/player geometry and layers | `crates/horizon-client/src/game/modding/native_mob_draw.rs:57`, `:74`, `:97`, `:119` | Preserve existing entity submission; non-mob families require #896/#897 audit. |

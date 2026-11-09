@@ -11,7 +11,7 @@
 //! (`native_config_unloading`).
 use super::Game;
 use mod_api::ConfigPath;
-pub use mod_api::game::{NativeConfig, NativeConfigFile, NativeConfigKind};
+pub use mod_api::game::ConfigFile;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -21,7 +21,7 @@ const CHECK_EVERY: Duration = Duration::from_secs(1);
 
 /// A loaded config, where it was read and what its file looked like then.
 struct Tracked {
-    config: NativeConfigFile,
+    config: ConfigFile,
     path: PathBuf,
 }
 
@@ -38,11 +38,11 @@ pub(super) struct NativeConfigs {
 /// server config when there is one, else `config_dir`'s, written from the
 /// default when missing.
 fn locate(
-    config: &NativeConfig,
+    config: &mod_api::Config,
     config_dir: &Path,
     world: Option<&Path>,
 ) -> std::io::Result<PathBuf> {
-    if config.kind == NativeConfigKind::Server
+    if config.kind == mod_api::ConfigKind::Server
         && let Some(world) = world
     {
         let own = world.join("serverconfig").join(&config.file);
@@ -66,11 +66,11 @@ impl NativeConfigs {
     /// and answers each loaded file.
     fn load(
         &mut self,
-        configs: Vec<NativeConfig>,
-        kinds: &[NativeConfigKind],
+        configs: Vec<mod_api::Config>,
+        kinds: &[mod_api::ConfigKind],
         config_dir: &Path,
         world: Option<&Path>,
-    ) -> Vec<NativeConfigFile> {
+    ) -> Vec<ConfigFile> {
         self.started = true;
         let mut loaded = Vec::new();
         for config in configs.into_iter().filter(|c| kinds.contains(&c.kind)) {
@@ -108,7 +108,7 @@ impl NativeConfigs {
                     continue;
                 }
             };
-            let file = NativeConfigFile::from(mod_api::__private::built::NativeConfigFile {
+            let file = ConfigFile::from(mod_api::__private::built::ConfigFile {
                 mod_id: config.mod_id,
                 kind: config.kind,
                 file: config.file,
@@ -125,7 +125,7 @@ impl NativeConfigs {
     /// compared, not the file's modification time: a save inside the same
     /// timestamp tick as the load (a mod writing its config from
     /// `config_loading`) keeps the time and the length and still changed.
-    fn changed(&mut self) -> Vec<NativeConfigFile> {
+    fn changed(&mut self) -> Vec<ConfigFile> {
         let mut changed = Vec::new();
         for tracked in &mut self.files {
             let Ok(text) = fs::read_to_string(&tracked.path) else {
@@ -149,10 +149,10 @@ impl NativeConfigs {
     }
 
     /// Drops the server's configs and answers them.
-    fn drop_server(&mut self) -> Vec<NativeConfigFile> {
+    fn drop_server(&mut self) -> Vec<ConfigFile> {
         let (server, rest) = std::mem::take(&mut self.files)
             .into_iter()
-            .partition(|t| t.config.kind == NativeConfigKind::Server);
+            .partition(|t| t.config.kind == mod_api::ConfigKind::Server);
         self.files = rest;
         server.into_iter().map(|t| t.config).collect()
     }
@@ -160,7 +160,7 @@ impl NativeConfigs {
 
 impl Game<'_> {
     /// Asks the mods for their configs and loads those of `kinds`.
-    fn native_configs_load(&mut self, kinds: &[NativeConfigKind], world: Option<&Path>) {
+    fn native_configs_load(&mut self, kinds: &[mod_api::ConfigKind], world: Option<&Path>) {
         let phase = self.mod_phase.clone();
         let _config = phase
             .config()
@@ -192,7 +192,7 @@ impl Game<'_> {
             return;
         }
         if !self.native_configs.started {
-            use NativeConfigKind::{Client, Common};
+            use mod_api::ConfigKind::{Client, Common};
             self.native_configs_load(&[Client, Common], None);
         }
     }
@@ -205,8 +205,8 @@ impl Game<'_> {
     /// A server about to open `world`: a dedicated server loads its
     /// `Common` configs too, a single player's server thread only `Server`.
     pub(super) fn native_configs_server_start(&mut self, world: &Path, dedicated: bool) {
-        use NativeConfigKind::{Common, Server};
-        let kinds: &[NativeConfigKind] = if dedicated && !self.native_configs.started {
+        use mod_api::ConfigKind::{Common, Server};
+        let kinds: &[mod_api::ConfigKind] = if dedicated && !self.native_configs.started {
             &[Common, Server]
         } else {
             &[Server]
@@ -235,14 +235,14 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use NativeConfigKind::{Client, Common, Server};
+    use mod_api::ConfigKind::{Client, Common, Server};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn config_permissions_and_once_per_side_survive_two_worlds() {
         use mod_api::{Hooks, Host, HostSide, HostTransaction, ModEntry};
         use std::sync::{Arc, Mutex};
-        struct Probe(Arc<Mutex<Vec<(bool, NativeConfigKind)>>>);
+        struct Probe(Arc<Mutex<Vec<(bool, mod_api::ConfigKind)>>>);
         #[mod_api::__subscriptions]
         impl Hooks for Probe {
             fn register_configs(
@@ -253,7 +253,7 @@ mod tests {
                 for kind in [Client, Common, Server] {
                     event
                         .configs
-                        .push(NativeConfig::new("phase_probe", kind, "enabled=true"));
+                        .push(mod_api::Config::new("phase_probe", kind, "enabled=true"));
                 }
             }
             fn config_loading(
@@ -357,9 +357,9 @@ mod tests {
         let mut configs = NativeConfigs::default();
         let loaded = configs.load(
             vec![
-                NativeConfig::new("gt", Client, "hud = true\n"),
-                NativeConfig::new("gt", Common, "voltage = 32\n"),
-                NativeConfig::new("gt", Server, "ores = 1\n"),
+                mod_api::Config::new("gt", Client, "hud = true\n"),
+                mod_api::Config::new("gt", Common, "voltage = 32\n"),
+                mod_api::Config::new("gt", Server, "ores = 1\n"),
             ],
             &[Client, Common],
             &config,
@@ -393,10 +393,10 @@ mod tests {
         let mut configs = NativeConfigs::default();
         let loaded = configs.load(
             vec![
-                NativeConfig::new("gt", Server, "veins = 3\n").file("gt/ores.toml"),
-                NativeConfig::new("gt", Server, "tiers = 4\n"),
+                mod_api::Config::new("gt", Server, "veins = 3\n").file("gt/ores.toml"),
+                mod_api::Config::new("gt", Server, "tiers = 4\n"),
                 // A Common config of the world's folder is not looked for.
-                NativeConfig::new("gt", Common, "a = 1\n"),
+                mod_api::Config::new("gt", Common, "a = 1\n"),
             ],
             &[Server],
             &config,
@@ -428,12 +428,12 @@ mod tests {
         let mut configs = NativeConfigs::default();
         let loaded = configs.load(
             vec![
-                NativeConfig::new("a", Common, "x").file("../options.txt"),
-                NativeConfig::new("a", Common, "x").file(""),
-                NativeConfig::new("a", Common, "first"),
-                NativeConfig::new("a", Common, "again"),
+                mod_api::Config::new("a", Common, "x").file("../options.txt"),
+                mod_api::Config::new("a", Common, "x").file(""),
+                mod_api::Config::new("a", Common, "first"),
+                mod_api::Config::new("a", Common, "again"),
                 // Another mod's file, as `Host::config_files` refuses it.
-                NativeConfig::new("b", Common, "second").file("a-common.toml"),
+                mod_api::Config::new("b", Common, "second").file("a-common.toml"),
             ],
             &[Common],
             &config,
@@ -452,7 +452,7 @@ mod tests {
         let config = root.0.join("config");
         let mut configs = NativeConfigs::default();
         configs.load(
-            vec![NativeConfig::new("gt", Common, "a = 1\n")],
+            vec![mod_api::Config::new("gt", Common, "a = 1\n")],
             &[Common],
             &config,
             None,
@@ -487,7 +487,7 @@ mod tests {
         let start = Instant::now();
         assert!(!configs.due(start));
         configs.files.push(Tracked {
-            config: NativeConfigFile::from(mod_api::__private::built::NativeConfigFile {
+            config: ConfigFile::from(mod_api::__private::built::ConfigFile {
                 mod_id: "gt".into(),
                 kind: Common,
                 file: "gt-common.toml".into(),

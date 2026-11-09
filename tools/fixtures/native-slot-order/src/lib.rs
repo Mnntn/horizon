@@ -40,7 +40,7 @@ impl mod_api::Hooks for Mod {}
 pub fn api_head(_: mod_api::HostSide<'_>, args: &mut mod_points::OnTickRateChangedArgs) {
     assert!(!args.cancel);
     assert_eq!(
-        mod_api::crash::current_native_mod(),
+        mod_api::content::crash::current_native_mod(),
         Some("native_slot_order")
     );
     API_HEAD.store(true, Ordering::SeqCst);

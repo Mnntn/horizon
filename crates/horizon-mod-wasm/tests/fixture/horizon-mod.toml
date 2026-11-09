@@ -21,3 +21,11 @@ kind = "head"
 with = "on_shutdown"
 access = "api"
 hash = "fixture"
+
+[[inject]]
+id = "average"
+at = "horizon_client::game::beacon::average"
+kind = "replace"
+with = "own_average"
+access = "api"
+hash = "fixture"

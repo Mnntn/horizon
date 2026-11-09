@@ -1,6 +1,6 @@
 use super::*;
 /// Owner-bound declarations retained for client mod-list rebuilds.
-pub fn key_mappings() -> &'static [(&'static str, crate::NativeKeyRegistration)] {
+pub fn key_mappings() -> &'static [(&'static str, crate::KeyRegistration)] {
     installed().map_or(&[], |installed| &installed.keys.key_mappings)
 }
 
@@ -13,11 +13,11 @@ pub mod tests {
     #[test]
     pub(crate) fn key_mappings_are_owned_and_duplicates_refuse_startup() {
         let mut registrar = super::PartRegistrar::new("first");
-        registrar.register_key_mapping(NativeKeyRegistration::new("zoom", "key.keyboard.z"));
-        registrar.register_key_mapping(NativeKeyRegistration::new("zoom", "key.keyboard.r"));
-        registrar.register_key_mapping(NativeKeyRegistration::new("second:zoom", "key.keyboard.z"));
+        registrar.register_key_mapping(KeyRegistration::new("zoom", "key.keyboard.z"));
+        registrar.register_key_mapping(KeyRegistration::new("zoom", "key.keyboard.r"));
+        registrar.register_key_mapping(KeyRegistration::new("second:zoom", "key.keyboard.z"));
         registrar.mod_id = "second";
-        registrar.register_key_mapping(NativeKeyRegistration::new("zoom", "key.keyboard.z"));
+        registrar.register_key_mapping(KeyRegistration::new("zoom", "key.keyboard.z"));
         assert_eq!(registrar.refused.len(), 2);
         let owners: Vec<_> = registrar
             .parts
@@ -34,11 +34,11 @@ pub mod tests {
 pub trait KeyMappingsRegistrar {
     /// Register a Controls binding owned by the calling mod (`RegisterKeyMappingsEvent`).
     /// Called from `Hooks::register`; invalid or duplicate local ids refuse startup.
-    fn register_key_mapping(&mut self, mapping: crate::NativeKeyRegistration);
+    fn register_key_mapping(&mut self, mapping: crate::KeyRegistration);
 }
 
 impl KeyMappingsRegistrar for PartRegistrar {
-    fn register_key_mapping(&mut self, mapping: crate::NativeKeyRegistration) {
+    fn register_key_mapping(&mut self, mapping: crate::KeyRegistration) {
         if mapping.id.is_empty()
             || !mapping
                 .id

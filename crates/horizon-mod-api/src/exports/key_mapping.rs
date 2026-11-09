@@ -1,2 +1,1 @@
-mod key_mapping;
-pub use key_mapping::{KeyConflictContext, NativeKeyRegistration};
+pub use client::key_mapping::{KeyConflictContext, KeyRegistration};

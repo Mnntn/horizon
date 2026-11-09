@@ -19,6 +19,26 @@ pub struct Point {
     /// Why its API listeners are refused: the first parameter with no API type, named.
     #[serde(default)]
     pub api_refusal: Option<String>,
+    /// What its listeners may do with the return: `cancel`, `result` (an API value) or `none`.
+    #[serde(default)]
+    pub returns: String,
+    /// Its API listeners' host: `none`, or the host they take.
+    #[serde(default)]
+    pub host: String,
+    /// Its raw form, read for the return type a refused `replace` names.
+    #[serde(default)]
+    pub raw_shape: Option<RawReturn>,
+    /// The function's return type as written: a `cancel` point takes a `replace` only when it
+    /// is `()`.
+    #[serde(default)]
+    pub return_ty: Option<String>,
+}
+
+/// The part of a point's raw contract a `replace` refusal names.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct RawReturn {
+    /// The function's return type, as written.
+    pub return_ty: String,
 }
 
 /// Remove type arguments and whitespace exactly as the native launcher resolves point paths.
@@ -42,15 +62,25 @@ pub fn plain_path(path: &str) -> String {
 /// Emit API head/return constructor expressions in manifest order, without surrounding syntax.
 /// `prefix` is the compiler-owned Rust module path preceding each manifest `with` function,
 /// for example `mod_0::` in the native launcher or `original_mod::` in a wasm wrapper.
+/// A `replace` goes through `mod_points::replace!`, which owns its contract for both targets.
 /// Call-site injections and internals listeners are emitted by their own slot routes.
 pub fn api(manifest: &Manifest, points: &[Point], prefix: &str) -> Result<Vec<String>, String> {
     Ok(resolve(manifest, points)?
         .into_iter()
-        .map(|(place, entry)| {
-            format!(
-                "mod_points::listeners::{place}({:?}, {}, {:?}, {prefix}{})",
-                manifest.id, entry.priority, entry.id, entry.with
-            )
+        .map(|(place, entry, point)| {
+            let (id, priority, inject) = (&manifest.id, entry.priority, &entry.id);
+            let listener = format!("{prefix}{}", entry.with);
+            if entry.kind == Kind::Replace {
+                let host = if point.host == "none" { "none" } else { "host" };
+                format!(
+                    "mod_points::replace!({place}, {}, {host}, {id:?}, {priority}, {inject:?}, {listener})",
+                    point.returns
+                )
+            } else {
+                format!(
+                    "mod_points::listeners::{place}({id:?}, {priority}, {inject:?}, {listener})"
+                )
+            }
         })
         .collect())
 }
@@ -60,14 +90,20 @@ pub fn api(manifest: &Manifest, points: &[Point], prefix: &str) -> Result<Vec<St
 pub fn places(manifest: &Manifest, points: &[Point]) -> Result<Vec<String>, String> {
     Ok(resolve(manifest, points)?
         .into_iter()
-        .map(|(place, _)| place)
+        .map(|(place, _, _)| place)
         .collect())
 }
 
-fn resolve<'a>(
+type Resolved<'a, 'p> = (
+    String,
+    &'a horizon_mod_package::manifest::inject::Inject,
+    &'p Point,
+);
+
+fn resolve<'a, 'p>(
     manifest: &'a Manifest,
-    points: &[Point],
-) -> Result<Vec<(String, &'a horizon_mod_package::manifest::inject::Inject)>, String> {
+    points: &'p [Point],
+) -> Result<Vec<Resolved<'a, 'p>>, String> {
     manifest
         .inject
         .iter()
@@ -95,14 +131,51 @@ fn resolve<'a>(
             if point.private || entry.kind == Kind::Return && !point.at_return {
                 return Err(format!("{}: no public API place at {}", entry.id, entry.at));
             }
+            if entry.kind == Kind::Replace {
+                replaceable(&entry.id, &entry.at, point)?;
+            }
             let place = if entry.kind == Kind::Return {
                 format!("{}_return", point.name)
             } else {
                 point.name.clone()
             };
-            Ok((place, entry))
+            Ok((place, entry, point))
         })
         .collect()
+}
+
+/// A `replace` listener produces the function's outcome, so its point must return `()` (the
+/// cancel is forced) or a value the API carries. A `cancel` point returning anything else
+/// (`Result<(), E>`, whose cancel would answer `Ok(())`) is refused, and so is a catalog that
+/// doesn't say. The refusal names the point and its return type.
+pub fn replaceable(id: &str, at: &str, point: &Point) -> Result<(), String> {
+    if point.host.is_empty() {
+        return Err(format!(
+            "{id}: the point catalog lists no listener host for {at}; rebuild it"
+        ));
+    }
+    let ty = match point.returns.as_str() {
+        "result" => return Ok(()),
+        "cancel" => match point.return_ty.as_deref() {
+            Some("()") => return Ok(()),
+            Some(ty) => format!("`{ty}`"),
+            None => {
+                return Err(format!(
+                    "{id}: the point catalog lists no return type for {at}; rebuild it"
+                ));
+            }
+        },
+        _ => point
+            .raw_shape
+            .as_ref()
+            .map_or("its return type".to_owned(), |raw| {
+                format!("`{}`", raw.return_ty)
+            }),
+    };
+    Err(format!(
+        "{id}: no replace listener at {at}: a replace returns the function's value, and {ty} \
+         has no API form"
+    ))
 }
 
 #[cfg(test)]
@@ -146,6 +219,10 @@ hash = "pin"
             private: false,
             at_return: true,
             api_refusal: None,
+            returns: "cancel".into(),
+            host: "both".into(),
+            raw_shape: None,
+            return_ty: Some("()".into()),
         }];
         let native = api(&manifest, &points, "mod_3::")
             .unwrap()
@@ -159,14 +236,48 @@ hash = "pin"
                 "        mod_points::listeners::tick_return(\"fixture\", 0, \"after\", mod_3::tail),\n"
             )
         );
-        for kind in [Kind::ModifyArg, Kind::Replace] {
-            let mut alternate = manifest.clone();
-            alternate.inject[0].kind = kind;
-            assert_eq!(
-                api(&alternate, &points, "mod_3::").unwrap()[0],
-                api(&manifest, &points, "mod_3::").unwrap()[0]
-            );
-        }
+        let mut modify = manifest.clone();
+        modify.inject[0].kind = Kind::ModifyArg;
+        assert_eq!(
+            api(&modify, &points, "mod_3::").unwrap()[0],
+            api(&manifest, &points, "mod_3::").unwrap()[0]
+        );
+        // A replace owns the outcome, by the point's return and host, through one macro.
+        let mut replace = manifest.clone();
+        replace.inject[0].kind = Kind::Replace;
+        assert_eq!(
+            api(&replace, &points, "mod_3::").unwrap()[0],
+            "mod_points::replace!(tick, cancel, host, \"fixture\", 12, \"before\", mod_3::head)"
+        );
+        let mut free = points[0].clone();
+        free.returns = "result".into();
+        free.host = "none".into();
+        assert_eq!(
+            api(&replace, &[free], "original_mod::").unwrap()[0],
+            "mod_points::replace!(tick, result, none, \"fixture\", 12, \"before\", original_mod::head)"
+        );
+        let mut opaque = points[0].clone();
+        opaque.returns = "none".into();
+        opaque.raw_shape = Some(RawReturn {
+            return_ty: "Frame<'_>".into(),
+        });
+        assert_eq!(
+            api(&replace, &[opaque], "mod_3::").unwrap_err(),
+            "before: no replace listener at horizon_client::game::Game<'_>::tick: a replace returns the function's value, and `Frame<'_>` has no API form"
+        );
+        let mut unlisted = points[0].clone();
+        unlisted.host = String::new();
+        assert!(api(&replace, &[unlisted], "mod_3::").is_err());
+        // A `Result<(), E>` point cancels with `Ok(())`: a replace there couldn't produce `Err`.
+        let mut fallible = points[0].clone();
+        fallible.return_ty = Some("Result<(),String>".into());
+        assert_eq!(
+            api(&replace, &[fallible], "mod_3::").unwrap_err(),
+            "before: no replace listener at horizon_client::game::Game<'_>::tick: a replace returns the function's value, and `Result<(),String>` has no API form"
+        );
+        let mut untyped = points[0].clone();
+        untyped.return_ty = None;
+        assert!(api(&replace, &[untyped], "mod_3::").is_err());
         let wasm = api(&manifest, &points, "original_mod::").unwrap();
         assert_eq!(
             wasm[0],

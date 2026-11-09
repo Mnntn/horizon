@@ -32,11 +32,11 @@ experimental serving limits are in `docs/api/shaders.md:163`: 0.2 needs
 
 Instance inputs remain vanilla-space inputs: `ModelInstance::tint` is packed
 `0xAARRGGBB`, and block and sky light are each `0..=15`
-(`crates/horizon-mod-api/src/model_instance.rs:1`). The engine owns their
+(`crates/horizon-mod-api/src/client/model_instance.rs:1`). The engine owns their
 conversion. Do not pre-decode these inputs just because shader colours are
 linear. R2 instance drawing (#808) must preserve this distinction.
 `WorldQuad::color` remains a `u32` ARGB colour with 8-bit channels, including
-coverage alpha (`crates/horizon-mod-api/src/world_draw.rs:40`). It cannot express
+coverage alpha (`crates/horizon-mod-api/src/client/world_draw.rs:40`). It cannot express
 RGB above 1; HDR-range quad colours would need a later typed addition.
 
 ## Applying the rule

@@ -1,6 +1,6 @@
 //! The level fake: blocks, block entities with the game's storages, and entities.
 use super::FAKE_EPOCH;
-use crate::{BlockEntityTypeKey, FluidStack, ItemStack, LevelRef, NativeWorldEpoch};
+use crate::{BlockEntityTypeKey, FluidStack, ItemStack, LevelRef, WorldEpoch};
 use std::collections::{BTreeMap, HashMap};
 
 // no wire: in-process testing harness state, not a mod boundary payload.
@@ -28,8 +28,8 @@ impl FakeLevel {
     pub fn new(dimension: &'static str) -> Self {
         Self {
             level: LevelRef::new(
-                NativeWorldEpoch::new(FAKE_EPOCH),
-                crate::registry_keys::dimension_key(dimension),
+                WorldEpoch::new(FAKE_EPOCH),
+                crate::content::registry_keys::dimension_key(dimension),
             ),
             blocks: HashMap::new(),
             block_entities: BTreeMap::new(),
@@ -151,7 +151,7 @@ impl FakeContainer {
         self.slots
             .iter()
             .flatten()
-            .filter(|held| crate::registry_keys::item_id(held.item()) == Some(item))
+            .filter(|held| crate::content::registry_keys::item_id(held.item()) == Some(item))
             .map(ItemStack::count)
             .sum()
     }

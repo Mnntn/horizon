@@ -144,7 +144,7 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
                 Access::Internals,
             ) => None,
             (Route::Source(_), _, _) => Some(NoSlotReason::SourcePending),
-            (_, Kind::Replace, _) => Some(NoSlotReason::ReplacePending),
+            (_, Kind::Replace, Access::Internals) => Some(NoSlotReason::ReplacePending),
             (Route::Slot(SlotKind::Site), _, Access::Api) => Some(NoSlotReason::ApiSitesPending),
             _ => None,
         };
@@ -153,6 +153,22 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
                 id: format!("{}:{}", manifest.id, inject.id),
                 reason,
                 declaration: format!("slots/{}.txt: {} ({route:?})", manifest.id, inject.at),
+            });
+        }
+        // A replace produces the outcome: the same check the shared emitter makes, at load.
+        let replace_refusal = catalog
+            .points
+            .iter()
+            .find(|point| plain(&point.target) == plain(&inject.at))
+            .filter(|_| inject.kind == Kind::Replace)
+            .and_then(|point| {
+                horizon_mod_point_emit::replaceable(&inject.id, &inject.at, &point.emitted()).err()
+            });
+        if let Some(why) = replace_refusal {
+            return Err(InjectError::NoSlot {
+                id: format!("{}:{}", manifest.id, inject.id),
+                reason: NoSlotReason::ReplaceWithoutValue,
+                declaration: why,
             });
         }
         decisions.push(route);

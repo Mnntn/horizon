@@ -1,7 +1,6 @@
 //! Bulk block edits for server mods: a helper on the level being ticked, as `native_set_block` is, that makes many
 //! runs of blocks up columns at once, straight into the chunks.
 use super::Game;
-pub use mod_api::game::{NativeBlockEdit, NativeBlockRun, NativeHeightmap};
 
 impl Game<'_> {
     /// For a server mod: the runs made at once, straight into the chunks of the authoritative level `dimension`
@@ -16,7 +15,7 @@ impl Game<'_> {
     pub(super) fn edit_blocks(
         &mut self,
         dimension: &str,
-        edit: &NativeBlockEdit,
+        edit: &mod_api::BlockEdit,
     ) -> Result<u64, String> {
         if !self.native_level_open(dimension) {
             return Err(format!("{dimension} is not the level being ticked"));

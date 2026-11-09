@@ -13,11 +13,11 @@ use super::commands::Target;
 use horizon_client::effects::{EffectInstance, PlayerEffects};
 use horizon_client::mobs::Mob;
 use horizon_items::items::ItemStack;
-use mod_api::{EffectKey, LivingRef, NativeActiveEffect};
+use mod_api::{ActiveEffect, EffectKey, LivingRef};
 
 /// A player's effect as the API's load-owned key and instance data.
-pub(super) fn active_effect(e: &EffectInstance) -> NativeActiveEffect {
-    NativeActiveEffect::from(mod_api::__private::built::NativeActiveEffect {
+pub(super) fn active_effect(e: &EffectInstance) -> ActiveEffect {
+    ActiveEffect::from(mod_api::__private::built::ActiveEffect {
         id: mod_api::__private::effect_key_by_index(
             e.registry_index.expect("active effect registry index"),
         )
@@ -31,8 +31,8 @@ pub(super) fn active_effect(e: &EffectInstance) -> NativeActiveEffect {
 }
 
 /// A mob's stored effect as the API's: ambient and particle flags remain in their own lists.
-pub(super) fn mob_effect(m: &Mob, e: &horizon_client::mobs::StoredEffect) -> NativeActiveEffect {
-    NativeActiveEffect::from(mod_api::__private::built::NativeActiveEffect {
+pub(super) fn mob_effect(m: &Mob, e: &horizon_client::mobs::StoredEffect) -> ActiveEffect {
+    ActiveEffect::from(mod_api::__private::built::ActiveEffect {
         id: mod_api::__private::effect_key_by_index(
             e.registry_index.expect("active effect registry index"),
         )
@@ -95,11 +95,7 @@ impl Game<'_> {
     /// ticks. False before effect resolution, for a duration below -1, an armor
     /// stand, the dragon, a stale handle or a client, or when the active
     /// instance did not change, as in vanilla's `addEffect`.
-    pub(super) fn living_add_effect(
-        &mut self,
-        living: LivingRef,
-        effect: &NativeActiveEffect,
-    ) -> bool {
+    pub(super) fn living_add_effect(&mut self, living: LivingRef, effect: &ActiveEffect) -> bool {
         let Some(def) = mod_api::__private::effect_index(effect.id)
             .and_then(horizon_client_core::potions::effect_by_index)
         else {
@@ -154,7 +150,7 @@ impl Game<'_> {
         &self,
         living: LivingRef,
         effect: EffectKey,
-    ) -> Option<NativeActiveEffect> {
+    ) -> Option<ActiveEffect> {
         let def = mod_api::__private::effect_index(effect)
             .and_then(horizon_client_core::potions::effect_by_index)?;
         match self.native_living_read_target(living)? {
@@ -178,7 +174,7 @@ impl Game<'_> {
     /// The entity's active effects (`LivingEntity.getActiveEffects`), in the
     /// order their store keeps them, in `Some` even when it has none. None
     /// for an armor stand, the dragon, a stale handle or a client.
-    pub(super) fn living_effects(&self, living: LivingRef) -> Option<Vec<NativeActiveEffect>> {
+    pub(super) fn living_effects(&self, living: LivingRef) -> Option<Vec<ActiveEffect>> {
         match self.native_living_read_target(living)? {
             t @ (Target::Player | Target::Guest(_)) => self
                 .native_living_player_effects(t)
@@ -358,10 +354,10 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::mobs::Mob;
     use horizon_core::geometry::Vec3;
-    use mod_api::{EntityRef, LivingRef, NativeActiveEffect, NativeWorldEpoch};
+    use mod_api::{ActiveEffect, EntityRef, LivingRef, WorldEpoch};
 
-    fn effect(id: &'static str, duration: i32, amplifier: i32) -> NativeActiveEffect {
-        NativeActiveEffect::from(mod_api::__private::built::NativeActiveEffect {
+    fn effect(id: &'static str, duration: i32, amplifier: i32) -> ActiveEffect {
+        ActiveEffect::from(mod_api::__private::built::ActiveEffect {
             id: mod_api::__private::part_tests::effect_key(id),
             duration,
             amplifier,
@@ -384,7 +380,7 @@ mod tests {
             game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
             let zombie = game.living(game.entity(21).unwrap()).unwrap();
             // The same load-owned slot is used for application, enumeration and diagnostics.
-            let speed = NativeActiveEffect::new(
+            let speed = ActiveEffect::new(
                 mod_api::__private::part_tests::effect_key("minecraft:speed"),
                 200,
                 0,
@@ -419,7 +415,7 @@ mod tests {
             for id in [23, 20] {
                 let living = game.living(game.entity(id).unwrap()).unwrap();
                 for show_icon in [false, true] {
-                    let given = NativeActiveEffect::new(key, 200, 0, false, true, show_icon);
+                    let given = ActiveEffect::new(key, 200, 0, false, true, show_icon);
                     assert!(game.living_add_effect(living, &given), "{id} {show_icon}");
                     let read = game.living_effect(living, key).unwrap();
                     assert_eq!((read.show_icon, read.visible), (show_icon, true), "{id}");
@@ -508,7 +504,7 @@ mod tests {
                 None
             );
             let stale = LivingRef::new(EntityRef::new(
-                NativeWorldEpoch::new(cow.entity().epoch().get() + 1),
+                WorldEpoch::new(cow.entity().epoch().get() + 1),
                 12,
             ));
             assert_eq!(
@@ -655,7 +651,7 @@ mod tests {
                 ),
                 None
             );
-            let stale = LivingRef::new(EntityRef::new(NativeWorldEpoch::new(epoch.get() + 1), 7));
+            let stale = LivingRef::new(EntityRef::new(WorldEpoch::new(epoch.get() + 1), 7));
             assert_eq!(
                 stale.effect_blend_factor(
                     game,
@@ -757,8 +753,7 @@ mod tests {
             assert!(!game.living_remove_all_effects(zombie));
 
             // A stale handle reads nothing and writes nothing.
-            let stale =
-                EntityRef::new(NativeWorldEpoch::new(zombie.entity().epoch().get() + 1), 12);
+            let stale = EntityRef::new(WorldEpoch::new(zombie.entity().epoch().get() + 1), 12);
             let stale = LivingRef::new(stale);
             assert!(!game.living_add_effect(stale, &effect("minecraft:speed", 100, 0)));
             assert_eq!(

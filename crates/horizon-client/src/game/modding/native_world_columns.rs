@@ -2,8 +2,6 @@
 //! them, in one call.
 use super::Game;
 use super::block_edits::MAX_COLUMNS;
-use super::native_world_edit::NativeHeightmap;
-pub use mod_api::game::NativeColumnBlocks;
 
 impl Game<'_> {
     /// For a client mod: each column's height by `heightmap` in the world this window shows,
@@ -12,7 +10,7 @@ impl Game<'_> {
     pub(super) fn client_surface_heights(
         &self,
         columns: &[(i32, i32)],
-        heightmap: NativeHeightmap,
+        heightmap: mod_api::Heightmap,
     ) -> Result<Vec<Option<i32>>, String> {
         if !self.remote.as_ref().is_some_and(|r| r.logged_in) {
             return Err("no client world is open".to_string());
@@ -32,7 +30,7 @@ impl Game<'_> {
         &self,
         dimension: &str,
         columns: &[(i32, i32)],
-        heightmap: NativeHeightmap,
+        heightmap: mod_api::Heightmap,
     ) -> Result<Vec<Option<i32>>, String> {
         if !self.native_level_open(dimension) {
             return Err(format!("{dimension} is not the level being ticked"));
@@ -58,9 +56,9 @@ impl Game<'_> {
         &self,
         dimension: &str,
         columns: &[(i32, i32)],
-        heightmap: NativeHeightmap,
+        heightmap: mod_api::Heightmap,
         range: (u32, u32),
-    ) -> Result<NativeColumnBlocks, String> {
+    ) -> Result<mod_api::ColumnBlocks, String> {
         let (below, above) = range;
         if !self.native_level_open(dimension) {
             return Err(format!("{dimension} is not the level being ticked"));

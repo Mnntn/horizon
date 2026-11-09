@@ -39,7 +39,7 @@ mod tests {
     use horizon_client::items::ItemStack;
     use horizon_client::mobs::Mob;
     use horizon_core::geometry::Vec3;
-    use mod_api::first_person::Hand;
+    use mod_api::client::first_person::Hand;
 
     /// A raised shield blocks after vanilla's 5-tick delay (`block_delay_seconds` 0.25), in
     /// either hand, for the player as the damage path sees it and for a mob; a bow in use, an

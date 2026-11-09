@@ -1,3 +1,3 @@
 mod stubs {
-    pub(super) struct NativeExplosionStart<'a>(pub &'a ());
+    pub(super) struct ExplosionStart<'a>(pub &'a ());
 }

@@ -163,7 +163,7 @@ fn with_changes(
 fn place(game: &mut Game<'_>, level: LevelRef, pos: [i32; 3], block: &str) {
     let state = game.pack.assets.registry.default_state(block).unwrap();
     assert_eq!(
-        game.level_set_block(level, pos, state, NativeBlockUpdateFlags::NONE),
+        game.level_set_block(level, pos, state, BlockUpdateFlags::NONE),
         Ok(true)
     );
 }
@@ -379,7 +379,7 @@ fn a_double_container_notifies_each_backing_block_once() {
                     .with_props(base, &[("facing", "north"), ("type", kind)])
                     .unwrap();
                 assert_eq!(
-                    game.level_set_block(level, pos, state, NativeBlockUpdateFlags::NONE),
+                    game.level_set_block(level, pos, state, BlockUpdateFlags::NONE),
                     Ok(true)
                 );
             }
@@ -492,7 +492,7 @@ fn a_crafter_notices_its_source_but_not_a_vehicles_placeholder() {
                 .with_props(base, &[("orientation", "down_east")])
                 .unwrap();
             assert_eq!(
-                game.level_set_block(level, pos, state, NativeBlockUpdateFlags::NONE),
+                game.level_set_block(level, pos, state, BlockUpdateFlags::NONE),
                 Ok(true)
             );
             let Some(BlockEntity::Crafter(crafter)) =

@@ -24,7 +24,7 @@ pub trait MinecartsBackend {
     /// Side: server.
     /// Which `AbstractMinecart` subclass the cart is.
     #[access(WorldOnly)]
-    fn minecart_kind(&self, cart: MinecartRef) -> Option<NativeMinecartKind>;
+    fn minecart_kind(&self, cart: MinecartRef) -> Option<MinecartKind>;
     /// Side: server.
     /// `AbstractMinecart.getMaxSpeed`, in blocks per tick: the old behaviour's
     /// 0.4 (0.2 in water), or with the `minecart_improvements` experiment the

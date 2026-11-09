@@ -22,7 +22,7 @@ pub trait Hooks {
         player: Option<u128>,
         player_entity_id: Option<i32>,
         pos: BlockPos,
-        instrument: &mut NativeNoteInstrument,
+        instrument: &mut NoteInstrument,
         note: &mut i32,
         cancel: &mut bool,
     );

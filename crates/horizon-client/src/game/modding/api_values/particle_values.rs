@@ -23,8 +23,8 @@ fn finite(options: &ApiOptions) -> bool {
         && options.vibration.as_ref().is_none_or(|(source, at, _)| {
             at.iter().all(|v| v.is_finite())
                 && match source {
-                    mod_api::particles::PositionSource::Block(_) => true,
-                    mod_api::particles::PositionSource::Entity { y_offset, .. } => {
+                    mod_api::client::particles::PositionSource::Block(_) => true,
+                    mod_api::client::particles::PositionSource::Entity { y_offset, .. } => {
                         y_offset.is_finite()
                     }
                     _ => false,
@@ -126,7 +126,7 @@ mod tests {
         original.block = Some(("test:sprite".into(), 0x123456));
         original.item = Some(vec!["test:layer".into()]);
         original.vibration = Some((
-            mod_api::particles::PositionSource::Entity {
+            mod_api::client::particles::PositionSource::Entity {
                 id: -7,
                 y_offset: 0.5,
             },
@@ -156,7 +156,7 @@ mod tests {
         assert_eq!(
             result.vibration,
             Some((
-                mod_api::particles::PositionSource::Entity {
+                mod_api::client::particles::PositionSource::Entity {
                     id: -7,
                     y_offset: 0.5
                 },
@@ -192,7 +192,7 @@ mod tests {
             .try_into_api()
             .unwrap();
         options.vibration = Some((
-            mod_api::particles::PositionSource::Entity {
+            mod_api::client::particles::PositionSource::Entity {
                 id: 1,
                 y_offset: f32::NAN,
             },
