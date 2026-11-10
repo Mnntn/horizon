@@ -1,5 +1,6 @@
 //! Engine-independent storage and registration machinery shared by the game and mod API.
 pub mod attachments;
+pub mod byte_channel;
 /// Load-owned registry names and numeric slots, without game or API key types.
 pub mod registry_keys;
 
