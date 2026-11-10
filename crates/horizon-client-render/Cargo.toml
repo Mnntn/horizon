@@ -12,7 +12,7 @@ horizon-hooks = { path = "../horizon-hooks" }
 horizon-cosmetics = { path = "../horizon-cosmetics" }
 horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 horizon-mod-render = { path = "../horizon-mod-render" }
-horizon-mod-api = { path = "../horizon-mod-api" }
+mod_api = { package = "horizon-mod-vocab", path = "../horizon-mod-vocab" } # Engine-layer vocabulary, named mod_api to preserve source paths (#2534); the platform facade is test-only.
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 # The GUI atlas's pixels, kept compressed once uploaded (hud.rs `pack_pixels`).
 lz4_flex = { version = "0.14", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"] }
@@ -90,7 +90,7 @@ workspace = true
 
 [dev-dependencies]
 tempfile = "3"
-horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }
+mod_api_facade = { package = "horizon-mod-api", path = "../horizon-mod-api", features = ["testing"] }
 # Tests: a TrueType font to load, and the design system the menus' motion curves match.
 horizon-theme = { path = "../horizon-theme" }
 horizon-items = { path = "../horizon-items", features = ["test-support"] }

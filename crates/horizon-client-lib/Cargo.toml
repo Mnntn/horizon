@@ -15,7 +15,7 @@ path = "../horizon-client/src/client_lib.rs"
 [dependencies]
 horizon-hooks = { path = "../horizon-hooks" }
 horizon-mod-runtime = { path = "../horizon-mod-runtime" }
-horizon-mod-api = { path = "../horizon-mod-api" }
+mod_api = { package = "horizon-mod-vocab", path = "../horizon-mod-vocab" } # Engine-layer vocabulary, named mod_api to preserve source paths (#2534); the platform facade is test-only.
 horizon-assets = { path = "../horizon-assets" }
 horizon-client-core = { path = "../horizon-client-core" }
 horizon-client-input = { path = "../horizon-client-input" }
@@ -128,7 +128,7 @@ windows-segment-heap = []
 workspace = true
 
 [dev-dependencies]
-horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }
+mod_api_facade = { package = "horizon-mod-api", path = "../horizon-mod-api", features = ["testing"] }
 # ui_theme's unit tests draw text in the design system's fonts.
 horizon-theme = { path = "../horizon-theme" }
 horizon-client-render = { path = "../horizon-client-render", features = ["test-support"] }
