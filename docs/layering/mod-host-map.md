@@ -209,8 +209,8 @@ Outside the host areas, 2562 `mod_api` references are in test code; 235 of them 
 | host (stays in the engine) | 4 | 1461 | 3 | 11 | 46 | 13 | 9 |
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | attachments (stays in the engine) | 13 | 2856 | 7 | 0 | 16 | 117 | 13 |
-| content_render (phase 5) | 6 | 2750 | 6 | 1 | 46 | 46 | 19 |
-| hooks (phase 6, not built) | 425 | 103953 | 388 | 19 | 587 | 1700 | 235 |
+| content_render (phase 5) | 6 | 2749 | 6 | 1 | 46 | 46 | 19 |
+| hooks (phase 6, not built) | 425 | 103908 | 388 | 19 | 587 | 1700 | 236 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
