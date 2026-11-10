@@ -35,8 +35,13 @@ mod inject_cache;
 mod inject_text;
 mod internals;
 mod internals_sync;
+mod registry_compile;
 mod registry_generate;
+mod registry_inventory;
 mod registry_lock;
+mod registry_plan;
+mod registry_runtime;
+mod registry_rustc;
 pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
 mod isolate;
 mod mod_points;
@@ -52,6 +57,7 @@ mod source_server;
 pub use isolate::LeftOut;
 pub use picker::{needs_picker, Route, Routes};
 pub use prebuilt::{prebuilt_availability, SourceReason};
+pub use registry_inventory::Inventory as RegistryInventory;
 
 // Settings and logs are shared by native-build and diagnostics tests.
 #[cfg(test)]
@@ -543,7 +549,7 @@ fn logged<T>(
 
 /// Dispatch Cargo's discovery-only rustc wrapper before normal launcher startup.
 pub fn internals_rustc_wrapper() -> Option<i32> {
-    internals_sync::rustc_wrapper()
+    registry_rustc::wrapper().or_else(internals_sync::rustc_wrapper)
 }
 
 pub fn sync_internals(
@@ -1181,7 +1187,7 @@ impl Step {
             ),
             Self::Mixins => tr("Applying the mixins").into(),
             Self::CachedMixins => tr("Reusing patched game source").into(),
-            Self::Crates => tr("Checking the mods' crates against Horizon's Cargo.lock").into(),
+            Self::Crates => tr("Checking native dependency pins and the game graph").into(),
             Self::PrebuiltGame(revision) => trf(
                 "Downloading the prebuilt game at {revision} (once)",
                 &[("revision", &revision[..7])],
@@ -1226,7 +1232,7 @@ impl Step {
 /// An error ends with its first `error` lines and the last lines: a failed build script's output
 /// alone could push the line naming its crate out of the last ones.
 fn run(cmd: Command, what: &str, line: impl FnMut(&str)) -> Result<(), String> {
-    run_checked(cmd, what, line, None).map_err(|e| e.error)
+    run_checked(cmd, what, line, None, None).map_err(|e| e.error)
 }
 
 /// A failed command, with diagnostic ownership for build isolation.
@@ -1241,6 +1247,7 @@ fn run_checked(
     what: &str,
     mut line: impl FnMut(&str),
     compiler: Option<diagnostics::Compiler<'_>>,
+    stdout_file: Option<fs::File>,
 ) -> Result<(), Ran> {
     let ran = |error: String| Ran {
         error,
@@ -1260,7 +1267,10 @@ fn run_checked(
         cmd.stdout(Stdio::piped());
         Some(log.try_clone().map_err(|e| ran(e.to_string()))?)
     } else {
-        cmd.stdout(log.try_clone().map_err(|e| ran(e.to_string()))?);
+        cmd.stdout(match stdout_file {
+            Some(file) => file,
+            None => log.try_clone().map_err(|e| ran(e.to_string()))?,
+        });
         None
     };
     #[cfg(unix)]
@@ -1556,41 +1566,6 @@ fn read_lock(dir: &Path) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Validate mod-owned pins at the existing early refusal boundary, before Cargo sees them.
-fn refuse_unlocked(
-    source: &Path,
-    mods: &[Bundle],
-    wanted: &[crates::Wanted],
-) -> Result<registry_lock::RegistryLock, String> {
-    let mut allowed = registry_lock::RegistryLock::parse(&read_lock(source)?)?;
-    for bundle in mods {
-        let requested: Vec<_> = wanted
-            .iter()
-            .filter(|w| w.mod_id == bundle.manifest.id)
-            .collect();
-        if requested.is_empty() {
-            continue;
-        }
-        let pins = registry_lock::RegistryLock::parse(&read_lock(&bundle.dir)?)?;
-        for request in requested {
-            let requirement =
-                semver::VersionReq::parse(&request.version).map_err(|e| e.to_string())?;
-            if !pins.packages.keys().any(|id| {
-                id.name == request.name
-                    && semver::Version::parse(&id.version)
-                        .is_ok_and(|version| requirement.matches(&version))
-            }) {
-                return Err(format!(
-                    "{}: Cargo.lock does not pin {} {}",
-                    request.mod_id, request.name, request.version
-                ));
-            }
-        }
-        allowed.extend(&pins)?;
-    }
-    Ok(allowed)
-}
-
 fn lock_crates(
     rust: &Toolchain,
     source: &Path,
@@ -1848,6 +1823,7 @@ struct BuildOptions<'a> {
     allow_jar_downloads: bool,
     skip: &'a [LeftOut],
     isolate: bool,
+    registry_consent: Option<&'a dyn Fn(&RegistryInventory) -> bool>,
 }
 
 /// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
@@ -2106,6 +2082,7 @@ fn pipeline(
             &projects,
             &declared,
             &resolution,
+            options.registry_consent,
         )
         .map_err(blame)?;
         check_cancelled()?;
@@ -2173,6 +2150,7 @@ fn pipeline(
                     apply(&rust, &tool, &mixin_source, &mixin_input, &fresh),
                     "horizon-mixins",
                     |_| {},
+                    None,
                     None,
                 );
                 let _ = fs::remove_dir_all(&mixin_input);
@@ -2276,40 +2254,26 @@ fn pipeline(
             })
             .collect();
         let wanted = crates::wanted(&fresh, &paths)?;
-        let allowed = refuse_unlocked(&source, &mods, &wanted)?;
-        // An inert manifest avoids SDK paths and all mod-owned Cargo configuration. Fetch
-        // uses Cargo's checksum verification without running build scripts or proc macros.
-        let fetch_dir = real.join("registry-fetch");
-        let game_pins = registry_lock::RegistryLock::parse(&read_lock(&source)?)?;
-        let mod_pins = registry_lock::RegistryLock {
-            packages: allowed
-                .packages
-                .iter()
-                .filter(|(id, _)| !game_pins.packages.contains_key(*id))
-                .map(|(id, record)| (id.clone(), record.clone()))
-                .collect(),
-        };
-        allowed.fetch_workspace(&mod_pins, &fetch_dir)?;
-        let mut index = cargo(&rust, &fetch_dir, "update");
-        index.arg("--workspace");
-        run(index, "Checking the pinned registry index", |_| {})?;
-        let fetch_pins = registry_lock::RegistryLock::parse(&read_lock(&fetch_dir)?)?;
-        allowed.check_resolution(
-            &fetch_pins,
-            &registry_lock::RegistryLock {
-                packages: Default::default(),
-            },
-        )?;
-        let mut fetch = cargo(&rust, &fetch_dir, "fetch");
-        fetch.arg("--locked");
-        run(fetch, "Downloading the mods' pinned crates", |_| {})?;
-        fs::write(fresh.join("Cargo.lock"), allowed.seed(&read_lock(&fresh)?)?)
-            .map_err(|e| e.to_string())?;
+        let dependency_plan = registry_plan::Plan::read(&read_lock(&source)?, &projects, &wanted)?;
+        dependency_plan.fetch(&rust, &real.join("registry-fetch"))?;
+        fs::write(
+            fresh.join("Cargo.lock"),
+            dependency_plan.allowed.seed(&read_lock(&fresh)?)?,
+        )
+        .map_err(|e| e.to_string())?;
         if has_api {
-            // Add path packages to Cargo.lock before the locked dependency check.
-            let mut metadata = cargo(&rust, &fresh, "metadata");
-            metadata.args(["--offline", "--format-version", "1"]);
-            run(metadata, "Resolving trait mod crates", |_| {})?;
+            let metadata = registry_inventory::read(&rust, &fresh)
+                .map_err(|error| dependency_plan.explain_resolution(error))?;
+            dependency_plan
+                .check_mods(&registry_lock::RegistryLock::parse(&read_lock(&fresh)?)?)?;
+            let inventory = metadata.inventory(&dependency_plan.game, &[])?;
+            if inventory.added_crates > 0
+                && !options.registry_consent.is_some_and(|ask| ask(&inventory))
+            {
+                return Err(tr("Registry dependency compilation was not approved")
+                    .to_owned()
+                    .into());
+            }
         }
         // Absolute: the compiler runs from elsewhere (`compile`).
         let stage = stage_dir(&real)?;
@@ -2317,7 +2281,7 @@ fn pipeline(
         let _ = fs::remove_dir_all(&fresh);
         if crates::any(&stage) || has_api {
             progress(Step::Crates);
-            lock_crates(&rust, &source, &stage, &allowed)?;
+            lock_crates(&rust, &source, &stage, &dependency_plan.allowed)?;
         }
         let mut target_dir = real.join("target");
         if let Some(cache_dir) = platform.cache_dir {
@@ -2379,6 +2343,7 @@ fn pipeline(
                 mods: &identities,
                 declared: &declared_injections,
             }),
+            None,
         )
         .map_err(|ran| {
             let error = blame(crates::locked(ran.error));
@@ -2524,6 +2489,7 @@ pub fn build(
     instance: &Instance,
     profile: Option<Profile>,
     progress: impl Fn(Step),
+    registry_consent: impl Fn(&RegistryInventory) -> bool,
 ) -> Result<String, Failed> {
     require_consent()?;
     CANCEL.store(false, Ordering::Relaxed);
@@ -2548,6 +2514,7 @@ pub fn build(
                     BuildOptions {
                         skip,
                         isolate: true,
+                        registry_consent: Some(&registry_consent),
                         ..BuildOptions::default()
                     },
                     &progress,
@@ -2589,6 +2556,7 @@ pub fn build_server(
     profile: Profile,
     allow_jar_downloads: bool,
     progress: impl Fn(Step),
+    registry_consent: impl Fn(&RegistryInventory) -> bool,
 ) -> Result<PathBuf, Failed> {
     require_consent()?;
     logged(|_| {
@@ -2623,6 +2591,7 @@ pub fn build_server(
             Target::Server,
             BuildOptions {
                 allow_jar_downloads,
+                registry_consent: Some(&registry_consent),
                 ..BuildOptions::default()
             },
             &progress,
@@ -3717,6 +3686,7 @@ mod tests {
         fs::write(d.join("src/salt.rs"), "pub const SALT: u32 = 42;\n").unwrap();
         fs::create_dir_all(d.join("data/crate_demo")).unwrap();
         fs::write(d.join("data/crate_demo/greeting.txt"), "hello").unwrap();
+        fs::write(d.join("Cargo.lock"), format!("version=4\n[[package]]\nname='itoa'\nversion='0.4.8'\nsource='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='{}'\n", "a".repeat(64))).unwrap();
         let key = || {
             version_for(
                 A,
@@ -3735,10 +3705,18 @@ mod tests {
             "src/lib.rs",
             "src/salt.rs",
             "Cargo.toml",
+            "Cargo.lock",
             "data/crate_demo/greeting.txt",
         ] {
             let mut bytes = fs::read(d.join(file)).unwrap();
-            bytes.extend_from_slice(b"\n");
+            if file == "Cargo.lock" {
+                bytes = String::from_utf8(bytes)
+                    .unwrap()
+                    .replace(&"a".repeat(64), &"b".repeat(64))
+                    .into_bytes();
+            } else {
+                bytes.extend_from_slice(b"\n");
+            }
             fs::write(d.join(file), bytes).unwrap();
             let now = key();
             assert!(!seen.contains(&now), "{file} is in the key");
@@ -4044,6 +4022,7 @@ mod tests {
             Profile::Balanced,
             false,
             |_| {},
+            |_| false,
         )
         .unwrap_err();
         let err = String::from(err);
@@ -4057,6 +4036,7 @@ mod tests {
             Profile::Balanced,
             false,
             |_| {},
+            |_| false,
         )
         .unwrap_err();
         let err = String::from(err);
@@ -4144,7 +4124,7 @@ mod tests {
         fs::write(&file, stored).unwrap();
         let instance = instances::find("horizon").unwrap();
         let folder = dir("automatic-profile");
-        let error = build("v2099.09.09", &folder, &instance, None, |_| {}).unwrap_err();
+        let error = build("v2099.09.09", &folder, &instance, None, |_| {}, |_| false).unwrap_err();
         assert!(String::from(error).contains("is not prepared yet"));
         assert_eq!(fs::read(&file).unwrap(), stored);
         if let Some(previous) = previous {
@@ -4202,9 +4182,24 @@ mod tests {
         }
         let profile = Profile::Optimized;
         let base = "uninstalled";
-        denied(build_server(base, &folder, &output, profile, false, |_| {}));
+        denied(build_server(
+            base,
+            &folder,
+            &output,
+            profile,
+            false,
+            |_| {},
+            |_| false,
+        ));
         for choice in [Some(profile), None] {
-            denied(build(base, &folder, &instances::selected(), choice, |_| {}));
+            denied(build(
+                base,
+                &folder,
+                &instances::selected(),
+                choice,
+                |_| {},
+                |_| false,
+            ));
         }
         denied(sync_internals(&folder));
         let expected = require_consent().unwrap_err().to_string();
@@ -4264,6 +4259,7 @@ mod tests {
             Profile::Balanced,
             false,
             |_| {},
+            |_| false,
         )
         .unwrap_err();
         let err = String::from(err);

@@ -6,25 +6,40 @@ const CRATES_IO: &str = "registry+https://github.com/rust-lang/crates.io-index";
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct Identity {
     pub name: String,
-    pub version: String,
+    pub version: semver::Version,
     pub source: String,
 }
 
 #[derive(Clone, Debug)]
+pub(super) struct Record {
+    checksum: Option<String>,
+    edges: std::collections::BTreeSet<Identity>,
+    raw: toml::Table,
+}
+
+#[derive(Clone, Debug)]
+struct Reference {
+    name: String,
+    version: Option<semver::Version>,
+    source: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
 pub(super) struct RegistryLock {
-    pub packages: BTreeMap<Identity, toml::Table>,
+    pub packages: BTreeMap<Identity, Record>,
+    local: BTreeMap<Identity, Record>,
 }
 
 impl RegistryLock {
-    /// Validate once, before any fetch. Local package records are deliberately not imported:
-    /// the staging boundary owns their generated manifests and source paths.
+    /// Parse untrusted lock records once; consumers use typed identities and edges.
     pub fn parse(text: &str) -> Result<Self, String> {
         let lock: toml::Table = text.parse().map_err(|e| format!("Cargo.lock: {e}"))?;
         let records = lock
             .get("package")
             .and_then(toml::Value::as_array)
             .ok_or("Cargo.lock: missing packages")?;
-        let mut packages = BTreeMap::new();
+        let mut parsed = Self::default();
+        let mut pending = Vec::new();
         for record in records {
             let table = record.as_table().ok_or("Cargo.lock: invalid package")?;
             let field = |key| {
@@ -33,44 +48,131 @@ impl RegistryLock {
                     .and_then(toml::Value::as_str)
                     .ok_or_else(|| format!("Cargo.lock: package missing {key}"))
             };
-            let name = field("name")?;
-            let version = field("version")?;
-            semver::Version::parse(version).map_err(|e| format!("Cargo.lock: {name}: {e}"))?;
-            let Some(source) = table.get("source") else {
-                continue;
+            let name = field("name")?.to_owned();
+            let version = semver::Version::parse(field("version")?)
+                .map_err(|e| format!("Cargo.lock: {name}: {e}"))?;
+            let source = match table.get("source") {
+                None => String::new(),
+                Some(value) if value.as_str() == Some(CRATES_IO) => CRATES_IO.to_owned(),
+                Some(_) => {
+                    return Err(format!(
+                        "Cargo.lock: {name} {version}: only crates.io sources are allowed"
+                    ))
+                }
             };
-            if source.as_str() != Some(CRATES_IO) {
-                return Err(format!(
-                    "Cargo.lock: {name} {version}: only crates.io sources are allowed"
-                ));
-            }
-            let checksum = field("checksum")?;
-            if checksum.len() != 64
-                || !checksum
-                    .bytes()
-                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-            {
-                return Err(format!(
-                    "Cargo.lock: {name} {version}: invalid crates.io checksum"
-                ));
+            let checksum = if source.is_empty() {
+                None
+            } else {
+                let checksum = field("checksum")?;
+                if checksum.len() != 64
+                    || !checksum
+                        .bytes()
+                        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+                {
+                    return Err(format!(
+                        "Cargo.lock: {name} {version}: invalid crates.io checksum"
+                    ));
+                }
+                Some(checksum.to_owned())
+            };
+            let mut dependencies = Vec::new();
+            if let Some(deps) = table.get("dependencies") {
+                for dep in deps.as_array().ok_or("Cargo.lock: invalid dependencies")? {
+                    let dep = dep
+                        .as_str()
+                        .ok_or("Cargo.lock: invalid dependency reference")?;
+                    let parts: Vec<_> = dep.split_whitespace().collect();
+                    if parts.is_empty() || parts.len() > 3 {
+                        return Err(format!("Cargo.lock: invalid dependency {dep}"));
+                    }
+                    let version = parts
+                        .get(1)
+                        .map(|version| semver::Version::parse(version))
+                        .transpose()
+                        .map_err(|e| format!("Cargo.lock: dependency {dep}: {e}"))?;
+                    let source = parts
+                        .get(2)
+                        .map(|source| {
+                            source
+                                .strip_prefix('(')
+                                .and_then(|source| source.strip_suffix(')'))
+                                .map(str::to_owned)
+                                .ok_or("Cargo.lock: invalid dependency source")
+                        })
+                        .transpose()?;
+                    dependencies.push(Reference {
+                        name: parts[0].into(),
+                        version,
+                        source,
+                    });
+                }
             }
             let identity = Identity {
-                name: name.into(),
-                version: version.into(),
-                source: CRATES_IO.into(),
+                name,
+                version,
+                source,
             };
-            if packages.insert(identity, table.clone()).is_some() {
-                return Err(format!("Cargo.lock: duplicate package {name} {version}"));
+            pending.push((identity.clone(), dependencies));
+            let records = if identity.source.is_empty() {
+                &mut parsed.local
+            } else {
+                &mut parsed.packages
+            };
+            if records
+                .insert(
+                    identity.clone(),
+                    Record {
+                        checksum,
+                        edges: Default::default(),
+                        raw: table.clone(),
+                    },
+                )
+                .is_some()
+            {
+                return Err(format!(
+                    "Cargo.lock: duplicate package {} {}",
+                    identity.name, identity.version
+                ));
             }
         }
-        Ok(Self { packages })
+        for (id, references) in pending {
+            let mut edges = std::collections::BTreeSet::new();
+            for dep in references {
+                let matches: Vec<_> = parsed
+                    .packages
+                    .keys()
+                    .chain(parsed.local.keys())
+                    .filter(|id| {
+                        id.name == dep.name
+                            && dep.version.as_ref().is_none_or(|v| v == &id.version)
+                            && dep
+                                .source
+                                .as_ref()
+                                .is_none_or(|source| source == &id.source)
+                    })
+                    .collect();
+                if matches.len() != 1 {
+                    return Err(format!(
+                        "Cargo.lock: ambiguous or missing dependency {}",
+                        dep.name
+                    ));
+                }
+                edges.insert(matches[0].clone());
+            }
+            parsed
+                .packages
+                .get_mut(&id)
+                .or_else(|| parsed.local.get_mut(&id))
+                .expect("parsed identity")
+                .edges = edges;
+        }
+        Ok(parsed)
     }
 
-    /// The same package identity must never acquire a different checksum or dependency list.
     pub fn extend(&mut self, other: &Self) -> Result<(), String> {
         for (identity, record) in &other.packages {
             if let Some(previous) = self.packages.get(identity) {
-                if previous != record {
+                if previous.checksum != record.checksum {
                     return Err(format!(
                         "Cargo.lock: conflicting pins for {} {}",
                         identity.name, identity.version
@@ -82,6 +184,7 @@ impl RegistryLock {
         }
         Ok(())
     }
+
     /// A closed, inert fetch workspace: no mod manifest, source, SDK path or Cargo config.
     pub fn fetch_workspace(&self, roots: &Self, dir: &std::path::Path) -> Result<(), String> {
         std::fs::create_dir_all(dir.join("src")).map_err(|e| e.to_string())?;
@@ -110,7 +213,11 @@ impl RegistryLock {
         let mut root = toml::toml! { name = "horizon-registry-fetch" version = "0.0.0" };
         root.insert("dependencies".into(), refs.into());
         let mut records = vec![toml::Value::Table(root)];
-        records.extend(self.packages.values().cloned().map(toml::Value::Table));
+        records.extend(
+            self.packages
+                .values()
+                .map(|record| toml::Value::Table(record.raw.clone())),
+        );
         let mut lock = toml::Table::new();
         lock.insert("version".into(), 4.into());
         lock.insert("package".into(), records.into());
@@ -133,7 +240,7 @@ impl RegistryLock {
                     .packages
                     .keys()
                     .filter(|old| old.name == id.name)
-                    .map(|old| old.version.as_str())
+                    .map(|old| old.version.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
                 return Err(format!(
@@ -141,20 +248,20 @@ impl RegistryLock {
                     id.name, versions, id.version
                 ));
             };
-            if pin.get("checksum") != record.get("checksum") {
+            if pin.checksum != record.checksum {
                 return Err(format!(
                     "Cargo.lock: checksum changed for {} {}",
                     id.name, id.version
                 ));
             }
         }
-        for id in game.packages.keys() {
-            let Some(record) = resolved.packages.get(id) else {
+        for id in game.packages.keys().chain(game.local.keys()) {
+            let Some(record) = resolved.packages.get(id).or_else(|| resolved.local.get(id)) else {
                 let versions = resolved
                     .packages
                     .keys()
                     .filter(|new| new.name == id.name)
-                    .map(|new| new.version.as_str())
+                    .map(|new| new.version.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
                 return Err(format!(
@@ -162,45 +269,80 @@ impl RegistryLock {
                     id.name, id.version, versions
                 ));
             };
-            if game.edges(id)? != resolved.edges(id)?
-                || game.packages[id].get("checksum") != record.get("checksum")
-            {
+            let original = game
+                .packages
+                .get(id)
+                .or_else(|| game.local.get(id))
+                .expect("game identity");
+            if original.edges != record.edges {
+                let labels = |edges: &std::collections::BTreeSet<Identity>| {
+                    edges
+                        .iter()
+                        .map(|id| format!("{} {}", id.name, id.version))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
                 return Err(format!(
-                    "Cargo.lock: game dependency graph changed for {} {}",
-                    id.name, id.version
+                    "Cargo.lock: game dependency graph changed for {} {}: [{}] -> [{}]",
+                    id.name,
+                    id.version,
+                    labels(&original.edges),
+                    labels(&record.edges)
                 ));
             }
         }
         Ok(())
     }
 
-    fn edges(&self, id: &Identity) -> Result<std::collections::BTreeSet<Identity>, String> {
-        let mut edges = std::collections::BTreeSet::new();
-        for dep in self.packages[id]
-            .get("dependencies")
-            .and_then(toml::Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let dep = dep
-                .as_str()
-                .ok_or("Cargo.lock: invalid dependency reference")?;
-            let mut parts = dep.split_whitespace();
-            let name = parts
-                .next()
-                .ok_or("Cargo.lock: empty dependency reference")?;
-            let version = parts.next();
-            let matches: Vec<_> = self
-                .packages
-                .keys()
-                .filter(|id| id.name == name && version.is_none_or(|v| v == id.version))
-                .collect();
-            if matches.len() != 1 {
-                return Err(format!("Cargo.lock: ambiguous or missing dependency {dep}"));
+    pub fn check_mod(
+        &self,
+        mod_id: &str,
+        root: &str,
+        skip_local: &std::collections::BTreeSet<String>,
+        pins: &Self,
+    ) -> Result<(), String> {
+        let root = self
+            .local
+            .keys()
+            .find(|id| id.name == root)
+            .ok_or_else(|| format!("{mod_id}: staged Cargo.lock has no mod root"))?;
+        let mut pending = vec![root.clone()];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id.clone()) {
+                continue;
             }
-            edges.insert(matches[0].clone());
+            let record = self
+                .packages
+                .get(&id)
+                .or_else(|| self.local.get(&id))
+                .expect("resolved edge identity");
+            if !id.source.is_empty() && !pins.packages.contains_key(&id) {
+                let versions = pins
+                    .packages
+                    .keys()
+                    .filter(|pin| pin.name == id.name)
+                    .map(|pin| pin.version.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(format!(
+                    "{mod_id}: {} resolved to {}, but its own Cargo.lock pins [{}]",
+                    id.name, id.version, versions
+                ));
+            }
+            pending.extend(
+                record
+                    .edges
+                    .iter()
+                    .filter(|dep| !dep.source.is_empty() || !skip_local.contains(&dep.name))
+                    .cloned(),
+            );
         }
-        Ok(edges)
+        Ok(())
+    }
+
+    pub fn game_package_names(&self) -> std::collections::BTreeSet<String> {
+        self.local.keys().map(|id| id.name.clone()).collect()
     }
 
     pub fn seed(&self, text: &str) -> Result<String, String> {
@@ -210,7 +352,11 @@ impl RegistryLock {
             .and_then(toml::Value::as_array_mut)
             .ok_or("Cargo.lock: missing packages")?;
         records.retain(|record| record.get("source").is_none());
-        records.extend(self.packages.values().cloned().map(toml::Value::Table));
+        records.extend(
+            self.packages
+                .values()
+                .map(|record| toml::Value::Table(record.raw.clone())),
+        );
         Ok(lock.to_string())
     }
 }
@@ -254,6 +400,59 @@ mod tests {
             .seed("version = 4\n[[package]]\nname = 'local-game'\nversion = '0.1.0'\n")
             .unwrap()
             .contains("local-game"));
+    }
+
+    #[test]
+    fn a_local_game_edge_cannot_move_even_when_both_versions_remain_locked() {
+        let registry = lock(CRATES_IO, &"a".repeat(64));
+        let game = format!(
+            "{registry}\n[[package]]\nname='game'\nversion='1.0.0'\ndependencies=['itoa']\n"
+        );
+        let old = RegistryLock::parse(&game).unwrap();
+        let new_registry = lock(CRATES_IO, &"b".repeat(64)).replace("1.0.15", "0.4.8");
+        let moved = format!(
+            "{}\n{}",
+            game.replace("dependencies=['itoa']", "dependencies=['itoa 0.4.8']"),
+            new_registry.replace("version = 4\n", "")
+        );
+        let resolved = RegistryLock::parse(&moved).unwrap();
+        let mut allowed = old.clone();
+        allowed
+            .extend(&RegistryLock::parse(&new_registry).unwrap())
+            .unwrap();
+        let error = allowed.check_resolution(&resolved, &old).unwrap_err();
+        for detail in ["game", "itoa", "1.0.15", "0.4.8"] {
+            assert!(error.contains(detail), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_mod_cannot_borrow_another_mods_transitive_pin() {
+        let owned = RegistryLock::parse(&lock(CRATES_IO, &"a".repeat(64))).unwrap();
+        let other = lock(CRATES_IO, &"b".repeat(64)).replace("1.0.15", "0.4.8");
+        let resolved = RegistryLock::parse(&format!(
+            "{other}\n[[package]]\nname='mod'\nversion='1.0.0'\ndependencies=['itoa']\n"
+        ))
+        .unwrap();
+        let error = resolved
+            .check_mod("example", "mod", &Default::default(), &owned)
+            .unwrap_err();
+        for detail in ["example", "itoa", "1.0.15", "0.4.8"] {
+            assert!(error.contains(detail), "{error}");
+        }
+    }
+
+    #[test]
+    fn sdk_and_declared_mod_roots_are_opaque_to_a_mods_registry_lock() {
+        let resolved = RegistryLock::parse(&format!("{}\n[[package]]\nname='mod'\nversion='1.0.0'\ndependencies=['sdk','other']\n[[package]]\nname='sdk'\nversion='1.0.0'\ndependencies=['itoa']\n[[package]]\nname='other'\nversion='1.0.0'\ndependencies=['itoa']\n", lock(CRATES_IO, &"a".repeat(64)))).unwrap();
+        resolved
+            .check_mod(
+                "example",
+                "mod",
+                &std::collections::BTreeSet::from(["sdk".into(), "other".into()]),
+                &RegistryLock::default(),
+            )
+            .unwrap();
     }
 
     #[test]

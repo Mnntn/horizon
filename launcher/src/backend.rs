@@ -4178,6 +4178,10 @@ pub enum Msg {
     FoundPacks(Vec<crate::other_launchers::Found>),
     /// Where the native-mods build is (`native_mods::Step::label`).
     NativeProgress(String, crate::native_mods::Progress),
+    NativeRegistryConsent(
+        crate::native_mods::RegistryInventory,
+        std::sync::mpsc::Sender<bool>,
+    ),
     /// The native-mods build ended: the version built, or why not.
     Native(Result<String, crate::native_mods::Failed>),
     /// An imported game build is installed (`build_import::import`): its version, or why not.

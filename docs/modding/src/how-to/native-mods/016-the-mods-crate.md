@@ -48,3 +48,26 @@ configuration are refused. Local crates inside the mod are traversed without cop
 into the registry resolver. Registry dependencies remain native code: their build scripts and
 proc macros execute during compilation, and the resulting mod runs with your rights. Trust their
 authors as well as the mod's author.
+
+Before compiling these dependencies, the launcher shows how many registry crates the mod adds and
+names the reachable build scripts and proc macros. Declining stops before any mod dependency is
+compiled. The existing native-code permission is also required; downloading a checksummed crate
+does not make its code trusted.
+
+On the optimized prebuilt route, Cargo compiles the mod's registry graph and the final wrapper
+against immutable SDK binaries. Registry dependencies never cause an automatic source rebuild.
+The SDK must include its locked graph and runtime native-library inventory; older SDKs without
+that information refuse registry builds. The launcher preserves the compiler/cache wrapper chain
+and uses its pinned Rust compiler.
+
+**SDK crate identities are not interchangeable.** A registry-built copy of a trait or type is not
+the SDK's copy, even at the same version. For example, passing an SDK value implementing the SDK's
+`serde::Serialize` to a registry-built `serde_json` can fail with Rust E0277. The launcher reports
+that boundary; it does not replace either library or rebuild the game to hide it. Keep private
+registry types behind your mod's API-facing values.
+
+Runtime native libraries emitted by registry builds are collected only from managed build and
+Cargo directories. Host-only build tools and proc macros are not packaged into the game. Conflicting
+native providers or output filenames, escaping outputs, relative native search paths, and bundled
+framework outputs are refused explicitly. System libraries remain system dependencies. These
+restrictions do not trigger a source fallback.

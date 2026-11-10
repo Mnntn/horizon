@@ -1175,6 +1175,12 @@ fn settings_json(s: &backend::Settings) -> serde_json::Value {
 }
 
 /// Runs a subcommand and returns the exit code, or None when the window should open.
+fn registry_consent(inventory: &native_mods::RegistryInventory) -> bool {
+    eprintln!("{}\n{}", inventory.label(), inventory.detail());
+    // The headless native route has already required explicit native-code permission.
+    true
+}
+
 pub fn run() -> Option<i32> {
     use clap::FromArgMatches;
     let no_ai = backend::no_ai();
@@ -1395,6 +1401,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                     profile.unwrap_or_default(),
                     allow_jar_downloads,
                     steps,
+                    registry_consent,
                 )?;
                 let built = std::path::absolute(&built).unwrap_or(built);
                 let path = built.display().to_string();
@@ -1436,7 +1443,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             };
             let profile = explicit.then_some(target.native_profile);
             let built =
-                native_mods::build(&base, &folder, &target, profile, steps).map_err(|error| {
+                native_mods::build(&base, &folder, &target, profile, steps, registry_consent).map_err(|error| {
                     let error = String::from(error);
                     if error.starts_with(native_mods::MISMATCH) {
                         trf("{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's folder to pin it to this game, then build again.", &[("error", &error), ("commit", &base)])

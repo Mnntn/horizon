@@ -1392,6 +1392,8 @@ capabilities = ["registries"]
         )
         .unwrap();
         std::fs::write(root.join("src/lib.rs"), "pub fn hooks() {}\n").unwrap();
+        let registry_lock = "version = 4\n[[package]]\nname = 'itoa'\nversion = '1.0.18'\n";
+        std::fs::write(root.join("Cargo.lock"), registry_lock).unwrap();
         std::fs::write(root.join(".git/hooks/pre-commit"), "#!/bin/sh\n").unwrap();
         std::fs::write(root.join("target/generated/bad.rs"), "#!/bin/sh\n").unwrap();
         let bytes = Package::pack_directory(&root).unwrap();
@@ -1399,6 +1401,10 @@ capabilities = ["registries"]
         assert_eq!(Package::read_zip(&mut zip).unwrap().manifest.id, "ruby");
         assert!(zip.by_name("Cargo.toml").is_ok());
         assert!(zip.by_name("src/lib.rs").is_ok());
+        let mut packed_lock = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("Cargo.lock").unwrap(), &mut packed_lock)
+            .unwrap();
+        assert_eq!(packed_lock, registry_lock);
         assert!(zip.by_name(".git/hooks/pre-commit").is_err());
         assert!(zip.by_name("target/generated/bad.rs").is_err());
         std::fs::write(root.join("src/lib.rs"), b"MZ executable").unwrap();

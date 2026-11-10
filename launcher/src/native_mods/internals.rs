@@ -849,7 +849,7 @@ pub mod raw {
         let (dir, bundle, mut catalog) = fixture("stage");
         let path = dir.join("Cargo.toml");
         let text = fs::read_to_string(&path).unwrap()
-            + "horizon-internals = { git = 'https://example.invalid/horizon', rev = 'pin' }\n";
+            + &format!("horizon-internals = {{ git = 'https://github.com/arismoko/horizon', rev = '{}' }}\n", bundle.native().horizon);
         fs::write(&path, text).unwrap();
         let project = api::Project::read(&bundle).unwrap();
         assert_eq!(super::super::prebuilt::project_refusal(&project), None);

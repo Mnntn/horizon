@@ -3,11 +3,11 @@ use super::{api, Bundle};
 use std::{
     collections::BTreeSet,
     fs,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 /// Copies only inert manifests. Source files, build scripts and Cargo config never enter it.
-fn stage(bundle: &Bundle, output: &Path) -> Result<(), String> {
+pub(super) fn stage(bundle: &Bundle, output: &Path) -> Result<(), String> {
     let mut todo = vec![PathBuf::new()];
     let mut seen = BTreeSet::new();
     while let Some(relative) = todo.pop() {
@@ -78,7 +78,7 @@ fn stage(bundle: &Bundle, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn rewrite_dependencies(
+pub(super) fn rewrite_dependencies(
     bundle: &Bundle,
     relative: &Path,
     table: &mut toml::Table,
@@ -132,23 +132,7 @@ fn rewrite_dependencies(
             }
             if let Some(path) = dep.get("path") {
                 let path = path.as_str().ok_or("dependency path must be a string")?;
-                let mut inside = relative.to_path_buf();
-                for component in Path::new(path).components() {
-                    match component {
-                        Component::Normal(part) => inside.push(part),
-                        Component::CurDir => {}
-                        Component::ParentDir if inside.pop() => {}
-                        _ => return Err(format!("{key}: path outside the mod is refused")),
-                    }
-                }
-                let mut checked = bundle.dir.clone();
-                for part in inside.components() {
-                    checked.push(part);
-                    let meta = fs::symlink_metadata(&checked).map_err(|e| e.to_string())?;
-                    if super::crates::is_link_or_junction(&meta) {
-                        return Err(format!("{key}: linked dependency path is refused"));
-                    }
-                }
+                let inside = super::crates::local_path(&bundle.dir, relative, path)?;
                 todo.push(inside);
             }
         }

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const IDENTITY: &str = "horizon-prebuilt.json";
-const TEMPLATE: &str = "native_main.rs.template";
+pub(super) const TEMPLATE: &str = "native_main.rs.template";
 const SUMS: &str = "SHA256SUMS";
 /// The optimization level of the `release` profile the prebuilt game is built with: the mods' code
 /// matches the game's.
@@ -32,8 +32,6 @@ pub enum SourceReason {
     BuildScript { mod_id: String },
     /// A mod declares Cargo features, or asks the mod API for features of its own.
     Features { mod_id: String },
-    /// A mod depends on a crate other than the mod API and other mods.
-    Crate { mod_id: String, krate: String },
     /// No prebuilt game for this computer.
     Host,
     /// The prebuilt game's release couldn't be downloaded.
@@ -56,10 +54,6 @@ impl std::fmt::Display for SourceReason {
             Self::Features { mod_id } => trf(
                 "{mod} uses Cargo features, so the game builds from source",
                 &[("mod", mod_id)],
-            ),
-            Self::Crate { mod_id, krate } => trf(
-                "{mod} depends on the crate {crate}, so the game builds from source",
-                &[("mod", mod_id), ("crate", krate)],
             ),
             Self::Host => {
                 tr("no prebuilt game for this computer, so the game builds from source").into()
@@ -172,10 +166,7 @@ pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason
                     .and_then(toml::Value::as_str)
                     .unwrap_or(key);
                 if !api::PACKAGES.iter().any(|(package, _)| *package == krate) {
-                    return Some(SourceReason::Crate {
-                        mod_id: mod_id(),
-                        krate: krate.to_owned(),
-                    });
+                    continue;
                 }
                 let own_features = value
                     .get("features")
@@ -402,17 +393,21 @@ fn expected_sum(listing: &str, name: &str) -> Option<String> {
 }
 
 #[derive(serde::Deserialize)]
-struct Identity {
+pub(super) struct Identity {
     commit: String,
     rustc: String,
     target: String,
     side: String,
-    link_args: Vec<String>,
+    pub(super) link_args: Vec<String>,
+    #[serde(default)]
+    pub(super) registry_lock: Option<String>,
+    #[serde(default)]
+    pub(super) native_links: Option<Vec<super::registry_inventory::NativeLink>>,
     #[serde(default)]
     facade_crates: std::collections::BTreeSet<String>,
 }
 
-fn identity(dir: &Path) -> Result<Identity, String> {
+pub(super) fn identity(dir: &Path) -> Result<Identity, String> {
     let path = dir.join(IDENTITY);
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
@@ -444,7 +439,7 @@ fn check_identity(dir: &Path, revision: &str, host: &str, target: Target) -> Res
 }
 
 /// The library file a crate named `krate` left in `deps`: its metadata, or its own dylib.
-fn library(deps: &Path, krate: &str) -> Result<PathBuf, String> {
+pub(super) fn library(deps: &Path, krate: &str) -> Result<PathBuf, String> {
     // A cached target can still contain metadata from an earlier static build. Prefer the dylib:
     // callers installing runtime libraries need its code, not a stale metadata-only artifact.
     let dylib = ["so", "dll", "dylib"]
@@ -482,7 +477,7 @@ fn facade_refused(krate: &str) -> String {
     )
 }
 
-fn facade_library(deps: &Path, krate: &str, sdk: &Identity) -> Result<PathBuf, String> {
+pub(super) fn facade_library(deps: &Path, krate: &str, sdk: &Identity) -> Result<PathBuf, String> {
     if !sdk.facade_crates.contains(krate) {
         return Err(facade_refused(krate));
     }
@@ -490,7 +485,7 @@ fn facade_library(deps: &Path, krate: &str, sdk: &Identity) -> Result<PathBuf, S
 }
 
 /// Rust's standard library as a dynamic library: what the prebuilt game and its executable load.
-fn standard_library(rust: &Toolchain) -> Result<PathBuf, String> {
+pub(super) fn standard_library(rust: &Toolchain) -> Result<PathBuf, String> {
     let dir = rust
         .target_libdir()
         .ok_or("no Rust standard library for this computer")?;
@@ -543,7 +538,32 @@ pub(super) fn compile(
     projects: &[api::Project<'_>],
     declared: &[Vec<dependencies::Dependency>],
     resolution: &dependencies::Resolution,
+    consent: Option<&dyn Fn(&super::RegistryInventory) -> bool>,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
+    if projects.iter().any(|project| {
+        project.dependency_tables().any(|(_, dependencies)| {
+            dependencies.iter().any(|(key, value)| {
+                let name = value
+                    .get("package")
+                    .and_then(toml::Value::as_str)
+                    .unwrap_or(key);
+                !api::PACKAGES.iter().any(|(package, _)| *package == name)
+            })
+        })
+    }) {
+        return super::registry_compile::compile(
+            rust,
+            game,
+            out,
+            projects,
+            declared,
+            resolution,
+            super::registry_compile::Options {
+                consent,
+                adapter: &std::env::current_exe().map_err(|e| e.to_string())?,
+            },
+        );
+    }
     let catalog =
         internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
     let generated = catalog
@@ -705,7 +725,7 @@ pub(super) fn compile(
 
 /// The game's own dynamic libraries, which the executable loads from beside itself: the game and
 /// the wasm mod runtime it links (`tools/prebuilt_game.py` checks the archive holds both).
-fn game_dylibs(deps: &Path) -> Result<Vec<PathBuf>, String> {
+pub(super) fn game_dylibs(deps: &Path) -> Result<Vec<PathBuf>, String> {
     ["horizon_client", "horizon_mod_wasm"]
         .into_iter()
         .map(|krate| {
@@ -1003,23 +1023,19 @@ mod tests {
     }
 
     #[test]
+    fn registry_dependencies_do_not_rebuild_the_game() {
+        for cargo in [
+            "[dependencies]\nhorizon-mod-api='0.1'\nserde='1'",
+            "[dependencies]\nhorizon-mod-api='0.1'\n[target.'cfg(unix)'.dependencies]\nlibc='0.2'",
+        ] {
+            assert_eq!(refusal_of(cargo), None);
+        }
+    }
+
+    #[test]
     fn anything_the_prebuilt_game_cant_build_names_why() {
         let id = || "example".to_owned();
         for (cargo, reason) in [
-            (
-                "[dependencies]\nhorizon-mod-api='0.1'\nserde='1'",
-                SourceReason::Crate {
-                    mod_id: id(),
-                    krate: "serde".into(),
-                },
-            ),
-            (
-                "[dependencies]\nhorizon-mod-api='0.1'\n[target.'cfg(unix)'.dependencies]\nlibc='0.2'",
-                SourceReason::Crate {
-                    mod_id: id(),
-                    krate: "libc".into(),
-                },
-            ),
             (
                 "[dependencies]\nhorizon-mod-api={version='0.1',features=['testing']}",
                 SourceReason::Features { mod_id: id() },

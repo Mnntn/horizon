@@ -57,6 +57,7 @@ mod motion;
 mod multiplayer_page;
 mod native_consent;
 mod native_log_page;
+mod native_registry_consent;
 mod new_instance;
 mod owner_page;
 mod packs_page;
@@ -1049,9 +1050,21 @@ impl Launcher {
         self.native_done = None;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let result = native_mods::build(&base, &folder, &instance, None, |step| {
-                let _ = tx.send(Msg::NativeProgress(step.label(), step.progress()));
-            });
+            let result = native_mods::build(
+                &base,
+                &folder,
+                &instance,
+                None,
+                |step| {
+                    let _ = tx.send(Msg::NativeProgress(step.label(), step.progress()));
+                },
+                |inventory| {
+                    let (reply, answer) = std::sync::mpsc::channel();
+                    tx.send(Msg::NativeRegistryConsent(inventory.clone(), reply))
+                        .is_ok()
+                        && answer.recv().unwrap_or(false)
+                },
+            );
             let _ = tx.send(Msg::Native(result));
         });
     }
@@ -1395,6 +1408,9 @@ impl Launcher {
                     }
                 }
                 Msg::Updates(Err(e)) => self.update_error = Some(e),
+                Msg::NativeRegistryConsent(inventory, reply) => {
+                    native_registry_consent::show(window, inventory, reply, cx)
+                }
                 Msg::NativeProgress(step, progress) => {
                     self.native_step = Some(step);
                     self.native_progress = Some(progress);

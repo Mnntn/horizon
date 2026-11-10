@@ -104,27 +104,38 @@ def copy_artifacts(messages: list[dict], deps: Path) -> None:
         shutil.copy2(file, deps / file.name)
 
 
-def runtime_crates(metadata: dict) -> set[str]:
-    """Normal library dependencies of the game, excluding build and proc-macro dependency trees."""
+def runtime_packages(metadata: dict) -> set[str]:
+    """Normal game library package IDs, excluding host build/proc-macro trees."""
     packages = {package["id"]: package for package in metadata["packages"]}
     nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
     pending = [package["id"] for package in metadata["packages"] if package["name"] == "horizon-client"]
     visited = set()
-    names = set()
+    runtime = set()
     while pending:
         package_id = pending.pop()
         if package_id in visited:
             continue
         visited.add(package_id)
-        targets = packages[package_id]["targets"]
-        libraries = [target["name"] for target in targets
-                     if any(kind in ("lib", "rlib", "dylib") for kind in target["kind"])]
-        if not libraries:
+        if not any(any(kind in ("lib", "rlib", "dylib") for kind in target["kind"])
+                   for target in packages[package_id]["targets"]):
             continue
-        names.update(libraries)
+        runtime.add(package_id)
         pending.extend(dependency["pkg"] for dependency in nodes[package_id]["deps"]
                        if any(kind["kind"] is None for kind in dependency["dep_kinds"]))
-    return names
+    return runtime
+
+
+def runtime_crates(metadata: dict) -> set[str]:
+    runtime = runtime_packages(metadata)
+    return {target["name"] for package in metadata["packages"] if package["id"] in runtime
+            for target in package["targets"]
+            if any(kind in ("lib", "rlib", "dylib") for kind in target["kind"])}
+
+
+def native_links(metadata: dict) -> list[dict]:
+    runtime = runtime_packages(metadata)
+    return [{"name": package["name"], "version": package["version"], "library": package["links"]}
+            for package in metadata["packages"] if package["id"] in runtime and package.get("links")]
 
 
 def facade_crates(deps: Path, runtime: set[str]) -> list[str]:
@@ -175,7 +186,8 @@ def build(out: Path, server: bool) -> None:
         "cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", rustc_host(),
         *features,
     ], cwd=staged))
-    eligible = facade_crates(deps, runtime_crates(metadata))
+    runtime = runtime_crates(metadata)
+    eligible = facade_crates(deps, runtime)
     assert_externs(out, eligible)
     native = out / NATIVE
     native.mkdir()
@@ -211,6 +223,8 @@ def build(out: Path, server: bool) -> None:
         "rustflags": rustflags,
         "link_args": link_args,
         "facade_crates": eligible,
+        "registry_lock": (staged / "Cargo.lock").read_text(),
+        "native_links": native_links(metadata),
         "files": files,
     }
     (out / IDENTITY).write_text(json.dumps(identity, indent=2) + "\n")
