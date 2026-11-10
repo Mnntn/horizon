@@ -414,6 +414,14 @@ fn a_biome_modifier_declared_in_code_applies_to_the_root_biomes() {
     let after = biome_modifiers_over_packs(&out, &packs, &declared)
         .unwrap()
         .expect("a declared modifier changes the biomes");
+    let file_mod = zinc_mod(&scratch.join("file-zinc"), &[("declared", &declared[0][2])]);
+    let file_out = scratch.join("file-out");
+    build_fixture(&base, &base.join("jars"), &[file_mod], &file_out).unwrap();
+    let original: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(out.join("worldgen/biomes.json")).unwrap()).unwrap();
+    let expected: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(file_out.join("worldgen/biomes.json")).unwrap()).unwrap();
+    assert_eq!(after.apply("biomes", original), expected);
     let plains = after
         .entries("biomes")
         .find(|(id, _)| *id == "minecraft:plains")
