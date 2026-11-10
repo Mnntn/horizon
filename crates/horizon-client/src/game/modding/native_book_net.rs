@@ -77,14 +77,24 @@ impl Game<'_> {
         self.build_screen();
     }
     pub(super) fn is_book_or_mod_channel(&self, channel: &str) -> bool {
-        channel == CHANNEL || channel == horizon_protocol::mod_net::CHANNEL
+        channel == CHANNEL
+            || channel == horizon_protocol::mod_net::CHANNEL
+            || channel == horizon_client::datapack_net::CHANNEL
     }
-    pub(super) fn remote_book_or_mod_payload(&mut self, channel: &str, data: &[u8]) {
+    pub(super) fn remote_book_or_mod_payload(
+        &mut self,
+        channel: &str,
+        data: &[u8],
+    ) -> horizon_client::Result<()> {
         if channel == CHANNEL {
             self.remote_book_settings(data);
+        } else if channel == horizon_client::datapack_net::CHANNEL {
+            // The server's next generation of the mods' registries: all of it or the connection.
+            horizon_client::datapack_net::accept(data)?;
         } else {
             self.remote_native_net(data);
         }
+        Ok(())
     }
 
     pub(super) fn clear_guest_book_connection(&mut self, conn: u32) {

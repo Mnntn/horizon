@@ -1047,6 +1047,7 @@ fn login_and_configure(
     // answering known packs. That reply orders the announcement without a ping.
     let server_mods = horizon_protocol::mod_list::local();
     let mut client_mods = Vec::new();
+    let mut datapack_offer = None;
     let core = KnownPack {
         namespace: CORE_PACK.0.into(),
         id: CORE_PACK.1.into(),
@@ -1095,6 +1096,11 @@ fn login_and_configure(
                         return Ok(None);
                     }
                 }
+            }
+            cfg::Serverbound::CustomPayload(p)
+                if p.channel == crate::datapack_net::OFFER_CHANNEL =>
+            {
+                datapack_offer = Some(p.data);
             }
             cfg::Serverbound::SelectKnownPacks(p) => break p.packs == vec![core.clone()],
             _ => {}
@@ -1215,6 +1221,27 @@ fn login_and_configure(
                 &format!("{name} ({})", uuid_string(uuid)),
                 crate::content_identity::MISMATCH,
             );
+            return Ok(None);
+        }
+    }
+    // The mods' datapack registries this client has, or the reason it cannot play (#811).
+    if let Some(offer) = &datapack_offer {
+        crate::datapack_net::remember_offer(uuid, offer.clone());
+    }
+    match crate::datapack_net::server_step(brand == "horizon", datapack_offer.as_deref()) {
+        crate::datapack_net::Step::Nothing => {}
+        crate::datapack_net::Step::Send(data) => send(
+            c,
+            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                channel: crate::datapack_net::CHANNEL.into(),
+                data,
+            }),
+        )?,
+        crate::datapack_net::Step::Refuse(text) => {
+            let reason =
+                horizon_core::nbt::Tag::String(horizon_core::nbt::JavaString::from(text.as_str()));
+            let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
+            lost(shared, &format!("{name} ({})", uuid_string(uuid)), &text);
             return Ok(None);
         }
     }

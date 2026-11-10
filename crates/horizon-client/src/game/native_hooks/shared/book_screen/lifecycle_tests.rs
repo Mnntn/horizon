@@ -30,7 +30,8 @@ fn receive(game: &mut Game<'_>, message: Message) {
     game.remote_book_or_mod_payload(
         horizon_client::recipe_book::settings_sync::CHANNEL,
         &settings_codec::encode(&message).unwrap(),
-    );
+    )
+    .unwrap();
 }
 fn geometry(game: &Game<'_>) -> ((f32, f32), Vec<(usize, [f32; 4])>) {
     let batch = horizon_client::hud::HudBatch::new([1280, 720], game.settings.gui_scale_inputs());

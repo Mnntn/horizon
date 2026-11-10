@@ -165,6 +165,8 @@ pub struct Biomes {
     /// The data packs' biome files (new biomes and replaced built-in ones),
     /// for the tables that read more of a biome than `BiomeInfo` keeps.
     packs: BTreeMap<String, Arc<Value>>,
+    /// The built-in biomes' own files, to tell a server's data that differs.
+    files: Arc<BTreeMap<String, Value>>,
 }
 /// The grass, foliage and dry foliage colormaps.
 struct Colormaps {
@@ -295,6 +297,7 @@ impl Biomes {
             dry: colormap(root.source(), "dry_foliage")?,
         };
         let mut list = Vec::new();
+        let mut files_by_name = BTreeMap::new();
         // The folder's own files (not its subfolders'), by file name: through `json_folder`,
         // from the prepared data file when there is one.
         let folder = horizon_world::json_folder::read(
@@ -313,6 +316,7 @@ impl Biomes {
                 &v,
                 &maps,
             ));
+            files_by_name.insert(format!("minecraft:{}", file.name), v);
         }
         let index = list
             .iter()
@@ -325,6 +329,7 @@ impl Biomes {
             index,
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
+            files: Arc::new(files_by_name),
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
         })
     }
@@ -367,6 +372,10 @@ impl Biomes {
     /// or replaced it.
     pub fn pack_file(&self, name: &str) -> Option<&Value> {
         self.packs.get(name).map(|v| &**v)
+    }
+    /// The file the game's own copy of built-in biome `name` was read from.
+    pub fn builtin_file(&self, name: &str) -> Option<&Value> {
+        self.files.get(name)
     }
     /// Whether data packs added or replaced any biome.
     pub fn has_packs(&self) -> bool {
@@ -601,6 +610,7 @@ mod pack_tests {
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
+            files: Arc::default(),
         }
     }
 
@@ -700,6 +710,12 @@ impl Biomes {
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
+            files: Arc::new(
+                entries
+                    .iter()
+                    .map(|(n, v)| ((*n).to_owned(), v.clone()))
+                    .collect(),
+            ),
         }
     }
 }
@@ -739,6 +755,7 @@ mod color_tests {
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
+            files: Arc::default(),
         }
     }
 

@@ -3817,7 +3817,7 @@ impl Game<'_> {
             C::Ping(p) => self.send(S::Pong(p)),
             // A native mod's server half to its client half.
             C::CustomPayload(p) if self.is_book_or_mod_channel(&p.channel) => {
-                self.remote_book_or_mod_payload(&p.channel, &p.data);
+                self.remote_book_or_mod_payload(&p.channel, &p.data)?;
             }
             // The synced attachments of a holder the server shows the window.
             C::CustomPayload(p) if p.channel == horizon_protocol::attachment_sync::CHANNEL => {

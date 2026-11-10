@@ -740,7 +740,7 @@ removal, then every `MODIFY` modifier, in mod order within each. NeoForge's own 
 `MODIFY` is for the single values (climate, colours) that a mod's own modifier type changes, so Horizon's is its own
 type, `horizon:modify_biome`, which sets any of `temperature`, `downfall`, `has_precipitation`, `temperature_modifier`
 (`none` or `frozen`) and `effects` colours (`sky_color`, `fog_color`, `water_color`, `water_fog_color`,
-`foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
+`foliage_color`, `dry_foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
 
 ```json
 {
@@ -757,6 +757,43 @@ sky, fog and water fog colours as its `minecraft:visual/...` attributes, where 2
 type, a colour out of range, an unknown colour name or a `temperature_modifier` other than `none` or `frozen` skips that
 modifier with a warning naming the mod and file. `BEFORE_EVERYTHING` and `AFTER_EVERYTHING` have no modifier type
 here, so the API names no phase for them.
+
+A `null` for `foliage_color`, `dry_foliage_color` or `grass_color` removes that override from the biome's `effects`, so the
+colormap tints it again; removing one the biome lacks changes nothing. The other colours are required or are attributes,
+so a `null` there skips the modifier with a warning. The removal form is inferred from the title of NeoForge's change
+"Add ability to remove color overrides in BiomeSpecialEffectsBuilder" (neoforged/NeoForge#3528, `26.3.0.19-beta`), whose
+field list is not public; it is not confirmed against NeoForge's code. In code, `foliage_color`, `dry_foliage_color` and
+`grass_color` are `Option<BiomeColourChange>` (`Set { rgb }` or `Remove`).
+
+A modifier also sets the biome's ambient and music attributes, in an `attributes` object with the vanilla keys and
+values of a biome file (`warped_forest.json` has all of them). Each key present replaces the biome's whole value;
+the keys it leaves out stay:
+
+```json
+{
+  "type": "horizon:modify_biome",
+  "biomes": "minecraft:plains",
+  "attributes": {
+    "minecraft:visual/ambient_particles": [{ "particle": { "type": "minecraft:ash" }, "probability": 0.25 }],
+    "minecraft:audio/ambient_sounds": {
+      "loop": "minecraft:ambient.warped_forest.loop",
+      "additions": { "sound": "minecraft:ambient.warped_forest.additions", "tick_chance": 0.0111 },
+      "mood": { "sound": "minecraft:ambient.warped_forest.mood", "tick_delay": 6000, "block_search_extent": 8, "offset": 2.0 }
+    },
+    "minecraft:audio/background_music": { "default": { "sound": "zinc:music.dunes", "min_delay": 12000, "max_delay": 24000 } },
+    "minecraft:audio/music_volume": 0.5
+  }
+}
+```
+
+The particle list may also be written `{ "argument": [...] }`. A particle or sound is a namespaced id and a chance or
+volume is 0 to 1; the mood needs its sound, `tick_delay`, `block_search_extent` and `offset`; `additions` is one
+object or a list; a music entry (`default`, `creative` or `underwater`) needs a sound and `min_delay` at most
+`max_delay`. Any other attribute, or a value that is not valid, skips the modifier with a warning naming the mod,
+file and attribute. A client plays these from the biome data the server sends. In code, `ModifyBiome` has
+`ambient_particles`, `ambient_loop`, `ambient_additions`, `ambient_mood`, `background_music` and `music_volume`; the
+three ambient sound fields together make the one `ambient_sounds` value, and a value out of range refuses the mods at
+startup.
 
 **When they apply.** Modifiers are applied while the world's worldgen data is loaded, before any chunk is generated: the content build writes the modified biomes into the content root, and when a world opens, `horizon_client::vanillagen::biome_modifiers_over_packs` applies them again over the world's data packs (`shared_data_with` for the generator, `packed_biomes` for the game's biome table), so a pack that replaces a vanilla biome keeps the mods' changes and a pack's own biome a tag selects gets them. Modifiers a mod declares in code (`Registrar::declare_biome_modifier`) register before any world opens and are read at the same moment. The generator's data is loaded once per bundle and set of packs and shared by the world's dimensions, so a modifier never applies halfway through a world. The dedicated server is the same game run headless (`horizon-client --dedicated`, [server.md](../../../server.md)), so it takes this path too; `horizon-server` only supervises it.
 

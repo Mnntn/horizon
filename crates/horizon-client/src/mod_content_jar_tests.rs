@@ -617,3 +617,188 @@ fn modify_biome_with_an_invalid_value_is_skipped_with_a_warning() {
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+/// `horizon:modify_biome` writes ambient particles, ambient sounds and music as the vanilla
+/// attribute values (the shapes of `warped_forest.json`), each replacing the biome's value.
+#[test]
+fn modify_biome_sets_ambient_particles_sounds_and_music() {
+    let base = biome_base("biome-modifiers-modify-effects");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[(
+            "dunes",
+            r#"{"type":"horizon:modify_biome","biomes":"minecraft:plains","attributes":{
+                "minecraft:visual/ambient_particles":{"argument":[{"particle":{"type":"minecraft:ash"},"probability":0.25}]},
+                "minecraft:audio/ambient_sounds":{"loop":"minecraft:ambient.warped_forest.loop",
+                    "additions":{"sound":"minecraft:ambient.warped_forest.additions","tick_chance":0.0111},
+                    "mood":{"sound":"minecraft:ambient.warped_forest.mood","tick_delay":6000,"block_search_extent":8,"offset":2.0}},
+                "minecraft:audio/background_music":{"default":{"sound":"zinc:music.dunes","min_delay":12000,"max_delay":24000}},
+                "minecraft:audio/music_volume":0.5}}"#,
+        )],
+    );
+    let out = scratch.join("out");
+    let warnings = build_fixture(&base, &base.join("jars"), &[m], &out).unwrap();
+    assert!(
+        warnings.iter().all(|w| !w.contains("skipped")),
+        "{warnings:?}"
+    );
+    let after: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(out.join("worldgen/biomes.json")).unwrap()).unwrap();
+    let plains: serde_json::Value = serde_json::from_str(&after["minecraft:plains"]).unwrap();
+    let attributes = &plains["attributes"];
+    assert_eq!(
+        attributes["minecraft:visual/ambient_particles"],
+        serde_json::json!([{"particle": {"type": "minecraft:ash"}, "probability": 0.25}])
+    );
+    assert_eq!(
+        attributes["minecraft:audio/ambient_sounds"],
+        serde_json::json!({
+            "loop": "minecraft:ambient.warped_forest.loop",
+            "additions": {"sound": "minecraft:ambient.warped_forest.additions", "tick_chance": 0.0111},
+            "mood": {"sound": "minecraft:ambient.warped_forest.mood", "tick_delay": 6000,
+                "block_search_extent": 8, "offset": 2.0},
+        })
+    );
+    assert_eq!(
+        attributes["minecraft:audio/background_music"],
+        serde_json::json!({"default": {"sound": "zinc:music.dunes", "min_delay": 12000, "max_delay": 24000}})
+    );
+    assert_eq!(attributes["minecraft:audio/music_volume"], 0.5);
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+/// A `null` colour removes an optional override (inferred from NeoForge's "remove color overrides"
+/// change); removing one the biome lacks changes nothing, and a required colour cannot be removed.
+#[test]
+fn modify_biome_removes_optional_colour_overrides_only() {
+    let base = biome_base("biome-modifiers-modify-remove");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[
+            (
+                "a-set",
+                r##"{"type":"horizon:modify_biome","biomes":["minecraft:plains","minecraft:desert"],"effects":{"grass_color":"#80a0ff","dry_foliage_color":"#8c3a04"}}"##,
+            ),
+            (
+                "b-remove",
+                r#"{"type":"horizon:modify_biome","biomes":"minecraft:plains","effects":{"grass_color":null}}"#,
+            ),
+            (
+                "c-lacks",
+                r#"{"type":"horizon:modify_biome","biomes":"minecraft:plains","effects":{"foliage_color":null}}"#,
+            ),
+            (
+                "d-required",
+                r#"{"type":"horizon:modify_biome","biomes":"minecraft:plains","effects":{"water_color":null}}"#,
+            ),
+        ],
+    );
+    let out = scratch.join("out");
+    let warnings = build_fixture(&base, &base.join("jars"), &[m], &out).unwrap();
+    assert_eq!(
+        warnings.iter().filter(|w| w.contains("skipped")).count(),
+        1,
+        "{warnings:?}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("effects.water_color: cannot be removed"))
+    );
+    let after: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(out.join("worldgen/biomes.json")).unwrap()).unwrap();
+    let effects = |id: &str| {
+        serde_json::from_str::<serde_json::Value>(&after[id]).unwrap()["effects"].clone()
+    };
+    // Set, then removed; the dry foliage colour set beside it stays; nothing to remove is no-op.
+    assert_eq!(
+        effects("minecraft:plains"),
+        serde_json::json!({"dry_foliage_color": "#8c3a04"})
+    );
+    assert_eq!(
+        effects("minecraft:desert"),
+        serde_json::json!({"grass_color": "#80a0ff", "dry_foliage_color": "#8c3a04"})
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+/// An invalid ambient or music value skips the modifier with a warning naming the attribute.
+#[test]
+fn modify_biome_with_an_invalid_effect_is_skipped_with_a_warning() {
+    let base = biome_base("biome-modifiers-modify-effects-bad");
+    let scratch = base.parent().unwrap().to_owned();
+    let bad = |attribute: &str, value: &str| {
+        format!(
+            r#"{{"type":"horizon:modify_biome","biomes":"minecraft:plains","attributes":{{"{attribute}":{value}}}}}"#
+        )
+    };
+    let files = [
+        (
+            "particle",
+            bad(
+                "minecraft:visual/ambient_particles",
+                r#"[{"particle":{"type":"ash"},"probability":0.5}]"#,
+            ),
+        ),
+        (
+            "chance",
+            bad(
+                "minecraft:audio/ambient_sounds",
+                r#"{"additions":{"sound":"minecraft:a.b","tick_chance":1.5}}"#,
+            ),
+        ),
+        (
+            "delay",
+            bad(
+                "minecraft:audio/background_music",
+                r#"{"default":{"sound":"minecraft:m","min_delay":9,"max_delay":3}}"#,
+            ),
+        ),
+        ("volume", bad("minecraft:audio/music_volume", "2")),
+        (
+            "unknown",
+            bad("minecraft:visual/sky_color", r##""#ffffff""##),
+        ),
+    ];
+    let files: Vec<(&str, &str)> = files.iter().map(|(n, t)| (*n, t.as_str())).collect();
+    let m = zinc_mod(&scratch.join("zinc"), &files);
+    let out = scratch.join("out");
+    let warnings = build_fixture(&base, &base.join("jars"), &[m], &out).unwrap();
+    assert_eq!(
+        warnings.iter().filter(|w| w.contains("skipped")).count(),
+        5,
+        "{warnings:?}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("attributes.minecraft:visual/ambient_particles"))
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("attributes.minecraft:audio/ambient_sounds"))
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("attributes.minecraft:audio/background_music"))
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("attributes.minecraft:audio/music_volume"))
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("unknown attribute minecraft:visual/sky_color"))
+    );
+    assert_eq!(
+        fs::read(out.join("worldgen/biomes.json")).unwrap(),
+        fs::read(base.join("worldgen/biomes.json")).unwrap()
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}

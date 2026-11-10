@@ -54,6 +54,7 @@ pub mod crafting;
 pub mod creative;
 pub mod cushion;
 pub mod data_cmd;
+pub mod datapack_net;
 pub mod debug_chart;
 pub mod debug_entries;
 pub mod debug_keys;

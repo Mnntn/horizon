@@ -33,6 +33,70 @@ pub struct BiomeModifierSpawner {
     pub max_count: u32,
 }
 
+/// A change to a colour that 26.3 treats as an optional override of the biome's `effects`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: a mod builds it with a literal; the game reads it
+#[derive(horizon_mod_api_macros::Wire)]
+pub enum BiomeColourChange {
+    /// Sets the colour, 24-bit RGB (0..=0xFFFFFF).
+    Set {
+        /// The colour.
+        rgb: u32,
+    },
+    /// Removes the override, so the colour comes from the colormap again.
+    Remove,
+}
+
+/// One ambient particle of a biome (`minecraft:visual/ambient_particles`).
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: a mod builds it with a literal; the game reads it
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct BiomeAmbientParticle {
+    /// The particle type (`minecraft:ash`).
+    pub particle: String,
+    /// The chance per tick and block, 0.0..=1.0.
+    pub probability: f64,
+}
+
+/// A random ambient sound of a biome (`additions` of `minecraft:audio/ambient_sounds`).
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: a mod builds it with a literal; the game reads it
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct BiomeAmbientAddition {
+    /// The sound event (`minecraft:ambient.cave`).
+    pub sound: String,
+    /// The chance per tick, 0.0..=1.0.
+    pub tick_chance: f64,
+}
+
+/// The cave mood sound of a biome (`mood` of `minecraft:audio/ambient_sounds`).
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: a mod builds it with a literal; the game reads it
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct BiomeAmbientMood {
+    /// The sound event.
+    pub sound: String,
+    /// Ticks the mood takes to build up.
+    pub tick_delay: u32,
+    /// How far around the player a spot for the sound is searched.
+    pub block_search_extent: u32,
+    /// How far from the listener the sound is placed.
+    pub offset: f64,
+}
+
+/// The default background music of a biome (`default` of `minecraft:audio/background_music`).
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: a mod builds it with a literal; the game reads it
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct BiomeMusic {
+    /// The sound event (`minecraft:music.overworld.meadow`).
+    pub sound: String,
+    /// Fewest ticks between two tracks.
+    pub min_delay: u32,
+    /// Most ticks between two tracks; at least `min_delay`.
+    pub max_delay: u32,
+}
+
 /// What a biome modifier does to its biomes.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
@@ -105,10 +169,27 @@ pub enum BiomeModifierOperation {
         water_color: Option<u32>,
         /// `effects.water_fog_color`, 24-bit RGB.
         water_fog_color: Option<u32>,
-        /// `effects.foliage_color`, 24-bit RGB.
-        foliage_color: Option<u32>,
-        /// `effects.grass_color`, 24-bit RGB.
-        grass_color: Option<u32>,
+        /// `effects.foliage_color`: set it or remove the override.
+        foliage_color: Option<BiomeColourChange>,
+        /// `effects.dry_foliage_color`: set it or remove the override.
+        dry_foliage_color: Option<BiomeColourChange>,
+        /// `effects.grass_color`: set it or remove the override.
+        grass_color: Option<BiomeColourChange>,
+        /// `minecraft:visual/ambient_particles`: replaces the biome's particles (an empty list
+        /// removes them).
+        ambient_particles: Option<Vec<BiomeAmbientParticle>>,
+        /// `loop` of `minecraft:audio/ambient_sounds`. Setting this, `ambient_mood` or
+        /// `ambient_additions` replaces the biome's whole ambient sounds value with the ones set.
+        ambient_loop: Option<String>,
+        /// `additions` of `minecraft:audio/ambient_sounds`.
+        ambient_additions: Option<Vec<BiomeAmbientAddition>>,
+        /// `mood` of `minecraft:audio/ambient_sounds`.
+        ambient_mood: Option<BiomeAmbientMood>,
+        /// `default` of `minecraft:audio/background_music`; replaces the whole value, so the
+        /// biome's creative and underwater music go.
+        background_music: Option<BiomeMusic>,
+        /// `minecraft:audio/music_volume`, 0.0..=1.0.
+        music_volume: Option<f64>,
     },
 }
 
@@ -219,9 +300,47 @@ impl BiomeModifier {
                 water_color,
                 water_fog_color,
                 foliage_color,
+                dry_foliage_color,
                 grass_color,
+                ambient_particles,
+                ambient_loop,
+                ambient_additions,
+                ambient_mood,
+                background_music,
+                music_volume,
                 ..
             } => {
+                let change = |c: &Option<BiomeColourChange>| match c {
+                    Some(BiomeColourChange::Set { rgb }) => Some(*rgb),
+                    _ => None,
+                };
+                let (foliage_color, dry_foliage_color, grass_color) = (
+                    change(foliage_color),
+                    change(dry_foliage_color),
+                    change(grass_color),
+                );
+                let id = |s: &String| name_ok(s, false);
+                let unit = |n: &f64| (0.0..=1.0).contains(n);
+                let ticks = |n: &u32| i32::try_from(*n).is_ok();
+                let effects_ok = ambient_particles
+                    .iter()
+                    .flatten()
+                    .all(|p| id(&p.particle) && unit(&p.probability))
+                    && ambient_loop.iter().all(id)
+                    && ambient_additions
+                        .iter()
+                        .flatten()
+                        .all(|a| id(&a.sound) && unit(&a.tick_chance))
+                    && ambient_mood.iter().all(|m| {
+                        id(&m.sound)
+                            && ticks(&m.tick_delay)
+                            && ticks(&m.block_search_extent)
+                            && m.offset.is_finite()
+                    })
+                    && background_music
+                        .iter()
+                        .all(|m| id(&m.sound) && ticks(&m.max_delay) && m.min_delay <= m.max_delay)
+                    && music_volume.iter().all(unit);
                 let finite = [temperature, downfall]
                     .iter()
                     .all(|n| n.is_none_or(f64::is_finite));
@@ -230,14 +349,15 @@ impl BiomeModifier {
                     fog_color,
                     water_color,
                     water_fog_color,
-                    foliage_color,
-                    grass_color,
+                    &foliage_color,
+                    &dry_foliage_color,
+                    &grass_color,
                 ];
                 let modifier = temperature_modifier
                     .as_deref()
                     .is_none_or(|m| m == "none" || m == "frozen");
                 let colours_ok = colours.iter().all(|c| c.is_none_or(|c| c <= 0xFF_FFFF));
-                match finite && modifier && colours_ok {
+                match finite && modifier && colours_ok && effects_ok {
                     true => Ok(()),
                     false => Err(BiomeModifierError::InvalidValue),
                 }
@@ -324,9 +444,64 @@ impl BiomeModifier {
                 water_color,
                 water_fog_color,
                 foliage_color,
+                dry_foliage_color,
                 grass_color,
+                ambient_particles,
+                ambient_loop,
+                ambient_additions,
+                ambient_mood,
+                background_music,
+                music_volume,
             } => {
                 let mut file = json!({"type": "horizon:modify_biome"});
+                // The vanilla attribute values, under the biome's `attributes`.
+                let mut attributes = serde_json::Map::new();
+                if let Some(list) = ambient_particles {
+                    attributes.insert(
+                        "minecraft:visual/ambient_particles".into(),
+                        list.iter()
+                            .map(|p| {
+                                json!({"particle": {"type": p.particle}, "probability": p.probability})
+                            })
+                            .collect(),
+                    );
+                }
+                let mut sounds = serde_json::Map::new();
+                if let Some(sound) = ambient_loop {
+                    sounds.insert("loop".into(), json!(sound));
+                }
+                if let Some(list) = ambient_additions {
+                    let additions = list
+                        .iter()
+                        .map(|a| json!({"sound": a.sound, "tick_chance": a.tick_chance}));
+                    sounds.insert("additions".into(), additions.collect());
+                }
+                if let Some(m) = ambient_mood {
+                    sounds.insert(
+                        "mood".into(),
+                        json!({"sound": m.sound, "tick_delay": m.tick_delay,
+                            "block_search_extent": m.block_search_extent, "offset": m.offset}),
+                    );
+                }
+                if !sounds.is_empty() {
+                    attributes.insert(
+                        "minecraft:audio/ambient_sounds".into(),
+                        Value::Object(sounds),
+                    );
+                }
+                if let Some(m) = background_music {
+                    attributes.insert(
+                        "minecraft:audio/background_music".into(),
+                        json!({"default": {"sound": m.sound, "min_delay": m.min_delay,
+                            "max_delay": m.max_delay}}),
+                    );
+                }
+                if let Some(volume) = music_volume {
+                    attributes.insert("minecraft:audio/music_volume".into(), json!(volume));
+                }
+                if !attributes.is_empty() {
+                    file["attributes"] = Value::Object(attributes);
+                }
                 for (key, value) in [
                     ("temperature", json!(temperature)),
                     ("downfall", json!(downfall)),
@@ -338,16 +513,23 @@ impl BiomeModifier {
                     }
                 }
                 let mut effects = serde_json::Map::new();
+                let change = |c: &Option<BiomeColourChange>| match c {
+                    Some(BiomeColourChange::Set { rgb }) => Some(json!(rgb)),
+                    // `null` removes the override.
+                    Some(BiomeColourChange::Remove) => Some(Value::Null),
+                    None => None,
+                };
                 for (key, colour) in [
-                    ("sky_color", sky_color),
-                    ("fog_color", fog_color),
-                    ("water_color", water_color),
-                    ("water_fog_color", water_fog_color),
-                    ("foliage_color", foliage_color),
-                    ("grass_color", grass_color),
+                    ("sky_color", sky_color.map(|c| json!(c))),
+                    ("fog_color", fog_color.map(|c| json!(c))),
+                    ("water_color", water_color.map(|c| json!(c))),
+                    ("water_fog_color", water_fog_color.map(|c| json!(c))),
+                    ("foliage_color", change(foliage_color)),
+                    ("dry_foliage_color", change(dry_foliage_color)),
+                    ("grass_color", change(grass_color)),
                 ] {
                     if let Some(colour) = colour {
-                        effects.insert(key.into(), json!(colour));
+                        effects.insert(key.into(), colour);
                     }
                 }
                 if !effects.is_empty() {
@@ -427,7 +609,14 @@ mod tests {
                 water_color: Some(0x3938c9),
                 water_fog_color: None,
                 foliage_color: None,
+                dry_foliage_color: None,
                 grass_color: None,
+                ambient_particles: None,
+                ambient_loop: None,
+                ambient_additions: None,
+                ambient_mood: None,
+                background_music: None,
+                music_volume: None,
             };
         let ok = modifier(operation(Some("frozen"), Some(0xc8e0ff)));
         assert_eq!(ok.check(), Ok(()));
@@ -449,6 +638,134 @@ mod tests {
         ] {
             assert_eq!(modifier(bad).check(), Err(BiomeModifierError::InvalidValue));
         }
+    }
+
+    fn effects() -> BiomeModifierOperation {
+        BiomeModifierOperation::ModifyBiome {
+            temperature: None,
+            downfall: None,
+            has_precipitation: None,
+            temperature_modifier: None,
+            sky_color: None,
+            fog_color: None,
+            water_color: None,
+            water_fog_color: None,
+            foliage_color: None,
+            dry_foliage_color: None,
+            grass_color: None,
+            ambient_particles: Some(vec![BiomeAmbientParticle {
+                particle: "minecraft:ash".into(),
+                probability: 0.25,
+            }]),
+            ambient_loop: Some("minecraft:ambient.warped_forest.loop".into()),
+            ambient_additions: Some(vec![BiomeAmbientAddition {
+                sound: "minecraft:ambient.warped_forest.additions".into(),
+                tick_chance: 0.0111,
+            }]),
+            ambient_mood: Some(BiomeAmbientMood {
+                sound: "minecraft:ambient.warped_forest.mood".into(),
+                tick_delay: 6000,
+                block_search_extent: 8,
+                offset: 2.0,
+            }),
+            background_music: Some(BiomeMusic {
+                sound: "huts:music.dunes".into(),
+                min_delay: 12000,
+                max_delay: 24000,
+            }),
+            music_volume: Some(0.5),
+        }
+    }
+
+    #[test]
+    fn modify_biome_sets_or_removes_the_optional_colour_overrides() {
+        let mut op = effects();
+        if let BiomeModifierOperation::ModifyBiome {
+            foliage_color,
+            dry_foliage_color,
+            grass_color,
+            ..
+        } = &mut op
+        {
+            *foliage_color = Some(BiomeColourChange::Remove);
+            *dry_foliage_color = Some(BiomeColourChange::Set { rgb: 0x8c3a04 });
+            *grass_color = Some(BiomeColourChange::Set { rgb: 0x1000000 });
+        }
+        assert_eq!(
+            modifier(op.clone()).check(),
+            Err(BiomeModifierError::InvalidValue)
+        );
+        if let BiomeModifierOperation::ModifyBiome { grass_color, .. } = &mut op {
+            *grass_color = Some(BiomeColourChange::Remove);
+        }
+        assert_eq!(modifier(op.clone()).check(), Ok(()));
+        let file: Value = serde_json::from_str(&modifier(op).json()).unwrap();
+        assert_eq!(
+            file["effects"],
+            json!({"foliage_color": null, "dry_foliage_color": 0x8c3a04, "grass_color": null})
+        );
+    }
+
+    #[test]
+    fn modify_biome_renders_the_effect_attributes_and_refuses_bad_values() {
+        let ok = modifier(effects());
+        assert_eq!(ok.check(), Ok(()));
+        let file: Value = serde_json::from_str(&ok.json()).unwrap();
+        assert_eq!(
+            file["attributes"],
+            json!({
+                "minecraft:visual/ambient_particles":
+                    [{"particle": {"type": "minecraft:ash"}, "probability": 0.25}],
+                "minecraft:audio/ambient_sounds": {
+                    "loop": "minecraft:ambient.warped_forest.loop",
+                    "additions": [{"sound": "minecraft:ambient.warped_forest.additions",
+                        "tick_chance": 0.0111}],
+                    "mood": {"sound": "minecraft:ambient.warped_forest.mood", "tick_delay": 6000,
+                        "block_search_extent": 8, "offset": 2.0},
+                },
+                "minecraft:audio/background_music": {"default": {"sound": "huts:music.dunes",
+                    "min_delay": 12000, "max_delay": 24000}},
+                "minecraft:audio/music_volume": 0.5,
+            })
+        );
+        let with = |change: &dyn Fn(&mut BiomeModifierOperation)| {
+            let mut op = effects();
+            change(&mut op);
+            modifier(op).check()
+        };
+        let set = |op: &mut BiomeModifierOperation, f: &dyn Fn(&mut Vec<BiomeAmbientParticle>)| {
+            if let BiomeModifierOperation::ModifyBiome {
+                ambient_particles: Some(list),
+                ..
+            } = op
+            {
+                f(list);
+            }
+        };
+        assert_eq!(
+            with(&|op| set(op, &|l| l[0].probability = 1.5)),
+            Err(BiomeModifierError::InvalidValue)
+        );
+        assert_eq!(
+            with(&|op| set(op, &|l| l[0].particle = "ash".into())),
+            Err(BiomeModifierError::InvalidValue)
+        );
+        let volume = |op: &mut BiomeModifierOperation| {
+            if let BiomeModifierOperation::ModifyBiome { music_volume, .. } = op {
+                *music_volume = Some(f64::NAN);
+            }
+        };
+        assert_eq!(with(&volume), Err(BiomeModifierError::InvalidValue));
+        let music = |op: &mut BiomeModifierOperation| {
+            if let BiomeModifierOperation::ModifyBiome {
+                background_music: Some(m),
+                ..
+            } = op
+            {
+                m.min_delay = m.max_delay + 1;
+            }
+        };
+        assert_eq!(with(&music), Err(BiomeModifierError::InvalidValue));
     }
 
     #[test]

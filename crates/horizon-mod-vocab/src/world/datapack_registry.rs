@@ -235,7 +235,7 @@ impl DatapackFieldKind {
     }
 
     /// Whether `value` is a value of this kind inside its bounds.
-    fn accepts(&self, value: &DatapackValue) -> bool {
+    pub(super) fn accepts(&self, value: &DatapackValue) -> bool {
         match (self, value) {
             (Self::Bool, DatapackValue::Bool(_)) => true,
             (Self::Int { min, max }, DatapackValue::Int(v)) => (min..=max).contains(&v),
@@ -244,7 +244,7 @@ impl DatapackFieldKind {
             }
             (Self::Text { max_len }, DatapackValue::Text(v)) => v.len() <= *max_len as usize,
             (Self::Identifier | Self::Reference { .. }, DatapackValue::Text(v)) => {
-                Identifier::parse(v).is_ok()
+                Identifier::parse(v).is_ok_and(|id| id.to_string() == *v)
             }
             _ => false,
         }

@@ -2219,6 +2219,7 @@ struct PreparedWorldReload {
     health: horizon_client::health::HealthResources,
     parts: PreparedParts,
     wire: Option<Arc<horizon_client::lan::data::SyncData>>,
+    datapack_candidate: Option<mod_api::DatapackCandidate>,
 }
 
 impl WorldTables {
@@ -11765,8 +11766,7 @@ impl Game<'_> {
         self.score = Default::default();
         let stack = self.reload_datapacks(false, &level.enabled_features)?;
         let root = self.options.resources.clone();
-        (self.world_tables, self.health_resources) =
-            self.build_world_tables(&stack, false, &root, self.mods.data_switched)?;
+        self.open_world_tables(&stack, &root)?;
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.resolve_parts()?;
         // A code-mod switch can have rebuilt the root since `Game::new`.

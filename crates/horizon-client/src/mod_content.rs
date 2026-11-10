@@ -2769,7 +2769,7 @@ pub fn biome_modifiers_over_packs(
 mod carver_registry;
 
 #[path = "mod_content_biomes.rs"]
-mod biomes;
+pub mod biomes;
 
 /// The overlay being written: `out` mirrors `base` through links, and a
 /// directory becomes real only when something inside it is written.
