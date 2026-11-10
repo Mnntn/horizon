@@ -977,7 +977,7 @@ fn trim_material(
 }
 /// `SmithingTrimRecipe.applyTrim`: none when the material provides no trim
 /// or the base already has this one.
-fn apply_trim(
+pub fn apply_trim(
     e: &Enchantments,
     base: &ItemStack,
     material: &ItemStack,
