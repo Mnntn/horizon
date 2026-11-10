@@ -371,7 +371,8 @@ mod tests {
         }];
         let resolution = dependencies::resolve(&inputs).unwrap();
         let rust = crate::rust_toolchain::install(|_| {}).unwrap();
-        let (binary, _) = compile(
+        let approve = std::env::var_os("HORIZON_TEST_REGISTRY_DECLINE").is_none();
+        let result = compile(
             &rust,
             &game,
             &out,
@@ -381,13 +382,22 @@ mod tests {
             Options {
                 consent: Some(&|inventory| {
                     eprintln!("{}\n{}", inventory.label(), inventory.detail());
-                    true
+                    approve
                 }),
                 adapter: &adapter,
             },
-        )
-        .unwrap();
-        assert!(binary.is_file());
-        eprintln!("compiled wrapper {}", binary.display());
+        );
+        if approve {
+            let (binary, _) = result.unwrap();
+            assert!(binary.is_file());
+            eprintln!("compiled wrapper {}", binary.display());
+        } else {
+            assert!(result.unwrap_err().contains("not approved"));
+            assert!(!out.join("cargo-messages.jsonl").exists());
+            assert!(!out.join("target").exists());
+            eprintln!(
+                "detailed consent declined before target compilation or Cargo build messages"
+            );
+        }
     }
 }
