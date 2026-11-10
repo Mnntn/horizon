@@ -576,6 +576,18 @@ so a mod's entity set may name its own new attribute. Values sanitize through th
 minimum, everything else clamps), and saves, item modifiers and the sync set carry the attribute by its string
 id.
 
+A code mod can declare a datapack registry of its own with `Registrar::declare_datapack_registry(path, sync,
+fields)` (NeoForge's `DataPackRegistryEvent.NewRegistry`; [#811](https://github.com/arismoko/horizon/issues/811)).
+`path` lands in the mod's namespace (`spell` of `example` is `example:spell`), and `fields` is a flat record
+schema: `Bool`, `Int { min, max }`, `Float { min, max }`, `Text { max_len }`, `Identifier` or `Reference { registry }`,
+each required or given a default. Entry `addon:fire` is `data/addon/example/spell/fire.json`
+(`DatapackRegistryDeclaration::entry_file`), the registry's namespace being a folder as NeoForge's modded
+registries have it. The game decodes entries against the schema without running mod code, so native and wasm
+mods get the same bounds: an undeclared key, a missing required key, a wrong type or an out-of-range value fails
+the entry, and a default never stands in for invalid data. The engine adds no entry-size or field-count limit
+of its own. Only both-side packages may declare registries. This slice declares and validates; loading the
+entries from packs, the duplicate check across mods and typed reads follow in the next parts of #811.
+
 A code mod can also use `Registrar::declare_entity_attributes(path, template, attributes)` during registration.
 That declaration starts from the vanilla template's attribute row, replacing the content row's overrides.
 Declared bases remain available to base-value reads, but computed values and spawn fields clamp them to each
