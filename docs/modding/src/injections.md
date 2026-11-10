@@ -387,6 +387,19 @@ targets the points of a library whose crate is named otherwise are refused.
 
 - **Opting out.** `#[mod_api::no_point]` on a function gives it no point. An addon declaring a
   listener there is refused: `chemlib::audit has no point (opted out with #[mod_api::no_point])`.
+  A whole module, with every module under it, opts out from the manifest, which suits generated or
+  ported code with thousands of functions:
+
+  ```toml
+  [mod-points]
+  exclude = ["ported_interp", "machines::internal"]
+  ```
+
+  Each entry is a module path from the crate root, inline or a file; no globs. The build refuses an
+  entry that names no module of the crate (`[mod-points] exclude: ported_interpp names no module of
+  crate chemlib`), so a typo can't leave the module's points in. An addon declaring a listener in an
+  excluded module is refused: `chemlib::ported_interp::step has no point (chemlib::ported_interp is
+  excluded by [mod-points] exclude)`. The library's `mod-points.json` lists the excluded modules.
 - **Declaring.** An addon depends on the library and pins the function with
   `cargo horizon-mod inject add chemlib::transfer --kind head --with double_rate`, exactly as for
   the game's points: `at` is the function's path in its crate.

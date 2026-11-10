@@ -86,6 +86,20 @@ pub struct Manifest {
     /// Unified listeners; routing and staging are separate from manifest parsing.
     #[serde(default)]
     pub inject: Vec<inject::Inject>,
+    /// How the build gives this mod's own functions their points (#2339).
+    #[serde(default, rename = "mod-points")]
+    pub mod_points: ModPoints,
+}
+
+/// `[mod-points]`: the parts of a code mod's crate that get no mod points.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ModPoints {
+    /// Module paths from the crate root (`ported_interp`, `ported::interp`): every function in
+    /// such a module, and in the modules under it, gets no point, as if each carried
+    /// `#[mod_api::no_point]`. The build refuses a path that names no module of the crate.
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -284,6 +298,16 @@ impl Manifest {
         }
         if m.native.is_some() && m.wasm.is_some() {
             return Err(format!("{MANIFEST}: a mod is [native] or [wasm], not both"));
+        }
+        let mut excluded = std::collections::HashSet::new();
+        for path in &m.mod_points.exclude {
+            let segment = |s: &str| rust_ident(s) && !matches!(s, "crate" | "self" | "super");
+            if !path.split("::").all(segment) || !excluded.insert(path) {
+                return Err(format!(
+                    "{MANIFEST}: [mod-points] exclude {path:?} must be a module path from the \
+                     crate root (`a::b`), listed once"
+                ));
+            }
         }
         inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
             .map_err(|e| format!("{MANIFEST}: {e}"))?;
@@ -1284,6 +1308,38 @@ capabilities = ["registries"]
         }
         let public = valid.to_owned() + "visibility = 'pub(crate)'\n";
         assert!(Manifest::parse(&format!("{EXAMPLE}{native}{public}")).is_ok());
+    }
+
+    #[test]
+    fn mod_points_exclude_takes_module_paths_once() {
+        let manifest = Manifest::parse(&format!(
+            "{EXAMPLE}[mod-points]\nexclude = ['ported_interp', 'ported::inner']\n"
+        ))
+        .unwrap();
+        assert_eq!(
+            manifest.mod_points.exclude,
+            ["ported_interp", "ported::inner"]
+        );
+        assert!(
+            Manifest::parse(EXAMPLE)
+                .unwrap()
+                .mod_points
+                .exclude
+                .is_empty()
+        );
+        for bad in [
+            "exclude = ['']",
+            "exclude = ['crate::ported']",
+            "exclude = ['::ported']",
+            "exclude = ['ported::*']",
+            "exclude = ['ported::']",
+            "exclude = ['1ported']",
+            "exclude = ['ported', 'ported']",
+            "include = ['ported']",
+        ] {
+            let error = Manifest::parse(&format!("{EXAMPLE}[mod-points]\n{bad}\n")).expect_err(bad);
+            assert!(error.starts_with(MANIFEST), "{bad}: {error}");
+        }
     }
 
     #[test]

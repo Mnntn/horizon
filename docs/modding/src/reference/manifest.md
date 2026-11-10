@@ -85,6 +85,11 @@ Top-level `[dependencies]` declares other mods by id: a semver requirement strin
 Content layers load in dependency order. A missing required dependency, incompatible installed version or dependency cycle refuses startup; an absent optional dependency is ignored. Native code dependencies additionally require API packages
 ([Dependencies between trait mods](../concepts/trait-mods.md#dependencies-between-trait-mods)).
 
+A code mod may add `[mod-points]` with `exclude`, an array of module paths from its crate root
+(`"ported_interp"`, `"machines::internal"`): each listed module, and every module under it, gets no
+[mod points](../injections.md#mod-points-patching-another-mod). Each entry is identifiers joined by `::`, listed
+once; the build refuses one that names no module of the crate.
+
 ## Original Java jar layers
 
 Content and code mods can list ordered `[[jar]]` references. Use

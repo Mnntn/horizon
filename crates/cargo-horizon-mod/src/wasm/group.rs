@@ -317,7 +317,11 @@ pub(super) fn build(
     for (member, point_registration) in members.iter().zip(&point_registrations) {
         copy(&member.root, &member.stage)?;
         // Every member crate gets its own points (#2339), listed in the package it builds.
-        let points = horizon_mod_api_gen::points::mod_crate::stage_mod(&member.stage, &wire)?;
+        let points = horizon_mod_api_gen::points::mod_crate::stage_mod(
+            &member.stage,
+            &wire,
+            &member.parsed()?.mod_points.exclude,
+        )?;
         std::fs::write(
             member
                 .root

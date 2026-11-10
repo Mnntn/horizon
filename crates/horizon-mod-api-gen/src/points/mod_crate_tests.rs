@@ -63,7 +63,7 @@ fn by_name<'a>(points: &'a [Point], name: &str) -> &'a Point {
 #[test]
 fn every_eligible_function_public_and_private_gets_a_point_by_the_engine_rules() {
     let dir = crate_with("list", LIB, TANKS);
-    let catalog = mod_points(&dir, &WireTypes::new()).unwrap();
+    let catalog = mod_points(&dir, &WireTypes::new(), &[]).unwrap();
     assert_eq!(catalog.krate, "chemlib");
     assert_eq!(
         catalog.opted_out,
@@ -134,7 +134,7 @@ fn every_eligible_function_public_and_private_gets_a_point_by_the_engine_rules()
 fn the_hash_changes_with_the_signature_and_only_with_it() {
     let hash = |name: &str, lib: &str| {
         let dir = crate_with(name, lib, TANKS);
-        let points = mod_points(&dir, &WireTypes::new()).unwrap().points;
+        let points = mod_points(&dir, &WireTypes::new(), &[]).unwrap().points;
         let _ = fs::remove_dir_all(dir);
         by_name(&points, "transfer").hash.clone()
     };
@@ -174,7 +174,7 @@ fn two_points_with_one_name_fail_the_build_naming_both() {
         "pub mod tanks;\npub fn tanks_drain() {}\n",
         "pub fn drain() {}\n",
     );
-    let error = mod_points(&dir, &WireTypes::new()).unwrap_err();
+    let error = mod_points(&dir, &WireTypes::new(), &[]).unwrap_err();
     assert!(
         error.contains("chemlib::tanks_drain") && error.contains("chemlib::tanks::drain"),
         "{error}"
@@ -183,9 +183,52 @@ fn two_points_with_one_name_fail_the_build_naming_both() {
 }
 
 #[test]
+fn an_excluded_module_and_everything_under_it_get_no_points() {
+    let dir = crate_with(
+        "exclude",
+        "pub mod tanks;\npub mod tanks_extra;\npub fn kept() {}\n",
+        "pub fn drain() {}\npub mod inner { pub fn deep() {} pub struct V; impl V { pub fn go(&self) {} } }\n",
+    );
+    fs::write(dir.join("src/tanks_extra.rs"), "pub fn sibling() {}\n").unwrap();
+    let exclude = ["tanks".to_owned()];
+    let catalog = mod_points(&dir, &WireTypes::new(), &exclude).unwrap();
+    let targets: Vec<_> = catalog.points.iter().map(|p| p.target.as_str()).collect();
+    assert_eq!(targets, ["chemlib::kept", "chemlib::tanks_extra::sibling"]);
+    assert_eq!(catalog.excluded, ["chemlib::tanks"]);
+    // An inline module can be excluded alone, and staging leaves it untouched.
+    let catalog = stage_mod(&dir, &WireTypes::new(), &["tanks::inner".to_owned()]).unwrap();
+    let targets: Vec<_> = catalog.points.iter().map(|p| p.target.as_str()).collect();
+    assert_eq!(
+        targets,
+        [
+            "chemlib::kept",
+            "chemlib::tanks::drain",
+            "chemlib::tanks_extra::sibling"
+        ]
+    );
+    let tanks = fs::read_to_string(dir.join("src/tanks.rs")).unwrap();
+    assert!(tanks.contains("__point(name = \"tanks_drain\""), "{tanks}");
+    assert!(!tanks.contains("tanks_inner"), "{tanks}");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_exclude_path_that_names_no_module_fails_the_build_naming_it() {
+    let dir = crate_with("exclude-typo", "pub mod tanks;\n", "pub fn drain() {}\n");
+    for path in ["tank", "tanks::drain", "tanks::inner"] {
+        let error = mod_points(&dir, &WireTypes::new(), &[path.to_owned()]).unwrap_err();
+        assert_eq!(
+            error,
+            format!("[mod-points] exclude: {path} names no module of crate chemlib")
+        );
+    }
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn staging_marks_each_point_and_writes_the_table_beside_the_crate_root() {
     let dir = crate_with("stage", LIB, TANKS);
-    let points = stage_mod(&dir, &WireTypes::new()).unwrap().points;
+    let points = stage_mod(&dir, &WireTypes::new(), &[]).unwrap().points;
     assert_eq!(points.len(), 8);
     let lib = fs::read_to_string(dir.join("src/lib.rs")).unwrap();
     assert!(lib.contains(

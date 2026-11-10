@@ -31,6 +31,7 @@ impl Catalog {
             let points = horizon_platform::mod_build::api_gen::points::mod_crate::mod_points(
                 &bundle.dir,
                 &self.wire,
+                &bundle.manifest.mod_points.exclude,
             )
             .map_err(|error| format!("{}: {error}", bundle.manifest.id))?;
             self.mods.push(ModLibrary {
@@ -48,9 +49,19 @@ impl Catalog {
     }
 }
 
-/// Stages the mod crate copied to `dir`: its points, for the table its own build compiles.
-pub(super) fn stage(dir: &Path, wire: &BTreeSet<String>) -> Result<(), String> {
-    horizon_platform::mod_build::api_gen::points::mod_crate::stage_mod(dir, wire).map(|_| ())
+/// Stages the mod crate copied to `dir`: its points, for the table its own build compiles, less
+/// the modules its manifest's `[mod-points] exclude` lists.
+pub(super) fn stage(
+    dir: &Path,
+    wire: &BTreeSet<String>,
+    manifest: &Manifest,
+) -> Result<(), String> {
+    horizon_platform::mod_build::api_gen::points::mod_crate::stage_mod(
+        dir,
+        wire,
+        &manifest.mod_points.exclude,
+    )
+    .map(|_| ())
 }
 
 /// `manifest`'s injections at other mods' points, each with its library and place.
@@ -169,6 +180,10 @@ pub(super) fn refusal(refusal: &Refusal) -> String {
                 ("expected", &library.replace('-', "_")),
             ],
         ),
+        Refusal::Excluded { id, at, module } => trf(
+            "E_INJECT_MISSING: {id}: {at} has no point ({module} is excluded by [mod-points] exclude)",
+            &[("id", id), ("at", at), ("module", module)],
+        ),
         Refusal::CrossTargetInternals { id, library } => trf(
             "{id}: internals access to {library} needs the same target: the same binary on native, the same dependency group on wasm",
             &[("id", id), ("library", library)],
@@ -204,6 +219,7 @@ mod tests {
                     krate: "chemlib".into(),
                     table: "__horizon_points".into(),
                     opted_out: vec![],
+                    excluded: vec![],
                     points: vec![Point {
                         name: "transfer".into(),
                         target: "chemlib::transfer".into(),

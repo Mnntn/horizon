@@ -64,6 +64,24 @@ fn rustup_found() -> bool {
     Command::new("rustup").arg("--version").output().is_ok()
 }
 
+/// A wasm mod's manifest before its build writes the real wasm pins, with placeholders for them.
+pub(crate) fn pending_pins(manifest: &toml_edit::DocumentMut) -> toml_edit::DocumentMut {
+    let mut manifest = manifest.clone();
+    if !manifest.contains_key("wasm") && !manifest.contains_key("native") {
+        // Inject validation requires a code target; the real wasm pins are written after staging.
+        manifest["wasm"]["sha512"] = toml_edit::value("0".repeat(128));
+        manifest["wasm"]["toolchain"] = toml_edit::value("pending");
+    }
+    manifest
+}
+
+/// A wasm mod's manifest, parsed before its build writes the real wasm pins.
+pub(crate) fn unbuilt_manifest(
+    manifest: &toml_edit::DocumentMut,
+) -> Result<horizon_mod_package::Manifest, String> {
+    horizon_mod_package::Manifest::parse(&pending_pins(manifest).to_string())
+}
+
 pub(crate) fn output(mut command: Command) -> Result<String, String> {
     let out = command.output().map_err(|e| format!("{command:?}: {e}"))?;
     if !out.status.success() {

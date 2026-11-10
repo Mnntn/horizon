@@ -583,7 +583,7 @@ pub(super) fn compile(
         // Compiled from a staged copy: the crate with its own points (#2339).
         let staged = out.join("staged").join(id);
         super::copy_bundle(project.bundle, &staged)?;
-        super::mod_points::stage(&staged, &catalog.wire)?;
+        super::mod_points::stage(&staged, &catalog.wire, &project.bundle.manifest)?;
         let source = staged.join(
             lib.and_then(|l| l.get("path"))
                 .and_then(toml::Value::as_str)

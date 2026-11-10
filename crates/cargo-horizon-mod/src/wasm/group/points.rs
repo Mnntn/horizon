@@ -7,20 +7,23 @@ pub(super) fn prepare(
     wire: &std::collections::BTreeSet<String>,
     catalog: Option<&Path>,
 ) -> Result<Vec<String>, String> {
+    let parsed = members
+        .iter()
+        .map(Member::parsed)
+        .collect::<Result<Vec<_>, _>>()?;
     let libraries = members
         .iter()
-        .map(|m| horizon_mod_api_gen::points::mod_crate::mod_points(&m.root, wire))
+        .zip(&parsed)
+        .map(|(m, parsed)| {
+            horizon_mod_api_gen::points::mod_crate::mod_points(
+                &m.root,
+                wire,
+                &parsed.mod_points.exclude,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let mut output = Vec::new();
-    for index in 0..members.len() {
-        let member = &members[index];
-        let mut manifest = member.manifest.clone();
-        if !manifest.contains_key("wasm") {
-            // Inject validation requires a code target; the real wasm pins are written after staging.
-            manifest["wasm"]["sha512"] = toml_edit::value("0".repeat(128));
-            manifest["wasm"]["toolchain"] = toml_edit::value("pending");
-        }
-        let parsed = horizon_mod_package::Manifest::parse(&manifest.to_string())?;
+    for (index, parsed) in parsed.iter().enumerate() {
         let mut registration = String::new();
         let is_mod = |at: &str| parsed.mod_point_dependency(at).is_some();
         // Native refuses these in `mod_points::route`; here the manifest never names them as mod
@@ -85,6 +88,7 @@ pub(super) fn prepare(
             registration.push_str(&format!("if !{}::__horizon_points::register_{}_{}({:?}, {}, {:?}, {}, {}) {{ return {refused}; }}\n", library.krate, access, routed.place, parsed.id, injection.priority, injection.id, injection.kind == Kind::Replace, listener));
         }
         // Engine listeners keep their existing generated codecs and registration path.
+        let mut manifest = pending_pins(&members[index].manifest);
         if let Some(array) = manifest
             .get_mut("inject")
             .and_then(|v| v.as_array_of_tables_mut())
@@ -101,4 +105,10 @@ pub(super) fn prepare(
         output.push(format!("\n#[cfg(target_arch = \"wasm32\")]\n#[unsafe(no_mangle)]\npub fn horizon_mod_points_register() -> u32 {{ {registration} 0 }}\n#[cfg(target_arch = \"wasm32\")]\n#[unsafe(no_mangle)]\npub fn horizon_mod_points_seal() {{ crate::__horizon_points::seal(); }}\n"));
     }
     Ok(output)
+}
+
+impl Member {
+    pub(super) fn parsed(&self) -> Result<horizon_mod_package::Manifest, String> {
+        unbuilt_manifest(&self.manifest)
+    }
 }

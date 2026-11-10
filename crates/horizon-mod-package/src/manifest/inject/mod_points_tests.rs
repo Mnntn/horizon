@@ -20,6 +20,7 @@ fn catalog() -> Catalog {
         krate: "chemlib".into(),
         table: "__horizon_points".into(),
         opted_out: vec!["chemlib::secret".into()],
+        excluded: vec!["chemlib::ported".into()],
         points: vec![
             point("transfer", "chemlib::transfer", None),
             point(
@@ -113,6 +114,43 @@ fn each_refusal_names_what_changed_or_why() {
             &same
         ),
         "E_INJECT_MISSING: addon:listen: chemlib::secret has no point (opted out with #[mod_api::no_point])"
+    );
+    for at in [
+        "chemlib::ported::step",
+        "chemlib::ported::deep::Machine::run",
+    ] {
+        assert_eq!(
+            refused(inject(at, Kind::Head, Access::Api, &hash), &same),
+            format!(
+                "E_INJECT_MISSING: addon:listen: {at} has no point (chemlib::ported is excluded by \
+                 [mod-points] exclude)"
+            )
+        );
+    }
+    // A sibling module sharing the name's start is not under the excluded one.
+    assert!(
+        refused(
+            inject(
+                "chemlib::ported_extra::step",
+                Kind::Head,
+                Access::Api,
+                &hash
+            ),
+            &same
+        )
+        .contains("E_INJECT_MISSING: addon:listen: chemlib::ported_extra::step")
+    );
+    assert!(
+        !refused(
+            inject(
+                "chemlib::ported_extra::step",
+                Kind::Head,
+                Access::Api,
+                &hash
+            ),
+            &same
+        )
+        .contains("excluded")
     );
     assert!(
         refused(

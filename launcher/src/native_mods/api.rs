@@ -415,7 +415,7 @@ pub(super) fn stage(
         let relative = format!("native-api/{}", bundle.manifest.id);
         let dest = stage.join(&relative);
         super::copy_bundle(bundle, &dest)?;
-        super::mod_points::stage(&dest, &catalog.wire)?;
+        super::mod_points::stage(&dest, &catalog.wire, &bundle.manifest)?;
         let path = dest.join("Cargo.toml");
         let mut manifest = project.cargo.clone();
         let package = project.package.clone();

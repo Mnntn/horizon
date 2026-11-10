@@ -1,7 +1,8 @@
 //! Mod points (#2339): every function of a mod crate that [`point_shape::eligible`] admits gets a
 //! point, public and private, by the engine's own rules: the same walk ([`super::module_files`],
 //! [`super::file_functions`]), the same `#[point]`, records and raw forms, in a slot table of the
-//! mod's own. `#[mod_api::no_point]` opts a function out. [`stage_mod`] writes them into a staged
+//! mod's own. `#[mod_api::no_point]` opts a function out, and the manifest's `[mod-points] exclude`
+//! a module with everything under it. [`stage_mod`] writes them into a staged
 //! copy of the crate, the copy `cargo horizon-mod build` and the launcher compile, and lists them
 //! as the mod's `mod-points.json`, each with the signature hash an addon's declaration pins.
 //!
@@ -158,7 +159,46 @@ struct Listed<'a> {
     point: GamePoint,
 }
 
-fn listed<'a>(files: &'a [File], krate: &str, wire: &WireTypes) -> Result<Vec<Listed<'a>>, String> {
+/// `exclude`, the manifest's `[mod-points] exclude` paths from the crate root, as module paths:
+/// each must name a module of the crate, inline or a file.
+fn excluded(krate: &str, files: &[File], exclude: &[String]) -> Result<Vec<String>, String> {
+    fn inline(module: &str, items: &[syn::Item], out: &mut BTreeSet<String>) {
+        for item in items {
+            if let syn::Item::Mod(inner) = item
+                && let Some((_, items)) = &inner.content
+            {
+                let path = format!("{module}::{}", unraw(&inner.ident));
+                inline(&path, items, out);
+                out.insert(path);
+            }
+        }
+    }
+    let mut modules = BTreeSet::new();
+    for file in files {
+        modules.insert(file.module.clone());
+        inline(&file.module, &file.parsed.items, &mut modules);
+    }
+    exclude
+        .iter()
+        .map(|path| {
+            let module = format!("{krate}::{path}");
+            if modules.contains(&module) {
+                Ok(module)
+            } else {
+                Err(format!(
+                    "[mod-points] exclude: {path} names no module of crate {krate}"
+                ))
+            }
+        })
+        .collect()
+}
+
+fn listed<'a>(
+    files: &'a [File],
+    krate: &str,
+    wire: &WireTypes,
+    excluded: &[String],
+) -> Result<Vec<Listed<'a>>, String> {
     let own: BTreeSet<String> = crate::wire_types::reachable(
         krate,
         files
@@ -179,7 +219,14 @@ fn listed<'a>(files: &'a [File], krate: &str, wire: &WireTypes) -> Result<Vec<Li
             &mut found,
         );
         let uses = imports(&file.parsed.items, krate);
-        for found in found {
+        let excluded = |module: &str| {
+            excluded.iter().any(|path| {
+                module
+                    .strip_prefix(path.as_str())
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
+            })
+        };
+        for found in found.into_iter().filter(|found| !excluded(&found.module)) {
             if found.attrs.iter().any(|attr| {
                 attr.path()
                     .segments
@@ -268,12 +315,18 @@ fn opted_out(files: &[File]) -> Vec<String> {
 }
 
 /// `points` as the mod's `mod-points.json` lists them.
-fn catalog(krate: String, files: &[File], mut points: Vec<GamePoint>) -> Catalog {
+fn catalog(
+    krate: String,
+    files: &[File],
+    excluded: Vec<String>,
+    mut points: Vec<GamePoint>,
+) -> Catalog {
     points.sort_by(|a, b| a.name.cmp(&b.name));
     Catalog {
         krate,
         table: TABLE.to_owned(),
         opted_out: opted_out(files),
+        excluded,
         points: points
             .into_iter()
             .map(|point| point_shape::catalog::Point {
@@ -295,23 +348,26 @@ fn catalog(krate: String, files: &[File], mut points: Vec<GamePoint>) -> Catalog
 }
 
 /// The mod crate at `dir`'s points, as its `mod-points.json` lists them, sorted by name. `wire` is
-/// the `mod_api` types with a `Wire` layout (the game's `points.json` lists them).
-pub fn mod_points(dir: &Path, wire: &WireTypes) -> Result<Catalog, String> {
+/// the `mod_api` types with a `Wire` layout (the game's `points.json` lists them); `exclude` is the
+/// mod manifest's `[mod-points] exclude`.
+pub fn mod_points(dir: &Path, wire: &WireTypes, exclude: &[String]) -> Result<Catalog, String> {
     let (krate, _, files) = files(dir)?;
-    let points = listed(&files, &krate, wire)?
+    let excluded = excluded(&krate, &files, exclude)?;
+    let points = listed(&files, &krate, wire, &excluded)?
         .into_iter()
         .map(|listed| listed.point)
         .collect();
-    Ok(catalog(krate, &files, points))
+    Ok(catalog(krate, &files, excluded, points))
 }
 
 /// The staging pass for a mod crate: in the copy at `dir`, in place, puts `#[point]` on every
 /// point function, declares each raw form's types after the item that holds it, and writes the
 /// crate's slot table module at its root. Run on a copy, never on the author's source. Returns
 /// the points, as [`mod_points`] lists them.
-pub fn stage_mod(dir: &Path, wire: &WireTypes) -> Result<Catalog, String> {
+pub fn stage_mod(dir: &Path, wire: &WireTypes, exclude: &[String]) -> Result<Catalog, String> {
     let (krate, root, files) = files(dir)?;
-    let listed = listed(&files, &krate, wire)?;
+    let excluded = excluded(&krate, &files, exclude)?;
+    let listed = listed(&files, &krate, wire, &excluded)?;
     for (index, file) in files.iter().enumerate() {
         let here: Vec<_> = listed.iter().filter(|l| l.file == index).collect();
         if here.is_empty() {
@@ -361,7 +417,7 @@ pub fn stage_mod(dir: &Path, wire: &WireTypes) -> Result<Catalog, String> {
     let mut points: Vec<GamePoint> = listed.into_iter().map(|listed| listed.point).collect();
     points.sort_by(|a, b| a.name.cmp(&b.name));
     let module = table(&points);
-    let catalog = catalog(krate, &files, points);
+    let catalog = catalog(krate, &files, excluded, points);
     let folder = root.parent().ok_or("a library root has a folder")?;
     fs::write(folder.join(format!("{TABLE}.rs")), module).map_err(|e| e.to_string())?;
     let mut text = fs::read_to_string(&root).map_err(|e| e.to_string())?;

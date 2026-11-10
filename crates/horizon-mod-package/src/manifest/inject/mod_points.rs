@@ -78,6 +78,12 @@ pub enum Refusal {
         library: String,
         krate: String,
     },
+    /// The function is in a module the library's `[mod-points] exclude` lists.
+    Excluded {
+        id: String,
+        at: String,
+        module: String,
+    },
     /// `internals` reaches the library's own types, so it needs the library's target.
     CrossTargetInternals { id: String, library: String },
     /// An `api` record crosses targets only with a `Wire` form for every parameter.
@@ -131,6 +137,11 @@ impl fmt::Display for Refusal {
                  is named after its mod id: {}",
                 library.replace('-', "_")
             ),
+            Self::Excluded { id, at, module } => write!(
+                f,
+                "E_INJECT_MISSING: {id}: {at} has no point ({module} is excluded by [mod-points] \
+                 exclude)"
+            ),
             Self::CrossTargetInternals { id, library } => write!(
                 f,
                 "{id}: internals access to {library} needs the same target: the same binary on \
@@ -183,6 +194,13 @@ pub fn route<'a>(
             return Err(Refusal::OptedOut {
                 id,
                 at: inject.at.clone(),
+            });
+        }
+        if let Some(module) = catalog.excluded_module(&plain(&inject.at)) {
+            return Err(Refusal::Excluded {
+                id,
+                at: inject.at.clone(),
+                module: module.to_owned(),
             });
         }
         return Err(Refusal::Inject(InjectError::Missing {

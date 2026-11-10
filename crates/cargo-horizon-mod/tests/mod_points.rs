@@ -159,7 +159,8 @@ fn an_addon_patches_a_library_through_its_mod_points() {
     )
     .unwrap();
     let listed =
-        horizon_mod_api_gen::points::mod_crate::mod_points(&library, &Default::default()).unwrap();
+        horizon_mod_api_gen::points::mod_crate::mod_points(&library, &Default::default(), &[])
+            .unwrap();
     assert_eq!(
         pinned.inject[0].hash.as_deref(),
         Some(
@@ -199,7 +200,8 @@ fn an_addon_patches_a_library_through_its_mod_points() {
     );
     copy("chemlib", &library);
     let catalog: Catalog =
-        horizon_mod_api_gen::points::mod_crate::stage_mod(&library, &Default::default()).unwrap();
+        horizon_mod_api_gen::points::mod_crate::stage_mod(&library, &Default::default(), &[])
+            .unwrap();
     assert_eq!(catalog.opted_out, ["chemlib::audit"]);
     let hash = |target: &str| {
         catalog
@@ -372,7 +374,8 @@ fn wasm_addon_routes_api_and_internals_into_library_registry() {
     )
     .unwrap();
     let catalog =
-        horizon_mod_api_gen::points::mod_crate::mod_points(&library, &Default::default()).unwrap();
+        horizon_mod_api_gen::points::mod_crate::mod_points(&library, &Default::default(), &[])
+            .unwrap();
     for root in [&library, &addon] {
         let path = root.join("horizon-mod.toml");
         let text = std::fs::read_to_string(&path).unwrap();

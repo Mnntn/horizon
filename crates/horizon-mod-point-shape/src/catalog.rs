@@ -13,6 +13,9 @@ pub struct Catalog {
     /// The functions `#[mod_api::no_point]` opted out, by path.
     #[serde(default)]
     pub opted_out: Vec<String>,
+    /// The modules `[mod-points] exclude` left without points, by path (`chemlib::ported`).
+    #[serde(default)]
+    pub excluded: Vec<String>,
     pub points: Vec<Point>,
 }
 
@@ -56,5 +59,16 @@ impl Catalog {
     /// Whether `at` names a function of this crate.
     pub fn owns(&self, at: &str) -> bool {
         at.split("::").next() == Some(self.krate.as_str())
+    }
+
+    /// The excluded module `at`, a function's path, is in or under.
+    pub fn excluded_module(&self, at: &str) -> Option<&str> {
+        self.excluded
+            .iter()
+            .find(|module| {
+                at.strip_prefix(module.as_str())
+                    .is_some_and(|rest| rest.starts_with("::"))
+            })
+            .map(String::as_str)
     }
 }

@@ -191,10 +191,13 @@ fn library(
     let root = Path::new(manifest)
         .parent()
         .ok_or("a manifest has a folder")?;
-    if !root.join(MANIFEST).is_file() {
+    let Ok(text) = std::fs::read_to_string(root.join(MANIFEST)) else {
         return Ok(None);
-    }
-    horizon_mod_api_gen::points::mod_crate::mod_points(root, wire).map(Some)
+    };
+    let manifest =
+        crate::wasm::unbuilt_manifest(&text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?)?;
+    horizon_mod_api_gen::points::mod_crate::mod_points(root, wire, &manifest.mod_points.exclude)
+        .map(Some)
 }
 
 type ModPoints = point_shape::catalog::Catalog;
@@ -225,6 +228,13 @@ fn append_mod_point(
             Refusal::OptedOut {
                 id,
                 at: request.at.into(),
+            }
+            .to_string()
+        } else if let Some(module) = library.excluded_module(request.at) {
+            Refusal::Excluded {
+                id,
+                at: request.at.into(),
+                module: module.into(),
             }
             .to_string()
         } else {
