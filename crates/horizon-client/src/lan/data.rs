@@ -60,10 +60,12 @@ pub fn client_biomes(
     let files: Vec<(&str, Value)> = registry
         .iter()
         .filter_map(|(name, data)| {
-            Some((
-                name.as_str(),
-                crate::scoreboard::tag_to_json(data.as_ref()?),
-            ))
+            let json = crate::scoreboard::tag_to_json(data.as_ref()?);
+            // Both sides through the NBT form: it turns 0.8 into the float it is sent as.
+            let same = known
+                .builtin_file(name)
+                .is_some_and(|own| crate::scoreboard::tag_to_json(&json_to_nbt(own)) == json);
+            (!same).then_some((name.as_str(), json))
         })
         .collect();
     if files.is_empty() {
@@ -476,6 +478,15 @@ impl SyncData {
                 pack_entries(path, overlay, &mut entries);
             }
             entries.retain(|(_, value, _)| overlay.conditions.allows(value));
+            // A biome the mods' modifiers changed is not the client's own file any more:
+            // its data is sent, as a pack's biome is.
+            let modified = match *key == BIOME_REGISTRY {
+                true => crate::mod_content::biomes::modified(resources),
+                false => Default::default(),
+            };
+            for ((ns, p), _, from_pack) in entries.iter_mut() {
+                *from_pack |= modified.contains(&format!("{ns}:{p}"));
+            }
             if *key == BIOME_REGISTRY
                 && let Some(table) = biomes.filter(|b| b.has_packs())
             {
@@ -489,7 +500,8 @@ impl SyncData {
                     let pack = table.pack_file(name);
                     let json = pack.or_else(|| found.get(name)).cloned();
                     let json = json.unwrap_or_else(|| Value::Object(Default::default()));
-                    entries.push(((ns.to_owned(), p.to_owned()), json, pack.is_some()));
+                    let packed = pack.is_some() || modified.contains(name);
+                    entries.push(((ns.to_owned(), p.to_owned()), json, packed));
                 }
             }
             let mut entries = damage_entries.unwrap_or_else(|| {
