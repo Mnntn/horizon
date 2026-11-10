@@ -838,6 +838,15 @@ content mods ("content mods not loaded: ..." in the log). Feature tags are vanil
 doesn't read a mod's `placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to
 it too.
 
+**A biome of your own.** A mod's `data/<ns>/worldgen/biome/<path>.json` (any namespace but `minecraft`) adds a biome.
+The game loads it into its biome table after vanilla's biomes, sorted by path and then namespace, so vanilla's biome ids
+never move. A joining client receives it in the biome registry with its data even when it has the vanilla pack, builds
+it from that data, and plays its colours, ambient particles, ambient sounds and music from it; a client with the same
+mod already has it. Its network id is its place in the registry sorted by path, then namespace, as in vanilla.
+Saved worlds name a column's biomes, not their ids: a world saved before the mod existed holds only vanilla names and
+loads unchanged; a world saved with the mod and opened without it reads the mod's biomes as plains, and the next save
+writes plains. A mod biome appears in the world only where a dimension's biome source or a worldgen file uses it.
+
 A pool element may be one of Lithostitched's: `lithostitched:limited` (`delegate`, `limit`, `min_depth`) places its
 `delegate` at most `limit` times in one structure start, and `lithostitched:guaranteed` (`delegate`, `count`,
 `min_depth`) is tried before its pool's other elements at each jigsaw that reaches that pool (as target or fallback)

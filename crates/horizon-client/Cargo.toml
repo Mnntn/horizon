@@ -173,6 +173,10 @@ name = "datapack_biome_sync"
 path = "tests/datapack_biome_sync.rs"
 
 [[test]]
+name = "mod_biome_sync"
+path = "tests/mod_biome_sync.rs"
+
+[[test]]
 name = "busy_launch"
 path = "tests/busy_launch.rs"
 

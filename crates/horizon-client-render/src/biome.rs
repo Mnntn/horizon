@@ -289,6 +289,31 @@ pub fn identifier_order(a: &str, b: &str) -> std::cmp::Ordering {
     }
     split(a).cmp(&split(b))
 }
+/// The content mods' own biomes (every id outside `minecraft`) from the content root's
+/// `worldgen/biomes.json` bundle (id to file text), in registry order; none when the root has
+/// no bundle. A file that does not parse is warned and left out.
+pub fn mod_biome_files(prepared: &std::path::Path) -> Vec<(String, Value)> {
+    let Ok(bytes) = std::fs::read(prepared.join("worldgen/biomes.json")) else {
+        return Vec::new();
+    };
+    let bundle: BTreeMap<String, Value> = serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+        log::warn!("worldgen/biomes.json: {e}");
+        Default::default()
+    });
+    let mut out: Vec<(String, Value)> = bundle
+        .into_iter()
+        .filter(|(id, _)| !id.starts_with("minecraft:"))
+        .filter_map(|(id, text)| match serde_json::from_str(text.as_str()?) {
+            Ok(v) => Some((id, v)),
+            Err(e) => {
+                log::warn!("mod biome {id}: {e}");
+                None
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| identifier_order(&a.0, &b.0));
+    out
+}
 impl Biomes {
     pub fn load(root: &ResourceRoot) -> Result<Self> {
         let maps = Colormaps {
@@ -317,6 +342,11 @@ impl Biomes {
                 &maps,
             ));
             files_by_name.insert(format!("minecraft:{}", file.name), v);
+        }
+        // Content mods' own biomes follow the built-in ones, so the built-in ids never move.
+        for (name, v) in mod_biome_files(root.prepared()) {
+            list.push(BiomeInfo::from_json(name.clone(), &v, &maps));
+            files_by_name.insert(name, v);
         }
         let index = list
             .iter()
@@ -368,10 +398,14 @@ impl Biomes {
         out.packs.clear();
         out
     }
-    /// The data pack file a world's biome `name` came from, if a pack added
-    /// or replaced it.
+    /// The file a world's biome `name` came from, if a pack added or replaced it or a content
+    /// mod added it (a mod's biome is no built-in: no client has its file).
     pub fn pack_file(&self, name: &str) -> Option<&Value> {
-        self.packs.get(name).map(|v| &**v)
+        self.packs.get(name).map(|v| &**v).or_else(|| {
+            self.files
+                .get(name)
+                .filter(|_| !name.starts_with("minecraft:"))
+        })
     }
     /// The file the game's own copy of built-in biome `name` was read from.
     pub fn builtin_file(&self, name: &str) -> Option<&Value> {

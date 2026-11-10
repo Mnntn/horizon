@@ -68,6 +68,7 @@ PR #2800 (`origin/xmilon/2732-biome-modify-phase`, commit `22c8f24053`) adds the
 1. **Fixtures first** (no behaviour change): add the tests named below against the current code to learn which already pass.
 2. Replacement rule in `client_biomes` and `with_packs`, and `from_pack` for modified entries (the two gaps).
 3. A mod's new biome file reaches `packed_biomes` and the server registry; effects play on a remote client.
+   Status: implemented. `Biomes::load` appends the content root's non-`minecraft` biomes from `worldgen/biomes.json` after the built-ins in registry order (`biome::mod_biome_files`), `pack_file` answers for them, and `SyncData` adds them to the biome registry with `from_pack` set, so a vanilla-pack client receives their data. Not covered: a dimension generating the biome (its biome source) and reload while connected.
 4. The ambient and music fields of the MODIFY phase, file and code form, with docs.
 5. Gameplay-side readers (any server logic that reads these attributes) are out of scope.
 
