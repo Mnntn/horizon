@@ -734,6 +734,17 @@ load. Climate sets apply only to `biomes`, not `features`.
   "features": "zinc:ore_zinc", "step": "underground_ores" }
 ```
 
+A code mod declares the same modifiers without a file: `Registrar::declare_biome_modifier(path, modifier)` takes a
+`BiomeModifier` (its `biomes`, and an operation: `AddFeatures`, `RemoveFeatures`, `AddSpawns`, `RemoveSpawns`,
+`AddSpawnCosts` or `RemoveSpawnCosts`). `BiomeModifier::json` renders it as the file above, so a declared modifier and
+a shipped one are applied by the same code, in the same order (additions first, then removals, mods in dispatch
+order, declarations in registration order). An id outside the mod's namespace or that is not a file path, a repeated
+id, an empty list, a name that is not namespaced, an unknown generation step, a spawner of weight 0 or with its
+smallest group above its largest, and a spawn cost that is not finite refuse the mods at startup, naming the mod.
+Carver, climate and effects operations are not available: the game has no such modifier yet. Declared modifiers are
+read by the API today; the game does not apply them until it feeds them through the content loader (tracked on
+arismoko/horizon#2732).
+
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A
 biome no modifier names keeps its text, and a world without mods keeps vanilla's biomes byte for byte. A modifier
