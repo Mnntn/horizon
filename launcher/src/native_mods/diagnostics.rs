@@ -54,13 +54,15 @@ impl Declared {
 
     /// Each staged `expression` site: an error inside its binding block means the declared
     /// `type` doesn't match how the game uses the read.
-    pub(super) fn expressions(sites: &[horizon_mod_api_gen::sites::Site]) -> Vec<Self> {
+    pub(super) fn expressions(
+        sites: &[horizon_platform::mod_build::api_gen::sites::Site],
+    ) -> Vec<Self> {
         sites
             .iter()
             .filter_map(|site| {
                 let expression = site.expression.as_ref()?;
                 Some(Self {
-                    binding: horizon_mod_api_gen::sites::expression::marker(&site.name),
+                    binding: horizon_platform::mod_build::api_gen::sites::expression::marker(&site.name),
                     injections: expression.origin.clone(),
                     explanation: crate::i18n::trf(
                         "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.",
@@ -458,7 +460,7 @@ mod tests {
             .unwrap();
         assert!(!output.status.success());
         let stdout = String::from_utf8(output.stdout).unwrap();
-        let site: horizon_mod_api_gen::sites::Site = serde_json::from_value(json!({
+        let site: horizon_platform::mod_build::api_gen::sites::Site = serde_json::from_value(json!({
             "expression": {"ty": "f32", "origin": "far_reach:reach, other:reach"},
             "name": "Sreach", "target": "horizon_client::game::reach", "selector": "4.5",
             "ordinal": 0, "hash": "h", "call": "4.5", "ctx": "c", "listener": "L", "record": "R",

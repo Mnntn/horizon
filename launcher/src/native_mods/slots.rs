@@ -52,7 +52,10 @@ fn selected<'a>(sites: &'a [Site], entry: &Inject) -> Option<&'a Site> {
                     .call
                     .clone()
                     .or_else(|| {
-                        horizon_mod_api_gen::sites::expression::spelling(entry.expr.as_ref()?).ok()
+                        horizon_platform::mod_build::api_gen::sites::expression::spelling(
+                            entry.expr.as_ref()?,
+                        )
+                        .ok()
                     })
                     .as_ref()
             && site.expression.as_ref().map(|e| &e.ty)

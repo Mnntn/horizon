@@ -2202,8 +2202,9 @@ fn pipeline(
             .map_err(|error| Failed::Other(cache_error(error)))?;
         crate::run_leases::publish(&profile_dir).map_err(cache_error)?;
         let (mut crates, mut total, mut name) = (0, None, String::new());
-        let mut declared_injections =
-            diagnostics::Declared::expressions(&horizon_mod_api_gen::sites::source::read(&real)?);
+        let mut declared_injections = diagnostics::Declared::expressions(
+            &horizon_platform::mod_build::api_gen::sites::source::read(&real)?,
+        );
         declared_injections.extend(diagnostics::Declared::fields(
             mods.iter().map(|bundle| &bundle.manifest),
         ));
