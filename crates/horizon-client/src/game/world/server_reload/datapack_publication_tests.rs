@@ -122,3 +122,6 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
         },
     );
 }
+
+#[path = "datapack_host_read_tests.rs"]
+mod datapack_host_read_tests;
