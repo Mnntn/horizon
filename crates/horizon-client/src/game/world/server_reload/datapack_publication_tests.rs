@@ -97,7 +97,10 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                 write(&winning, r#"{"power":9}"#);
                 assert!(game.run_command("reload"));
                 assert_eq!(power(game), DatapackValue::Int(9));
-                assert_eq!(horizon_client::datapack_net::served(), game.mods.datapack_registries);
+                assert_eq!(
+                    horizon_client::datapack_net::served(),
+                    game.mods.datapack_registries
+                );
                 assert_eq!(
                     game.mods.datapack_registries.as_ref().unwrap().generation(),
                     2
@@ -144,7 +147,10 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                     "generation exhaustion must refuse the whole publication"
                 );
                 assert_eq!(game.mods.datapack_registries, old_set);
-                assert_eq!(horizon_client::datapack_net::served().unwrap().generation(), 6);
+                assert_eq!(
+                    horizon_client::datapack_net::served().unwrap().generation(),
+                    6
+                );
                 assert_eq!(
                     game.world_tables
                         .as_ref()
