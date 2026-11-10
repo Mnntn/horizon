@@ -1389,13 +1389,5 @@
   "Offline developer session: single-player only; no account features.": "Offline developer session: single-player only; no account features.",
   "This game cannot enforce offline developer single-player. Rebuild and reinstall the developer game and its native mods.": "This game cannot enforce offline developer single-player. Rebuild and reinstall the developer game and its native mods.",
   "{id}: mod point library {library}'s crate is {krate}; a mod point library's crate is named after its mod id: {expected}": "{id}: mod point library {library}'s crate is {krate}; a mod point library's crate is named after its mod id: {expected}",
-  "Native mod adds {count} registry crates": "Native mod adds {count} registry crates",
-  "Registry dependencies are native code. Their build scripts and proc macros run during compilation, before the game starts.": "Registry dependencies are native code. Their build scripts and proc macros run during compilation, before the game starts.",
-  "Build scripts: {crates}": "Build scripts: {crates}",
-  "Proc macros: {crates}": "Proc macros: {crates}",
-  "Registry dependency compilation was not approved": "Registry dependency compilation was not approved",
-  "None": "None",
-  "Native mod dependencies must match their supplied Cargo.lock pins, and the game's locked graph must remain unchanged.": "Native mod dependencies must match their supplied Cargo.lock pins, and the game's locked graph must remain unchanged.",
-  "Checking native dependency pins and the game graph": "Checking native dependency pins and the game graph",
-  "SDK values keep the SDK's Rust crate identities. A registry-built copy of a trait or type is not interchangeable, even at the same version. Type mismatches are refused; SDK libraries are never substituted.": "SDK values keep the SDK's Rust crate identities. A registry-built copy of a trait or type is not interchangeable, even at the same version. Type mismatches are refused; SDK libraries are never substituted."
+  "Checking the mods' crates against Horizon's Cargo.lock": "Controlando łe casse dei mod contro el Cargo.lock de Horizon"
 }
