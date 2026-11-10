@@ -470,7 +470,7 @@ impl Game<'_> {
             );
         }
         self.world_tables = tables;
-        self.mods.datapack_registries = datapack_registries;
+        self.mods.datapack_registries = datapack_registries.map(Arc::new);
         horizon_client::datapack_net::serve(self.mods.datapack_registries.clone());
         self.send_datapack_snapshots();
         self.refresh_recipe_property_context();
@@ -637,7 +637,7 @@ impl Game<'_> {
                     .map_err(|error| format!("datapack registry reload: {error:?}")),
                 None => Ok(mod_api::DatapackRegistrySet::first(
                     candidate,
-                    next_datapack_session(),
+                    horizon_client::datapack_net::next_session(),
                 )),
             })
             .transpose()?;
