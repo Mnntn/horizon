@@ -56,14 +56,16 @@ jobs:
       contents: read
       actions: read
     outputs:
-      self_hosted: ${{ !inputs.github-fallback && steps.hosted.outputs.forced_github != 'true' && steps.runner.outputs.self_hosted || 'false' }}
+      # TEMPORARY, NEVER MERGE: one authorized same-repository Boat health proof.
+      # Bypass placement only, without changing either admission list or test selection.
+      self_hosted: 'false'
       routing_reason: ${{ steps.runner.outputs.routing_reason }}
       # Every ignored-tests shard on main pushes and dispatches; empty on pull requests.
       ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
       # Where lint and verify run when they don't go to Dyna's pool: boat-large for listed outside contributors
       # while vars.BOAT_CI is on (boat refuses a public repository's run unless both its author and the user who
       # started it are on boat's own list, so the same list lives in vars.BOAT_CI_USERS), else GitHub's runner.
-      hosted_label: ${{ steps.hosted.outputs.label }}
+      hosted_label: boat-large
       forced_github: ${{ steps.hosted.outputs.forced_github }}
     steps:
       - uses: actions/checkout@v4
@@ -137,7 +139,8 @@ jobs:
   # Same-run fallback jobs would leave the original queued checks pending, not green.
   boat-watch:
     needs: changes
-    if: needs.changes.outputs.hosted_label == 'boat-large' && needs.changes.outputs.self_hosted != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    # One proof run only: no automatic cancel/rerun or fallback dispatch.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
