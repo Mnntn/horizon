@@ -2755,7 +2755,16 @@ pub(crate) mod tests {
         view.set(5, None);
         view.guest.carried = None;
         view.set(36, Some(helmet));
+        let before: Vec<_> = (0..46).map(|slot| view.get(slot)).collect();
         click(&mut view, &mut drag, 36, 0, input::QUICK_MOVE, &rules);
+        if view.get(5).is_none() {
+            let after: Vec<_> = (0..46).map(|slot| view.get(slot)).collect();
+            assert_eq!(
+                after, before,
+                "refused quick move must leave every slot unchanged"
+            );
+            assert!(view.guest.carried.is_none());
+        }
         (clicked, view.get(5).is_some(), entity)
     }
 
