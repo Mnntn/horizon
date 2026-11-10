@@ -852,6 +852,40 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn review_climate_literals() {
+        with_game(|game| {
+            let level = game.level("minecraft:overworld").unwrap();
+            for (name, temperature, downfall, precipitation, frozen) in [
+                ("plains", 0.8, 0.4, true, false),
+                ("desert", 2.0, 0.0, false, false),
+                ("snowy_plains", 0.0, 0.5, true, false),
+                ("ocean", 0.5, 0.5, true, false),
+                ("frozen_ocean", 0.0, 0.5, true, true),
+            ] {
+                let actual = game
+                    .level_biome_properties(level, &format!("minecraft:{name}"))
+                    .unwrap();
+                assert_eq!(
+                    actual,
+                    mod_api::BiomeProperties {
+                        temperature,
+                        downfall,
+                        has_precipitation: precipitation,
+                        frozen
+                    },
+                    "{name}"
+                );
+            }
+            for id in ["minecraft:no_such_biome", "", "!malformed::id"] {
+                assert_eq!(game.level_biome_properties(level, id), None);
+            }
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
+            assert_eq!(game.level_biome_properties(stale, "minecraft:plains"), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_level_with_its_own_clock_counts_apart_from_the_overworlds() {
         with_game(|game| {
             game.world.day_time = 100;
