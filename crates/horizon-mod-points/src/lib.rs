@@ -76,7 +76,9 @@ pub mod guest;
 pub mod __private {
     pub use crate::registry::{POINTS, SITES, TABLE, seal};
     use crate::{PointId, SiteId};
-    pub use mod_api::__private::points::{ApiKind, Forward, PointHost, RawKind, SlotListener};
+    pub use mod_api::__private::points::{
+        ApiKind, Forward, PointHost, RawKind, SlotListener, cold,
+    };
 
     /// Whether an active `replace` listener owns `place`'s outcome. A point's head checks it
     /// around its internals listeners, which run after the API ones and may not undo it.

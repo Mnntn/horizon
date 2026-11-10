@@ -381,7 +381,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         let (names, values): (Vec<_>, Vec<_>) = before.into_iter().unzip();
         let before = quote! {
             let __back = if __returned {
-                ::mod_api::__private::points::cold(|| ::std::option::Option::Some((#(#values,)*)))
+                #table::__private::cold(|| ::std::option::Option::Some((#(#values,)*)))
             } else {
                 ::std::option::Option::None
             };
@@ -493,7 +493,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         (api_part.is_some() || raw_part.is_some()).then(|| {
             quote! {
                 if __returned {
-                    ::mod_api::__private::points::cold(|| { #api_part #raw_part });
+                    #table::__private::cold(|| { #api_part #raw_part });
                 }
             }
         })
@@ -520,7 +520,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         // The listened path stays out of line, so a point nothing listens at keeps the function
         // small enough to inline: one load and a branch.
         if #head_listened {
-            (#(#owned,)*) = ::mod_api::__private::points::cold(|| { #head_api #head_raw (#(#owned,)*) });
+            (#(#owned,)*) = #table::__private::cold(|| { #head_api #head_raw (#(#owned,)*) });
             #stop
         }
         #(#shared_refs)*

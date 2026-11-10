@@ -444,7 +444,7 @@ pub(crate) fn table(points: &[GamePoint]) -> String {
         pub mod __private {
             use super::PointId;
             use ::std::sync::atomic::AtomicBool;
-            pub use ::mod_api::__private::points::{ApiKind, PointHost, RawKind, SlotListener};
+            pub use ::mod_api::__private::points::{cold, ApiKind, PointHost, RawKind, SlotListener};
             /// Each place's slot: set once, at the seal, where an addon listens.
             pub static POINTS: [AtomicBool; super::POINT_COUNT] = [const { AtomicBool::new(false) }; super::POINT_COUNT];
             static SITES: [AtomicBool; 0] = [];
