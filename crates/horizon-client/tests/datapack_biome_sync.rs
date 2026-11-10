@@ -220,4 +220,3 @@ fn a_biome_the_mods_modifiers_changed_is_sent_to_a_client_that_knows_the_vanilla
     let client = client_biomes(&base, &received).expect("plains differs");
     assert_eq!(client.get(client.id("minecraft:plains")).grass, 0x112233);
 }
-
