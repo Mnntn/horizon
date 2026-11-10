@@ -17133,7 +17133,7 @@ fn load_world_rest(
     let load_animate = || -> Result<_> {
         let _step = startup::step("rest.animate_fog");
         let animate = if draws {
-            horizon_client::animate_tick::AnimateTables::load(root, registry, biomes)?
+            horizon_client::animate_tick::AnimateTables::load(root, registry)?
         } else {
             Default::default()
         };

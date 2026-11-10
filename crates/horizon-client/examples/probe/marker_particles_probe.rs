@@ -72,7 +72,7 @@ pub fn main() -> Result<()> {
         root.to_path_buf(),
     ))?;
     let collision = collisions::load(root, assets.registry)?;
-    let tables = AnimateTables::load(root, assets.registry, &biomes)?;
+    let tables = AnimateTables::load(root, assets.registry)?;
     let mut world = World::new(facts.air, 0);
     let barrier = assets
         .registry
