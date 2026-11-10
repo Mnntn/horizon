@@ -631,9 +631,9 @@ fn modify_biome_sets_ambient_particles_sounds_and_music() {
             r#"{"type":"horizon:modify_biome","biomes":"minecraft:plains","attributes":{
                 "minecraft:visual/ambient_particles":{"argument":[{"particle":{"type":"minecraft:ash"},"probability":0.25}]},
                 "minecraft:audio/ambient_sounds":{"loop":"minecraft:ambient.warped_forest.loop",
-                    "additions":{"sound":"minecraft:ambient.warped_forest.additions","tick_chance":0.0111},
+                    "additions":{"sound":"minecraft:ambient.warped_forest.additions","tick_chance":1.5},
                     "mood":{"sound":"minecraft:ambient.warped_forest.mood","tick_delay":6000,"block_search_extent":8,"offset":2.0}},
-                "minecraft:audio/background_music":{"default":{"sound":"zinc:music.dunes","min_delay":12000,"max_delay":24000}},
+                "minecraft:audio/background_music":{"default":{"sound":"zinc:music.dunes","min_delay":25000,"max_delay":24000}},
                 "minecraft:audio/music_volume":0.5}}"#,
         )],
     );
@@ -655,14 +655,14 @@ fn modify_biome_sets_ambient_particles_sounds_and_music() {
         attributes["minecraft:audio/ambient_sounds"],
         serde_json::json!({
             "loop": "minecraft:ambient.warped_forest.loop",
-            "additions": {"sound": "minecraft:ambient.warped_forest.additions", "tick_chance": 0.0111},
+            "additions": {"sound": "minecraft:ambient.warped_forest.additions", "tick_chance": 1.5},
             "mood": {"sound": "minecraft:ambient.warped_forest.mood", "tick_delay": 6000,
                 "block_search_extent": 8, "offset": 2.0},
         })
     );
     assert_eq!(
         attributes["minecraft:audio/background_music"],
-        serde_json::json!({"default": {"sound": "zinc:music.dunes", "min_delay": 12000, "max_delay": 24000}})
+        serde_json::json!({"default": {"sound": "zinc:music.dunes", "min_delay": 25000, "max_delay": 24000}})
     );
     assert_eq!(attributes["minecraft:audio/music_volume"], 0.5);
     fs::remove_dir_all(scratch).unwrap();
@@ -746,14 +746,14 @@ fn modify_biome_with_an_invalid_effect_is_skipped_with_a_warning() {
             "chance",
             bad(
                 "minecraft:audio/ambient_sounds",
-                r#"{"additions":{"sound":"minecraft:a.b","tick_chance":1.5}}"#,
+                r#"{"additions":{"sound":"minecraft:a.b","tick_chance":"invalid"}}"#,
             ),
         ),
         (
             "delay",
             bad(
                 "minecraft:audio/background_music",
-                r#"{"default":{"sound":"minecraft:m","min_delay":9,"max_delay":3}}"#,
+                r#"{"default":{"sound":"minecraft:m","min_delay":-1,"max_delay":3}}"#,
             ),
         ),
         ("volume", bad("minecraft:audio/music_volume", "2")),

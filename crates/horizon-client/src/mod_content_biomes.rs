@@ -142,7 +142,12 @@ fn attribute(key: &str, v: &Value) -> std::result::Result<Value, String> {
         }
         "minecraft:audio/ambient_sounds" => {
             let object = v.as_object().ok_or_else(|| bad("not an object"))?;
-            let addition = |a: &Value| sound(a) && unit(a.get("tick_chance"));
+            let addition = |a: &Value| {
+                sound(a)
+                    && a.get("tick_chance")
+                        .and_then(Value::as_f64)
+                        .is_some_and(f64::is_finite)
+            };
             for (name, value) in object {
                 let ok = match name.as_str() {
                     "loop" => value.as_str().is_some_and(id),
@@ -170,11 +175,10 @@ fn attribute(key: &str, v: &Value) -> std::result::Result<Value, String> {
                 let (min, max) = (count(music.get("min_delay")), count(music.get("max_delay")));
                 let ok = matches!(name.as_str(), "default" | "creative" | "underwater")
                     && sound(music)
-                    && min.zip(max).is_some_and(|(min, max)| min <= max);
+                    && min.is_some()
+                    && max.is_some();
                 if !ok {
-                    return Err(bad(&format!(
-                        "{name} needs a sound and min_delay <= max_delay"
-                    )));
+                    return Err(bad(&format!("{name} needs a sound and nonnegative delays")));
                 }
             }
             Ok(v.clone())

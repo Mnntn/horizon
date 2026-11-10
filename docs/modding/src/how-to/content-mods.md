@@ -788,7 +788,7 @@ the keys it leaves out stay:
 
 The particle list may also be written `{ "argument": [...] }`. A particle or sound is a namespaced id and a chance or
 volume is 0 to 1; the mood needs its sound, `tick_delay`, `block_search_extent` and `offset`; `additions` is one
-object or a list; a music entry (`default`, `creative` or `underwater`) needs a sound and `min_delay` at most
+object or a list; a music entry (`default`, `creative` or `underwater`) needs a sound and independently nonnegative `min_delay` and
 `max_delay`. Any other attribute, or a value that is not valid, skips the modifier with a warning naming the mod,
 file and attribute. A client plays these from the biome data the server sends. In code, `ModifyBiome` has
 `ambient_particles`, `ambient_loop`, `ambient_additions`, `ambient_mood`, `background_music` and `music_volume`; the
@@ -865,3 +865,5 @@ Seats follow passenger order; extra passengers use the last point. Offsets scale
 the entity and rotate with its yaw.
 
 Vanilla `FishingHook.shouldStopFishing` tests exact `Items.FISHING_ROD` identity, while the renderer chooses the holding arm using `instanceof FishingRodItem`. Broadening these checks for content rods is intentional.
+
+Ambient additions accept any finite `tick_chance`, without clamping to the unit interval. Music delays need not be ordered.

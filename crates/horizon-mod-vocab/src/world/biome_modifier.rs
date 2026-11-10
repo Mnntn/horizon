@@ -65,7 +65,7 @@ pub struct BiomeAmbientParticle {
 pub struct BiomeAmbientAddition {
     /// The sound event (`minecraft:ambient.cave`).
     pub sound: String,
-    /// The chance per tick, 0.0..=1.0.
+    /// The finite chance per tick (not range-clamped).
     pub tick_chance: f64,
 }
 
@@ -93,7 +93,7 @@ pub struct BiomeMusic {
     pub sound: String,
     /// Fewest ticks between two tracks.
     pub min_delay: u32,
-    /// Most ticks between two tracks; at least `min_delay`.
+    /// Most ticks between two tracks, independently nonnegative.
     pub max_delay: u32,
 }
 
@@ -330,7 +330,7 @@ impl BiomeModifier {
                     && ambient_additions
                         .iter()
                         .flatten()
-                        .all(|a| id(&a.sound) && unit(&a.tick_chance))
+                        .all(|a| id(&a.sound) && a.tick_chance.is_finite())
                     && ambient_mood.iter().all(|m| {
                         id(&m.sound)
                             && ticks(&m.tick_delay)
@@ -339,7 +339,7 @@ impl BiomeModifier {
                     })
                     && background_music
                         .iter()
-                        .all(|m| id(&m.sound) && ticks(&m.max_delay) && m.min_delay <= m.max_delay)
+                        .all(|m| id(&m.sound) && ticks(&m.max_delay) && ticks(&m.min_delay))
                     && music_volume.iter().all(unit);
                 let finite = [temperature, downfall]
                     .iter()
@@ -660,7 +660,7 @@ mod tests {
             ambient_loop: Some("minecraft:ambient.warped_forest.loop".into()),
             ambient_additions: Some(vec![BiomeAmbientAddition {
                 sound: "minecraft:ambient.warped_forest.additions".into(),
-                tick_chance: 0.0111,
+                tick_chance: -0.5,
             }]),
             ambient_mood: Some(BiomeAmbientMood {
                 sound: "minecraft:ambient.warped_forest.mood".into(),
@@ -670,7 +670,7 @@ mod tests {
             }),
             background_music: Some(BiomeMusic {
                 sound: "huts:music.dunes".into(),
-                min_delay: 12000,
+                min_delay: 25000,
                 max_delay: 24000,
             }),
             music_volume: Some(0.5),
@@ -719,12 +719,12 @@ mod tests {
                 "minecraft:audio/ambient_sounds": {
                     "loop": "minecraft:ambient.warped_forest.loop",
                     "additions": [{"sound": "minecraft:ambient.warped_forest.additions",
-                        "tick_chance": 0.0111}],
+                        "tick_chance": -0.5}],
                     "mood": {"sound": "minecraft:ambient.warped_forest.mood", "tick_delay": 6000,
                         "block_search_extent": 8, "offset": 2.0},
                 },
                 "minecraft:audio/background_music": {"default": {"sound": "huts:music.dunes",
-                    "min_delay": 12000, "max_delay": 24000}},
+                    "min_delay": 25000, "max_delay": 24000}},
                 "minecraft:audio/music_volume": 0.5,
             })
         );
@@ -765,7 +765,7 @@ mod tests {
                 m.min_delay = m.max_delay + 1;
             }
         };
-        assert_eq!(with(&music), Err(BiomeModifierError::InvalidValue));
+        assert_eq!(with(&music), Ok(()));
     }
 
     #[test]
