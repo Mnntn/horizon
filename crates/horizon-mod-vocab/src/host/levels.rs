@@ -87,6 +87,7 @@ pub trait LevelsBackend {
         pos: [i32; 3],
         tool: Option<&ItemStack>,
     ) -> Option<f32>;
+    /// Side: both.
     /// The entry ids (`addon:fire`) of a datapack registry a mod declared
     /// (`declare_datapack_registry`), sorted, as this world session last loaded them. On a client
     /// they are the ones its server sent at the join and after each reload, and only for a
