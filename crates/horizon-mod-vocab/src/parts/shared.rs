@@ -514,7 +514,6 @@ impl PartRegistrar {
             attributes: Vec::new(),
             spawn_placements: Vec::new(),
             biome_modifiers: Vec::new(),
-            biome_modifiers: Vec::new(),
             registry_keys: Default::default(),
             effects: OnceLock::new(),
             controllers: Vec::new(),
@@ -659,7 +658,6 @@ pub(crate) fn install_registrar(
         attributes: registrar.attributes,
         entity_attribute_modifications: registrar.entity_attribute_modifications,
         spawn_placements: registrar.spawn_placements,
-        biome_modifiers: registrar.biome_modifiers,
         biome_modifiers: registrar.biome_modifiers,
         resolved_block_entity_types: OnceLock::new(),
         registry_keys: Rc::try_unwrap(registrar.registry_keys)
