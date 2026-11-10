@@ -1,6 +1,19 @@
 //! The client nonce is tied to the actual shown mod screen, not just its menu type.
 use super::*;
 impl Game<'_> {
+    pub(in crate::game) fn apply_screen_with_mod_book(
+        &mut self,
+        screen: Screen,
+        owner: Option<&str>,
+    ) {
+        self.apply_screen(screen, owner);
+        // A server-opened native menu installs its declaration before this
+        // transition. It is not a shown screen until apply_screen finishes.
+        if self.native_screen_shown() {
+            self.begin_mod_book_placement();
+            self.ensure_mod_book_catalog();
+        }
+    }
     fn native_book_placement_scope_matches(
         &self,
         window: i32,

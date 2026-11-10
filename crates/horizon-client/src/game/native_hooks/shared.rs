@@ -106,13 +106,7 @@ impl Game<'_> {
         if self.screen == screen && owner.is_none() {
             return;
         }
-        self.apply_screen(screen, owner);
-        // A server-opened native menu installs its declaration before this
-        // transition. It is not a shown screen until apply_screen finishes.
-        if self.native_screen_shown() {
-            self.begin_mod_book_placement();
-            self.ensure_mod_book_catalog();
-        }
+        self.apply_screen_with_mod_book(screen, owner);
     }
     /// Whether a change of screen asks the screen hooks: a mod listens to
     /// `screen_opening` or `screen_closing`, on a client's own `Game` (not a
