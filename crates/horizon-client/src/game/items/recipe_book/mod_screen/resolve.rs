@@ -5,11 +5,11 @@ use mod_api::{RecipeBookDisplay as Display, RecipeSlotDisplay as Slot};
 
 pub(super) struct Resolver<'a, 'w> {
     game: &'a Game<'w>,
-    stocks: &'a [ItemStack],
+    stocks: &'a Stacked,
 }
 
 impl<'a, 'w> Resolver<'a, 'w> {
-    pub(super) fn new(game: &'a Game<'w>, stocks: &'a [ItemStack]) -> Self {
+    pub(super) fn new(game: &'a Game<'w>, stocks: &'a Stacked) -> Self {
         Self { game, stocks }
     }
 
@@ -59,10 +59,7 @@ impl<'a, 'w> Resolver<'a, 'w> {
                 let targets = self.resolve(target);
                 self.resolve(dye)
                     .iter()
-                    .filter_map(|stack| {
-                        if !stack.carries_component(items.get(&stack.item), "minecraft:dye") {
-                            return None;
-                        }
+                    .map(|stack| {
                         let name = stack
                             .data()
                             .and_then(|data| data.other("minecraft:dye"))
@@ -72,19 +69,16 @@ impl<'a, 'w> Resolver<'a, 'w> {
                                 }
                                 _ => None,
                             })
-                            .or_else(|| items.get(&stack.item).and_then(|info| info.dye.clone()))?;
+                            .or_else(|| items.get(&stack.item).and_then(|info| info.dye.clone()))
+                            .unwrap_or_else(|| "white".into());
                         horizon_client::block_entity_render::DYES
                             .iter()
-                            .find(|(id, _)| *id == name)
-                            .map(|(_, color)| *color as i32)
+                            .position(|(id, _)| *id == name)
+                            .unwrap_or(0)
                     })
-                    .flat_map(|color| {
-                        targets.iter().cloned().map(move |mut stack| {
-                            stack.count = 1;
-                            stack.data_mut().dyed_color = Some(color);
-                            stack
-                        })
-                    })
+                    .flat_map(|dye| targets.iter().map(move |stack| dye_stack(stack, dye)))
+                    // SlotDisplay.applyDemoTransformation cycles targets fastest,
+                    // then keeps at most 16 successful transformations.
                     .take(16)
                     .collect()
             }
@@ -96,18 +90,31 @@ impl<'a, 'w> Resolver<'a, 'w> {
                 let materials = self.resolve(material);
                 let pattern =
                     horizon_client::crafting::RecipeTrimPattern::Reference(pattern.clone());
-                self.resolve(base)
-                    .iter()
-                    .flat_map(|base| {
-                        materials.iter().filter_map(|material| {
-                            horizon_client::stations::apply_trim(
-                                &self.game.stations().enchantments,
-                                base,
-                                material,
-                                &pattern,
-                            )
-                        })
+                let bases = self.resolve(base);
+                if bases.is_empty() || materials.is_empty() {
+                    return Vec::new();
+                }
+                use horizon_core::random::RandomSource;
+                // Vanilla seeds this demo from display identity, samples at most
+                // 256 pairs, and retains the first 16 successful trims.
+                let mut random =
+                    horizon_core::random::LegacyRandom::new(slot as *const Slot as usize as i64);
+                (0..256)
+                    .filter_map(|_| {
+                        let base = random
+                            .next_int_bound(i32::try_from(bases.len()).ok()?)
+                            .ok()? as usize;
+                        let material = random
+                            .next_int_bound(i32::try_from(materials.len()).ok()?)
+                            .ok()? as usize;
+                        horizon_client::stations::apply_trim(
+                            &self.game.stations().enchantments,
+                            &bases[base],
+                            &materials[material],
+                            &pattern,
+                        )
                     })
+                    .take(16)
                     .collect()
             }
         }
@@ -141,7 +148,8 @@ impl<'a, 'w> Resolver<'a, 'w> {
                 )
             })
             .collect();
-        can_craft(self.stocks, &ingredients)
+        self.stocks
+            .can_craft(&ingredients.iter().collect::<Vec<_>>())
     }
 
     pub(super) fn search_text(&self, stacks: &[ItemStack]) -> String {
@@ -154,17 +162,50 @@ impl<'a, 'w> Resolver<'a, 'w> {
     }
 }
 
-fn can_craft(stocks: &[ItemStack], ingredients: &[Ingredient]) -> bool {
-    let mut stacked = Stacked::default();
-    for stack in stocks {
-        stacked.account_stack(stack, stack.count);
+fn dye_stack(target: &ItemStack, dye: usize) -> ItemStack {
+    let mut stack = target.clone();
+    stack.count = 1;
+    let current = stack.data().and_then(|data| data.dyed_color);
+    stack.data_mut().dyed_color = Some(horizon_client::crafting::apply_dyes(current, &[dye]));
+    stack
+}
+
+impl horizon_client::recipe_book::mod_presentation::DisplayResolver for Resolver<'_, '_> {
+    fn resolve(&self, slot: &Slot) -> Vec<ItemStack> {
+        Resolver::resolve(self, slot)
     }
-    stacked.can_craft(&ingredients.iter().collect::<Vec<_>>())
+    fn craftable(&self, recipe: &str, display: &Display) -> bool {
+        Resolver::craftable(self, recipe, display)
+    }
+    fn search_text(&self, results: &[ItemStack]) -> String {
+        Resolver::search_text(self, results)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn can_craft(stocks: &[ItemStack], ingredients: &[Ingredient]) -> bool {
+        let mut stacked = Stacked::default();
+        for stack in stocks {
+            stacked.account_stack(stack, stack.count);
+        }
+        stacked.can_craft(&ingredients.iter().collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn dye_blends_existing_color_and_preserves_other_components() {
+        let mut target = ItemStack::new("test:target", 7).with_potion("minecraft:water");
+        target.data_mut().dyed_color = Some(0xB02E26);
+        let dyed = dye_stack(&target, 11);
+        assert_eq!(dyed.count, 1);
+        assert_eq!(dyed.data().unwrap().dyed_color, Some(0xAD5398));
+        let mut expected = target.clone();
+        expected.count = 1;
+        expected.data_mut().dyed_color = dyed.data().unwrap().dyed_color;
+        assert_eq!(dyed, expected);
+        assert_eq!(target.count, 7);
+    }
     #[test]
     fn duplicate_inputs_consume_capacity_and_reassign_alternatives() {
         let ingredients = [
