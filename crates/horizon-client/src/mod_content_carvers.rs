@@ -82,4 +82,18 @@ mod tests {
             ["test:new"]
         );
     }
+    #[test]
+    fn pack_carvers_without_modifiers_leave_world_data_unchanged() {
+        let root = std::env::temp_dir().join(format!("carver-invariance-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("biome-modifiers.json"), r#"{"enabled_mods":[],"modifiers":[],"unmodified":{},"feature_tags":{},"entity_categories":{},"entity_tags":{}}"#).unwrap();
+        let mut packs = WorldgenOverrides::default();
+        packs.set("carvers", "test:new", "{}".into());
+        packs.set("biomes", "test:plains", r#"{"carvers":"test:new"}"#.into());
+        let result = super::super::biome_modifiers_over_packs(&root, &packs, &[])
+            .unwrap()
+            .unwrap();
+        assert_eq!(result, packs);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
