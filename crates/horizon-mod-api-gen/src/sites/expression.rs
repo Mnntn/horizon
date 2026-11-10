@@ -227,7 +227,7 @@ pub(super) fn lower(
     };
     let replacement = quote! {{
         let #value: #ty = #expr;
-        if ::mod_points::__private::SITES[::mod_points::SiteId::#variant as usize].load(::std::sync::atomic::Ordering::Relaxed) {
+        if ::mod_points::__private::TABLE.active_site(::mod_points::SiteId::#variant as usize) {
             let mut #args = #record { value: #value };
             ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver, #record, #output, (), #args, |_: (), __args: &mut #record| __args.value)
         } else { #value }

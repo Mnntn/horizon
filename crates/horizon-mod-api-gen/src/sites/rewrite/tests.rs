@@ -803,7 +803,7 @@ fn an_expression_site_wraps_one_read_and_keeps_its_value_when_nothing_listens() 
         extern crate self as mod_points;
         extern crate self as horizon_mod_api_macros;
         pub enum SiteId {{ {name} }}
-        pub mod __private {{ pub static SITES: [std::sync::atomic::AtomicBool; 1] = [const {{ std::sync::atomic::AtomicBool::new(false) }}; 1]; }}
+        pub mod __private {{ pub static SITES: [std::sync::atomic::AtomicBool; 1] = [const {{ std::sync::atomic::AtomicBool::new(false) }}; 1]; pub struct Table; pub static TABLE: Table = Table; impl Table {{ pub fn active_site(&self, index: usize) -> bool {{ SITES[index].load(std::sync::atomic::Ordering::Relaxed) }} }} }}
         #[macro_export] macro_rules! site {{ ($wrap:ident, $place:ident, $listener:ident, $recv_ty:ident, $record:ident, $output:ident, $receiver:expr, $args:expr, $original:expr) => {{ ($original)($receiver, &mut $args) }}; }}
         mod game {{ {rewritten} }}
         fn main() {{
