@@ -47,6 +47,26 @@ class CheckLayersTests(unittest.TestCase):
         self.assertTrue(any("game -> mod-api: engine may not depend on platform" in p for p in problems))
         self.assertTrue(all("docs/layers.md#engine" in p for p in problems))
 
+    def test_engine_cannot_hide_platform_api_behind_a_dependency_rename(self):
+        for rename in (None, "mod_api", "horizon-mod-vocab"):
+            with self.subTest(rename=rename):
+                engine = package("horizon-client", "horizon-mod-api")
+                engine["dependencies"][0]["rename"] = rename
+                problems, _ = run(engine, crates={
+                    "horizon-client": "engine", "horizon-mod-api": "platform",
+                })
+                self.assertTrue(any(
+                    "horizon-client -> horizon-mod-api: engine may not depend on platform" in p
+                    for p in problems
+                ))
+
+    def test_vocabulary_package_is_engine_even_when_named_mod_api(self):
+        engine = package("horizon-client", "horizon-mod-vocab")
+        engine["dependencies"][0]["rename"] = "mod_api"
+        self.assertEqual(run(engine, crates={
+            "horizon-client": "engine", "horizon-mod-vocab": "engine",
+        }), ([], []))
+
     def test_platform_may_not_depend_on_horizon(self):
         problems, _ = run(package("mod-api", "cosmetics"))
         self.assertIn("docs/layers.md#platform", problems[0])
