@@ -4,12 +4,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(test)]
 use crate::i18n::trf;
 
 /// Where the launcher stages the mods' crates.
 pub(super) const DIR: &str = "native-api";
 
 /// A package of a `Cargo.lock` from a registry (or git): the ones a build would download.
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct Locked {
     pub name: String,
@@ -20,6 +22,7 @@ pub(super) struct Locked {
 
 /// The downloaded packages of the lock file `text`; the workspace's own (no `source`) are left
 /// out.
+#[cfg(test)]
 pub(super) fn downloaded(text: &str) -> Result<BTreeSet<Locked>, String> {
     let lock: toml::Table = text.parse().map_err(|e| format!("Cargo.lock: {e}"))?;
     let packages = lock.get("package").and_then(|p| p.as_array());
@@ -233,6 +236,19 @@ pub(super) fn wanted(
                 )?;
                 continue;
             }
+            for selector in [
+                "git",
+                "registry",
+                "registry-index",
+                "branch",
+                "rev",
+                "tag",
+                "workspace",
+            ] {
+                if dep.get(selector).is_some() {
+                    return Err(format!("{}: dependency {key}: {selector} sources are not allowed; use crates.io with Cargo.lock", manifest.display()));
+                }
+            }
             out.push(Wanted {
                 mod_id: mod_id.to_owned(),
                 name: get("package").unwrap_or(key).to_owned(),
@@ -381,6 +397,7 @@ fn is_link_or_junction(metadata: &fs::Metadata) -> bool {
 /// lacks, or at no version they accept (checked before Cargo, whose offline resolution would
 /// fail on it, or look online), or a package the updated lock `staged` has that Horizon's lacks
 /// or has in another version. None when they fit.
+#[cfg(test)]
 pub(super) fn refused(
     horizon: &BTreeSet<Locked>,
     staged: Option<&BTreeSet<Locked>>,
@@ -430,6 +447,7 @@ pub(super) fn refused(
 
 /// Whether Horizon's lock has `wanted`'s crate in a version it accepts. A requirement Cargo's
 /// semver doesn't parse is left to Cargo to report.
+#[cfg(test)]
 fn fits(horizon: &BTreeSet<Locked>, wanted: &Wanted) -> bool {
     let requirement = semver::VersionReq::parse(&wanted.version).ok();
     horizon.iter().any(|locked| {

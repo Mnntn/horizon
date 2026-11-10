@@ -35,6 +35,7 @@ mod inject_cache;
 mod inject_text;
 mod internals;
 mod internals_sync;
+mod registry_lock;
 pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
 mod isolate;
 mod mod_points;
@@ -1544,44 +1545,56 @@ fn read_lock(dir: &Path) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// The packages Horizon's own `Cargo.lock` in `source` downloads.
-fn horizon_lock(source: &Path) -> Result<std::collections::BTreeSet<crates::Locked>, String> {
-    crates::downloaded(&read_lock(source)?)
-}
-
-/// Refuse the crates the mods ask for that Horizon's `Cargo.lock` lacks, from the lock file alone:
-/// the resolution that follows is offline and could only fail on them without saying why.
-fn refuse_unlocked(source: &Path, wanted: &[crates::Wanted]) -> Result<(), String> {
-    match crates::refused(&horizon_lock(source)?, None, wanted, &[]) {
-        Some(why) => Err(why),
-        None => Ok(()),
+/// Validate mod-owned pins at the existing early refusal boundary, before Cargo sees them.
+fn refuse_unlocked(
+    source: &Path,
+    mods: &[Bundle],
+    wanted: &[crates::Wanted],
+) -> Result<registry_lock::RegistryLock, String> {
+    let mut allowed = registry_lock::RegistryLock::parse(&read_lock(source)?)?;
+    for bundle in mods {
+        let requested: Vec<_> = wanted
+            .iter()
+            .filter(|w| w.mod_id == bundle.manifest.id)
+            .collect();
+        if requested.is_empty() {
+            continue;
+        }
+        let pins = registry_lock::RegistryLock::parse(&read_lock(&bundle.dir)?)?;
+        for request in requested {
+            let requirement =
+                semver::VersionReq::parse(&request.version).map_err(|e| e.to_string())?;
+            if !pins.packages.keys().any(|id| {
+                id.name == request.name
+                    && semver::Version::parse(&id.version)
+                        .is_ok_and(|version| requirement.matches(&version))
+            }) {
+                return Err(format!(
+                    "{}: Cargo.lock does not pin {} {}",
+                    request.mod_id, request.name, request.version
+                ));
+            }
+        }
+        allowed.extend(&pins)?;
     }
+    Ok(allowed)
 }
 
-/// Check staged crates against Horizon's own Cargo.lock before fetching dependencies.
-/// Their requested packages and every downloaded package must belong to that lock.
 fn lock_crates(
     rust: &Toolchain,
     source: &Path,
     stage: &Path,
-    mods: &[Bundle],
-    wanted: &[crates::Wanted],
+    allowed: &registry_lock::RegistryLock,
 ) -> Result<(), String> {
-    let horizon = horizon_lock(source)?;
-    let staged_lock = read_lock(stage)?;
-    crates::check_game_graph(stage, &staged_lock)?;
-    let staged = crates::downloaded(&staged_lock)?;
-    let api_ids: Vec<&str> = mods.iter().map(|m| m.manifest.id.as_str()).collect();
-    if let Some(why) = crates::refused(&horizon, Some(&staged), wanted, &api_ids) {
-        return Err(why);
-    }
-    // Only this computer's crates: the build needs no others.
+    let text = read_lock(stage)?;
+    crates::check_game_graph(stage, &text)?;
+    allowed.check_resolution(
+        &registry_lock::RegistryLock::parse(&text)?,
+        &registry_lock::RegistryLock::parse(&read_lock(source)?)?,
+    )?;
     let mut fetch = cargo(rust, stage, "fetch");
     fetch.arg("--locked");
-    if let Some(host) = rust_toolchain::host() {
-        fetch.args(["--target", host.target]);
-    }
-    run(fetch, "Downloading the crates", |_| {}).map_err(crates::locked)
+    run(fetch, "Downloading the crates", |_| {})
 }
 
 /// Horizon's source at commit `revision`: GitHub's archive of it, unpacked once, with the commit in
@@ -2252,7 +2265,35 @@ fn pipeline(
             })
             .collect();
         let wanted = crates::wanted(&fresh, &paths)?;
-        refuse_unlocked(&source, &wanted)?;
+        let allowed = refuse_unlocked(&source, &mods, &wanted)?;
+        // An inert manifest avoids SDK paths and all mod-owned Cargo configuration. Fetch
+        // uses Cargo's checksum verification without running build scripts or proc macros.
+        let fetch_dir = real.join("registry-fetch");
+        let game_pins = registry_lock::RegistryLock::parse(&read_lock(&source)?)?;
+        let mod_pins = registry_lock::RegistryLock {
+            packages: allowed
+                .packages
+                .iter()
+                .filter(|(id, _)| !game_pins.packages.contains_key(*id))
+                .map(|(id, record)| (id.clone(), record.clone()))
+                .collect(),
+        };
+        allowed.fetch_workspace(&mod_pins, &fetch_dir)?;
+        let mut index = cargo(&rust, &fetch_dir, "update");
+        index.arg("--workspace");
+        run(index, "Checking the pinned registry index", |_| {})?;
+        let fetch_pins = registry_lock::RegistryLock::parse(&read_lock(&fetch_dir)?)?;
+        allowed.check_resolution(
+            &fetch_pins,
+            &registry_lock::RegistryLock {
+                packages: Default::default(),
+            },
+        )?;
+        let mut fetch = cargo(&rust, &fetch_dir, "fetch");
+        fetch.arg("--locked");
+        run(fetch, "Downloading the mods' pinned crates", |_| {})?;
+        fs::write(fresh.join("Cargo.lock"), allowed.seed(&read_lock(&fresh)?)?)
+            .map_err(|e| e.to_string())?;
         if has_api {
             // Add path packages to Cargo.lock before the locked dependency check.
             let mut metadata = cargo(&rust, &fresh, "metadata");
@@ -2265,7 +2306,7 @@ fn pipeline(
         let _ = fs::remove_dir_all(&fresh);
         if crates::any(&stage) || has_api {
             progress(Step::Crates);
-            lock_crates(&rust, &source, &stage, &mods, &wanted)?;
+            lock_crates(&rust, &source, &stage, &allowed)?;
         }
         let mut target_dir = real.join("target");
         if let Some(cache_dir) = platform.cache_dir {
@@ -2711,60 +2752,6 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
 mod tests {
 
     use super::*;
-
-    #[test]
-    fn a_crate_the_game_does_not_lock_is_refused_from_the_lock_file_alone() {
-        let folder = tempfile::tempdir().unwrap();
-        let source = folder.path().join("source");
-        let krate = folder
-            .path()
-            .join("stage")
-            .join(crates::DIR)
-            .join("farmers_delight");
-        let cargo_home = folder.path().join("cargo-home");
-        for dir in [&source, &krate, &cargo_home] {
-            fs::create_dir_all(dir).unwrap();
-        }
-        fs::write(
-            source.join("Cargo.lock"),
-            "[[package]]
-name = \"zip\"
-version = \"9.1.3\"
-source = \"registry+x\"
-",
-        )
-        .unwrap();
-        let stage = folder.path().join("stage");
-        let wanted = |requirement: &str| {
-            fs::write(
-                krate.join("Cargo.toml"),
-                format!(
-                    "[package]
-name = \"farmers_delight\"
-version = \"0.1.0\"
-[dependencies]
-zip = \"{requirement}\"
-"
-                ),
-            )
-            .unwrap();
-            crates::wanted(&stage, &std::collections::BTreeMap::new()).unwrap()
-        };
-        // The managed Cargo home is empty: the decision can't come from downloaded crates.
-        let error = refuse_unlocked(&source, &wanted("2")).unwrap_err();
-        assert!(
-            error.starts_with("farmers_delight needs zip 2, which isn't in Horizon's Cargo.lock."),
-            "{error}"
-        );
-        assert!(
-            error.contains("must be versions the game already locks"),
-            "{error}"
-        );
-        assert!(error.ends_with("Horizon locks zip 9.1.3."), "{error}");
-        assert_eq!(fs::read_dir(&cargo_home).unwrap().count(), 0);
-        // The version the game locks is admitted.
-        refuse_unlocked(&source, &wanted("9")).unwrap();
-    }
 
     #[test]
     fn source_archive_escape_is_refused_without_writing_outside() {

@@ -255,6 +255,24 @@ impl<'a> Project<'a> {
             mod_id: mod_id(),
             reason,
         })?;
+        for section in ["patch", "replace"] {
+            if cargo.contains_key(section) {
+                return Err(ProjectError::Cargo {
+                    mod_id: mod_id(),
+                    reason: format!("[{section}] is not allowed in a native mod"),
+                });
+            }
+        }
+        for config in [".cargo/config", ".cargo/config.toml"] {
+            if bundle.dir.join(config).exists() {
+                return Err(ProjectError::Cargo {
+                    mod_id: mod_id(),
+                    reason: format!(
+                        "{config} is not allowed in a native mod; source replacement is refused"
+                    ),
+                });
+            }
+        }
         let package = cargo
             .get("package")
             .and_then(|p| p.get("name"))
