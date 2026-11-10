@@ -516,6 +516,7 @@ impl Game<'_> {
             && let Some(types) = self.recipe_tables.received.take()
         {
             self.native_recipes_received(&types);
+            self.build_screen();
         }
     }
     /// `OnDatapackSyncEvent.sendRecipes`: the recipe types the native mods

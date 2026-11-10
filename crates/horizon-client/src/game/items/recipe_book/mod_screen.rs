@@ -108,7 +108,6 @@ impl Game<'_> {
         self.mod_book_flags().is_some_and(|flags| flags.0)
     }
     fn refresh_mod_book(&mut self) {
-        self.ensure_mod_book_displays();
         let Some((open, filtering)) = self.mod_book_flags() else {
             return;
         };

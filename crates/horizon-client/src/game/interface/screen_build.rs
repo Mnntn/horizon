@@ -339,6 +339,11 @@ impl Game<'_> {
                     .then(|| self.observed_screen_view().map(|view| view.id))
                     .flatten()
             });
+        // Validate the assigned mod book before its flags can affect any
+        // cached origin, slot rectangles or exclusion areas.
+        if self.native_screen_book().is_some() {
+            self.ensure_mod_book_displays();
+        }
         // The container screens' layout is a build input: the frame's own
         // state, and the mods' effects answer, compared here so the panels and
         // the exclusion never disagree by a frame.
