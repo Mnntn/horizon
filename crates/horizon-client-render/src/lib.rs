@@ -1,6 +1,9 @@
 //! The client's world data, rendering and screens: chunks, meshing, light, streaming, the renderer,
 //! the HUD, menus and settings. Gameplay (horizon-client) builds on it; nothing here reaches gameplay.
 #![forbid(unsafe_code)]
+// Shared mod fixtures exercise the public facade; production uses vocabulary.
+#[cfg(test)]
+extern crate mod_api_facade as mod_api;
 pub mod android_gamepad;
 pub mod android_runtime;
 pub mod assets;

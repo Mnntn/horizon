@@ -57,7 +57,7 @@ pub trait WorldEditServerHost {
         &mut self,
         id: &str,
         at: [i32; 3],
-        rotation: StructureRotation,
-        mirror: StructureMirror,
-    ) -> Option<StructureTemplateSnapshot>;
+        rotation: mod_api::world::structure_template::StructureRotation,
+        mirror: mod_api::world::structure_template::StructureMirror,
+    ) -> Option<mod_api::world::structure_template::StructureTemplateSnapshot>;
 }

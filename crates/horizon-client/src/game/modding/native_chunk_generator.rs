@@ -3,7 +3,8 @@ use super::native_worldgen::WorkerResources;
 use horizon_world::worldgen::mod_generators::{
     ChunkAccess as EngineChunk, ModChunkGenerator, ModChunkGenerators,
 };
-use mod_api::{BlockKey, BlockMetadata, BlockState, ChunkAccess, ChunkGenerator, ChunkPos};
+use mod_api::world::structure_type::ChunkPos;
+use mod_api::{BlockKey, BlockMetadata, BlockState, ChunkAccess, ChunkGenerator};
 use std::sync::Arc;
 
 struct Adapter(Arc<dyn ChunkGenerator>);

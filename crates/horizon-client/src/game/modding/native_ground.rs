@@ -2,9 +2,9 @@
 //! provider as the decorator asks it. `mod_api` keeps only the API's provider traits.
 use horizon_world::native_worldgen_hooks::{AlterGroundTree, GroundAccess, ModGroundProvider};
 use horizon_world::registry::BlockStateId as EngineState;
+use mod_api::world::structure_type::StructureRandom;
 use mod_api::{
     BlockStateId as ApiState, GroundLevel, GroundProvider, GroundStateProvider, HookId,
-    StructureRandom,
 };
 use std::sync::Arc;
 

@@ -9,7 +9,7 @@ use horizon_world::worldgen::{
     placement::PlacementQueryError,
     structure::{legacy::PieceRandom, mod_types::ModStructureType},
 };
-use mod_api::{
+use mod_api::world::structure_type::{
     BiomeId, ChunkPos, GenerationContext, HeightmapType, NoiseBlock, NoiseColumn, PieceContext,
     StructurePiece, StructureRandom, StructureType,
 };
@@ -112,7 +112,7 @@ impl GenerationContext for Start<'_> {
         column.0
     }
     fn noise_biome(&mut self, quart: [i32; 3]) -> BiomeId {
-        mod_api::__private::biome_id(self.inner.noise_biome(quart).0)
+        mod_api::world::structure_type::biome_id(self.inner.noise_biome(quart).0)
     }
     fn column_has_valid_biome(&mut self, x: i32, z: i32, min_y: i32, max_y: i32) -> bool {
         self.inner.column_has_valid_biome(x, z, min_y, max_y)
@@ -373,7 +373,7 @@ mod tests;
 /// Registered API declarations become engine adapters once, not once per chunk.
 pub(in crate::game) fn installed_structure_types()
 -> horizon_world::worldgen::structure::mod_types::ModStructureTypes {
-    mod_api::__private::structure_type_declarations()
+    mod_api::world::structure_type::structure_type_declarations()
         .into_iter()
         .map(|(id, ty)| {
             let adapter = Adapter::new(&id, ty).into_engine_type();

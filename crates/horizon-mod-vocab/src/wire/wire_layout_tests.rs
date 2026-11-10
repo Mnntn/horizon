@@ -651,7 +651,7 @@ fn newtype_widths_and_unit_enum_tags_match_their_layouts() {
     fields(WorldEpoch::new(47), (47u64,));
     fields(TickId::new(19), (19u64,));
     fields(SoundRef { id: 71 }, (71u64,));
-    fields(crate::__private::biome_id(11), (11u32,));
+    fields(crate::world::structure_type::biome_id(11), (11u32,));
     fields(crate::__private::mod_color_resolver(13), (13u32,));
     fields(crate::wire::wire_slots::Id(0x100000003), (0x100000003u64,));
     fields(BlockUpdateFlags(17), (17u32,));

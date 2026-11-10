@@ -12,6 +12,18 @@ use std::sync::{Arc, OnceLock};
 use serde_json::{Map, Value};
 use std::time::Duration;
 
+// Internal names used by generated host and Wire implementations. Only the facade exports
+// these mod-only names at its root; their definitions remain in the world modules.
+use world::structure_type::{
+    BiomeId, ChunkPos, FoundStructure, HeightmapType, NoiseColumn, StructureError, StructurePiece,
+    StructureRandom, StructureType,
+};
+#[allow(
+    unused_imports,
+    reason = "Named Wire handler schemas resolve these trait definitions at the crate root"
+)]
+use world::structure_type::{GenerationContext, PieceContext};
+
 mod generated_host {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
 }

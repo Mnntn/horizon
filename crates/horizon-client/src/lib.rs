@@ -2,6 +2,9 @@
 // No `#![recursion_limit]` or other inner attribute horizon-mixins doesn't know here: the
 // launcher's horizon-mixins then rejects every native mod targeting this crate (#8169).
 #![forbid(unsafe_code)]
+// Shared mod fixtures exercise the public facade; production uses vocabulary.
+#[cfg(test)]
+extern crate mod_api_facade as mod_api;
 extern crate self as horizon_client;
 pub use horizon_client_lib::*;
 #[doc(hidden)]

@@ -10,7 +10,9 @@ use horizon_world::registry::BlockStateId;
 use horizon_world::worldgen::structure::{Mirror, Rotation, StateTransforms, StructureTemplate};
 use mod_api::Compound;
 
-use mod_api::{StructureMirror, StructureRotation, StructureTemplateSnapshot};
+use mod_api::world::structure_template::{
+    StructureMirror, StructureRotation, StructureTemplateSnapshot,
+};
 
 /// Game-owned placement result; numeric states never escape to mods.
 #[derive(Debug, PartialEq)]

@@ -6,8 +6,22 @@ use syn::Item;
 
 pub(crate) const DIRECTORY: &str = "crates/horizon-mod-vocab/src/exports";
 const PREFIX: &str = "mod_api_exports_";
+pub(crate) const API_DIRECTORY: &str = "crates/horizon-mod-api/src/exports";
+const API_PREFIX: &str = "mod_api_facade_exports_";
 
 pub(crate) fn sources(root: &Path) -> Result<BTreeMap<String, String>, String> {
+    sources_in(root, DIRECTORY, PREFIX)
+}
+
+pub(crate) fn api_sources(root: &Path) -> Result<BTreeMap<String, String>, String> {
+    sources_in(root, API_DIRECTORY, API_PREFIX)
+}
+
+fn sources_in(
+    root: &Path,
+    directory: &str,
+    prefix: &str,
+) -> Result<BTreeMap<String, String>, String> {
     fn collect(
         root: &Path,
         scope: &str,
@@ -38,9 +52,7 @@ pub(crate) fn sources(root: &Path) -> Result<BTreeMap<String, String>, String> {
                 if scope != "root" {
                     return Err("out-of-line export modules belong at the API root".into());
                 }
-                let path = root
-                    .join("crates/horizon-mod-vocab/src")
-                    .join(format!("{}.rs", module.ident));
+                let path = root.join(format!("{}.rs", module.ident));
                 let path = if path.is_file() {
                     path
                 } else {
@@ -57,7 +69,7 @@ pub(crate) fn sources(root: &Path) -> Result<BTreeMap<String, String>, String> {
         }
         Ok(())
     }
-    let dir = root.join(DIRECTORY);
+    let dir = root.join(directory);
     let mut out = [
         "root",
         "private",
@@ -76,7 +88,7 @@ pub(crate) fn sources(root: &Path) -> Result<BTreeMap<String, String>, String> {
         let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
         has_host |= file.items.iter().any(|item| matches!(item, Item::Mod(module) if module.ident == "host" && module.content.is_none()));
         has_parts |= file.items.iter().any(|item| matches!(item, Item::Mod(module) if module.ident == "parts" && module.content.is_none()));
-        collect(root, "root", file.items, &mut out)?;
+        collect(dir.parent().unwrap(), "root", file.items, &mut out)?;
     }
     if has_host {
         // Re-export the generated macro aliases, not the include!-expanded
@@ -102,7 +114,7 @@ pub(crate) fn sources(root: &Path) -> Result<BTreeMap<String, String>, String> {
     }
     Ok(out
         .into_iter()
-        .map(|(scope, code)| (format!("{PREFIX}{scope}.rs"), code))
+        .map(|(scope, code)| (format!("{prefix}{scope}.rs"), code))
         .collect())
 }
 
@@ -130,11 +142,14 @@ pub(crate) fn expand(root: &Path, source: &str) -> Result<String, String> {
         Ok(out)
     }
     let parts = source.contains(super::parts::OUTPUT);
-    if !source.contains(PREFIX) && !parts {
+    if !source.contains(PREFIX) && !source.contains(API_PREFIX) && !parts {
         return Ok(source.to_owned());
     }
     let mut file = syn::parse_file(source).map_err(|e| e.to_string())?;
     let mut generated = sources(root)?;
+    if source.contains(API_PREFIX) {
+        generated.extend(api_sources(root)?);
+    }
     if parts {
         generated.insert(super::parts::OUTPUT.to_owned(), super::parts::source(root)?);
     }

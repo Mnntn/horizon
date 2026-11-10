@@ -59,7 +59,7 @@ pub mod tests {
         }
         crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Valid))])
             .unwrap();
-        let types = crate::__private::structure_type_declarations();
+        let types = crate::world::structure_type::structure_type_declarations();
         assert!(types.iter().any(|(id, _)| id == "test:tower"));
         assert_eq!(types.len(), 1);
 

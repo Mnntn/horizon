@@ -1,6 +1,9 @@
 //! Horizon native client: resources, world streaming, rendering and the
 //! bindings between the validated simulation pieces and the game loop.
 #![forbid(unsafe_code)]
+// Shared mod fixtures exercise the public facade; production uses vocabulary.
+#[cfg(test)]
+extern crate mod_api_facade as mod_api;
 extern crate self as horizon_client;
 pub mod advancements;
 pub mod ambience;

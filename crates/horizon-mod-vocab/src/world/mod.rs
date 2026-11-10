@@ -26,8 +26,12 @@ pub(crate) mod reload_order;
 pub(crate) mod scheduler;
 pub(crate) mod server_reload;
 pub mod snapshots;
-pub(crate) mod structure_template;
-pub(crate) mod structure_type;
+// hidden: definition path shared with the facade's mod-only root exports.
+#[doc(hidden)]
+pub mod structure_template;
+// hidden: definition path shared with the facade's mod-only root exports.
+#[doc(hidden)]
+pub mod structure_type;
 pub(crate) mod tags;
 pub(crate) mod ticket_controller;
 pub(crate) mod types;

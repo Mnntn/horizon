@@ -28,6 +28,19 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             ("mod_api_goal_view_generated.rs", generated.goal_view),
         ],
         Target::Api | Target::Vocab => {
+            if matches!(target, Target::Api) {
+                let directory = root.join(super::exports::API_DIRECTORY);
+                println!("cargo:rerun-if-changed={}", directory.display());
+                for area in Catalog::modules(&directory).map_err(|e| e.to_string())? {
+                    println!(
+                        "cargo:rerun-if-changed={}",
+                        directory.join(format!("{area}.rs")).display()
+                    );
+                }
+                for (name, code) in super::exports::api_sources(root)? {
+                    fs::write(out_dir.join(name), code).map_err(|e| e.to_string())?;
+                }
+            }
             if matches!(target, Target::Vocab) {
                 fs::write(
                     out_dir.join(super::parts::OUTPUT),

@@ -1,7 +1,8 @@
 //! Whole-aggregate block-state boundaries. No partial snapshot or draw is admitted.
 use super::{TryIntoApi, TryIntoEngine, block_state};
 use crate::game::{native_scene::SceneBlock, native_structures::TemplateSnapshot};
-use mod_api::{BlockStateError, StructureTemplateBlock, StructureTemplateSnapshot};
+use mod_api::BlockStateError;
+use mod_api::world::structure_template::{StructureTemplateBlock, StructureTemplateSnapshot};
 
 impl TryIntoApi for TemplateSnapshot<'_> {
     type Api = StructureTemplateSnapshot;
