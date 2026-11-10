@@ -1539,6 +1539,25 @@ fn cargo(rust: &Toolchain, dir: &Path, subcommand: &str) -> Command {
     cmd
 }
 
+fn read_lock(dir: &Path) -> Result<String, String> {
+    let path = dir.join("Cargo.lock");
+    fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The packages Horizon's own `Cargo.lock` in `source` downloads.
+fn horizon_lock(source: &Path) -> Result<std::collections::BTreeSet<crates::Locked>, String> {
+    crates::downloaded(&read_lock(source)?)
+}
+
+/// Refuse the crates the mods ask for that Horizon's `Cargo.lock` lacks, from the lock file alone:
+/// the resolution that follows is offline and could only fail on them without saying why.
+fn refuse_unlocked(source: &Path, wanted: &[crates::Wanted]) -> Result<(), String> {
+    match crates::refused(&horizon_lock(source)?, None, wanted, &[]) {
+        Some(why) => Err(why),
+        None => Ok(()),
+    }
+}
+
 /// Check staged crates against Horizon's own Cargo.lock before fetching dependencies.
 /// Their requested packages and every downloaded package must belong to that lock.
 fn lock_crates(
@@ -1548,12 +1567,8 @@ fn lock_crates(
     mods: &[Bundle],
     wanted: &[crates::Wanted],
 ) -> Result<(), String> {
-    let read = |dir: &Path| {
-        let path = dir.join("Cargo.lock");
-        fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
-    };
-    let horizon = crates::downloaded(&read(source)?)?;
-    let staged_lock = read(stage)?;
+    let horizon = horizon_lock(source)?;
+    let staged_lock = read_lock(stage)?;
     crates::check_game_graph(stage, &staged_lock)?;
     let staged = crates::downloaded(&staged_lock)?;
     let api_ids: Vec<&str> = mods.iter().map(|m| m.manifest.id.as_str()).collect();
@@ -2237,6 +2252,7 @@ fn pipeline(
             })
             .collect();
         let wanted = crates::wanted(&fresh, &paths)?;
+        refuse_unlocked(&source, &wanted)?;
         if has_api {
             // Add path packages to Cargo.lock before the locked dependency check.
             let mut metadata = cargo(&rust, &fresh, "metadata");
@@ -2695,6 +2711,60 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn a_crate_the_game_does_not_lock_is_refused_from_the_lock_file_alone() {
+        let folder = tempfile::tempdir().unwrap();
+        let source = folder.path().join("source");
+        let krate = folder
+            .path()
+            .join("stage")
+            .join(crates::DIR)
+            .join("farmers_delight");
+        let cargo_home = folder.path().join("cargo-home");
+        for dir in [&source, &krate, &cargo_home] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        fs::write(
+            source.join("Cargo.lock"),
+            "[[package]]
+name = \"zip\"
+version = \"9.1.3\"
+source = \"registry+x\"
+",
+        )
+        .unwrap();
+        let stage = folder.path().join("stage");
+        let wanted = |requirement: &str| {
+            fs::write(
+                krate.join("Cargo.toml"),
+                format!(
+                    "[package]
+name = \"farmers_delight\"
+version = \"0.1.0\"
+[dependencies]
+zip = \"{requirement}\"
+"
+                ),
+            )
+            .unwrap();
+            crates::wanted(&stage, &std::collections::BTreeMap::new()).unwrap()
+        };
+        // The managed Cargo home is empty: the decision can't come from downloaded crates.
+        let error = refuse_unlocked(&source, &wanted("2")).unwrap_err();
+        assert!(
+            error.starts_with("farmers_delight needs zip 2, which isn't in Horizon's Cargo.lock."),
+            "{error}"
+        );
+        assert!(
+            error.contains("must be versions the game already locks"),
+            "{error}"
+        );
+        assert!(error.ends_with("Horizon locks zip 9.1.3."), "{error}");
+        assert_eq!(fs::read_dir(&cargo_home).unwrap().count(), 0);
+        // The version the game locks is admitted.
+        refuse_unlocked(&source, &wanted("9")).unwrap();
+    }
 
     #[test]
     fn source_archive_escape_is_refused_without_writing_outside() {

@@ -15,8 +15,12 @@ the launcher supplies the checked paths needed for the game and declared mod dep
 version requirement (`crc32fast = "1"`, `{ version, features, default-features, optional }`); each
 must already be in Horizon's lock file in a matching version. The launcher checks every downloaded
 package in the staged lock against Horizon's: name, version, source and checksum. Only the staged
-workspace packages are added. A missing crate or a feature that introduces an unlocked dependency
-stops the build; the game still builds with `--locked`.
+workspace packages are added. A crate the lock lacks, or has only in a version your requirement
+doesn't accept (`zip = "2"` against a locked `zip` 9.1.3), stops the build before Cargo resolves anything,
+with a message naming the crate and requirement and the versions Horizon locks; nothing is downloaded
+for it, because a mod can't bring dependencies of its own. Change the requirement to a locked version. A
+feature that introduces an unlocked dependency stops the build too; the game still builds with
+`--locked`.
 
 Crates included only for mods are listed as optional dependencies in
 `crates/horizon-mod-deps/Cargo.toml`: `mysql` 27 (blocking MariaDB/MySQL, with

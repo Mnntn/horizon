@@ -4,6 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use crate::i18n::trf;
+
 /// Where the launcher stages the mods' crates.
 pub(super) const DIR: &str = "native-api";
 
@@ -376,8 +378,9 @@ fn is_link_or_junction(metadata: &fs::Metadata) -> bool {
 }
 
 /// Why a mod's crates can't build with Horizon's lock file `horizon`: a crate they name that it
-/// lacks (checked before Cargo, which would look for it online), or a package the updated lock
-/// `staged` has that Horizon's lacks or has in another version. None when they fit.
+/// lacks, or at no version they accept (checked before Cargo, whose offline resolution would
+/// fail on it, or look online), or a package the updated lock `staged` has that Horizon's lacks
+/// or has in another version. None when they fit.
 pub(super) fn refused(
     horizon: &BTreeSet<Locked>,
     staged: Option<&BTreeSet<Locked>>,
@@ -385,14 +388,25 @@ pub(super) fn refused(
     api_ids: &[&str],
 ) -> Option<String> {
     let why = |mod_id: &str, name: &str, version: &str| {
-        format!(
-            "{mod_id} needs {name} {version}, which isn't in Horizon's Cargo.lock. A native mod's crate can use only the crates Horizon itself uses, in the versions its Cargo.lock has."
-        )
+        let mut text = trf(
+            "{mod_id} needs {name} {version}, which isn't in Horizon's Cargo.lock. A native mod's registry dependencies must be versions the game already locks: its crate can use only the crates Horizon itself uses, in the versions its Cargo.lock has.",
+            &[("mod_id", mod_id), ("name", name), ("version", version)],
+        );
+        let locked: Vec<&str> = horizon
+            .iter()
+            .filter(|l| l.name == name)
+            .map(|l| l.version.as_str())
+            .collect();
+        if !locked.is_empty() {
+            text.push(' ');
+            text.push_str(&trf(
+                "Horizon locks {name} {versions}.",
+                &[("name", name), ("versions", &locked.join(", "))],
+            ));
+        }
+        text
     };
-    if let Some(w) = wanted
-        .iter()
-        .find(|w| !horizon.iter().any(|l| l.name == w.name))
-    {
+    if let Some(w) = wanted.iter().find(|w| !fits(horizon, w)) {
         return Some(why(&w.mod_id, &w.name, &w.version));
     }
     let added = staged?.difference(horizon).next()?;
@@ -412,6 +426,19 @@ pub(super) fn refused(
     }
     mods.dedup();
     Some(why(&mods.join(", "), &added.name, &added.version))
+}
+
+/// Whether Horizon's lock has `wanted`'s crate in a version it accepts. A requirement Cargo's
+/// semver doesn't parse is left to Cargo to report.
+fn fits(horizon: &BTreeSet<Locked>, wanted: &Wanted) -> bool {
+    let requirement = semver::VersionReq::parse(&wanted.version).ok();
+    horizon.iter().any(|locked| {
+        locked.name == wanted.name
+            && requirement.as_ref().is_none_or(|requirement| {
+                semver::Version::parse(&locked.version)
+                    .map_or(true, |version| requirement.matches(&version))
+            })
+    })
 }
 
 /// A Cargo error (`run`'s) said plainly when it is `--locked` refusing to change the lock file:
@@ -674,6 +701,20 @@ checksum = "def"
             err.starts_with("bake needs rand 0.9, which isn't in Horizon's Cargo.lock"),
             "{err}"
         );
+        // In the lock, but at no version the mod accepts: refused the same way, naming what
+        // Horizon locks.
+        let err = refused(&horizon, None, &[wants("bake", "serde_json", "^2")], &[]).unwrap();
+        assert!(
+            err.starts_with("bake needs serde_json ^2, which isn't in Horizon's Cargo.lock"),
+            "{err}"
+        );
+        assert!(err.ends_with("Horizon locks serde_json 1.0.140."), "{err}");
+        assert!(
+            err.contains("must be versions the game already locks"),
+            "{err}"
+        );
+        let tilde = [wants("bake", "serde_json", "~1.0.100")];
+        assert_eq!(refused(&horizon, None, &tilde, &[]), None);
         // In the lock, but the update had to change its version.
         let newer = LOCK.replace("1.0.140", "1.0.145");
         let err = refused(&horizon, Some(&downloaded(&newer).unwrap()), &ok, &[]).unwrap();

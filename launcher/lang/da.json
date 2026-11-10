@@ -1388,5 +1388,7 @@
   "{version} is not an installed base. Choose an installed release, Nightly or local unsigned developer build.": "{version} is not an installed base. Choose an installed release, Nightly or local unsigned developer build.",
   "Source interrupted: {error}": "Source interrupted: {error}",
   "Could not unpack the source: {error}": "Could not unpack the source: {error}",
-  "The source archive contains a path outside its folder.": "The source archive contains a path outside its folder."
+  "The source archive contains a path outside its folder.": "The source archive contains a path outside its folder.",
+  "{mod_id} needs {name} {version}, which isn't in Horizon's Cargo.lock. A native mod's registry dependencies must be versions the game already locks: its crate can use only the crates Horizon itself uses, in the versions its Cargo.lock has.": "{mod_id} needs {name} {version}, which isn't in Horizon's Cargo.lock. A native mod's registry dependencies must be versions the game already locks: its crate can use only the crates Horizon itself uses, in the versions its Cargo.lock has.",
+  "Horizon locks {name} {versions}.": "Horizon locks {name} {versions}."
 }
