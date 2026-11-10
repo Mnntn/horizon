@@ -379,7 +379,7 @@ fn validate_sibling_path(
 
 /// `symlink_metadata` reports links without following them. Windows junctions are reparse points
 /// as well, so reject the reparse attribute even if the standard file type is not a symlink.
-fn is_link_or_junction(metadata: &fs::Metadata) -> bool {
+pub(super) fn is_link_or_junction(metadata: &fs::Metadata) -> bool {
     if metadata.file_type().is_symlink() {
         return true;
     }

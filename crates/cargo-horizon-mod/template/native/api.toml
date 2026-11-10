@@ -5,5 +5,5 @@ edition = "2024"
 
 [dependencies]
 # The launcher points this at the Horizon source it builds the game from. Any other
-# dependency must be a crate and version in Horizon's Cargo.lock.
+# registry dependency must be pinned with `horizon-launcher native-lock .` before building.
 horizon-mod-api = { git = "https://github.com/arismoko/horizon"{rev} }

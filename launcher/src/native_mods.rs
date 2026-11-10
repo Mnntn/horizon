@@ -35,6 +35,7 @@ mod inject_cache;
 mod inject_text;
 mod internals;
 mod internals_sync;
+mod registry_generate;
 mod registry_lock;
 pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
 mod isolate;
@@ -659,6 +660,16 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
         ));
     }
     Ok(found)
+}
+
+/// Generate only registry pins; never compiles source or modifies manifests.
+pub fn registry_lock(folder: &Path, update: bool) -> Result<(), String> {
+    let bundles = bundles(folder)?;
+    if bundles.len() != 1 {
+        return Err("native-lock requires one mod folder".into());
+    }
+    fs::create_dir_all(root()).map_err(|e| e.to_string())?;
+    registry_generate::generate(&bundles[0], update)
 }
 
 fn scan_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {

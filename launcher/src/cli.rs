@@ -798,6 +798,13 @@ enum Cmd {
         #[arg(long, value_parser = parse_storage_row)]
         clear: Option<ClearStorage>,
     },
+    /// Generate the registry-only Cargo.lock for one native mod, without executing mod code
+    NativeLock {
+        folder: PathBuf,
+        /// Explicitly replace an existing lock with newly resolved registry pins
+        #[arg(long)]
+        update_lock: bool,
+    },
     /// Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod projects against the instance's exact
     /// Horizon source revision with the launcher's own Rust, as the version the instance then
     /// plays. Not sandboxed: the mods' code runs with your rights
@@ -1335,6 +1342,10 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                 }
             }
         }
+        Cmd::NativeLock {
+            folder,
+            update_lock,
+        } => native_mods::registry_lock(&folder, update_lock)?,
         Cmd::NativeBuild {
             sync_internals,
             catalog,

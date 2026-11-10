@@ -385,6 +385,7 @@ pub fn source_file(name: &str) -> bool {
         return false;
     }
     name == "Cargo.toml"
+        || name == "Cargo.lock"
         || name == "build.rs"
         || (name.starts_with("src/") && (name.ends_with(".rs") || name.ends_with(".toml")))
         || (!name.contains('/')
