@@ -384,6 +384,7 @@ pub fn main() -> horizon_client::Result<()> {
                     maps: None,
                 };
                 let env = Env {
+                    crafting_remainder: None,
                     player: None,
                     player_entity_id: None,
                     loop_context: &crate::test_resources::loop_context(

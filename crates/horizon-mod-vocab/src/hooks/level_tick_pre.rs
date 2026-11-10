@@ -2,7 +2,7 @@
 // catalog-order: 0010
 
 pub trait Hooks {
-    /// Before an authoritative server level's tick pass. `dimension` is its ID.
-    #[hook(side = "server", contract = "listen", neoforge = "LevelTickEvent.Pre")]
+    /// Before a level's tick pass on either logical side. `level` identifies the level.
+    #[hook(side = "both", contract = "listen", neoforge = "LevelTickEvent.Pre")]
     fn level_tick_pre();
 }

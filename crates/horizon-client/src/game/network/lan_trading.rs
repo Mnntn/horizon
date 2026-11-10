@@ -291,6 +291,7 @@ impl Game<'_> {
         let g = &host.hub.guests[gi];
         let (player_uuid, player_entity_id) = (g.uuid, g.entity_id);
         let env = Env {
+            crafting_remainder: Some(self),
             player: Some(player_uuid),
             player_entity_id: Some(player_entity_id),
             loop_context: &self.loop_context,

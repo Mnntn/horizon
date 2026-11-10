@@ -227,13 +227,22 @@ pub fn route<'a>(
             at: inject.at.clone(),
         }));
     };
-    if point.hash != inject.hash {
+    // Another mod's function moves with that mod's version, not the game's pin, so nothing
+    // records a hash for it: the declaration must carry one.
+    let Some(pinned) = &inject.hash else {
+        return Err(Refusal::Inject(InjectError::Invalid {
+            id,
+            field: "hash",
+            fix: "an injection at another mod's point pins its hash; add it with `cargo horizon-mod inject add`",
+        }));
+    };
+    if &point.hash != pinned {
         return Err(Refusal::Changed(Box::new(Changed {
             id,
             library: library.id.to_owned(),
             version: library.version.to_owned(),
             at: inject.at.clone(),
-            pinned: inject.hash.clone(),
+            pinned: pinned.clone(),
             installed: point.hash.clone(),
             signature: point.signature.clone(),
         })));
@@ -270,6 +279,18 @@ pub fn route<'a>(
                 NoSlotReason::NotListed
             },
             declaration: format!("{}: a mod point has head and return places only", inject.at),
+        }));
+    }
+    // An internals replace needs the point's raw outcome shape, which the mod point catalog
+    // doesn't record; routed as a head it would run beside the body instead of replacing it.
+    if !api && inject.kind == super::Kind::Replace {
+        return Err(Refusal::Inject(InjectError::NoSlot {
+            id,
+            reason: NoSlotReason::KindHasNoSlot,
+            declaration: format!(
+                "{}: a mod point takes an api replace only; use access = \"api\"",
+                inject.at
+            ),
         }));
     }
     match super::route(

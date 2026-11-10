@@ -263,16 +263,46 @@ impl Game<'_> {
         };
         let mut drops = Vec::new();
         let (lit, burning, smelted, smelting, fueled) = {
-            let Some(BlockEntity::Furnace(f)) = self.world.block_entities.get_mut(&pos) else {
+            let needs_part = mod_api::__private::has_part_hook(mod_api::HookId::CraftingRemainder)
+                && matches!(self.world.block_entities.get(&pos), Some(BlockEntity::Furnace(f))
+                    if f.lit_remaining <= 1 && f.items[1].as_ref().is_some_and(|s|
+                        mod_api::__private::item_listens(mod_api::HookId::CraftingRemainder, &s.item)));
+            let lit = if needs_part {
+                let Some(BlockEntity::Furnace(original)) = self.world.block_entities.get(&pos)
+                else {
+                    return Ok(());
+                };
+                let mut furnace = original.clone();
+                let lit = furnace.tick(
+                    &self.loop_context,
+                    world_recipes!(self),
+                    world_items!(self),
+                    self.res.providers(),
+                    &mut drops,
+                    &|s| self.crafting_remainder(s),
+                );
+                self.world
+                    .block_entities
+                    .insert(pos, BlockEntity::Furnace(furnace));
+                lit
+            } else {
+                let Some(BlockEntity::Furnace(furnace)) = self.world.block_entities.get_mut(&pos)
+                else {
+                    return Ok(());
+                };
+                let items = world_items!(self);
+                furnace.tick(
+                    &self.loop_context,
+                    world_recipes!(self),
+                    items,
+                    self.res.providers(),
+                    &mut drops,
+                    &|s| crate::crafting::CraftingRemainder::crafting_remainder(items, s),
+                )
+            };
+            let Some(BlockEntity::Furnace(f)) = self.world.block_entities.get(&pos) else {
                 return Ok(());
             };
-            let lit = f.tick(
-                &self.loop_context,
-                world_recipes!(self),
-                world_items!(self),
-                self.res.providers(),
-                &mut drops,
-            );
             let burning = before.1.filter(|_| f.lit_remaining > 0);
             let smelted = f.items[2]
                 .as_ref()

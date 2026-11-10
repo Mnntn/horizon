@@ -36,6 +36,7 @@ fn entries() -> Vec<Internal> {
 }
 fn declaration(selector: &str, ordinal: Option<usize>) -> Declaration {
     Declaration {
+        expression: None,
         local: None,
         target: "horizon_client::game::Game::run".into(),
         selector: selector.into(),
@@ -71,6 +72,7 @@ fn site_rewrite_preserves_method_path_closure_and_question_mark_results() {
         internal("lower::make", "fn", "fn make() -> Made"),
     ];
     let request = Declaration {
+        expression: None,
         local: None,
         target: "lower::lower_run".into(),
         selector: "make".into(),
@@ -480,6 +482,7 @@ fn modify_local_executes_real_binding_at_call_boundary() {
             ),
         ] {
             let request = Declaration {
+                expression: None,
                 target: "fixture::f".into(),
                 selector: "fixture::sink".into(),
                 ordinal: Some(0),
@@ -582,6 +585,7 @@ fn modify_local_refuses_uncertain_bindings_by_name() {
         ),
     ] {
         let request = Declaration {
+            expression: None,
             target: "fixture::f".into(),
             selector: "fixture::sink".into(),
             ordinal: Some(0),
@@ -648,6 +652,7 @@ fn modify_local_refuses_pattern_borrows_uninitialized_and_inferred_bindings() {
     ] {
         for after in [false, true] {
             let request = Declaration {
+                expression: None,
                 target: "fixture::f".into(),
                 selector: "fixture::sink".into(),
                 ordinal: Some(0),
@@ -675,6 +680,7 @@ fn modify_local_refuses_pattern_borrows_uninitialized_and_inferred_bindings() {
     }
     // An after position also scans the selected call's argument expressions.
     let request = Declaration {
+        expression: None,
         target: "fixture::f".into(),
         selector: "fixture::sink".into(),
         ordinal: Some(0),
@@ -698,4 +704,178 @@ fn modify_local_refuses_pattern_borrows_uninitialized_and_inferred_bindings() {
         error.to_string(),
         "local fixture: fixture::f: local `n`: binding is borrowed across the position"
     );
+}
+
+fn expression(expr: &str, ty: &str, nth: usize) -> Declaration {
+    Declaration {
+        expression: Some(Expression {
+            ty: ty.into(),
+            origin: "example:reach".into(),
+        }),
+        local: None,
+        target: "horizon_client::game::Game::run".into(),
+        selector: expr.into(),
+        ordinal: Some(nth),
+        ctx: String::new(),
+        origin: "example:reach".into(),
+    }
+}
+
+#[test]
+fn an_expression_site_wraps_one_read_and_keeps_its_value_when_nothing_listens() {
+    // Two `4` reads (one unsuffixed, one in a borrow), an assignment's place and a receiver,
+    // which a value can't stand in for, and a field read.
+    let source = "pub struct Game { pub value: u32 } impl Game { fn step(&mut self, value: u32) -> u32 { value } pub fn run(&mut self) -> Result<u32, ()> { let far = 4; let near = &4; self.value = 4; let n = 4u32.max(1); let k = 2u32; Ok(far + *near + n + self.value + 4 + k) } } const fn add(value: u32) -> u32 { value }";
+    let staged = |declarations: &[Declaration]| {
+        super::rewrite(
+            source,
+            "horizon_client::game",
+            &entries(),
+            declarations,
+            true,
+        )
+    };
+    // The reads are `far = 4`, the value assigned to `self.value` and the last `4`; `&4`, the
+    // assignment's place and `4u32` (another literal) are not.
+    let (_, first) = staged(&[expression("4", "u32", 0)]).unwrap();
+    let (rewritten, last) = staged(&[expression(" 4 ", "u32", 2)]).unwrap();
+    assert_ne!(first[0].ctx, last[0].ctx);
+    assert_eq!(
+        (
+            last[0].call.as_str(),
+            last[0].output.as_str(),
+            last[0].receiver.as_str()
+        ),
+        ("4", "u32", "()")
+    );
+    let marker = super::super::expression::marker(&last[0].name);
+    assert!(
+        rewritten.contains(&format!("let {marker} : u32 = 4 ;")),
+        "{rewritten}"
+    );
+    let lost = staged(&[expression("4", "u32", 3)])
+        .unwrap_err()
+        .to_string();
+    assert!(lost.contains("expr matched no read at that nth"), "{lost}");
+    let mut moved = expression("4", "u32", 0);
+    moved.ctx = last[0].ctx.clone();
+    assert!(matches!(
+        staged(&[moved]).unwrap_err().cause,
+        Cause::Identity(Refusal::Moved(2))
+    ));
+    let mut gone = expression("4", "u32", 0);
+    gone.ctx = "changed".into();
+    let error = staged(&[gone]).unwrap_err().to_string();
+    assert!(
+        error.contains(&format!("nth = 2, ctx = \"{}\"", last[0].ctx)),
+        "{error}"
+    );
+    // A field read, and the refusals that need no compiler.
+    let (_, field) = staged(&[expression("self.value", "u32", 0)]).unwrap();
+    assert_eq!(field[0].call, "self.value");
+    for (expr, ty, why) in [
+        ("2u32", "u64", "is `u32`, but its declared type is `u64`"),
+        ("4", "String", "carries a copied scalar"),
+        (
+            "self.step(1)",
+            "u32",
+            "a literal, a constant's path or a field read",
+        ),
+    ] {
+        let error = staged(&[expression(expr, ty, 0)]).unwrap_err().to_string();
+        assert!(error.contains(why), "{expr}: {error}");
+    }
+    assert!(
+        rewrite(
+            source,
+            "horizon_client::game",
+            &entries(),
+            &[expression("4", "u32", 0)]
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("expression requires native source rebuilding")
+    );
+    // The lowered site compiles and keeps the read's value with the slot off and on (a stub
+    // `site!` calls the original).
+    let fixture = format!(
+        r#"
+        extern crate self as mod_points;
+        extern crate self as horizon_mod_api_macros;
+        pub enum SiteId {{ {name} }}
+        pub mod __private {{ pub static SITES: [std::sync::atomic::AtomicBool; 1] = [const {{ std::sync::atomic::AtomicBool::new(false) }}; 1]; }}
+        #[macro_export] macro_rules! site {{ ($wrap:ident, $place:ident, $listener:ident, $recv_ty:ident, $record:ident, $output:ident, $receiver:expr, $args:expr, $original:expr) => {{ ($original)($receiver, &mut $args) }}; }}
+        mod game {{ {rewritten} }}
+        fn main() {{
+            for enabled in [false, true] {{
+                __private::SITES[0].store(enabled, std::sync::atomic::Ordering::Relaxed);
+                let mut game = game::Game {{ value: 0 }};
+                assert_eq!(game.run(), Ok(22));
+            }}
+        }}
+    "#,
+        name = last[0].name
+    );
+    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target")
+        .join(format!("expression-rewrite-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let file = directory.join("fixture.rs");
+    let binary = directory.join("fixture");
+    fs::write(&file, fixture).unwrap();
+    let compiled = std::process::Command::new("rustc")
+        .args(["--edition=2024", "-Awarnings"])
+        .arg(&file)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    assert!(
+        std::process::Command::new(binary)
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn string_literals_differing_only_in_spaces_are_separate_reads() {
+    let source = "pub struct Game { pub value: u32 } impl Game { pub fn run(&mut self) -> Result<u32, ()> { let a = \"a b\"; let b = \"ab\"; let c = \" \"; let d = \"\"; Ok((a.len() + b.len() + c.len() + d.len()) as u32) } }";
+    let staged = |expr: &str, nth: usize| {
+        super::rewrite(
+            source,
+            "horizon_client::game",
+            &entries(),
+            &[expression(expr, "&'static str", nth)],
+            true,
+        )
+    };
+    let mut contexts = Vec::new();
+    for literal in ["\"a b\"", "\"ab\"", "\" \"", "\"\""] {
+        let (rewritten, sites) = staged(literal, 0).unwrap();
+        assert_eq!(sites[0].call, literal);
+        let marker = super::super::expression::marker(&sites[0].name);
+        assert!(
+            rewritten.contains(&format!("{marker} : & 'static str = {literal} ;")),
+            "{literal}: {rewritten}"
+        );
+        // Each literal is one read: no second one at nth 1.
+        assert!(staged(literal, 1).is_err(), "{literal}");
+        contexts.push(sites[0].ctx.clone());
+    }
+    contexts.sort();
+    contexts.dedup();
+    assert_eq!(contexts.len(), 4);
+    // Spacing between tokens still never decides a match.
+    assert_eq!(
+        super::super::expression::spelling("self . value").unwrap(),
+        "self.value"
+    );
+    assert_eq!(super::super::expression::spelling("- 1").unwrap(), "-1");
 }

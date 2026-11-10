@@ -275,6 +275,7 @@ mod tests {
             who_lookup: None,
             others_grid: None,
             others_index: None,
+            passenger_objects: &[],
             others_villagers: None,
             others_solid: None,
             daylight: true,

@@ -1638,6 +1638,7 @@ mod tests {
                 set: 0,
                 behaviour: None,
                 provider: None,
+                group: None,
             },
         );
         engine.set_sprites.push(vec![10, 11, 12]);
@@ -2217,6 +2218,7 @@ mod tests {
                 set: 0,
                 behaviour: None,
                 provider: None,
+                group: None,
             },
         );
         engine.set_sprites.push(vec![10]);

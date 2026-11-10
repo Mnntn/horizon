@@ -1,8 +1,8 @@
 //! Checked wire decoding for opaque API values.
 use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::{
-    BlockEntityTypeKey, BlockKey, BoolGameRuleKey, DimensionKey, EffectKey, FluidKey, ItemKey,
-    TagKey, UnresolvedFluid,
+    BlockEntityTypeKey, BlockKey, BoolGameRuleKey, DimensionKey, EffectKey, EnchantmentKey,
+    EntityTypeKey, FluidKey, ItemKey, MenuKey, TagKey, UnresolvedFluid,
 };
 
 impl Wire for crate::OwnProvider {
@@ -152,7 +152,7 @@ layout_fields!("slot" => $width);
         }
     )+};
 }
-slot_keys!(u32; BlockEntityTypeKey, BlockKey, BoolGameRuleKey, DimensionKey, EffectKey, FluidKey, ItemKey, crate::client::particle_keys::ParticleKey, TagKey);
+slot_keys!(u32; BlockEntityTypeKey, BlockKey, BoolGameRuleKey, DimensionKey, EffectKey, EnchantmentKey, EntityTypeKey, FluidKey, ItemKey, MenuKey, crate::client::particle_keys::ParticleKey, TagKey);
 slot_keys!(u64; UnresolvedFluid);
 
 impl Wire for crate::Identifier {

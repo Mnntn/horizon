@@ -53,7 +53,11 @@ pub fn main() -> horizon_client::Result<()> {
             stand.ingredient = (f[12] != "-").then(|| Arc::<str>::from(f[12]));
             let mut brews = 0;
             for _ in 0..ticks {
-                brews += stand.tick(&brewing, &items, &providers).brewed as u32;
+                brews += stand
+                    .tick(&brewing, &items, &providers, &|s| {
+                        horizon_client::crafting::CraftingRemainder::crafting_remainder(&items, s)
+                    })
+                    .brewed as u32;
             }
             let bits: String = stand.items[..3]
                 .iter()

@@ -121,7 +121,10 @@ pub struct Internal {
     /// The catalog's member kind, required when several kinds share the path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    pub hash: String,
+    /// Optional pinning: the catalog fingerprint `internals add` writes. Absent, the build takes
+    /// it from the pinned game's catalog, which `[native] horizon` fixes exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
 }
 
 /// A support module merged into a game crate, forwarded as horizon-mixins'
@@ -210,7 +213,7 @@ impl Internal {
         let mut paths = std::collections::HashSet::new();
         for internal in internals {
             if internal.path.is_empty()
-                || internal.hash.is_empty()
+                || internal.hash.as_ref().is_some_and(String::is_empty)
                 || internal.kind.as_ref().is_some_and(|kind| kind.is_empty())
                 || !paths.insert((&internal.path, &internal.kind))
             {
@@ -226,6 +229,16 @@ impl Internal {
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
         let m: Manifest = toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
+        if m.wasm.is_some()
+            && let Some(field) = m.inject.iter().find(|i| i.kind == inject::Kind::Field)
+        {
+            return Err(inject::InjectError::NoSlot {
+                id: format!("{}:{}", m.id, field.id),
+                reason: inject::NoSlotReason::FieldRequiresSource,
+                declaration: format!("slots/{}.txt: type {}", m.id, field.at),
+            }
+            .to_string());
+        }
         Internal::check_all(&m.internals)?;
         if m.wasm.is_some()
             && m.internals.is_empty()
@@ -1169,7 +1182,7 @@ capabilities = ["registries"]
         let untyped = Internal {
             path: "Game".into(),
             kind: None,
-            hash: "1234".into(),
+            hash: Some("1234".into()),
         };
         assert!(!toml::to_string(&untyped).unwrap().contains("kind"));
     }
@@ -1650,7 +1663,7 @@ issues = \"http://example.org/issues\"
         ))
         .unwrap();
         assert!(parsed.native.is_none());
-        assert_eq!(parsed.internals[0].hash, "world-hash");
+        assert_eq!(parsed.internals[0].hash.as_deref(), Some("world-hash"));
 
         for wrong in [
             "internals=[{path='',hash='h'}]",

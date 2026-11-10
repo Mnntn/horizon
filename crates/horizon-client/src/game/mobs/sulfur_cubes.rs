@@ -241,9 +241,16 @@ impl Game<'_> {
         {
             return;
         }
+        // Vanilla calls primeWhenOnPoweredPosition from SulfurCube.tick,
+        // not from a block-change callback. Frozen descendants never poll power.
+        let blocked = self.mobs_below_off_level();
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if m.species() != Species::SulfurCube || !m.alive() || sulfur_cube::primed(m) {
+            if blocked.contains(&m.id)
+                || m.species() != Species::SulfurCube
+                || !m.alive()
+                || sulfur_cube::primed(m)
+            {
                 continue;
             }
             let Some(&(_, fuse)) = primable.iter().find(|(id, _)| *id == m.id) else {
@@ -397,5 +404,56 @@ mod tests {
         assert_eq!(block_light(0x2050, 1), 0x2050);
         assert_eq!(block_light(0x2050, 7), 0x7050);
         assert_eq!(block_light(0x0070, 0), 0x0070);
+    }
+}
+
+#[cfg(test)]
+mod off_level_tests {
+    use super::*;
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn power_does_not_prime_a_frozen_sulfur_cube() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let power = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:redstone_block")
+                .unwrap();
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:sulfur_cube")
+                .unwrap()
+                .clone();
+            for (id, x, mount) in [(73, 1, Some(72)), (74, 4, None)] {
+                game.world.set(x, 79, 1, power).unwrap();
+                let mut m = horizon_client::mobs::Mob::new(
+                    id,
+                    kind.clone(),
+                    Vec3::new(f64::from(x), 80.0, 1.0),
+                    0.0,
+                );
+                m.extra.set_body(Some("minecraft:tnt".into()));
+                m.extra.armor_attributes = game.motion.attributes.create(&m.kind.id).map(Box::new);
+                sulfur_cube::adopt_body(&mut m);
+                m.extra.mount = mount;
+                game.mobs.push(m);
+            }
+            let ghost = horizon_client::mobs::Mob::new(72, kind, Vec3::ZERO, 0.0);
+            game.persist
+                .off_level
+                .insert(72, crate::game::persist::OffLevel::Mob(ghost));
+            let primable = game.sulfur_cubes_adopted_explosive();
+            game.sulfur_cube_power_priming(&primable);
+            assert!(!sulfur_cube::primed(game.mob_object(73).unwrap()));
+            assert!(sulfur_cube::primed(game.mob_object(74).unwrap()));
+        });
     }
 }

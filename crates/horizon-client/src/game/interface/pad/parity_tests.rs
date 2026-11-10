@@ -50,8 +50,28 @@ fn playing(test: impl FnOnce(&mut Game)) {
     test(&mut game);
 }
 
-/// Hold `button` on the pad, as a poll that saw it go down would.
+/// No window loop runs in these gameplay input tests.
+struct NoEventLoop;
+
+impl crate::game::event_loop::EventLoopCtl for NoEventLoop {
+    fn exit(&self) {
+        unreachable!("a gameplay pad press does not exit the event loop");
+    }
+
+    fn set_control_flow(&self, _: winit::event_loop::ControlFlow) {
+        unreachable!("a gameplay pad press does not change the event loop");
+    }
+}
+
+/// Hold `button` through the real press dispatcher, including its action ownership.
 fn pad_press(game: &mut Game, button: Button, action: &str) {
+    assert!(
+        game.settings
+            .controller
+            .actions_of(button)
+            .contains(&action)
+    );
+    game.pad.virtual_input = true;
     let mut state = PadState::default();
     // A trigger is held by how far it's pulled, not by a button bit.
     match button {
@@ -60,7 +80,13 @@ fn pad_press(game: &mut Game, button: Button, action: &str) {
         _ => state.set(button, true),
     }
     game.pad.edges.update(&state, 0.4);
-    game.pad_action(action, true).unwrap();
+    game.pad_button(&NoEventLoop, button, true).unwrap();
+}
+
+/// Release the sole held test button through the same dispatcher as its press.
+fn pad_release(game: &mut Game, button: Button) {
+    game.pad.edges.update(&PadState::default(), 0.4);
+    game.pad_button(&NoEventLoop, button, false).unwrap();
 }
 
 #[test]
@@ -105,7 +131,7 @@ fn pad_smooth_camera_binding_toggles_the_cinematic_camera() {
             .controller
             .bind("key.smoothCamera", Some(Button::Select));
         assert!(!game.smooth_camera);
-        pad_press(game, Button::Select, "key.smoothCamera");
+        game.pad_action("key.smoothCamera", true).unwrap();
         assert!(game.smooth_camera, "as its key does in play");
     });
 }
@@ -181,7 +207,9 @@ fn pad_number_actions_select_the_hotbar_as_their_keys_do() {
         game.settings
             .controller
             .bind("key.hotbar.3", Some(Button::DPadUp));
-        pad_press(game, Button::DPadUp, "key.hotbar.3");
+        // This tests the one-shot number action, not all actions sharing D-pad up
+        // (the default chat binding would open a screen before the number action).
+        game.pad_action("key.hotbar.3", true).unwrap();
         assert_eq!(game.hotbar_presses, [2]);
     });
 }
@@ -208,7 +236,7 @@ fn the_pads_attack_and_use_reach_what_the_mouse_tells_mods() {
         pad_press(game, Button::RightTrigger, "key.attack");
         assert!(game.mapping("key.attack").unwrap().unwrap().down);
         assert_eq!(game.native_clicks(), (1, 0));
-        game.pad_action("key.attack", false).unwrap();
+        pad_release(game, Button::RightTrigger);
         assert!(!game.mapping("key.attack").unwrap().unwrap().down);
         pad_press(game, Button::LeftTrigger, "key.use");
         assert!(game.mapping("key.use").unwrap().unwrap().down);
@@ -227,8 +255,7 @@ fn the_mouse_letting_go_leaves_what_the_pad_holds_and_back() {
             .unwrap();
         assert!(game.left, "the pad still holds the attack");
         // The pad let go, so its edges are no longer held either.
-        game.pad.edges.update(&PadState::default(), 0.4);
-        game.pad_action("key.attack", false).unwrap();
+        pad_release(game, Button::RightTrigger);
         assert!(!game.left);
 
         // The other way round: the mouse button is physically down.
@@ -236,8 +263,7 @@ fn the_mouse_letting_go_leaves_what_the_pad_holds_and_back() {
         game.mouse_mapping(MouseButton::Right, true, Source::Keyboard)
             .unwrap();
         pad_press(game, Button::LeftTrigger, "key.use");
-        game.pad.edges.update(&PadState::default(), 0.4);
-        game.pad_action("key.use", false).unwrap();
+        pad_release(game, Button::LeftTrigger);
         assert!(game.right, "the mouse still holds the use");
         game.physical_buttons.remove(&MouseButton::Right);
         game.mouse_mapping(MouseButton::Right, false, Source::Keyboard)
@@ -256,8 +282,7 @@ fn a_release_from_a_screen_can_not_strand_the_pads_attack() {
         game.left = false;
         pad_press(game, Button::RightTrigger, "key.attack");
         assert!(game.left);
-        game.pad.edges.update(&PadState::default(), 0.4);
-        game.pad_action("key.attack", false).unwrap();
+        pad_release(game, Button::RightTrigger);
         assert!(!game.left, "nothing is physically held");
     });
 }

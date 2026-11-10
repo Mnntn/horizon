@@ -75,9 +75,9 @@ fn internals_add_writes_pinned_hashes_and_preserves_the_rest_of_the_manifest() {
     success(&output);
     let manifest = project.manifest();
     assert_eq!(manifest.internals.len(), 2);
-    assert_eq!(manifest.internals[0].hash, "1111");
+    assert_eq!(manifest.internals[0].hash.as_deref(), Some("1111"));
     // A guarded alternative before the unconditional entry must not shadow it.
-    assert_eq!(manifest.internals[1].hash, "7777");
+    assert_eq!(manifest.internals[1].hash.as_deref(), Some("7777"));
     assert!(
         project
             .text()
@@ -174,7 +174,7 @@ fn internals_add_refuses_missing_gated_and_shape_only_paths_without_partial_edit
 fn update_diffs_signatures_refreshes_present_hashes_and_keeps_missing_declarations() {
     let project = Project::new(
         "update",
-        "internals = [\n  { path = 'horizon_client::game::Game', hash = '1111' }, # stable\n  { path = \"horizon_client::game::Game<'_>::reach\", hash = '2222' }, # reach\n  { path = 'horizon_client::game::Game::creative', hash = '3333' }, # removed\n  { path = 'horizon_client::game::conditional', hash = '8888' }, # gated now\n  { path = 'horizon_client::game::restored', hash = '0000' }, # back again\n]\n",
+        "internals = [\n  { path = 'horizon_client::game::Game', hash = '1111' }, # stable\n  { path = \"horizon_client::game::Game<'_>::reach\" }, # reach\n  { path = 'horizon_client::game::Game::creative', hash = '3333' }, # removed\n  { path = 'horizon_client::game::conditional', hash = '8888' }, # gated now\n  { path = 'horizon_client::game::restored', hash = '0000' }, # back again\n]\n",
     );
     let report = success(&project.run(&["update", "--horizon", NEW]));
     assert!(
@@ -201,9 +201,10 @@ fn update_diffs_signatures_refreshes_present_hashes_and_keeps_missing_declaratio
         manifest
             .internals
             .iter()
-            .map(|i| i.hash.as_str())
+            .map(|i| i.hash.as_deref().unwrap_or_default())
             .collect::<Vec<_>>(),
-        ["1111", "abcd", "3333", "8888", "9999"]
+        // `reach` has no hash: it follows the pin, reported but left without one.
+        ["1111", "", "3333", "8888", "9999"]
     );
     for comment in [
         "# stable",
@@ -237,7 +238,10 @@ fn table_declarations_keep_their_format_when_adding_and_refreshing() {
         "horizon_client::game::Game",
         "horizon_client::game::Game::creative",
     ]));
-    assert_eq!(project.manifest().internals[0].hash, "1111");
+    assert_eq!(
+        project.manifest().internals[0].hash.as_deref(),
+        Some("1111")
+    );
     assert!(project.text().contains("[[internals]] # the game"));
     assert!(project.text().contains("# fingerprint"));
     let report = success(&project.run(&["update", "--horizon", NEW]));
@@ -282,7 +286,7 @@ fn internals_add_requires_kind_for_ambiguous_paths_and_update_keeps_it() {
             success(&project.run(&["internals", "add", path, "--kind", kind]));
             let declaration = &project.manifest().internals[0];
             assert_eq!(declaration.kind.as_deref(), Some(kind));
-            assert_eq!(declaration.hash, "function");
+            assert_eq!(declaration.hash.as_deref(), Some("function"));
             success(&project.run(&["internals", "add", path, "--kind", "field"]));
             let before = project.text();
             success(&project.run(&["internals", "add", "--kind", kind, path]));
@@ -295,9 +299,9 @@ fn internals_add_requires_kind_for_ambiguous_paths_and_update_keeps_it() {
             let manifest = project.manifest();
             assert_eq!(manifest.internals.len(), 2);
             assert_eq!(manifest.internals[0].kind.as_deref(), Some(kind));
-            assert_eq!(manifest.internals[0].hash, "new-function");
+            assert_eq!(manifest.internals[0].hash.as_deref(), Some("new-function"));
             assert_eq!(manifest.internals[1].kind.as_deref(), Some("field"));
-            assert_eq!(manifest.internals[1].hash, "field");
+            assert_eq!(manifest.internals[1].hash.as_deref(), Some("field"));
         }
     }
 }
@@ -352,7 +356,7 @@ printf '%s\n' '[{"path":"Used","kind":"struct","signature":"struct Used","hash":
     assert!(report.contains("removed: Unused"));
     let manifest = project.manifest();
     assert_eq!(manifest.internals.len(), 1);
-    assert_eq!(manifest.internals[0].hash, "compiler");
+    assert_eq!(manifest.internals[0].hash.as_deref(), Some("compiler"));
     assert!(project.text().contains("# native settings"));
     let before = project.text();
     fs::write(&launcher, "#!/bin/sh\nprintf 'not JSON'\n").unwrap();

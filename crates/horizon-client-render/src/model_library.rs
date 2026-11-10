@@ -115,12 +115,20 @@ impl ParsedModels {
             pending.extend(model.referenced_models());
             models.insert(name, model);
         }
-        Ok(ModelLibrary::from_shared(models)?.with_assets(Arc::new(RootAssets(source.clone()))))
+        Ok(ModelLibrary::from_shared(models)?
+            .with_assets(Arc::new(RootAssets(source.clone())))
+            .with_loaders(Arc::new(crate::mod_model_loaders::ModLoaders)))
     }
     pub fn into_item_library(self) -> std::result::Result<Arc<ModelLibrary>, String> {
         let source = self.source;
         ModelLibrary::with_shared_item_generator(self.models)
-            .map(|library| Arc::new(library.with_assets(Arc::new(RootAssets(source)))))
+            .map(|library| {
+                Arc::new(
+                    library
+                        .with_assets(Arc::new(RootAssets(source)))
+                        .with_loaders(Arc::new(crate::mod_model_loaders::ModLoaders)),
+                )
+            })
             .map_err(|e| format!("item models: {e:?}"))
     }
 }

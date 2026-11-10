@@ -55,23 +55,28 @@ impl Game<'_> {
         found || self.entity_ids_off_walk().any(|e| e == id)
     }
 
+    /// Object ownership for persistence cleanup, never a level-query membership set.
+    pub(super) fn retained_entity_ids(&self) -> std::collections::HashSet<u32> {
+        let mut retained = self.live_entity_ids();
+        retained.extend(self.persist.off_level.keys().copied());
+        retained
+    }
+
     /// The attachments of entities that left the level, dropped: each tick
     /// while any entity has some. Only those entities are looked at, and
     /// nothing else of the entities' memory changes.
     pub(super) fn prune_entity_attachments(&mut self) {
-        let alive = self.live_entity_ids();
-        let gone: Vec<[i32; 4]> = self
+        let alive = self.retained_entity_ids();
+        let gone: Vec<u32> = self
             .persist
             .uuids
-            .iter()
-            .filter(|(id, uuid)| {
-                self.entity_attachments.contains_key(*uuid) && !alive.contains(*id)
-            })
-            .map(|(_, uuid)| *uuid)
+            .keys()
+            .copied()
+            .filter(|id| self.entity_attachments.contains_key(id) && !alive.contains(id))
             .collect();
-        for uuid in gone {
-            self.forget_entity_initialization(uuid);
-            self.entity_attachments.remove(&uuid);
+        for id in gone {
+            self.forget_entity_initialization(mod_api::Holder::Entity(id));
+            self.entity_attachments.remove(&id);
         }
     }
 
@@ -134,8 +139,7 @@ impl Game<'_> {
         ) {
             return Ok(());
         }
-        let uuid = self.uuid_for(id.get());
-        if !self.entity_attachments.contains_key(&uuid) {
+        if !self.entity_attachments.contains_key(&id.get()) {
             return Ok(());
         }
         let level = self
@@ -144,17 +148,17 @@ impl Game<'_> {
         let holder =
             mod_api::AttachmentHolder::Entity(mod_api::EntityRef::new(level.epoch(), id.get()));
         let index = self.attachment_indexes.entry(self.dim).or_default().clone();
-        let mut map = self.entity_attachments.remove(&uuid).unwrap();
+        let mut map = self.entity_attachments.remove(&id.get()).unwrap();
         self.with_resident_slot(&self.dim.key(), id, |slot| {
             if !slot.is_bound() {
                 slot.bind(&mut map, &index, holder);
             }
         });
-        self.entity_attachments.insert(uuid, map);
+        self.entity_attachments.insert(id.get(), map);
         Ok(())
     }
 
-    /// Where `holder`'s attachment map lives now: an entity's by its UUID, a player's where
+    /// Where `holder`'s attachment map lives now: an entity's by its object ID, a player's where
     /// their state is (swapped in for a guest's turn, or kept beside), the world's others.
     pub(super) fn attachment_slot(
         &mut self,
@@ -222,14 +226,13 @@ impl Game<'_> {
             {
                 return Err(AttachmentError::MissingHolder);
             }
-            let uuid = self.uuid_for(id);
             if access == AttachmentAccess::Store
                 && self.entity_initialization.active != Some(holder)
             {
-                self.entity_attachments.entry(uuid).or_default();
+                self.entity_attachments.entry(id).or_default();
                 self.bind_resident_entity_attachments(id)?;
             }
-            return Ok(self.entity_attachments.entry(uuid).or_default());
+            return Ok(self.entity_attachments.entry(id).or_default());
         }
         if let mod_api::Holder::Player(uuid) = holder {
             if self.entity_initialization.active != Some(holder)

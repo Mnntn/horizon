@@ -5,6 +5,7 @@
 #[cfg(test)]
 mod borrowed_panic_tests;
 mod borrowed_tick;
+mod death_tail;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
 
@@ -1126,6 +1127,7 @@ impl Game<'_> {
             leash_boats: &self.leash_boats,
             others_grid: None,
             others_index: None,
+            passenger_objects: &[],
             others_villagers: None,
             others_solid: None,
             daylight: self.dim != Dim::Nether && self.sky_darken() < 4,
@@ -1406,6 +1408,7 @@ impl Game<'_> {
     pub(super) fn tick_creature_entities(&mut self) -> Result<()> {
         // Its steps as spans for `horizon-report` (nothing is read while spans are off).
         let mut laps = horizon_client::spans::laps();
+        let blocked = self.mobs_below_off_level();
         let level_id = self.dim.id();
         if let Some(pending) = self.creatures.pending.get_mut(level_id)
             && (pending.refusal_logged || pending.retained_passes >= MAX_PENDING_MOB_PASSES)
@@ -1451,7 +1454,7 @@ impl Game<'_> {
             let mut i = 0;
             while let Some(m) = self.mobs.get(i) {
                 let (x, z) = (m.position.x.floor() as i32, m.position.z.floor() as i32);
-                if self.world.loaded(x, z) && ticking(x, z) {
+                if !blocked.contains(&m.id) && self.world.loaded(x, z) && ticking(x, z) {
                     let (id, kind) = (m.id, super::native_ticks::TickKind::Mob(m.kind.clone()));
                     if self.native_tick_pre_batch(&mut round, id, kind) {
                         self.sync_sleeping_mob(i);
@@ -1478,6 +1481,7 @@ impl Game<'_> {
         snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
         let mut events = std::mem::take(&mut self.creatures.event_buf);
         events.clear();
+        let passenger_objects = self.retained_passenger_snapshot(uuid);
         let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
         let primable = self.sulfur_cubes_adopted_explosive();
         let mut mobs = self.mobs.lift();
@@ -1523,6 +1527,8 @@ impl Game<'_> {
         let (lent, dispatch_panic) = self.tick_borrowed_creatures(borrowed_tick::BorrowedMobTick {
             mobs: &mut mobs,
             snapshot: &mut snapshot,
+            passenger_objects: &passenger_objects,
+            blocked: &blocked,
             events: &mut events,
             pushes: &mut pending.pushes,
             dead: &mut dead,
@@ -1728,25 +1734,6 @@ impl Game<'_> {
             self.particles.add(&options, [x, y, z], [xa, ya, za]);
         }
     }
-    /// The killing blow of a mob as the death hooks name it: its damage
-    /// type and the causing entity's id (0 for none).
-    fn mob_damage_source(&self, m: &Mob) -> (&'static str, u32) {
-        let (damage_type, attacker) = match m.last_damage {
-            Some((d, _)) => (source_damage_type(d), d.attacker),
-            None => ("minecraft:generic", None),
-        };
-        let attacker = match attacker {
-            Some(Who::Mob(id)) => id,
-            Some(Who::Player) => self
-                .last_hurt_by_player
-                .get(&m.id)
-                .and_then(|credit| self.resolve_player_credit(*credit))
-                .and_then(|conn| self.player_entity_id_by_connection(conn))
-                .map_or(0, |id| id as u32),
-            None => 0,
-        };
-        (damage_type, attacker)
-    }
     /// `LivingDeathEvent` for a mob whose health ran out: whether a native
     /// mod canceled the death. A canceled mob stays alive at 1 health.
     fn mob_death_canceled(&mut self, m: &Mob) -> bool {
@@ -1867,11 +1854,7 @@ impl Game<'_> {
             pos,
             source,
         );
-        self.create_wither_rose(m);
-        if m.species() == Species::CopperGolem {
-            // CopperGolem.dropEquipment: the preserved equipment too.
-            self.golem_drop_equipment(&mut dying);
-        }
+        self.finish_mob_death(m, &mut dying, source);
     }
     /// `AbstractCubeMob.remove`: split only as the dead body is removed.
     fn split_dead_cube(&mut self, mut dying: Mob) {
@@ -9503,92 +9486,8 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-mod mob_griefing_tests {
-    use super::super::native_entity_refs::tests::with_game;
-    use super::super::native_item_places::tests::{guest, open_to_lan};
-    use std::sync::{Arc, Mutex};
-
-    /// Denies griefing to the entities in `self.0`, and logs who was asked.
-    struct Deny(Vec<u32>, Arc<Mutex<Vec<(u32, bool)>>>);
-    #[mod_api::__subscriptions]
-    impl mod_api::Hooks for Deny {
-        fn entity_mob_griefing(
-            &self,
-            _: &dyn mod_api::Host,
-            event: &mut mod_api::EntityMobGriefingEvent,
-        ) {
-            self.1
-                .lock()
-                .unwrap()
-                .push((event.entity.id(), event.can_grief));
-            if self.0.contains(&event.entity.id()) {
-                event.can_grief = false;
-            }
-        }
-    }
-
-    /// `EntityMobGriefingEvent`: the mod's answer for one entity reaches the
-    /// game's checks and the mob AI's; another entity keeps the rule, and a
-    /// check with no entity reads the rule without asking.
-    #[test]
-    #[ignore = "needs prepared resources"]
-    fn a_mod_denies_one_entity_griefing() {
-        let heard = Arc::default();
-        let (denied, other) = (900, 901);
-        // Guest 5's entity id (`guest` gives `conn + 19`): a player the mod denies.
-        let denied_player = 24;
-        let mods = vec![mod_api::ModEntry::new(
-            "deny",
-            Box::new(Deny(vec![denied, denied_player], Arc::clone(&heard))),
-        )]
-        .into();
-        mod_api::testing::with_mods(mods, || {
-            with_game(|game| {
-                open_to_lan(game);
-                assert!(
-                    game.ui
-                        .rules
-                        .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
-                );
-                assert!(!game.can_entity_grief(Some(denied)));
-                assert!(game.can_entity_grief(Some(other)));
-                assert!(game.can_entity_grief(None));
-                let world = game.mob_world_base(&[]);
-                assert!(!world.can_grief(denied));
-                assert!(world.can_grief(other));
-                let asked = heard.lock().unwrap().clone();
-                assert_eq!(
-                    asked,
-                    [(denied, true), (other, true), (denied, true), (other, true)]
-                );
-                // A large fireball asks for its owner: the ghast the mod denies
-                // lights no fire and another ghast's does; a fireball sent back
-                // by the guest the mod denies lights none and another guest's
-                // does. A gone owner, or none, reads the rule without asking.
-                use super::Who;
-                let hub = &mut game.lan.as_mut().unwrap().hub;
-                hub.guests.push(guest(5));
-                hub.guests.push(guest(6));
-                heard.lock().unwrap().clear();
-                assert!(!game.large_fireball_fire(Some(Who::Mob(denied)), None));
-                assert!(game.large_fireball_fire(Some(Who::Mob(other)), None));
-                assert!(!game.large_fireball_fire(Some(Who::Player), Some(5)));
-                assert!(game.large_fireball_fire(Some(Who::Player), Some(6)));
-                assert!(game.large_fireball_fire(Some(Who::Player), Some(7)));
-                assert!(game.large_fireball_fire(None, None));
-                assert_eq!(
-                    *heard.lock().unwrap(),
-                    [
-                        (denied, true),
-                        (other, true),
-                        (denied_player, true),
-                        (25, true)
-                    ]
-                );
-            });
-        });
-    }
-}
+#[path = "mob_griefing_tests.rs"]
+mod mob_griefing_tests;
 
 #[cfg(test)]
 mod living_visibility_tests {
@@ -11758,6 +11657,7 @@ mod pearl_tests {
             who_lookup: None,
             others_grid: None,
             others_index: None,
+            passenger_objects: &[],
             others_villagers: None,
             others_solid: None,
             daylight: true,

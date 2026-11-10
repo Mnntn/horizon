@@ -8,6 +8,9 @@ use crate::{
 };
 use horizon_core::nbt::Tag;
 
+mod update;
+pub use update::UpdateRecipes;
+
 /// `HolderSet<Item>` on the network: a tag by name, or item ids.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HolderSet {
@@ -16,11 +19,14 @@ pub enum HolderSet {
 }
 impl HolderSet {
     pub fn read(r: &mut Reader) -> Result<Self> {
-        let n = r.varint()? - 1;
-        if n == -1 {
+        let n = r.varint()?;
+        if n == 0 {
             return Ok(Self::Tag(r.string(32767)?));
         }
-        let n = usize::try_from(n).map_err(|_| crate::Error::new("negative holder set size"))?;
+        let n = usize::try_from(n)
+            .ok()
+            .and_then(|n| n.checked_sub(1))
+            .ok_or_else(|| crate::Error::new("negative holder set size"))?;
         if n > r.remaining() {
             return Err(crate::Error::new("holder set larger than the packet"));
         }
@@ -140,7 +146,8 @@ impl SlotDisplay {
                             description: r.nbt()?,
                             decal: r.bool()?,
                         },
-                        id => TrimPattern::Id(id - 1),
+                        id if id > 0 => TrimPattern::Id(id - 1),
+                        _ => return Err(crate::Error::new("negative trim pattern holder")),
                     };
                     Self::SmithingTrim {
                         base,

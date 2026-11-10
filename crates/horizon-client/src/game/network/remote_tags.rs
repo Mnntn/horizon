@@ -49,6 +49,7 @@ impl Game<'_> {
             let tags = tags.iter().map(|(tag, ids)| (tag.clone(), members(ids)));
             items.set_tags(registry, tags.collect());
         }
+        super::class_tags::install(&mut items, self.res.facts());
         super::native_world_read::install_block_tags(self.block_tag_sets(&items));
         if let Some(r) = self.remote.as_mut() {
             r.tags = Some(items);

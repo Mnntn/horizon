@@ -38,8 +38,48 @@ pub use registry::{RegisterError, stop};
 ///
 /// The launcher's generated `main` and `cargo horizon-mod build --wasm` both emit it, so native
 /// and wasm mods share one contract.
+///
+/// An internals `replace` (native only) takes the same contract through the point's raw form:
+/// `replace!(internals constructor, outcome, receiver, mod_id, priority, inject_id, listener)`,
+/// where `constructor` is the mod facade's `raw::<point>` and `outcome` is the raw shape's
+/// `cancel` or `result`. The listener gets the real receiver (`receiver`, or `none` for a free or
+/// associated function) and the raw record, and returns the function's own return type. It runs
+/// after every API and internals head listener at the place, and a second replace there, of
+/// either tier, is refused.
 #[macro_export]
 macro_rules! replace {
+    (internals $constructor:path, cancel, receiver, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $constructor($id, |receiver, raw| {
+            $listener(receiver, raw);
+            *raw.cancel = true;
+        })
+        .ordered($priority, $inject)
+        .replacing()
+    };
+    (internals $constructor:path, cancel, none, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $constructor($id, |raw| {
+            $listener(raw);
+            *raw.cancel = true;
+        })
+        .ordered($priority, $inject)
+        .replacing()
+    };
+    (internals $constructor:path, result, receiver, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $constructor($id, |receiver, raw| {
+            let value = $listener(receiver, raw);
+            *raw.result = ::core::option::Option::Some(value);
+        })
+        .ordered($priority, $inject)
+        .replacing()
+    };
+    (internals $constructor:path, result, none, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $constructor($id, |raw| {
+            let value = $listener(raw);
+            *raw.result = ::core::option::Option::Some(value);
+        })
+        .ordered($priority, $inject)
+        .replacing()
+    };
     ($constructor:path, cancel, host, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
         $constructor($id, $priority, $inject, |host, args| {
             $listener(host, args);

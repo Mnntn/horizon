@@ -10,12 +10,22 @@ impl Game<'_> {
         creative: bool,
         fire: bool,
     ) -> bool {
+        let id = self.carts[i].id;
         let kind = self.carts[i].kind.id();
         let mut cancel = false;
         self.native_vehicle_damage(kind, &mut damage, &mut cancel);
         if cancel {
             return false;
         }
+        let Some(i) = self.carts.iter().position(|c| {
+            c.id == id
+                && !self
+                    .persist
+                    .removals
+                    .contains(&crate::game::commands::Target::Cart(id))
+        }) else {
+            return true;
+        };
         let destroyed = self.carts.update(i, |c| {
             c.hurt_dir = -c.hurt_dir;
             c.hurt_time = 10;
@@ -32,7 +42,15 @@ impl Game<'_> {
             if !tnt_prime {
                 self.eject_cart_mobs(i);
             }
-            let id = self.carts[i].id;
+            let Some(i) = self.carts.iter().position(|c| {
+                c.id == id
+                    && !self
+                        .persist
+                        .removals
+                        .contains(&crate::game::commands::Target::Cart(id))
+            }) else {
+                return true;
+            };
             if !tnt_prime {
                 self.release_vehicle_container(id);
             }
@@ -43,6 +61,18 @@ impl Game<'_> {
                     self.carts[i].position.z,
                 ];
                 self.native_vehicle_destroy(self.carts[i].kind.id(), at);
+            }
+            let Some(i) = self.carts.iter().position(|c| {
+                c.id == id
+                    && !self
+                        .persist
+                        .removals
+                        .contains(&crate::game::commands::Target::Cart(id))
+            }) else {
+                return true;
+            };
+            if !tnt_prime {
+                self.finish_destroyed_vehicle_riders(id, self.carts[i].position.y);
             }
             let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
             let mut c = if tnt_prime {

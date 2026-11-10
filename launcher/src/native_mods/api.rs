@@ -100,6 +100,11 @@ pub(super) fn main_rs(
             let place = point.place(injection.at_return);
             let entry = manifest.inject.iter().find(|entry| entry.id == injection.id)
                 .expect("unified point entry");
+            if entry.kind == horizon_mod_package::manifest::inject::Kind::Replace {
+                let replace = horizon_mod_point_emit::internals_replace(entry, &manifest.id, &point.emitted(), &format!("mod_{i}_internals::raw::{place}"), &format!("mod_{i}::{}", entry.with))
+                    .expect("internals replace checked");
+                return format!("        {replace}, // injection {:?}\n", injection.id);
+            }
             let order = format!(".ordered({}, {:?})", entry.priority, entry.id);
             format!("        mod_{i}_internals::raw::{place}({:?}, mod_{i}::{}){order}, // injection {:?}\n", manifest.id, injection.method, injection.id)
         })
@@ -749,13 +754,14 @@ mod tests {
                 local: None,
                 local_type: None,
                 position: None,
+                expr: None,
                 id: format!("listen_{index}"),
                 at: "game::Game<'_>::tick".into(),
                 kind,
                 with: format!("listen_{index}"),
                 access: Access::Api,
                 priority: 12,
-                hash: "pin".into(),
+                hash: Some("pin".into()),
                 call: None,
                 nth: None,
                 ctx: None,

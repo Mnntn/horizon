@@ -407,11 +407,11 @@ It mirrors the engine's staging pass (`horizon-mod-api-gen/src/points.rs`, `stag
 ### How it is built
 
 Built as stage P (the [how-to](../injections.md#mod-points-patching-another-mod) is the reference):
-1. Every point table, the game's and each mod crate's, is a `Table` in one registry (`mod_api::__private::points`). A listener carries its table, and the one seal sets every table that has listeners.
+1. Every point table, the game's and each mod crate's, is a `Table` in one registry (in the mod API's internal registration module). A listener carries its table, and the one seal sets every table that has listeners.
 2. `#[point(table = "…")]` expands against its table: the game's `mod_points` by default, a mod crate's generated `crate::__horizon_points` for a mod point. Mod points have no engine mirrors.
 3. `stage_mod` (`horizon-mod-api-gen/src/points/mod_crate.rs`) is the staging pass for a mod crate. `cargo horizon-mod build --wasm` runs it on every member, and the launcher on every native mod crate it compiles.
 4. The mod's catalog and the routing of an addon's injection to it (`horizon-mod-package`, `manifest::inject::mod_points`) are shared by every loader.
-5. The listened paths run out of line (`mod_api::__private::points::cold`), so an unlistened point costs a slot load and a branch at its head and one at its return.
+5. The listened paths run out of line (in the internal cold dispatch module), so an unlistened point costs a slot load and a branch at its head and one at its return.
 6. Wasm group routing (a wasm addon's listeners registered in its library's table inside the group) follows in its own change.
 
 ### Mixed native and wasm

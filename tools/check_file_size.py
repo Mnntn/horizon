@@ -5,9 +5,11 @@ Big files slow incremental builds (game.rs, gfx.rs). Any file may grow up to the
 stay the same. A renamed file is compared with its old name, and a new file counts from zero. Files under
 third_party/ and files that say they are generated (`@generated` in their first lines) are not checked. There is no
 general exemption list. The sync-only ratchet in tools/file_size_baseline.txt records
-restored upstream growth at its exact size. Its sync-baseline header declares the
-upstream SHA for a sync; only a changed header permits new or raised entries.
-Entries above the current size fail, forcing them down as code shrinks.
+restored upstream growth at its exact size, and only a sync PR uses it: a changed sync-baseline
+header declares the upstream SHA, permits new or raised entries, makes every entry a cap and makes an
+entry above the current size fail. Any other PR ignores the entries and applies the rule above to every
+file, so shrinking a listed file never needs a baseline edit. A sync (or a rollup carrying one)
+regenerates the file with tools/sync/write_file_size_baseline.py instead of editing it by hand.
 
 Inline test modules don't count, on the base or now: a normal build doesn't compile them. A test module is a
 `#[cfg(test)]` line directly followed by `mod name {` (or `pub mod`, `pub(crate) mod`...) at the same indentation,
@@ -184,6 +186,12 @@ def baseline_problems(sizes, previous, counts, sync):
     return out
 
 
+def raised_problems(sizes, previous):
+    """Outside a sync the entries are inert, but none may be added or raised: only a sync declares restoration."""
+    return [f"{path}: baseline added or raised without a changed sync-baseline upstream SHA"
+            for path, size in sizes.items() if size > previous.get(path, 0)]
+
+
 def sync_provenance(marker, base, head="HEAD"):
     """Require a freshly verified upstream-main ancestor and its exact merge parent."""
     shallow = git("rev-parse", "--is-shallow-repository").strip()
@@ -257,6 +265,21 @@ def verified_sync_config(base, config_path):
     return config, []
 
 
+def scan(base):
+    """(merge base, entries): for each Rust file changed since the merge base with `base`, its path, code lines on the
+    merge base, code lines now and whether it is generated. The input of `problems`."""
+    merge_base, changed = changes(base)
+    entries = []
+    for path, old in changed:
+        file = ROOT / path
+        if not file.exists():
+            continue
+        text = file.read_text(encoding="utf-8", errors="replace")
+        before = code_lines(git("show", f"{merge_base}:{old}")) if old else 0
+        entries.append((path, before, code_lines(text), generated(text)))
+    return merge_base, entries
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base", help="the git ref the branch starts from (CI: the pull request's base)")
@@ -267,34 +290,31 @@ def main(argv=None):
     if git("rev-parse", "--is-shallow-repository").strip() == "true":
         print("File size check failed: provenance needs full history; fetch --unshallow before checking.")
         return 1
-    merge_base, changed = changes(args.base)
-    entries = []
-    for path, old in changed:
-        file = ROOT / path
-        if not file.exists():
-            continue
-        text = file.read_text(encoding="utf-8", errors="replace")
-        before = code_lines(git("show", f"{merge_base}:{old}")) if old else 0
-        entries.append((path, before, code_lines(text), generated(text)))
+    merge_base, entries = scan(args.base)
     baseline_path = "tools/file_size_baseline.txt"
     file = ROOT / baseline_path
     marker, sizes = parse_baseline(file.read_text() if file.exists() else "")
     old = subprocess.run(["git", "show", f"{merge_base}:{baseline_path}"], cwd=ROOT,
                          capture_output=True, encoding="utf-8")
     previous_marker, previous = parse_baseline(old.stdout if old.returncode == 0 else "")
-    counts = {path: code_lines((ROOT / path).read_text()) for path in sizes if (ROOT / path).is_file()}
     declared_sync = marker is not None and marker != previous_marker
-    provenance = sync_provenance(marker, merge_base) if declared_sync else []
-    sync = declared_sync and not provenance
-    found = provenance + baseline_problems(sizes, previous, counts, sync)
-    found.extend(problems(entries, baseline=sizes))
+    if declared_sync:
+        counts = {path: code_lines((ROOT / path).read_text()) for path in sizes if (ROOT / path).is_file()}
+        provenance = sync_provenance(marker, merge_base)
+        found = provenance + baseline_problems(sizes, previous, counts, not provenance)
+        caps = sizes
+    else:
+        found = raised_problems(sizes, previous)
+        caps = None
+    found.extend(problems(entries, baseline=caps))
     if found:
         print(f"File size check failed ({DOC}):")
         for problem in found:
             print(f"  {problem}")
         return 1
-    print(f"File size check passed: {len(entries)} changed Rust files, {len(sizes)} sync baselines; none over {LIMIT} lines grew beyond their cap "
-          f"(inline test modules not counted).")
+    kept = f"{len(sizes)} sync baselines" if declared_sync else "no sync declared, baselines not used"
+    print(f"File size check passed: {len(entries)} changed Rust files, {kept}; none over {LIMIT} lines grew beyond "
+          f"{'their cap' if declared_sync else 'the merge base'} (inline test modules not counted).")
     return 0
 
 

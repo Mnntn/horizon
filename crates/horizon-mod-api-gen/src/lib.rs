@@ -1119,3 +1119,6 @@ mod tests {
         );
     }
 }
+
+/// Native source-only transient fields.
+pub mod fields;

@@ -1,10 +1,12 @@
 //! The `recipe_book_categories` hooks and helpers: declarations the mod API generator reads (see `hooks/mod.rs`).
 
 pub trait Hooks {
-    /// Declare categories for custom recipe types, with registered item icons.
-    /// Asked lazily once per recipe table by `native_recipe_book_category`.
-    /// Invalid declarations are logged and skipped; the first valid category
-    /// owns its id and type. This does not yet add tabs or book displays.
+    /// Supply categories and vanilla-shaped displays for custom recipe types.
+    /// Asked lazily once per recipe table. Use the Host's recipe table to build
+    /// `RecipeBookCategory::displays` from the type's own opaque recipe JSON.
+    /// Each category names its menu, book identity and per-book search group.
+    /// The display/index load boundary returns typed errors; screen integration
+    /// is separate. This declaration does not register a settings book (#2415).
     #[hook(
         side = "both",
         contract = "listen",

@@ -72,6 +72,15 @@ fn call_context(body: &syn::Block, expr: &Expr) -> String {
 }
 
 pub(crate) fn name(declaration: &Declaration, ordinal: usize) -> String {
+    if let Some(expression) = &declaration.expression {
+        return format!(
+            "S{}",
+            digest(format!(
+                "{}|expression {}|{ordinal}|{}",
+                declaration.target, declaration.selector, expression.ty
+            ))
+        );
+    }
     if let Some(local) = &declaration.local {
         return format!(
             "S{}",
@@ -139,6 +148,92 @@ pub fn rewrite(
         {
             let build = || -> Result<_, Error> {
                 let mut lexical = super::analysis::Scope::scan(found.sig, Some(found.body));
+                if let Some(expression) = &declaration.expression {
+                    if !private {
+                        return Err(Cause::Source(
+                            "expression requires native source rebuilding".into(),
+                        )
+                        .into());
+                    }
+                    let selector = super::expression::spelling(&declaration.selector)?;
+                    let reads = super::expression::candidates(found.body, &selector);
+                    let contexts = reads
+                        .iter()
+                        .map(|expr| digest(call_context(found.body, expr)))
+                        .collect::<Vec<_>>();
+                    let ordinal = declaration.ordinal.unwrap_or(0);
+                    let identities = contexts
+                        .iter()
+                        .enumerate()
+                        .map(|(nth, ctx)| CallIdentity {
+                            call: &selector,
+                            nth,
+                            ctx,
+                        })
+                        .collect::<Vec<_>>();
+                    // Empty contexts are only for tool discovery, as for calls.
+                    let ctx = if declaration.ctx.is_empty() {
+                        contexts
+                            .get(ordinal)
+                            .ok_or(Cause::Missing("expr matched no read at that nth"))?
+                    } else {
+                        &declaration.ctx
+                    };
+                    let index = match select(&identities, &selector, ordinal, ctx) {
+                        Selection::Selected(index) => index,
+                        Selection::Moved(nth) => {
+                            return Err(Cause::Identity(Refusal::Moved(nth)).into());
+                        }
+                        // A lost read names every candidate, so the declaration can be fixed
+                        // without staging the game by hand.
+                        Selection::Lost | Selection::Ambiguous => {
+                            let found = contexts
+                                .iter()
+                                .enumerate()
+                                .map(|(nth, ctx)| format!("nth = {nth}, ctx = \"{ctx}\""))
+                                .collect::<Vec<_>>();
+                            return Err(Cause::Source(format!(
+                                "E_INJECT_LOST: expr `{selector}` at nth = {ordinal} with that \
+                                 ctx is gone or ambiguous; reads now: {}",
+                                if found.is_empty() {
+                                    "none".into()
+                                } else {
+                                    found.join("; ")
+                                }
+                            ))
+                            .into());
+                        }
+                    };
+                    let expr = reads[index];
+                    let ty = super::expression::checked_type(expr, expression)?;
+                    let name = name(declaration, ordinal);
+                    let (raw, replacement) =
+                        super::expression::lower(&name, expr, &ty, &mut lexical);
+                    let record = format_ident!("__{name}Args");
+                    let listener = format_ident!("__{name}Listener");
+                    let site = Site {
+                        local: None,
+                        expression: Some(expression.clone()),
+                        name,
+                        target: declaration.target.clone(),
+                        selector: declaration.selector.clone(),
+                        ordinal,
+                        hash: digest(format!(
+                            "{}|{}|{}",
+                            enclosing.signature,
+                            selector,
+                            call_context(found.body, expr)
+                        )),
+                        call: selector,
+                        ctx: contexts[index].clone(),
+                        listener: format!("{}::{listener}", found.module),
+                        record: format!("{}::{record}", found.module),
+                        receiver: "()".into(),
+                        args: vec![("value".into(), ty.to_token_stream().to_string())],
+                        output: ty.to_token_stream().to_string(),
+                    };
+                    return Ok((expr.span(), raw.to_string(), replacement.to_string(), site));
+                }
                 let written = super::analysis::calls(found.body, &declaration.selector);
                 let paths = written
                     .iter()
@@ -247,6 +342,7 @@ pub fn rewrite(
                         quote!({ #dispatch #expr })
                     };
                     let site = Site {
+                        expression: None,
                         local: Some(local.clone()),
                         name,
                         target: declaration.target.clone(),
@@ -347,6 +443,7 @@ pub fn rewrite(
                 let nth = ordinal;
                 let same = calls.len();
                 let site = Site {
+                    expression: None,
                     local: None,
                     name,
                     target: declaration.target.clone(),

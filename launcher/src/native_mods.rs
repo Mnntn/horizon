@@ -35,6 +35,7 @@ mod inject_cache;
 mod inject_text;
 mod internals;
 mod internals_sync;
+pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
 mod isolate;
 mod mod_points;
 mod package;
@@ -543,7 +544,6 @@ pub fn internals_rustc_wrapper() -> Option<i32> {
     internals_sync::rustc_wrapper()
 }
 
-/// Discover used internals without installing a game or changing an instance.
 pub fn sync_internals(
     folder: &Path,
 ) -> Result<Vec<horizon_mod_package::internals::ListedInternal>, Failed> {
@@ -1959,7 +1959,9 @@ fn pipeline(
             left_out.clone()
         },
     };
-    let about = |route: &str| {
+    // The record carries each declaration's hash as the build checked it: an absent one from
+    // the pinned catalog (`internals::Catalog::pinned`).
+    let about = |route: &str, catalog: &internals::Catalog| {
         serde_json::json!({
             "base": origin,
             "horizon": revision,
@@ -1975,13 +1977,16 @@ fn pipeline(
             "target": target.name(),
             "rust_target": platform.target,
             "secs": started.elapsed().as_secs(),
-            "mods": mods.iter().map(|m| serde_json::json!({
-                "id": m.manifest.id,
-                "version": m.manifest.version,
-                "sha256": digests.get(&m.manifest.id).cloned().flatten(),
-                "internals": m.manifest.internals,
-                "inject": m.manifest.inject,
-            })).collect::<Vec<_>>(),
+            "mods": mods.iter().map(|m| {
+                let pinned = catalog.pinned(&m.manifest);
+                serde_json::json!({
+                    "id": m.manifest.id,
+                    "version": m.manifest.version,
+                    "sha256": digests.get(&m.manifest.id).cloned().flatten(),
+                    "internals": pinned.internals,
+                    "inject": pinned.inject,
+                })
+            }).collect::<Vec<_>>(),
         })
     };
     let linker = || match target {
@@ -2011,7 +2016,7 @@ fn pipeline(
             target,
             &binary,
             &libraries,
-            &about("prebuilt"),
+            &about("prebuilt", &internals::Catalog::read(game)?),
             &ordered,
         )?;
     } else if !exists {
@@ -2197,6 +2202,11 @@ fn pipeline(
             .map_err(|error| Failed::Other(cache_error(error)))?;
         crate::run_leases::publish(&profile_dir).map_err(cache_error)?;
         let (mut crates, mut total, mut name) = (0, None, String::new());
+        let mut declared_injections =
+            diagnostics::Declared::expressions(&horizon_mod_api_gen::sites::source::read(&real)?);
+        declared_injections.extend(diagnostics::Declared::fields(
+            mods.iter().map(|bundle| &bundle.manifest),
+        ));
         let identities: Vec<_> = mods
             .iter()
             .map(|m| (m.manifest.id.clone(), m.manifest.version.clone()))
@@ -2237,6 +2247,7 @@ fn pipeline(
                 stage: &stage,
                 source: &source,
                 mods: &identities,
+                declared: &declared_injections,
             }),
         )
         .map_err(|ran| {
@@ -2284,7 +2295,7 @@ fn pipeline(
             target,
             &binary,
             &[],
-            &about("source"),
+            &about("source", &catalog),
             &ordered,
         )?;
     } else {
@@ -3982,6 +3993,11 @@ mod tests {
             denied(build(base, &folder, &instances::selected(), choice, |_| {}));
         }
         denied(sync_internals(&folder));
+        let expected = require_consent().unwrap_err().to_string();
+        assert_eq!(
+            pinned_catalog_with_modules(&folder).err().unwrap(),
+            expected
+        );
         let preview = root().join("installed.routes");
         fs::create_dir_all(&preview).unwrap();
         let marker = preview.join("permission-sentinel");

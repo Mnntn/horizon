@@ -156,7 +156,6 @@ fn site_routes_validate_freshness_and_execute_every_kind_adapter() {
         "pub fn hook(receiver: &mut u32, args: &Args) -> bool { *receiver += 10; args.value == 0 }";
     for case in [
         Case { kind: "before_call", body: before, output: "u32", initial: 2, expected: "30", state: 11 },
-        Case { kind: "modify_call_arg", body: before, output: "u32", initial: 2, expected: "30", state: 11 },
         Case { kind: "after_call", body: "pub fn hook(receiver: &mut u32, value: &u32) { assert_eq!(*value, 20); *receiver += 10; }", output: "u32", initial: 2, expected: "20", state: 11 },
         Case { kind: "modify_value", body: "pub fn hook(receiver: &mut u32, value: u32) -> u32 { *receiver += 10; value + 7 }", output: "u32", initial: 2, expected: "27", state: 11 },
         Case { kind: "wrap_call", body: "pub fn hook(receiver: &mut u32, args: &mut Args, original: &mut dyn FnMut(&mut u32, &mut Args) -> u32) -> u32 { let first = original(receiver, args); args.value += 1; first + original(receiver, args) }", output: "u32", initial: 2, expected: "50", state: 2 },
@@ -177,17 +176,13 @@ fn site_routes_validate_freshness_and_execute_every_kind_adapter() {
                 "path":"horizon_client::game::Game::run", "kind":"method", "signature":"fn run(&mut self)", "hash":"signature"
             }])).unwrap(),
         };
-        use horizon_mod_package::manifest::inject::{InjectError, NoSlotReason};
-        if kind == "modify_call_arg" {
-            assert!(matches!(super::super::slots::check(&catalog, &manifest), Err(InjectError::NoSlot { reason: NoSlotReason::SourcePending, .. })));
-            continue;
-        }
+        use horizon_mod_package::manifest::inject::InjectError;
         super::super::slots::check(&catalog, &manifest).unwrap();
         let registration = super::super::api::main_rs("/* MOD_SLOTS */", &[&manifest], &super::super::internals::Catalog { sites: catalog.sites.clone(), ..Default::default() });
         exercise(&dir, &registration, &site.constructor(), &case);
-        manifest.inject[0].hash = "changed".into();
+        manifest.inject[0].hash = Some("changed".into());
         assert!(matches!(super::super::slots::check(&catalog, &manifest), Err(InjectError::Changed { .. })));
-        manifest.inject[0].hash = "signature".into();
+        manifest.inject[0].hash = Some("signature".into());
         manifest.inject[0].ctx = Some("changed".into());
         assert!(matches!(super::super::slots::check(&catalog, &manifest), Err(InjectError::Lost { .. })));
         manifest.inject[0].ctx = Some("statement".into());
@@ -265,9 +260,9 @@ fn private_wrap_adapters_repeat_suppress_and_condition_the_original() {
     ] {
         let mut manifest = Manifest::parse(&base).unwrap();
         manifest.inject.push(Inject {
-            local: None, local_type: None, position: None,
+            local: None, local_type: None, position: None, expr: None,
             id: "wrap".into(), at: "game::run".into(), kind, with: "hook".into(),
-            access: Access::Internals, priority: 7, hash: "signature".into(),
+            access: Access::Internals, priority: 7, hash: Some("signature".into()),
             call: Some("game::step".into()), nth: Some(0), ctx: Some("statement".into()),
         });
         catalog.sites.clear();

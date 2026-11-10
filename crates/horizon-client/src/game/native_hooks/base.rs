@@ -730,12 +730,12 @@ impl Game<'_> {
         self.fire_server_tick(context, phase);
     }
     /// Before an authoritative server level's tick pass. `dimension` is its ID.
-    pub(in crate::game) fn native_level_tick_pre(&mut self, dimension: &str) {
-        self.fire_level_tick_pre(dimension);
+    pub(in crate::game) fn native_level_tick_pre(&mut self, level: LevelRef) {
+        self.fire_level_tick_pre(level);
     }
     /// After a successful authoritative server level tick pass.
-    pub(in crate::game) fn native_level_tick_post(&mut self, dimension: &str) {
-        self.fire_level_tick_post(dimension);
+    pub(in crate::game) fn native_level_tick_post(&mut self, level: LevelRef) {
+        self.fire_level_tick_post(level);
     }
     /// Before one of vanilla's HUD layers is drawn (`RenderGuiLayerEvent.Pre`):
     /// draw here to put something below the layer, or set `canceled` to hide

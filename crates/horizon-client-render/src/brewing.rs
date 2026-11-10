@@ -297,10 +297,16 @@ impl BrewingStand {
             .any(|b| brewing.find(b, ingredient).is_some())
     }
     /// `BrewingStandBlockEntity.serverTick`.
-    pub fn tick(&mut self, brewing: &Brewing, items: &Items, providers: &Providers) -> BrewTick {
-        let (mut out, due) = self.tick_to_brew(brewing, items, providers);
+    pub fn tick(
+        &mut self,
+        brewing: &Brewing,
+        items: &Items,
+        providers: &Providers,
+        remainder: &dyn Fn(&ItemStack) -> Option<ItemStack>,
+    ) -> BrewTick {
+        let (mut out, due) = self.tick_to_brew(brewing, items, providers, remainder);
         if due {
-            self.brew(brewing, items, &mut out);
+            self.brew(brewing, remainder, &mut out);
         }
         self.sync_bottles(&mut out);
         out
@@ -313,6 +319,7 @@ impl BrewingStand {
         brewing: &Brewing,
         items: &Items,
         providers: &Providers,
+        remainder: &dyn Fn(&ItemStack) -> Option<ItemStack>,
     ) -> (BrewTick, bool) {
         let mut out = BrewTick::default();
         if self.fuel <= 0
@@ -322,12 +329,12 @@ impl BrewingStand {
             self.fuel = providers.int_value(&uses);
             self.total_fuel = self.fuel;
             self.speed = providers.float_value(&speed, 1.0);
-            let remainder = items.get(&fuel.item).and_then(|i| i.remainder.clone());
+            let remainder = remainder(fuel);
             fuel.count -= 1;
             if fuel.count == 0 {
-                self.items[4] = remainder.map(|r| ItemStack::new(&r, 1));
+                self.items[4] = remainder;
             } else if let Some(r) = remainder {
-                out.drops.push(ItemStack::new(&r, 1));
+                out.drops.push(r);
             }
         }
         let brewable = self.brewable(brewing);
@@ -382,16 +389,21 @@ impl BrewingStand {
         &mut self,
         asked: Option<([Option<ItemStack>; 5], bool)>,
         brewing: &Brewing,
-        items: &Items,
+        remainder: &dyn Fn(&ItemStack) -> Option<ItemStack>,
         out: &mut BrewTick,
     ) {
         match asked {
             Some((stacks, true)) => self.items = stacks,
-            _ => self.brew(brewing, items, out),
+            _ => self.brew(brewing, remainder, out),
         }
     }
     /// `BrewingStandBlockEntity.doBrew`.
-    pub fn brew(&mut self, brewing: &Brewing, items: &Items, out: &mut BrewTick) {
+    pub fn brew(
+        &mut self,
+        brewing: &Brewing,
+        remainder: &dyn Fn(&ItemStack) -> Option<ItemStack>,
+        out: &mut BrewTick,
+    ) {
         let Some(ingredient) = self.items[3].clone() else {
             return;
         };
@@ -402,15 +414,13 @@ impl BrewingStand {
                 self.items[slot] = Some(r.output.clone());
             }
         }
-        let remainder = items
-            .get(&ingredient.item)
-            .and_then(|i| i.remainder.clone());
+        let remainder = remainder(&ingredient);
         if let Some(i) = self.items[3].as_mut() {
             i.count -= 1;
             if i.count == 0 {
-                self.items[3] = remainder.map(|r| ItemStack::new(&r, 1));
+                self.items[3] = remainder;
             } else if let Some(r) = remainder {
-                out.drops.push(ItemStack::new(&r, 1));
+                out.drops.push(r);
             }
         }
         out.brewed = true;
@@ -442,6 +452,14 @@ pub fn brewing_fuel(items: &Items, stack: &ItemStack) -> Option<(Value, Value)> 
 
 #[cfg(test)]
 mod tests {
+    fn data_remainder(items: &super::Items, stack: &super::ItemStack) -> Option<super::ItemStack> {
+        items
+            .get(&stack.item)?
+            .crafting_remainder
+            .as_deref()
+            .map(|id| super::ItemStack::new(id, 1))
+    }
+
     use super::*;
 
     fn content_brewing_root(name: &str, condition: &str) -> std::path::PathBuf {
@@ -459,6 +477,55 @@ mod tests {
         .unwrap();
         std::fs::write(root.join("data/example/recipe/brewing/test.json"), format!(r#"{{"type":"minecraft:brewing","input":{{"item":"minecraft:potion"}},"reagent":{{"item":"minecraft:nether_wart"}},"output":{{"id":"minecraft:diamond"}}{condition}}}"#)).unwrap();
         root
+    }
+
+    #[test]
+    fn crafting_remainder_brewing_fuel_and_ingredient_use_current_stack() {
+        use horizon_core::nbt::Tag;
+        let items = Items::for_tests(Default::default());
+        let brewing = Brewing {
+            recipes: Vec::new(),
+            reagents: HashSet::new(),
+            inputs: HashSet::new(),
+        };
+        let mut fuel = ItemStack {
+            damage: 2,
+            ..ItemStack::new("test:tool", 1)
+        };
+        fuel.data_mut().set_loot_component(
+            "minecraft:brewing_fuel",
+            &Some(Tag::compound([
+                ("uses", Tag::Int(7)),
+                ("speed_multiplier", Tag::Float(1.0_f32.to_bits())),
+            ])),
+        );
+        let worn = |s: &ItemStack| {
+            Some(ItemStack {
+                count: 1,
+                damage: s.damage + 1,
+                ..s.clone()
+            })
+        };
+        let mut stand = BrewingStand::new();
+        stand.items[4] = Some(fuel);
+        stand.tick_to_brew(&brewing, &items, &Providers::empty(), &worn);
+        assert_eq!(
+            stand.items[4].as_ref().map(|s| (s.damage, s.count)),
+            Some((3, 1))
+        );
+        assert_eq!(stand.fuel, 7);
+        stand.items[3] = Some(ItemStack {
+            damage: 2,
+            ..ItemStack::new("test:tool", 1)
+        });
+        let mut out = BrewTick::default();
+        stand.brew(&brewing, &worn, &mut out);
+        assert_eq!(
+            stand.items[3].as_ref().map(|s| (s.damage, s.count)),
+            Some((3, 1))
+        );
+        assert!(out.brewed);
+        assert!(out.drops.is_empty());
     }
 
     #[test]
@@ -536,13 +603,21 @@ mod tests {
             stand.items[3] = Some(ItemStack::new("minecraft:nether_wart", 1));
             stand.items[4] = Some(fuel);
             let providers = Providers::empty();
-            stand.tick(&brewing, &items, &providers);
+            stand.tick(&brewing, &items, &providers, &|s| data_remainder(&items, s));
             assert_eq!((stand.brew_time, stand.fuel, stand.total_fuel), (160, 6, 7));
             assert_eq!(stand.items[4].as_ref().unwrap().count, 1);
             for _ in 1..160 {
-                assert!(!stand.tick(&brewing, &items, &providers).brewed);
+                assert!(
+                    !stand
+                        .tick(&brewing, &items, &providers, &|s| data_remainder(&items, s))
+                        .brewed
+                );
             }
-            assert!(stand.tick(&brewing, &items, &providers).brewed);
+            assert!(
+                stand
+                    .tick(&brewing, &items, &providers, &|s| data_remainder(&items, s))
+                    .brewed
+            );
             assert_eq!(
                 stand.items[0].as_ref().unwrap().potion(),
                 Some("minecraft:awkward")
@@ -642,12 +717,15 @@ mod tests {
         stand.items[2] =
             Some(ItemStack::new("minecraft:potion", 1).with_potion("minecraft:awkward"));
         stand.items[3] = Some(ItemStack::new("minecraft:nether_wart", 2));
-        let first = stand.tick(&brewing, &items, &providers);
+        let first = stand.tick(&brewing, &items, &providers, &|s| data_remainder(&items, s));
         assert_eq!(first.bottles, Some([true, false, true]));
         assert_eq!((stand.brew_time, stand.fuel), (400, 0));
         let mut brewed_at = 0;
         for t in 1..=400 {
-            if stand.tick(&brewing, &items, &providers).brewed {
+            if stand
+                .tick(&brewing, &items, &providers, &|s| data_remainder(&items, s))
+                .brewed
+            {
                 brewed_at = t;
             }
         }
@@ -663,7 +741,7 @@ mod tests {
         );
         assert_eq!(stand.items[3].as_ref().unwrap().count, 1);
         // No fuel left: nothing more brews.
-        stand.tick(&brewing, &items, &providers);
+        stand.tick(&brewing, &items, &providers, &|s| data_remainder(&items, s));
         assert_eq!(stand.brew_time, 0);
     }
 
@@ -732,7 +810,7 @@ mod tests {
             assert!(before.idle(), "{before:?}");
             let mut after = before.clone();
             assert_eq!(
-                after.tick(&brewing, &items, &providers),
+                after.tick(&brewing, &items, &providers, &|s| data_remainder(&items, s)),
                 BrewTick::default()
             );
             assert_eq!(format!("{after:?}"), format!("{before:?}"));
@@ -741,7 +819,7 @@ mod tests {
         let mut brewing_now = stand(true, 5, false);
         brewing_now.items[3] = Some(ItemStack::new("minecraft:nether_wart", 1));
         assert!(!brewing_now.idle());
-        brewing_now.tick(&brewing, &items, &providers);
+        brewing_now.tick(&brewing, &items, &providers, &|s| data_remainder(&items, s));
         assert_eq!(brewing_now.brew_time, 400);
     }
 
@@ -799,7 +877,12 @@ mod tests {
             let mut edited = stand.items.clone();
             edited[0] = Some(ItemStack::new("minecraft:diamond", 1));
             let mut out = BrewTick::default();
-            stand.brew_after_pre(Some((edited, cancel)), &brewing, &items, &mut out);
+            stand.brew_after_pre(
+                Some((edited, cancel)),
+                &brewing,
+                &|s| data_remainder(&items, s),
+                &mut out,
+            );
             assert_eq!(out.brewed, !cancel);
             assert_eq!(
                 stand.items[0],

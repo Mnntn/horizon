@@ -3,14 +3,14 @@
 mod matrix;
 #[path = "support/checks.rs"]
 mod matrix_checks;
-#[path = "fixture/src/modify_arg.rs"]
-mod modify_arg;
 #[path = "support/no_hooks.rs"]
 mod no_hooks;
 #[path = "fixture/src/replace.rs"]
 mod replace;
 #[path = "fixture/src/shutdown.rs"]
 mod shutdown;
+#[path = "fixture/src/turn.rs"]
+mod turn;
 
 /// `horizon_client::game::server_lifecycle::remember_shutdown`, as the staging pass marks it.
 #[horizon_mod_api_macros::point(name = "game_server_lifecycle_remember_shutdown", free)]
@@ -90,12 +90,12 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
         matrix::mirrors,
     ))
     .unwrap();
-    // A `modify_arg` registers with the head's constructor, as the emitter writes it.
+    // A head listener changing its argument (mixin `@ModifyVariable` on a parameter).
     mod_points::register(&mod_points::listeners::game_commands_wrap_degrees(
         "native",
         0,
         "turn",
-        modify_arg::turn_angle,
+        turn::turn_angle,
     ))
     .unwrap();
     mod_points::__private::seal();
@@ -112,7 +112,7 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
             0
         );
     }
-    for (angle, wrapped) in modify_arg::CASES {
+    for (angle, wrapped) in turn::CASES {
         assert_eq!(wrap_degrees(angle), wrapped, "{angle}");
     }
 }

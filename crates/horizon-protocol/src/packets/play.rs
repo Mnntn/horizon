@@ -1662,6 +1662,7 @@ packet_enum!(Clientbound, crate::ids::play::clientbound {
     ClearTitles(Bool1) = CLEAR_TITLES,
     LowDiskSpaceWarning(Empty) = LOW_DISK_SPACE_WARNING,
     Commands(Commands) = COMMANDS,
+    UpdateRecipes(super::recipes::UpdateRecipes) = UPDATE_RECIPES,
     RecipeBookAdd(super::recipes::RecipeBookAdd) = RECIPE_BOOK_ADD,
     RecipeBookRemove(super::recipes::RecipeBookRemove) = RECIPE_BOOK_REMOVE,
     RecipeBookSettings(super::recipes::RecipeBookSettings) = RECIPE_BOOK_SETTINGS,

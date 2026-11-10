@@ -88,7 +88,7 @@ fn saved_painting_residency_precedes_reads_and_retires_at_the_sweep() {
         // A retained UUID map or detached entity cannot extend residency.
         VALUE
             .set(
-                game.entity_attachments.get_mut(&uuid).unwrap(),
+                game.entity_attachments.get_mut(&id).unwrap(),
                 Holder::Entity(id),
                 9,
             )
@@ -104,7 +104,7 @@ fn saved_painting_residency_precedes_reads_and_retires_at_the_sweep() {
             current[0].holder,
             AttachmentHolder::Entity(EntityRef::new(entity.epoch(), replacement))
         );
-        assert_eq!(current[0].entry.read(&VALUE), Ok(&9));
+        assert_eq!(current[0].entry.read(&VALUE), Ok(&7));
         game.paintings.clear();
         assert!(index.lock().unwrap().snapshot(&key).is_empty());
     });
@@ -169,19 +169,25 @@ fn saved_paintings_stay_in_their_dimension_and_empty_reads_do_not_bind() {
         );
         let id = game.paintings[0].id;
         assert_eq!(VALUE.get_existing(game, Holder::Entity(id)), Ok(None));
-        assert!(!game.entity_attachments[&empty].has_index_binding());
+        assert!(!game.entity_attachments[&id].has_index_binding());
         let unknown = [13, 14, 15, 16];
         game.load_painting(
             painting(unknown, Tag::compound([("unknown", Tag::Int(1))])),
             Some(unknown),
             (0, 0),
         );
-        assert!(!game.entity_attachments[&unknown].has_index_binding());
+        let unknown_id = game.paintings.last().unwrap().id;
+        assert!(!game.entity_attachments[&unknown_id].has_index_binding());
         let malformed = [17, 18, 19, 20];
         game.load_painting(painting(malformed, Tag::Int(1)), Some(malformed), (0, 0));
-        assert!(!game.entity_attachments.contains_key(&malformed));
+        assert!(
+            !game
+                .entity_attachments
+                .contains_key(&game.paintings.last().unwrap().id)
+        );
         let loaded = [21, 22, 23, 24];
         game.load_painting(painting(loaded, contents()), Some(loaded), (0, 0));
+        let loaded_id = game.paintings.last().unwrap().id;
         let index = game.attachment_indexes[&Dim::Overworld].clone();
         let key = ("test".into(), "mana".into());
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
@@ -196,7 +202,7 @@ fn saved_paintings_stay_in_their_dimension_and_empty_reads_do_not_bind() {
         assert!(index.lock().unwrap().snapshot(&key).is_empty());
         assert_eq!(nether.lock().unwrap().snapshot(&key).len(), 1);
         // The saved data remains, but no detached clone becomes a live publisher.
-        let detached: Attachments = game.entity_attachments[&loaded].clone();
+        let detached: Attachments = game.entity_attachments[&loaded_id].clone();
         assert!(!detached.has_index_binding());
     });
 }
@@ -219,7 +225,7 @@ fn first_write_painting_publication_and_rollback() {
         assert_eq!(VALUE.has(store, holder), Ok(false));
         assert_eq!(VALUE.get_existing(store, holder), Ok(None));
         assert_eq!(VALUE.remove(store, holder), Ok(None));
-        assert!(!game.entity_attachments[&uuid].has_index_binding());
+        assert!(!game.entity_attachments[&id].has_index_binding());
         let bad = AttachmentType {
             namespace: "test",
             name: "bad",
@@ -233,7 +239,7 @@ fn first_write_painting_publication_and_rollback() {
             bad.set(store, holder, 1),
             Err(AttachmentError::InvalidCopyPolicy)
         );
-        assert!(!game.entity_attachments[&uuid].has_index_binding());
+        assert!(!game.entity_attachments[&id].has_index_binding());
         let aborted: Result<(), AttachmentError> = game.transaction(|host, _| {
             let store: &mut dyn horizon_mod_runtime::attachments::AttachmentStore = host;
             assert_eq!(VALUE.get(store, holder), Ok(0));
@@ -255,7 +261,7 @@ fn first_write_painting_publication_and_rollback() {
             Err(AttachmentError::MissingHolder)
         });
         assert!(aborted.is_err());
-        assert!(!game.entity_attachments[&uuid].has_index_binding());
+        assert!(!game.entity_attachments[&id].has_index_binding());
         let index = game.attachment_indexes[&Dim::Overworld].clone();
         let key = ("test".into(), "mana".into());
         assert!(index.lock().unwrap().snapshot(&key).is_empty());

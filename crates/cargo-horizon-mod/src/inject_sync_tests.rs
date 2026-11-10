@@ -54,7 +54,12 @@ fn inject_sync_sorted_union_and_idempotence() {
             "wrap_call",
             "call = 'lower::callee'\nnth = 2\nctx = 'context-two'\n",
         )
-        + &entry("type", "lower::Thing", "field", "")
+        + &entry(
+            "type",
+            "lower::Thing",
+            "field",
+            "type = 'u32'\naccess = 'internals'\n",
+        )
         + &entry("shared", "lower::shared", "return", "");
     let f = Fixture::new("union", "example", &declarations);
     fs::write(f.file("other.txt"), "lower::shared\n").unwrap();

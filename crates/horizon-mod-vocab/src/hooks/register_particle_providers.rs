@@ -47,7 +47,8 @@ of `assets/example/particles/orbit.json`, with the spawn values of its `horizon:
 velocity). The engine keeps the sprite handling and the camera-distance, Particles-setting and population limits;
 only the motion is the provider's. Before each `tick` the game advances `age` (1 on the first tick) and sets
 `previous`, and it expires the particle once `age` passes `lifetime`, or after a tick that sets `removed` or
-leaves a number that is not finite. The particle draws on the blended layer, so `rgba[3]` may fade it.
+leaves a number that is not finite. The particle draws on the blended layer, so `rgba[3]` may fade it, unless a `register_particle_groups`
+group lists its type: it then draws in that group, on the group's blend.
 `position`, `frame` (a sprite of the set, clamped), `size`, `rgba`, `lifetime` and `removed` are the tick's to
 write. `state` is four numbers that stay with the particle, zero at spawn; it is the only per-particle data,
 since every particle of a type shares the one provider (the same for native and wasm mods: a wasm tick is one

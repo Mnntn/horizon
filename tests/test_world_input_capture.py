@@ -46,7 +46,9 @@ class WorldInputCaptureTests(unittest.TestCase):
     def test_loading_completion_wiring(self):
         game = "".join((ROOT / "crates/horizon-client/src" / path).read_text(encoding="utf-8")
                        for path in ("game/world/player_spawn.rs", "game/runtime/window_handler.rs", "game.rs"))
-        remote = (next(ROOT.glob('crates/horizon-client/src/game/*/remote/mod.rs'))).read_text(encoding="utf-8")
+        remote_dir = next(ROOT.glob('crates/horizon-client/src/game/*/remote'))
+        remote = (remote_dir / "mod.rs").read_text(encoding="utf-8")
+        level_tick = (remote_dir / "client_level_tick.rs").read_text(encoding="utf-8")
         spawn = method(game, "spawn_player")
         self.assertLess(spawn.index("self.player = Some(player)"),
                         spawn.index("self.capture_loaded_world()"))
@@ -55,7 +57,8 @@ class WorldInputCaptureTests(unittest.TestCase):
         ready = remote[remote.index("    fn tick_client_load("):]
         self.assertLess(ready.index("r.loaded_sent = true"),
                         ready.index("self.capture_loaded_world()"))
-        self.assertIn("self.tick_remote_player(running, hold)", method(remote, "tick_remote_level"))
+        level_fn = level_tick[level_tick.index("    pub(in crate::game) fn tick_remote_level("):]
+        self.assertIn("self.tick_remote_player(running, hold)", level_fn)
         level = method(remote, "tick_remote_player")
         self.assertLess(level.index("self.tick_client_load()"),
                         level.index("self.tick_local_player("))
@@ -499,9 +502,12 @@ mod input_trace {
     pub enum InputOrigin { User }
     pub enum TraceKind { Motion { x: f64, y: f64 } }
 }
+struct Radial(bool);
+impl Radial { fn is_open(&self) -> bool { self.0 } }
+struct Pad { radial: Radial }
 struct Game {
     pending_save: Option<()>, captured: bool, focused: bool, keyboard_mouse: bool, split_window: bool,
-    options: Options, screen: Screen, mouse: MouseLook, last_input: Instant, scripted: bool,
+    options: Options, screen: Screen, mouse: MouseLook, last_input: Instant, pad: Pad, scripted: bool,
 }
 impl Game {
     fn scripted_run(&self) -> bool { self.scripted }
@@ -509,26 +515,30 @@ impl Game {
     fn note_input(&mut self, _: input_trace::InputOrigin, _: input_trace::TraceKind) {}
     // Handing input back from the controller does not change the turn either.
     fn pad_yield_input(&mut self, _: &ActiveEventLoop) {}
+    // `game/pad/capture.rs`: the radial menu owns the pad while it is open.
+    fn pad_radial_captures(&self) -> bool { self.pad.radial.is_open() }
 METHOD
 }
 fn main() {
-    // (offscreen renderer, compositor, keyboard/mouse owner, active, gameplay, saving,
-    // a scripted run).
-    for (offscreen, split, owner, active, playing, saving, scripted, turns) in [
-        (false, false, true, true, true, false, false, true),
-        (true, true, true, true, true, false, false, true),
-        (true, true, false, true, true, false, false, false),
-        (true, false, true, true, true, false, false, false),
-        (true, true, true, false, true, false, false, false),
-        (true, true, true, true, false, false, false, false),
-        (true, true, true, true, true, true, false, false),
-        (false, false, true, true, true, false, true, false),
+    // (offscreen renderer, compositor, keyboard/mouse owner, active, gameplay, saving, the pad's
+    // radial menu open, a scripted run).
+    for (offscreen, split, owner, active, playing, saving, radial, scripted, turns) in [
+        (false, false, true, true, true, false, false, false, true),
+        (true, true, true, true, true, false, false, false, true),
+        (true, true, false, true, true, false, false, false, false),
+        (true, false, true, true, true, false, false, false, false),
+        (true, true, true, false, true, false, false, false, false),
+        (true, true, true, true, false, false, false, false, false),
+        (true, true, true, true, true, true, false, false, false),
+        (false, false, true, true, true, false, true, false, false),
+        (false, false, true, true, true, false, false, true, false),
     ] {
         let mut game = Game {
             pending_save: saving.then_some(()), captured: true, focused: active,
             keyboard_mouse: owner, split_window: split, options: Options { offscreen },
             screen: if playing { Screen::Playing } else { Screen::Paused },
-            mouse: MouseLook::default(), last_input: Instant::now(), scripted,
+            mouse: MouseLook::default(), last_input: Instant::now(), pad: Pad { radial: Radial(radial) },
+            scripted,
         };
         game.device_event(&ActiveEventLoop, DeviceId, DeviceEvent::MouseMotion { delta: (0.0, 0.0) });
         game.device_event(&ActiveEventLoop, DeviceId, DeviceEvent::MouseMotion { delta: (20.0, -10.0) });
@@ -538,7 +548,7 @@ fn main() {
         rotation.turn(x, y);
         let want = if turns { (3.0, -1.5) } else { (0.0, 0.0) };
         assert!((rotation.y_rot - want.0).abs() < 0.00001 && (rotation.x_rot - want.1).abs() < 0.00001,
-            "rotation=({}, {}), offscreen={offscreen}, split={split}, owner={owner}, active={active}, playing={playing}, saving={saving}, scripted={scripted}", rotation.y_rot, rotation.x_rot);
+            "rotation=({}, {}), offscreen={offscreen}, split={split}, owner={owner}, active={active}, playing={playing}, saving={saving}, radial={radial}, scripted={scripted}", rotation.y_rot, rotation.x_rot);
     }
 }
 '''

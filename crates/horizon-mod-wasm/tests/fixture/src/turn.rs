@@ -1,6 +1,6 @@
-//! One `modify_arg` listener source, built into the wasm fixture and into a native test, at the
-//! real point of `horizon_client::game::commands::wrap_degrees(angle: f32) -> f32`: the body runs
-//! with the listener's argument on both targets.
+//! One head listener that changes its argument, built into the wasm fixture and into a native
+//! test, at the real point of `horizon_client::game::commands::wrap_degrees(angle: f32) -> f32`:
+//! the body runs with the listener's argument on both targets.
 
 /// Turns the angle half a circle before the body wraps it.
 pub fn turn_angle(args: &mut mod_points::GameCommandsWrapDegreesArgs) {

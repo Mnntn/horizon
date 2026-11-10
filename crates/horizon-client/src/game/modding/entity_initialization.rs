@@ -17,10 +17,10 @@ mod tests;
 
 #[derive(Default)]
 pub(super) struct EntityInitialization {
-    /// The UUIDs already told. An entity is forgotten when it leaves the world (`forget_entity`:
+    /// The object holders already told (entity IDs and separate player UUIDs). An entity is forgotten when it leaves the world (`forget_entity`:
     /// death, a chunk unloading), so the next one made from its data is
     /// told again, as vanilla constructs a new entity for each of those.
-    initialized: HashSet<[i32; 4]>,
+    initialized: HashSet<Holder>,
     /// Each LAN guest's connection when its player was last told: a new connection is a new
     /// `ServerPlayer`.
     players: HashMap<u128, u32>,
@@ -35,12 +35,10 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::EntityConstructing) {
             return;
         }
-        let uuid = match holder {
-            Holder::Entity(id) => self.uuid_for(id),
-            Holder::Player(uuid) => horizon_client::lan::playerdata::uuid_ints(uuid),
-            _ => return,
-        };
-        if !self.entity_initialization.initialized.insert(uuid) {
+        if !matches!(holder, Holder::Entity(_) | Holder::Player(_)) {
+            return;
+        }
+        if !self.entity_initialization.initialized.insert(holder) {
             return;
         }
         let previous = self.entity_initialization.active.replace(holder);
@@ -67,8 +65,20 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn forget_entity_initialization(&mut self, uuid: [i32; 4]) {
-        self.entity_initialization.initialized.remove(&uuid);
+    pub(super) fn forget_entity_initialization(&mut self, holder: Holder) {
+        self.entity_initialization.initialized.remove(&holder);
+    }
+
+    /// Forget destroyed objects in this level before its UUID metadata is pruned.
+    /// The supplied set includes reachable off-level objects. Other levels and
+    /// player lifetimes are owned by their own cleanup boundaries.
+    pub(super) fn prune_entity_initializations(&mut self, retained: &HashSet<u32>) {
+        self.entity_initialization
+            .initialized
+            .retain(|holder| match holder {
+                Holder::Entity(id) => !self.persist.uuids.contains_key(id) || retained.contains(id),
+                _ => true,
+            });
     }
 
     /// A LAN guest's player, its file just read for connection `conn`: told once per
@@ -76,7 +86,7 @@ impl Game<'_> {
     /// `loadPlayerData` reads its file).
     pub(super) fn initialize_server_player(&mut self, uuid: u128, conn: u32) {
         if self.entity_initialization.players.insert(uuid, conn) != Some(conn) {
-            self.forget_entity_initialization(horizon_client::lan::playerdata::uuid_ints(uuid));
+            self.forget_entity_initialization(Holder::Player(uuid));
         }
         self.initialize_guest_player_under_data(uuid, conn);
     }
@@ -84,7 +94,7 @@ impl Game<'_> {
     /// `PlayerList.respawn`: the guest gets a new `ServerPlayer`, told again, and the data it
     /// keeps (`copy_on_death`, already in place) is restored over it.
     pub(super) fn reinitialize_server_player(&mut self, uuid: u128, conn: u32) {
-        self.forget_entity_initialization(horizon_client::lan::playerdata::uuid_ints(uuid));
+        self.forget_entity_initialization(Holder::Player(uuid));
         self.initialize_guest_player_under_data(uuid, conn);
     }
 
@@ -108,6 +118,63 @@ impl Game<'_> {
                 .and_then(|host| host.hub.guests.attachments_mut(conn))
         {
             attachments.read_saved_over(data);
+        }
+    }
+}
+
+/// Explicit ownership passed alongside one travelling object's NBT, never encoded in NBT.
+/// Not Clone: a transfer cannot install the same runtime state twice.
+#[derive(Debug)]
+pub(super) struct TransferredEntityState {
+    attachments: Option<horizon_mod_runtime::attachments::Attachments>,
+    initialized: bool,
+}
+
+impl Game<'_> {
+    /// Consume the source object's state before forgetting its persistence metadata.
+    /// Retiring the publisher immediately makes retained query write tokens stale.
+    pub(super) fn take_transferred_entity_state(&mut self, id: u32) -> TransferredEntityState {
+        let mut attachments = self.entity_attachments.remove(&id);
+        if let Some(map) = &mut attachments {
+            map.unbind_index();
+        }
+        TransferredEntityState {
+            attachments,
+            initialized: self
+                .entity_initialization
+                .initialized
+                .remove(&Holder::Entity(id)),
+        }
+    }
+
+    /// Install before `remember_uuid`: the destination is the same logical entity,
+    /// so neither construction nor the saved overlay may replace its runtime values.
+    pub(super) fn adopt_transferred_entity_state(
+        &mut self,
+        id: u32,
+        state: TransferredEntityState,
+    ) {
+        // Even an empty map marks this as runtime state for `remember_uuid`.
+        self.entity_attachments
+            .insert(id, state.attachments.unwrap_or_default());
+        if state.initialized {
+            self.entity_initialization
+                .initialized
+                .insert(Holder::Entity(id));
+        }
+    }
+}
+
+impl Game<'_> {
+    pub(super) fn forget_remote_entity_construction(&mut self, id: i32) {
+        self.forget_entity_initialization(Holder::Entity(id as u32));
+        if let Some(uuid) = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.level_players.get(&id))
+            .copied()
+        {
+            self.forget_entity_initialization(Holder::Player(uuid));
         }
     }
 }

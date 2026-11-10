@@ -537,9 +537,12 @@ proof, adding or raising an entry fails against `--base`. Missing network access
 shallow history fail closed. The addresses and layers checks reuse the same provenance helper to
 permit only exact rows or assignments from the verified upstream inventories. A PR can still merge
 a real upstream commit and add unrelated caps: review the sync and growth list
-(see `tools/sync/README.md`). A listed file must stay within its cap, and a cap above
-the current size (or naming a deleted file) fails: lower or remove the entry when the file shrinks. Sync
-PRs list every entry and its growth. This records restoration debt, not permission for other PRs to grow it.
+(see `tools/sync/README.md`). In a sync PR a listed file must stay within its cap, and a cap above
+the current size (or naming a deleted file) fails. Every other PR (no changed header) ignores the entries and holds each file to
+its size on the base, so shrinking a listed file never needs an edit to the baseline. Nobody edits the entries by hand: a sync, or a
+rollup that carries one, regenerates the file with `python3 tools/sync/write_file_size_baseline.py --base origin/main --marker <full
+upstream SHA>`, which lists the files that grew past the limit at their exact size. On a conflict in the file, run that command
+instead of merging by hand. Sync PRs list every entry and its growth. This records restoration debt, not permission for other PRs to grow it.
 Generated files and `third_party/` are not checked. Test code doesn't count either, since a normal
 build doesn't compile it: inline `#[cfg(test)] mod name { ... }` modules. Filenames such as `tests.rs`
 or `<name>_tests.rs` do not exempt a file; other `#[cfg(test)]` items count.

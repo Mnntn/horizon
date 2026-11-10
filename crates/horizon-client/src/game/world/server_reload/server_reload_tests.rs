@@ -201,12 +201,26 @@ fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() 
                 let root =
                     std::env::temp_dir().join(format!("reload-order-{}", std::process::id()));
                 game.load_world(request(&root)).unwrap();
+                let class =
+                    mod_api::__private::tag_key(&Identifier::parse("horizon:class/fence").unwrap())
+                        .unwrap();
+                let fence = mod_api::__private::block_key("minecraft:oak_fence").unwrap();
+                assert!(mod_api::Tags::blocks(game, class).unwrap().contains(&fence));
+                assert!(
+                    game.items()
+                        .block_in_tag("horizon:class/fence", "minecraft:oak_fence")
+                );
+                assert_eq!(game.block_in_tag(fence, "horizon:class/fence"), Some(true));
                 state.store(0, Ordering::SeqCst);
                 assert!(game.run_command("reload"));
                 assert_eq!(state.load(Ordering::SeqCst), 1);
                 assert!(
                     game.items().block_tags["reload_order:derived"].contains("minecraft:stone")
                 );
+                assert!(mod_api::Tags::blocks(game, class).unwrap().contains(&fence));
+                let old_bound = crate::game::native_world_read::installed_block_tag_snapshot();
+                let old_order = game.items().block_tag_order.clone();
+                let old_sets = game.items().block_tags.clone();
                 let old = game.world_tables.as_ref().map(|tables| tables as *const _);
                 crate::game::api_values::install_parts(&[ModEntry::new(
                     "reload_order",
@@ -222,6 +236,12 @@ fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() 
                 assert!(
                     game.items().block_tags["reload_order:derived"].contains("minecraft:stone")
                 );
+                assert_eq!(
+                    crate::game::native_world_read::installed_block_tag_snapshot(),
+                    old_bound
+                );
+                assert_eq!(game.items().block_tag_order, old_order);
+                assert_eq!(game.items().block_tags, old_sets);
                 let _ = std::fs::remove_dir_all(root);
             });
         },
@@ -974,3 +994,6 @@ fn data_maps_updated_fires_for_each_registry_on_first_open_and_every_reload() {
         });
     });
 }
+
+#[path = "villager_secondary_reload_tests.rs"]
+mod villager_secondary_reload_tests;

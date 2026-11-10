@@ -84,7 +84,15 @@ fn main() -> ExitCode {
         Some("use-jar") => jar::run(&args[1..]),
         Some("internals") => internals::run(&args[1..]),
         Some("inject") => inject::run(&args[1..]),
-        Some("update") => update(Path::new("."), flag(&args[1..], "--horizon")),
+        Some("update") => update(
+            Path::new("."),
+            flag(&args[1..], "--horizon"),
+            &args[1..]
+                .windows(2)
+                .filter(|pair| pair[0] == "--accept")
+                .map(|pair| pair[1].as_str())
+                .collect::<Vec<_>>(),
+        ),
         _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | update [--horizon <commit>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] | wasm-std <out.wasm> | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list | use-jar <path>".into()),
     };
     match result {
@@ -234,7 +242,7 @@ fn newest_prebuilt(releases: &serde_json::Value) -> Option<String> {
 }
 
 /// Repins the native mod and its API dependencies, reporting signature changes before writing.
-fn update(dir: &Path, horizon: Option<&str>) -> Result<(), String> {
+fn update(dir: &Path, horizon: Option<&str>, accept: &[&str]) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let manifest = Manifest::parse(&text)?;
@@ -266,9 +274,20 @@ fn update(dir: &Path, horizon: Option<&str>) -> Result<(), String> {
             .ok_or_else(|| format!("Cargo.toml: no dependencies.{package}.rev"))?;
         internals::set_string(rev, &horizon);
     }
-    if !manifest.internals.is_empty() {
+    if !manifest.internals.is_empty() || manifest.inject.iter().any(|i| i.hash.is_none()) {
+        // #2593: these become the pinned catalogs with the mod's own modules applied.
         let old = internals::load(dir, &native.horizon)?;
         let new = internals::load(dir, &horizon)?;
+        let (reports, refused) = inject::update::pin_moves(&manifest, &old, &new, accept);
+        for report in reports {
+            println!("{report}");
+        }
+        if refused {
+            return Err(
+                "update refused; no files changed (pass --accept <inject id> to take a change)"
+                    .into(),
+            );
+        }
         print!("{}", internals::refresh(&manifest, &mut doc, &old, &new)?);
     }
     internals::set_string(
@@ -587,7 +606,7 @@ mod tests {
             .contains("40 lowercase hex")
         );
         let newer = "89abcdef0123456789abcdef0123456789abcdef";
-        update(&path, Some(newer)).unwrap();
+        update(&path, Some(newer), &[]).unwrap();
         let manifest =
             Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
         assert_eq!(manifest.native.unwrap().horizon, newer);

@@ -298,42 +298,54 @@ pub trait EntitiesBackend {
     fn entity_no_physics(&self, entity: EntityRef) -> Option<bool>;
     /// Side: server.
     /// What the entity rides (`Entity.getVehicle`): `None` when it rides
-    /// nothing, or for a stale handle.
+    /// nothing, its actual vehicle is retained off-level and has no resident handle,
+    /// or the supplied handle is stale. `is_passenger` still reports the relationship.
     #[access(WorldOnly)]
     fn entity_vehicle(&self, entity: EntityRef) -> Option<EntityRef>;
     /// Side: server.
-    /// Whether the entity rides another (`Entity.isPassenger`).
+    /// Whether the entity rides another (`Entity.isPassenger`), including a retained
+    /// off-level vehicle that cannot be returned by `vehicle`. Stale handles return `None`.
     #[access(WorldOnly)]
     fn entity_is_passenger(&self, entity: EntityRef) -> Option<bool>;
     /// Side: server.
     /// The lowest vehicle under the entity (`Entity.getRootVehicle`): the
-    /// entity itself when it rides nothing.
+    /// entity itself when it rides nothing. Traverses retained off-level intermediaries,
+    /// but returns `None` if the actual root has no resident handle, the supplied handle
+    /// is stale, or the relationship contains a cycle. Never substitutes a descendant.
     #[access(WorldOnly)]
     fn entity_root_vehicle(&self, entity: EntityRef) -> Option<EntityRef>;
     /// Side: server.
     /// The entities riding this one (`Entity.getPassengers`), in `addPassenger`'s order: each
     /// behind those aboard, except that a player goes first when the first is no player.
+    /// Only resident handles are returned; retained off-level passengers are omitted.
+    /// Dying passengers stay aboard until removed.
     #[access(WorldOnly)]
     fn entity_passengers(&self, entity: EntityRef) -> Option<Vec<EntityRef>>;
     /// Side: server.
-    /// Whether anything rides the entity (`Entity.isVehicle`).
+    /// Whether anything rides the entity (`Entity.isVehicle`), including retained
+    /// off-level passengers omitted from `passengers`. Dying is not removal.
     #[access(WorldOnly)]
     fn entity_is_vehicle(&self, entity: EntityRef) -> Option<bool>;
     /// Side: server.
     /// Every entity riding this one, at any depth (`Entity.getIndirectPassengers`): each
-    /// passenger in `passengers` order, followed by those riding it.
+    /// passenger in boarding order, followed by those riding it. Traverses retained
+    /// off-level intermediaries, omitting only their handles from the result; resident
+    /// descendants below them are still returned.
     #[access(WorldOnly)]
     fn entity_indirect_passengers(&self, entity: EntityRef) -> Option<Vec<EntityRef>>;
     /// Side: server.
     /// The first passenger, when it steers the entity (`Entity.getControllingPassenger`): a
     /// player in a boat, a player on a mount that is ready for one, or a mob on a mob with AI
     /// unless `#non_controlling_rider` names it. `None` when nothing steers it, or for a stale
-    /// handle.
+    /// handle. The actual first passenger is chosen before filtering by residency:
+    /// an off-level first passenger returns `None`, never a later resident substitute.
     #[access(WorldOnly)]
     fn entity_controlling_passenger(&self, entity: EntityRef) -> Option<LivingRef>;
     /// Side: server.
     /// Whether both entities share a root vehicle (`Entity.isPassengerOfSameVehicle`): true for
-    /// an entity and itself, false for two entities riding nothing. `None` for a stale handle.
+    /// an entity and itself, false for two distinct entities riding nothing. Compares
+    /// actual object roots even when they are retained off-level and have no handle.
+    /// `None` for stale handles or a cycle with no root.
     #[access(WorldOnly)]
     fn entity_is_passenger_of_same_vehicle(
         &self,

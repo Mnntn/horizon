@@ -66,9 +66,8 @@ impl Game<'_> {
             seats.push((i64::MIN, me, true));
         }
         seats.extend(
-            self.mobs
-                .iter()
-                .filter(|m| m.extra.mount == Some(vehicle) && !m.removed && m.alive())
+            self.mob_objects()
+                .filter(|m| m.extra.mount == Some(vehicle) && !m.removed)
                 .map(|m| (m.extra.vehicle_order, m.id, false)),
         );
         seats.sort_by_key(|&(place, ..)| place);
@@ -87,12 +86,12 @@ impl Game<'_> {
     }
     /// `addPassenger` for the mob `id`, linked to its vehicle just now.
     pub(in crate::game) fn seat_mob(&mut self, id: u32) {
-        let mount = self.mobs.iter().find(|m| m.id == id);
+        let mount = self.mob_object(id);
         let Some(vehicle) = mount.and_then(|m| m.extra.mount) else {
             return;
         };
         let order = self.boarding_order(vehicle, id, false);
-        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+        if let Some(m) = self.mob_object_mut(id) {
             m.extra.vehicle_order = order;
         }
     }
@@ -129,6 +128,36 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn retained_passengers_occupy_seats_in_boarding_order() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            use horizon_client::mobs::Mob;
+            use horizon_core::geometry::Vec3;
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            for (id, order) in [(74, 2), (72, 0)] {
+                let mut m = Mob::new(id, pig.clone(), Vec3::ZERO, 0.0);
+                m.extra.mount = Some(71);
+                m.extra.vehicle_order = order;
+                game.persist
+                    .off_level
+                    .insert(id, crate::game::persist::OffLevel::Mob(m));
+            }
+            let mut resident = Mob::new(73, pig, Vec3::ZERO, 0.0);
+            resident.extra.mount = Some(71);
+            resident.extra.vehicle_order = 1;
+            game.mobs.push(resident);
+            assert_eq!(
+                game.seated_passengers(71),
+                vec![(0, 72, false), (1, 73, false), (2, 74, false)]
+            );
+            assert_eq!(game.boarding_order(71, 75, false), 3);
+            assert_eq!(game.boarding_order(71, 75, true), -1);
+            game.seat_mob(72);
+            assert_eq!(game.mob_object(72).unwrap().extra.vehicle_order, 3);
+        });
+    }
+
     #[test]
     fn started_riding_reaches_every_rider_of_the_vehicle() {
         // Entity.startRiding: START_RIDING_TRIGGER for every ServerPlayer in

@@ -14,6 +14,67 @@ pub(super) struct Compiler<'a> {
     pub stage: &'a Path,
     pub source: &'a Path,
     pub mods: &'a [(String, String)],
+    /// Declarations staged into the game whose compile errors are their injections'.
+    pub declared: &'a [Declared],
+}
+
+/// A declaration the launcher staged into the game on an injection's behalf, such as an
+/// `expression` site's typed binding: an error whose primary span lies in the block that binds
+/// `binding` first, or in the field named `binding`, is the declaring injections' mistake. Each
+/// kind supplies its own binding and explanation; the lookup and attribution are shared.
+pub(super) struct Declared {
+    /// The identifier the staged code binds or declares for it.
+    pub binding: String,
+    /// The declaring injections, `mod:inject` joined with ", ".
+    pub injections: String,
+    /// What is wrong, in the modder's words, naming `injections`; shown before rustc's error.
+    pub explanation: String,
+}
+
+impl Declared {
+    pub(super) fn fields<'a>(
+        manifests: impl IntoIterator<Item = &'a horizon_mod_package::manifest::Manifest>,
+    ) -> Vec<Self> {
+        manifests.into_iter().flat_map(|manifest| {
+            manifest.inject.iter().filter(|inject| inject.kind == horizon_mod_package::manifest::inject::Kind::Field).map(|inject| {
+                let prefix = if manifest.id.starts_with(|c: char| c.is_ascii_digit()) { "_" } else { "" };
+                let injections = format!("{}:{}", manifest.id, inject.id);
+                let field = format!("{prefix}{}__{}", manifest.id, inject.with);
+                Self {
+                    binding: field.clone(),
+                    explanation: crate::i18n::trf(
+                        "E_INJECT_FIELD_TYPE: {injections}: the declared field type `{type}` for `{field}` in {target} failed to compile; use a visible type with the required Default and Clone bounds.",
+                        &[("injections", &injections), ("type", inject.local_type.as_deref().expect("validated field type")), ("field", &field), ("target", &inject.at)],
+                    ),
+                    injections,
+                }
+            })
+        }).collect()
+    }
+
+    /// Each staged `expression` site: an error inside its binding block means the declared
+    /// `type` doesn't match how the game uses the read.
+    pub(super) fn expressions(sites: &[horizon_mod_api_gen::sites::Site]) -> Vec<Self> {
+        sites
+            .iter()
+            .filter_map(|site| {
+                let expression = site.expression.as_ref()?;
+                Some(Self {
+                    binding: horizon_mod_api_gen::sites::expression::marker(&site.name),
+                    injections: expression.origin.clone(),
+                    explanation: crate::i18n::trf(
+                        "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.",
+                        &[
+                            ("injections", &expression.origin),
+                            ("type", &expression.ty),
+                            ("expr", &site.call),
+                            ("target", &site.target),
+                        ],
+                    ),
+                })
+            })
+            .collect()
+    }
 }
 
 #[derive(Default)]
@@ -66,6 +127,14 @@ pub(super) fn capture(compiler: &Compiler<'_>, input: impl BufRead, mut log: imp
         if message["level"] != "error" {
             continue;
         }
+        if let Some(declared) = message["spans"].as_array().and_then(|spans| {
+            spans
+                .iter()
+                .filter(|s| s["is_primary"] == true)
+                .find_map(|span| declared_at(compiler, span))
+        }) {
+            declared_failure(compiler, declared, &mut output);
+        }
         if output.errors.len() < 4 {
             output.errors.push(rendered.to_owned());
         }
@@ -85,6 +154,65 @@ pub(super) fn capture(compiler: &Compiler<'_>, input: impl BufRead, mut log: imp
         }
     }
     output
+}
+
+/// The staged declaration holding the error's primary `span`: the innermost block that binds a
+/// declared identifier first, or the field that declares one.
+fn declared_at<'a>(compiler: &Compiler<'a>, span: &Value) -> Option<&'a Declared> {
+    struct Bindings(Vec<(Range<usize>, String)>);
+    impl<'ast> Visit<'ast> for Bindings {
+        fn visit_block(&mut self, block: &'ast syn::Block) {
+            if let Some(syn::Stmt::Local(local)) = block.stmts.first() {
+                let pat = match &local.pat {
+                    syn::Pat::Type(typed) => &*typed.pat,
+                    pat => pat,
+                };
+                if let syn::Pat::Ident(ident) = pat {
+                    self.0
+                        .push((block.span().byte_range(), ident.ident.to_string()));
+                }
+            }
+            syn::visit::visit_block(self, block);
+        }
+        fn visit_field(&mut self, field: &'ast syn::Field) {
+            if let Some(ident) = &field.ident {
+                self.0.push((field.span().byte_range(), ident.to_string()));
+            }
+            syn::visit::visit_field(self, field);
+        }
+    }
+    if compiler.declared.is_empty() {
+        return None;
+    }
+    let file = compiler.stage.join(span["file_name"].as_str()?);
+    let start = usize::try_from(span["byte_start"].as_u64()?).ok()?;
+    let end = usize::try_from(span["byte_end"].as_u64()?).ok()?;
+    let mut bindings = Bindings(Vec::new());
+    bindings.visit_file(&syn::parse_file(&fs::read_to_string(file).ok()?).ok()?);
+    bindings
+        .0
+        .into_iter()
+        .filter(|(range, _)| range.start <= start && end <= range.end)
+        .filter_map(|(range, name)| {
+            let declared = compiler.declared.iter().find(|d| d.binding == name)?;
+            Some((range.len(), declared))
+        })
+        .min_by_key(|(len, _)| *len)
+        .map(|(_, declared)| declared)
+}
+
+/// Names the mods behind `declared` and puts its explanation before rustc's words.
+fn declared_failure(compiler: &Compiler<'_>, declared: &Declared, output: &mut Output) {
+    for injection in declared.injections.split(", ") {
+        let id = injection.split(':').next().unwrap_or_default();
+        if let Some((id, version)) = compiler.mods.iter().find(|(m, _)| m == id) {
+            output.owners.insert(format!("{id} {version}"));
+        }
+    }
+    let explained = format!("{}\n", declared.explanation);
+    if !output.errors.contains(&explained) {
+        output.errors.insert(0, explained);
+    }
 }
 
 /// Both rustc's prebuilt route and Cargo's source route preserve the rendered error.
@@ -310,6 +438,114 @@ mod tests {
     }
 
     #[test]
+    fn a_wrong_expression_type_names_the_injection_not_just_rustc() {
+        let dir = super::super::tests::dir("expression-culprit");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("Cargo.toml"), "[workspace]\n[package]\nname = 'expression-fixture'\nversion = '0.1.0'\nedition = '2021'\n").unwrap();
+        // The staged shape of an `expression` site: the read bound to the declared type first. The
+        // game uses it as an `f64`; the mod declared `f32`.
+        fs::write(
+            dir.join("src/main.rs"),
+            "fn reach() -> f64 { 3.0 }\nfn main() {\n    let far = reach() > { let __horizon_expression_Sreach: f32 = 4.5; __horizon_expression_Sreach };\n    let _ = far;\n}\n",
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO"))
+            .args(["check", "--offline", "--message-format=json"])
+            .arg("--manifest-path")
+            .arg(dir.join("Cargo.toml"))
+            .env("CARGO_TARGET_DIR", dir.join("target"))
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let site: horizon_mod_api_gen::sites::Site = serde_json::from_value(json!({
+            "expression": {"ty": "f32", "origin": "far_reach:reach, other:reach"},
+            "name": "Sreach", "target": "horizon_client::game::reach", "selector": "4.5",
+            "ordinal": 0, "hash": "h", "call": "4.5", "ctx": "c", "listener": "L", "record": "R",
+            "receiver": "()", "args": [], "output": "f32"
+        }))
+        .unwrap();
+        let mods = vec![("far_reach".to_owned(), "0.2.0".to_owned())];
+        let compiler = Compiler {
+            stage: &dir,
+            source: &dir,
+            mods: &mods,
+            declared: &Declared::expressions(std::slice::from_ref(&site)),
+        };
+        let error = capture(&compiler, Cursor::new(&stdout), Vec::new()).explain(String::new());
+        assert!(error.starts_with("far_reach 0.2.0:\nE_INJECT_EXPRESSION_TYPE: far_reach:reach, other:reach: the declared type `f32` doesn't match the expression `4.5` in horizon_client::game::reach; set `type` in its [[inject]] to the type the game uses there.\n"), "{error}");
+        // rustc's own words follow, for the details.
+        assert!(error.contains("E0308"), "{error}");
+        // The same error outside any expression site names no injection.
+        let unrelated = Compiler {
+            declared: &[],
+            ..compiler
+        };
+        let error = capture(&unrelated, Cursor::new(&stdout), Vec::new()).explain(String::new());
+        assert!(!error.contains("E_INJECT_EXPRESSION_TYPE"), "{error}");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn any_kind_declares_its_own_binding_and_explanation() {
+        // A kind other than `expression` (such as an extension field) supplies only its binding
+        // and words: the span lookup and the owner attribution are shared.
+        let dir = super::super::tests::dir("declared-field-culprit");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("Cargo.toml"), "[workspace]\n[package]\nname = 'declared-fixture'\nversion = '0.1.0'\nedition = '2021'\n").unwrap();
+        fs::write(
+            dir.join("src/main.rs"),
+            "struct Game { speed: u8, charged__charge: Charge }\nfn main() {}\n",
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO"))
+            .args(["check", "--offline", "--message-format=json"])
+            .arg("--manifest-path")
+            .arg(dir.join("Cargo.toml"))
+            .env("CARGO_TARGET_DIR", dir.join("target"))
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let mods = vec![("charged".to_owned(), "1.0.0".to_owned())];
+        let manifest = horizon_mod_package::manifest::Manifest::parse(
+            r#"
+id = "charged"
+name = "Charged"
+version = "1.0.0"
+api = "0.2"
+capabilities = ["registries"]
+[native]
+game = "26.3"
+horizon = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+mixins = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+[[inject]]
+id = "charge"
+at = "game::Game"
+kind = "field"
+access = "internals"
+with = "charge"
+type = "Charge"
+"#,
+        )
+        .unwrap();
+        let declared = Declared::fields([&manifest]);
+        let compiler = Compiler {
+            stage: &dir,
+            source: &dir,
+            mods: &mods,
+            declared: &declared,
+        };
+        let error = capture(&compiler, Cursor::new(&stdout), Vec::new()).explain(String::new());
+        assert!(
+            error.contains("charged:charge: the declared field type `Charge` for `charged__charge` in game::Game"),
+            "{error}"
+        );
+        assert!(error.contains("E0425"), "{error}");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_real_compiler_error_in_a_helper_names_its_mod_and_preserves_the_error() {
         let dir = fixture("compiler-culprit");
         let output = Command::new(env!("CARGO"))
@@ -331,6 +567,7 @@ mod tests {
             stage: &dir,
             source: &dir.join("original"),
             mods: &mods,
+            declared: &[],
         };
         let original = String::from_utf8(output.stderr).unwrap();
         let mut log = Vec::new();
@@ -358,6 +595,7 @@ mod tests {
                         stage: &dir,
                         source: &dir.join("original"),
                         mods: &mods,
+                        declared: &[],
                     }),
                 )
                 .map_err(|ran| ran.error)
@@ -396,6 +634,7 @@ mod tests {
                 stage: &dir,
                 source: &dir.join("original"),
                 mods: &both,
+                declared: &[],
             },
             Cursor::new(&stdout),
             Vec::new(),
@@ -516,6 +755,7 @@ mod tests {
             stage: &dir,
             source: &dir.join("original"),
             mods: &mods,
+            declared: &[],
         };
         let line = |package: &str| {
             json!({
@@ -568,6 +808,7 @@ mod tests {
             stage: &dir,
             source: &dir.join("original"),
             mods: &mods,
+            declared: &[],
         };
         let stdout = check(
             &dir,

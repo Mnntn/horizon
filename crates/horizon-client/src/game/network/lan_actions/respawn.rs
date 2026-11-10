@@ -385,7 +385,7 @@ impl Game<'_> {
             // The death's last blow, read before the death message empties the
             // combat record: ServerPlayer.die's triggers read it from a record
             // that CombatTracker.recheckStatus clears only at the end of die.
-            let blow = self.guest_combat.get(&conn).and_then(|c| c.killing_blow());
+            let killing = self.guest_combat.get(&conn).and_then(|c| c.killing_blow());
             // ServerPlayer.die: with showDeathMessages, the message goes to
             // the dying player's death screen and to everyone the team lets
             // see it; without it, the death screen gets an empty one.
@@ -448,7 +448,7 @@ impl Game<'_> {
             );
             // LivingEntity.die: the death animation, the dying player included.
             host.hub.entity_event(id, 3);
-            let recently_hit = blow.is_some()
+            let recently_hit = killing.is_some()
                 && self
                     .guest_combat
                     .get(&conn)
@@ -457,7 +457,7 @@ impl Game<'_> {
                 entity: id as u32,
                 kind: "minecraft:player",
                 player: Some(uuid),
-                source: blow.as_ref().map(|(damage_type, attacker)| {
+                source: killing.as_ref().map(|(damage_type, attacker)| {
                     crate::game::creatures::death_hurt_source(damage_type, attacker.unwrap_or(0))
                 }),
                 recently_hit,
@@ -486,7 +486,7 @@ impl Game<'_> {
                     game.award_stat("killed_by", kind, 1);
                 }
             });
-            self.guest_killed_player_trigger(conn, at, blow);
+            self.guest_killed_player_trigger(conn, at, killing);
             self.as_guest(conn, |game| {
                 game.award_custom_stat("deaths", 1);
                 game.stats.reset_death_timers();
@@ -512,6 +512,15 @@ impl Game<'_> {
                 if !consumed {
                     self.spawn_orbs(at, reward as u32);
                 }
+            }
+            // `ServerPlayer.die`'s `broadcastEntityEvent`, after the message,
+            // the loot and the experience: Fabric's AFTER_DEATH. The blow is
+            // the one `living_death` heard, so a death it cancelled returns
+            // above and is never told here.
+            if let Some((damage_type, attacker)) = &blow
+                && mod_api::__private::listened(mod_api::HookId::LivingDeathPost)
+            {
+                self.native_living_death_post(id as u32, damage_type, *attacker);
             }
         }
     }

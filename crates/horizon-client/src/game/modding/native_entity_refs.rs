@@ -8,6 +8,10 @@
 //! copy: the local player and the entities the server told it of, in the level
 //! it shows. The entities are those of the level in place (the one a hook runs
 //! in) and the server's players, whatever their level.
+#[path = "native_entity_refs/dragon_parts_table.rs"]
+pub(in crate::game) mod dragon_parts_table;
+#[path = "native_entity_refs/dragon_query.rs"]
+mod dragon_query;
 #[path = "native_entity_refs/save_lending.rs"]
 mod save_lending;
 use super::{
@@ -177,6 +181,13 @@ impl Game<'_> {
             .find(|d| d.id() == dimension)?;
         Some(LevelRef::new(epoch, dim.key()))
     }
+    /// The client level in place as a handle: the level this window shows and
+    /// ticks. None before login, while reconfiguring, or with no world open.
+    pub(super) fn native_client_level(&self) -> Option<LevelRef> {
+        let epoch = self.native_lifecycle.epoch()?;
+        let remote = self.remote.as_ref().filter(|r| r.has_level())?;
+        Some(LevelRef::new(epoch, remote.level_key))
+    }
     /// The name of a dimension's key.
     pub(in crate::game) fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
         mod_api::__private::dimension_id(key).map(str::to_owned)
@@ -204,8 +215,9 @@ impl Game<'_> {
     /// its entity handles cannot resolve until the level is in place. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
-    /// yet resolve; frames, paintings, other special entities and the dragon
-    /// are not on the entity-list walk.
+    /// yet resolve; frames, paintings and other special entities
+    /// are not on the entity-list walk. The dragon follows ordinary entities;
+    /// its eight intersecting parts follow players (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
     /// the game and is not visible; it is restored for `projectile_impact`.
     pub(super) fn level_entities_in(
@@ -231,6 +243,7 @@ impl Game<'_> {
                 ids.push(entity.id());
             }
         });
+        self.append_dragon_query_ids(bounds, false, &mut ids);
         ids.extend(
             self.fishing_hooks_here()
                 .filter(|(hook, _)| bounds.intersects(hook.bounds()))
@@ -262,6 +275,7 @@ impl Game<'_> {
                 ids.push(id);
             }
         }
+        self.append_dragon_query_ids(bounds, true, &mut ids);
         Some(
             ids.into_iter()
                 .map(|id| EntityRef::new(level.epoch(), id))
@@ -901,6 +915,25 @@ pub(super) mod tests {
             .collect();
         crate::game::api_values::register_game_keys(ids);
         Some(root)
+    }
+
+    pub(in crate::game) fn prepare_entity_ticking_neighborhood(
+        game: &mut super::Game<'_>,
+        center: horizon_core::position::ChunkPos,
+    ) {
+        for z in center.z - 2..=center.z + 2 {
+            for x in center.x - 2..=center.x + 2 {
+                if !game.world.chunks.contains_key(&(x, z)) {
+                    game.world.chunks.insert(
+                        (x, z),
+                        std::sync::Arc::new(horizon_client::chunk::Chunk::empty(x, z)),
+                    );
+                    game.block_ticks
+                        .add_empty_chunk(horizon_core::position::ChunkPos::new(x, z))
+                        .unwrap();
+                }
+            }
+        }
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {

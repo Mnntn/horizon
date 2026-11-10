@@ -550,8 +550,6 @@ impl Game<'_> {
     /// `Cushion.removePassenger` plays none once the cushion is removed.
     pub(super) fn dismount_removed_vehicle(&mut self, vehicle_y: f64) {
         self.riding = None;
-        let border = self.border_bounds();
-        let b = self.res.behaviours();
         let Some(p) = self.player.as_ref() else {
             return;
         };
@@ -559,7 +557,26 @@ impl Game<'_> {
             f64::from(p.dimensions.width),
             f64::from(p.dimensions.height),
         );
-        let mut at = Vec3::new(p.position.x, p.position.y.max(vehicle_y), p.position.z);
+        let at = self.removed_vehicle_dismount_point(p.position, w, h, vehicle_y);
+        if let Some(p) = self.player.as_mut() {
+            self.previous_position = p.position;
+            p.position = at;
+            p.velocity = Vec3::ZERO;
+            p.fall_distance = 0.0;
+        }
+    }
+
+    /// Free-position branch shared by removed vehicles and portal dismounts.
+    pub(super) fn removed_vehicle_dismount_point(
+        &self,
+        position: Vec3,
+        w: f64,
+        h: f64,
+        vehicle_y: f64,
+    ) -> Vec3 {
+        let border = self.border_bounds();
+        let b = self.res.behaviours();
+        let mut at = Vec3::new(position.x, position.y.max(vehicle_y), position.z);
         // `getBbWidth() <= 4 && getBbHeight() <= 4`.
         if w <= 4.0 && h <= 4.0 {
             let center = at.add_vector(Vec3::new(0.0, h / 2.0, 0.0));
@@ -578,12 +595,7 @@ impl Game<'_> {
                 at = free.add_vector(Vec3::new(0.0, -h / 2.0, 0.0));
             }
         }
-        if let Some(p) = self.player.as_mut() {
-            self.previous_position = p.position;
-            p.position = at;
-            p.velocity = Vec3::ZERO;
-            p.fall_distance = 0.0;
-        }
+        at
     }
 
     /// `LivingEntity.dismountVehicle` from a live vehicle at `vehicle` whose

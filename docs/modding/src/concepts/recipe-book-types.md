@@ -1,7 +1,8 @@
 # Design: custom recipe-book settings
 
-Proposal for [#1023](https://github.com/arismoko/horizon/issues/1023), not an
-implemented API. This is a Horizon design; vanilla 26.3 is the reference for the
+Design for [#1023](https://github.com/arismoko/horizon/issues/1023).
+Storage and registration are implemented; the player settings handles and
+negotiated synchronization below remain planned. This is a Horizon design; vanilla 26.3 is the reference for the
 four existing books. No other project's implementation is a reference.
 
 ## Registration and ownership
@@ -32,6 +33,22 @@ icons; a book owns two flags. A screen can associate categories with a registere
 book explicitly. Neither category registration nor recipe-type registration
 implicitly registers a book. Display layout, unlocking and custom recipe displays
 remain separate work; this proposal supplies settings only.
+
+### Registration API
+
+In `Hooks::register`, call `r.recipe_book_type("demo:cooking_pot")` on the
+existing `Registrar`. It returns `Result<RecipeBookTypeKey, String>`; failures
+include the declaring mod, supplied ID and rule and refuse installation even
+if ignored. Keep the returned key (`mod_api::item::recipe_book::RecipeBookTypeKey`)
+for screen bindings. `as_str()` returns its stable identity and `is_registered()`
+checks membership in this process's installed registry. No public unchecked
+constructor exists. Native and wasm share the same registrar method through
+the generated Wire boundary; the key explicitly derives `Wire`.
+
+This registration does not create a category, settings handle, UI or network
+payload. Successful installation freezes the registry; resource reload does
+not reopen it. The settings and synchronization operations below are the
+contract for the remaining implementation, not callable methods yet.
 
 ## Storage, persistence, copy and replace
 
@@ -153,6 +170,35 @@ The vanilla reference queries are `rea_vanilla.py method
 net.minecraft.stats.RecipeBookSettings replaceFrom` and `rea_vanilla.py method
 net.minecraft.stats.ServerRecipeBook sendInitialRecipeBook`. Custom registration,
 retention and negotiation are Horizon decisions, not claims about vanilla.
+
+## Recipe displays and category membership (#828)
+
+The `recipe_book_categories` declaration now carries `target_menu`, `book`,
+`search_group` and `displays` beside the category id, recipe type and icon.
+A type supplies `RecipeBookDisplayEntry` values for its recipes during the
+existing recipe-table declaration callback. The callback can read the Host's
+recipe table and interpret its own JSON; the engine does not impose a JSON
+schema on mod recipes.
+
+`RecipeBookDisplay` names the shaped, shapeless, furnace, stonecutter and
+smithing layouts. `RecipeSlotDisplay` describes slots using API-owned values:
+items, stacks, tags, fuel, potion/component transforms, dyeing, trimming,
+remainders and composites. All three display types explicitly derive `Wire`.
+Named resource references are resolved at load, not while drawing.
+
+The engine's `ModBookIndex::build` boundary validates declarations atomically
+against resource tables. Unknown resources, invalid layouts, duplicate recipe
+ownership and conflicting book membership return `DisplayLoadError` values.
+A book has one menu and one search group; no search group can aggregate two
+books. Search membership is derived from the book's categories, so two mod
+books remain isolated and vanilla books have no mod search members.
+
+This is display/index infrastructure, **not screen integration**. Existing
+screens do not yet render these declarations. A declaration's `book` is a
+registered `RecipeBookTypeKey` from #2415; it does not implicitly register
+a book or create settings. The index checks the key against the frozen registry. Enabling
+custom book screens still requires the registration and negotiated settings
+route described above. No vanilla book ordinal or packet meaning changes.
 
 ## Open questions
 

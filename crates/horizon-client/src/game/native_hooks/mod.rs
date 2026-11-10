@@ -85,7 +85,7 @@ use mod_api::{
 };
 use mod_api::{
     BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, HiddenParts, MapDecorationType,
-    PosedParts, RuntimeSprite, TaskId, TextureAtlasRegistration,
+    ParticleGroup, PosedParts, RuntimeSprite, TaskId, TextureAtlasRegistration,
 };
 pub(crate) use mod_api::{
     BlockRim, ClientPacket, ClientPayload, ColoredLight, ExplosionStart, ItemFished, LootDrops,

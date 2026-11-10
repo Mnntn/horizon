@@ -44,12 +44,7 @@ impl Game<'_> {
                 .and_then(|chunk| chunk.saved.as_ref())
                 .map(|extras| extras.attachments.synced()),
             // Read in place: lending the map would give the entity one.
-            Holder::Entity(id) => self
-                .persist
-                .uuids
-                .get(&id)
-                .and_then(|uuid| self.entity_attachments.get(uuid))
-                .map(|map| map.synced()),
+            Holder::Entity(id) => self.entity_attachments.get(&id).map(|map| map.synced()),
             _ => self
                 .attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                 .ok()

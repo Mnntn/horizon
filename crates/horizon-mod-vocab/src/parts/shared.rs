@@ -142,6 +142,7 @@ pub(crate) struct TagParts {
 /// What every mod's [`Hooks::register`](crate::Hooks::register) attached.
 #[derive(Default)]
 pub(crate) struct Installed {
+    pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
     pub(crate) game_rule_slots: Vec<u32>,
@@ -529,6 +530,7 @@ pub(crate) fn attached<'a, 'k, P: ?Sized>(
 /// The game's [`Registrar`]: every mod's registrations, checked as they come.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
+    pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
     pub(crate) mod_id: &'static str,
@@ -556,6 +558,7 @@ pub struct PartRegistrar {
 impl PartRegistrar {
     pub(crate) fn new(mod_id: &'static str) -> Self {
         Self {
+            recipe_book_types: HashMap::new(),
             game_rule_categories: Vec::new(),
             game_rules: Vec::new(),
             mod_id,
@@ -699,6 +702,7 @@ pub(crate) fn install_registrar(
     }
     let game_rule_slots = slots.expect("every schema refusal was collected");
     let mut installed = Installed {
+        recipe_book_types: registrar.recipe_book_types,
         game_rule_slots,
         game_rules: registrar.game_rules,
         game_rule_categories: registrar.game_rule_categories,

@@ -58,7 +58,11 @@ fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
         .native
         .as_ref()
         .ok_or("internals add needs a [native] mod")?;
-    let catalog = load(dir, &native.horizon)?;
+    let catalog = if native.module.is_empty() {
+        load(dir, &native.horizon)?
+    } else {
+        internals::read(&catalog_directory(dir, &manifest)?.join(CATALOG))?
+    };
     // Resolve every request before editing: any unavailable or ambiguous path leaves the file alone.
     let entries = paths
         .iter()
@@ -125,6 +129,49 @@ fn upsert(
         }
     }
     Ok(())
+}
+
+/// Module discovery uses the launcher's source and toolchain management.
+pub(crate) fn catalog_directory(dir: &Path, manifest: &Manifest) -> Result<PathBuf, String> {
+    let native = manifest
+        .native
+        .as_ref()
+        .ok_or("catalog needs a native mod")?;
+    if native.module.is_empty() {
+        return Ok(dir
+            .join("target/horizon-mod/prebuilt")
+            .join(&native.horizon));
+    }
+    let launcher =
+        std::env::var_os("HORIZON_LAUNCHER").unwrap_or_else(|| "horizon-launcher".into());
+    let snapshots = dir.join("target/horizon-mod/catalog-snapshots");
+    fs::create_dir_all(&snapshots).map_err(|e| e.to_string())?;
+    let destination = snapshots
+        .canonicalize()
+        .map_err(|e| e.to_string())?
+        .join(format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_nanos()
+        ));
+    let output = std::process::Command::new(launcher)
+        .args(["native-build", "--catalog", "--trust-native-code", "--catalog-output"])
+        .arg(&destination)
+        .arg(dir.canonicalize().map_err(|e| e.to_string())?)
+        .stderr(std::process::Stdio::inherit())
+        .output()
+        .map_err(|e| format!("Could not run horizon-launcher: {e}. Install it on PATH or set HORIZON_LAUNCHER to its executable."))?;
+    if !output.status.success() {
+        return Err("Module catalog discovery failed".into());
+    }
+    Ok(PathBuf::from(
+        String::from_utf8(output.stdout)
+            .map_err(|e| e.to_string())?
+            .trim(),
+    ))
 }
 
 /// The launcher owns source staging and compiler diagnostics; this tool owns manifest edits.
@@ -328,7 +375,10 @@ pub fn refresh(
                 ));
             }
         }
-        set_fingerprint(doc, index, &entry.hash, declared.kind.as_deref())?;
+        // A declaration without a hash follows the pin, so it stays without one.
+        if declared.hash.is_some() {
+            set_fingerprint(doc, index, &entry.hash, declared.kind.as_deref())?;
+        }
     }
     Ok(report)
 }
@@ -564,7 +614,7 @@ mod tests {
                 replace(&format!("{metadata}{body}[native]{pins}"), &entries).unwrap();
             let manifest = Manifest::parse(&candidate).unwrap();
             assert_eq!(manifest.internals.len(), 2);
-            assert_eq!(manifest.internals[0].hash, "new");
+            assert_eq!(manifest.internals[0].hash.as_deref(), Some("new"));
             assert_eq!(manifest.internals[0].kind.as_deref(), Some("struct"));
             assert!(candidate.contains("# keep"));
             assert!(candidate.starts_with(metadata));
@@ -585,7 +635,7 @@ mod tests {
             replace(&format!("{metadata}{body}[native]{pins}"), &entries[..1]).unwrap();
         let manifest = Manifest::parse(&candidate).unwrap();
         assert_eq!(manifest.internals.len(), 1);
-        assert_eq!(manifest.internals[0].hash, "new");
+        assert_eq!(manifest.internals[0].hash.as_deref(), Some("new"));
         assert_eq!(manifest.internals[0].kind.as_deref(), Some("struct"));
     }
 
@@ -596,7 +646,7 @@ mod tests {
         let mut declared = horizon_mod_package::manifest::Internal {
             path: "horizon_client::game::Game<'_>::reach".into(),
             kind: None,
-            hash: "2222".into(),
+            hash: Some("2222".into()),
         };
         assert_eq!(
             internals::check(&entries, "example", &declared)
@@ -604,7 +654,7 @@ mod tests {
                 .to_string(),
             "E_INTERNAL_CHANGED: example uses horizon_client::game::Game<'_>::reach, whose signature is now impl Game<'_> { fn reach(&self, hand: Hand) -> f64 }; run cargo horizon-mod update to see what changed."
         );
-        declared.hash = "abcd".into();
+        declared.hash = Some("abcd".into());
         internals::check(&entries, "example", &declared).unwrap();
     }
 }

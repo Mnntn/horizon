@@ -209,6 +209,17 @@ impl Default for ResourceSource {
     }
 }
 
+/// `name` from the highest-priority source that supplies it, read when the
+/// whole resource fits `max` bytes. Sources are ordered lowest priority first,
+/// as vanilla's `MultiPackResourceManager` lists a pack stack: a later source
+/// overrides an earlier one. None when no source has the file, the winning
+/// source cannot read it, or it is larger than `max` (a lower source's copy is
+/// not substituted for an oversized winner).
+pub fn read_winning_resource(sources: &[&ResourceSource], name: &str, max: u64) -> Option<Vec<u8>> {
+    let winner = sources.iter().rev().find(|source| source.contains(name))?;
+    winner.read_limited(name, max).ok()
+}
+
 /// A resource name cannot escape its layer. ZIP names already have separators
 /// normalized by `Zip`; reject drive/stream names and NULs on every platform.
 /// Whether a relative resource name cannot escape its source root.
@@ -873,6 +884,47 @@ mod tests {
             source
                 .list("assets/demo/sounds/")
                 .contains(&sound.to_owned())
+        );
+    }
+
+    #[test]
+    fn winning_resource_takes_the_last_layer_with_a_bounded_read() {
+        let base = ResourceSource::indexed(BTreeMap::from([
+            (
+                "data/demo/config.json".to_owned(),
+                Resource::bytes(b"base".to_vec()),
+            ),
+            (
+                "data/demo/only-base.json".to_owned(),
+                Resource::bytes(b"base-only".to_vec()),
+            ),
+        ]));
+        let pack = ResourceSource::indexed(BTreeMap::from([(
+            "data/demo/config.json".to_owned(),
+            Resource::bytes(b"pack".to_vec()),
+        )]));
+        let empty = ResourceSource::default();
+        let sources = [&base, &empty, &pack];
+        assert_eq!(
+            read_winning_resource(&sources, "data/demo/config.json", 64),
+            Some(b"pack".to_vec())
+        );
+        assert_eq!(
+            read_winning_resource(&sources, "data/demo/only-base.json", 64),
+            Some(b"base-only".to_vec())
+        );
+        assert_eq!(
+            read_winning_resource(&sources, "data/demo/missing.json", 64),
+            None
+        );
+        // The winning layer is too large: the lower layer's smaller copy is not used.
+        assert_eq!(
+            read_winning_resource(&sources, "data/demo/config.json", 3),
+            None
+        );
+        assert_eq!(
+            read_winning_resource(&sources, "../data/demo/config.json", 64),
+            None
         );
     }
 

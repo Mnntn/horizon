@@ -161,20 +161,27 @@ pub(super) fn overlay_files(
 }
 
 impl FnState {
+    /// The enabled world packs in resource priority order, highest first: a
+    /// later selected pack overrides an earlier one (`PackRepository` order).
+    pub(in crate::game) fn pack_sources(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = &horizon_assets::resource_source::ResourceSource> {
+        self.enabled
+            .iter()
+            .rev()
+            .filter_map(|id| self.packs.iter().find(|pack| &pack.id == id))
+            .map(|pack| pack.source())
+    }
+
     /// The highest enabled world pack providing this data resource.
     pub(super) fn data_resource(
         &self,
         name: &str,
     ) -> Option<horizon_assets::resource_source::Resource> {
-        self.enabled
-            .iter()
-            .rev()
-            .filter_map(|id| self.packs.iter().find(|pack| &pack.id == id))
-            .find_map(|pack| {
-                let source = pack.source();
-                source.contains(name).then(|| {
-                    horizon_assets::resource_source::Resource::file(source.clone(), name.to_owned())
-                })
+        self.pack_sources()
+            .find(|source| source.contains(name))
+            .map(|source| {
+                horizon_assets::resource_source::Resource::file(source.clone(), name.to_owned())
             })
     }
 

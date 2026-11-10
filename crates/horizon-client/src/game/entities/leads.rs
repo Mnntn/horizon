@@ -583,8 +583,10 @@ impl Game<'_> {
         }
     }
     /// The `leash` tag of a mob about to be saved.
-    pub(super) fn write_leash(&mut self, tag: &mut Tag, index: usize) {
-        let m = &self.mobs[index];
+    pub(super) fn write_leash(&mut self, tag: &mut Tag, id: u32) {
+        let Some(m) = self.mob_object(id) else {
+            return;
+        };
         let (holder, pending, leash_player) =
             (m.extra.leash, m.extra.leash_pending, m.extra.leash_player);
         let level_player_uuid = self.level.player_uuid;

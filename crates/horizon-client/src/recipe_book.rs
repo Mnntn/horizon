@@ -13,8 +13,13 @@ use horizon_world::loot::PackOverlay;
 pub use mod_api::item::recipe_book::RecipeBookCategory;
 use std::collections::{BTreeSet, HashMap};
 
+mod properties;
+pub use properties::ServerRecipeProperties;
+
 mod custom_books;
+mod mod_index;
 pub use custom_books::{BookError, BookFlags, CustomBooks, read_saved};
+pub use mod_index::{DisplayLoadError, DisplayResources, ModBookIndex};
 
 /// Validate declarations once per recipe table. The first valid declaration
 /// owns its category id and recipe type; vanilla categories are never replaced.
@@ -1456,6 +1461,14 @@ mod tests {
             id: id.into(),
             recipe_type: recipe_type.into(),
             icon: icon.into(),
+            target_menu: "mymod:machine".into(),
+            book: {
+                let mut wire = mod_api::wire::Writer::new();
+                wire.put(&"mymod:machine".to_owned());
+                mod_api::wire::Reader::decode(wire.bytes()).unwrap()
+            },
+            search_group: "mymod:search".into(),
+            displays: Vec::new(),
         };
         let crusher = declare("mymod:crushing", "mymod:crusher", "mymod:crusher");
         let mixer = declare("mymod:mixing", "mymod:mixer", "minecraft:stone");

@@ -573,7 +573,7 @@ fn dispatch_contracts() {
     dispatch_modify_default_components(&Load("defaults"), "item", &mut components);
     assert_eq!(components["order"], serde_json::json!([1, 2]));
     let mut host = TestHost;
-    dispatch_level_tick_pre(&mut host, "overworld");
+    dispatch_level_tick_pre(HostSide::Server(&mut host), LevelRef);
     assert_eq!(*calls.lock().unwrap(), [1, 2]);
     calls.lock().unwrap().clear();
     let mut zoom = None;

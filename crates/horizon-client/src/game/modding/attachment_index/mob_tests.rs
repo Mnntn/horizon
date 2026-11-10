@@ -108,11 +108,14 @@ fn saved_mob_binding_tracks_serialized_transfer_and_parked_levels() {
         game.enter_level(Dim::Overworld).unwrap();
         assert_eq!(VALUE.get(game, Holder::Entity(id)), Ok(11));
         // Serialized portals discard the source owner before destination load.
+        let state = game.take_transferred_entity_state(id);
         game.mobs.retain(|m| m.id != id);
         game.detach_entity(id);
         assert!(source.lock().unwrap().snapshot(&key).is_empty());
         game.enter_level(Dim::Nether).unwrap();
-        let moved = game.load_mob(mob(uuid), None).unwrap();
+        let moved = game
+            .load_mob_transferred(mob(uuid), None, Some(state))
+            .unwrap();
         assert_ne!(moved, id); // This route allocates; retained-id vehicles have their own arrival seam.
         assert_eq!(
             game.attachment_indexes[&Dim::Nether]
@@ -157,7 +160,7 @@ fn saved_mob_binding_rebinds_retained_id_with_a_new_generation() {
         owner.attachment_lifetime.retire();
         assert!(source.lock().unwrap().snapshot(&key).is_empty());
         game.enter_level(Dim::Nether).unwrap();
-        game.rebind_transferred_entity(Dim::Overworld, id, &mut owner);
+        game.rebind_transferred_entity(id, &mut owner);
         game.mobs.push(owner);
         let current = game.attachment_indexes[&Dim::Nether]
             .lock()
@@ -224,7 +227,7 @@ fn mob_first_store_binds_and_nested_rollback_retires_authority() {
         });
         assert!(result.is_err());
         assert!(!game.mobs[0].attachment_lifetime.is_bound());
-        assert!(!game.entity_attachments[&uuid].has_index_binding());
+        assert!(!game.entity_attachments[&id].has_index_binding());
         let index = game.attachment_indexes[&Dim::Overworld].clone();
         assert!(
             index
@@ -269,7 +272,7 @@ fn mob_taken_store_refuses_without_writing_and_missing_store_refuses() {
         assert!(
             !game
                 .entity_attachments
-                .get(&uuid)
+                .get(&id)
                 .is_some_and(|map| map.has_index_binding())
         );
         game.mobs.restore(

@@ -158,7 +158,8 @@ impl Game<'_> {
                 else {
                     return Ok(None);
                 };
-                let mut placed = recipes.remainders(id, grid, size);
+                let mut placed =
+                    recipes.remainders(id, grid, size, &|s| self.crafting_remainder(s));
                 let remainders = (0..w * h)
                     .map(|i| placed[at(i)].take().try_into_api().map_err(|_| InvalidItem))
                     .collect::<Result<Vec<_>, _>>()?;

@@ -12,7 +12,10 @@ Call `host.query(&TYPE)` on `&dyn Host`, then borrow its rows with `batch.iter()
 Reads require `T: Send + Sync + 'static`, not `Clone`. Each successful row has a
 Copy `holder` and a borrowed `value: &T`. Match `AttachmentHolder` to work with the
 existing `EntityRef`, `PlayerRef`, `BlockEntityRef`, `ChunkRef` or `LevelRef`.
-Copying that identity does not keep its holder loaded.
+Copying that identity does not keep its holder loaded. Attachment ownership follows
+an entity object, not its saved UUID. A rejected passenger can own attachments
+without being in the level; it is absent from queries until admitted. Equal-UUID
+objects never share attachment contents.
 
 This example defines a serialized counter and sums its captured values:
 

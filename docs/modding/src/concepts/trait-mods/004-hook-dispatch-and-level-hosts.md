@@ -1,8 +1,9 @@
 <!-- chapter: Hook dispatch and level hosts -->
 <!-- separator: 1 -->
 
-A linked trait mod implements `mod_api::Hooks`. Helper injections run first.
-An injection that returns early skips trait mods. A claimed cancellation reaches only trait listeners that receive cancelled events.
+A linked trait mod implements `mod_api::Hooks`. A hook function is not an injection point, so
+`[[inject]]` never runs inside a hook's dispatch; a `head` injection that cancels the game function
+calling a hook keeps the hook from firing at all. A claimed cancellation reaches only trait listeners that receive cancelled events.
 Otherwise, trait mods run by priority, then in dependency order. Once a mod cancels, later mods are skipped unless
 they receive cancelled events. For replacement hooks, the first `Some` wins. Collection hooks call every mod.
 Receiverless hooks have no `Host`.

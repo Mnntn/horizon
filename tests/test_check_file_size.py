@@ -1,4 +1,5 @@
 import contextlib
+import importlib.util
 import io
 import os
 from pathlib import Path
@@ -292,6 +293,201 @@ class SyncProvenanceTests(unittest.TestCase):
             with mock.patch.object(check_file_size, "ROOT", Path(clone)):
                 result = check_file_size.sync_provenance(self.upstream, self.base)
                 self.assertIn("unshallow", result[0])
+
+SYNC_A, SYNC_B = "a" * 40, "b" * 40
+
+
+class RepositoryCase(unittest.TestCase):
+    """A real repository whose base commit holds big.rs (3100 lines) and a sync baseline that lists it."""
+
+    base_cap = 3200
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.name", "Fixture")
+        self.git("config", "user.email", "fixture@example.invalid")
+        (self.root / "tools").mkdir()
+        self.write_baseline(SYNC_A, {"big.rs": self.base_cap})
+        self.write("big.rs", 3100)
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "base")
+        self.git("checkout", "-q", "-b", "work")
+        patch = mock.patch.object(check_file_size, "ROOT", self.root)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def git(self, *args):
+        return subprocess.run(["git", *args], cwd=self.root, check=True, capture_output=True, text=True).stdout
+
+    def write(self, path, lines):
+        (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / path).write_text("x\n" * lines)
+
+    def write_baseline(self, marker, sizes):
+        rows = [f"# sync-baseline: {marker}"] + [f"{path} {size}" for path, size in sizes.items()]
+        (self.root / "tools/file_size_baseline.txt").write_text("\n".join(rows) + "\n")
+
+    def commit(self, message="work"):
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", message)
+
+    def check(self, provenance=()):
+        out = io.StringIO()
+        with mock.patch.object(check_file_size, "sync_provenance", return_value=list(provenance)), \
+                contextlib.redirect_stdout(out):
+            return check_file_size.main(["--base", "main"]), out.getvalue()
+
+
+class BaselineModeTests(RepositoryCase):
+    """The checked-in caps are used by a sync PR (its header changed) and ignored by every other PR."""
+
+    def test_shrinking_a_listed_file_needs_no_baseline_edit(self):
+        # The cap on the base (3200) is above the file; outside a sync nothing forces it down.
+        self.write("big.rs", 3050)
+        self.commit()
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("baselines not used", out)
+        # Main can shrink independently after this branch forks. Its newer tip is not
+        # this PR's baseline: 3050 still shrinks the common ancestor's 3100 lines.
+        self.git("checkout", "-q", "main")
+        self.write("big.rs", 3025)
+        self.commit("independent main shrink")
+        self.git("checkout", "-q", "work")
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+
+    def test_a_listed_file_still_may_not_grow_outside_a_sync(self):
+        # Its entry would allow 3200 lines, but the entry is not used: the base rule holds at 3100.
+        self.write("big.rs", 3150)
+        self.commit()
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("big.rs: 3150 lines without test modules (3100 on the base)", out)
+
+    def test_raising_an_entry_without_a_sync_header_still_fails(self):
+        self.write_baseline(SYNC_A, {"big.rs": 3300})
+        self.commit()
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("added or raised without a changed sync-baseline upstream SHA", out)
+
+    def test_a_sync_header_makes_the_entries_exact_caps(self):
+        self.write_baseline(SYNC_B, {"big.rs": 3200})
+        self.write("big.rs", 3200)
+        self.commit()
+        self.assertEqual(self.check()[0], 0)
+        self.write("big.rs", 3201)
+        self.commit("grow")
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("3201 lines exceeds its sync baseline 3200", out)
+
+    def test_a_sync_header_keeps_the_stale_high_rule(self):
+        self.write_baseline(SYNC_B, {"big.rs": 3200})
+        self.write("big.rs", 3150)
+        self.commit()
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("big.rs: stale-high baseline 3200", out)
+
+    def test_a_sync_header_needs_its_provenance(self):
+        self.write_baseline(SYNC_B, {"big.rs": 3200})
+        self.write("big.rs", 3200)
+        self.commit()
+        code, out = self.check(provenance=["sync baseline SHA is not an ancestor of upstream main"])
+        self.assertEqual(code, 1)
+        self.assertIn("not an ancestor of upstream main", out)
+
+
+def load_generator():
+    spec = importlib.util.spec_from_file_location(
+        "write_file_size_baseline", Path(__file__).resolve().parent.parent / "tools/sync/write_file_size_baseline.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class GeneratorTests(RepositoryCase):
+    """tools/sync/write_file_size_baseline.py writes what the checker accepts in a sync, and nothing else."""
+
+    def setUp(self):
+        super().setUp()
+        self.generator = load_generator()
+
+    def run_generator(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = self.generator.main(["--base", "main", *args])
+        return code, out.getvalue(), err.getvalue()
+
+    def baseline(self):
+        return (self.root / "tools/file_size_baseline.txt").read_text()
+
+    def test_it_lists_only_the_files_that_grew_and_the_checker_accepts_the_result(self):
+        self.write("big.rs", 3150)           # over the limit and grew
+        self.write("crossed.rs", 3200)       # was under the limit, now over it
+        self.write("shrunk.rs", 100)
+        self.write("third_party/x/lib.rs", 9000)
+        (self.root / "gen.rs").write_text("// @generated\n" + "x\n" * 4000)
+        self.commit()
+        code, out, err = self.run_generator("--marker", SYNC_B)
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertEqual(self.baseline().splitlines()[2:], [
+            f"# sync-baseline: {SYNC_B}", "big.rs 3150", "crossed.rs 3200"])
+        self.commit("regenerate")
+        self.assertEqual(self.check()[0], 0)
+        # Entries are exact: one more line fails, and a smaller file is stale-high until regenerated.
+        self.write("big.rs", 3151)
+        self.commit("grow")
+        self.assertEqual(self.check()[0], 1)
+        self.write("big.rs", 3100)
+        self.commit("shrink")
+        self.assertIn("stale-high", self.check()[1])
+        self.assertEqual(self.run_generator("--marker", SYNC_B)[0], 0)
+        self.commit("regenerate again")
+        self.assertEqual(self.check()[0], 0)
+
+    def test_growth_needs_a_new_upstream_marker(self):
+        self.write("big.rs", 3150)
+        self.commit()
+        before = self.baseline()
+        for args in ((), ("--marker", SYNC_A)):
+            code, out, err = self.run_generator(*args)
+            self.assertEqual(code, 2)
+            self.assertIn("pass --marker", err)
+            self.assertEqual(self.baseline(), before)
+
+    def test_without_growth_it_writes_an_empty_ratchet_and_keeps_the_header(self):
+        self.write("big.rs", 3000)
+        self.commit()
+        self.assertEqual(self.run_generator()[0], 0)
+        self.assertEqual(self.baseline().splitlines()[2:], [f"# sync-baseline: {SYNC_A}"])
+        self.commit("regenerate")
+        self.assertEqual(self.check()[0], 0)
+
+    def test_a_malformed_marker_is_refused(self):
+        self.write("big.rs", 3150)
+        self.commit()
+        before = self.baseline()
+        code, out, err = self.run_generator("--marker", "abc")
+        self.assertEqual(code, 2)
+        self.assertIn("Refusing to write", err)
+        self.assertEqual(self.baseline(), before)
+
+    def test_check_prints_and_leaves_the_file_alone(self):
+        self.write("big.rs", 3150)
+        self.commit()
+        before = self.baseline()
+        code, out, err = self.run_generator("--marker", SYNC_B, "--check")
+        self.assertEqual(code, 0)
+        self.assertIn("big.rs 3150", out)
+        self.assertEqual(self.baseline(), before)
+
+
 
 if __name__ == "__main__":
     unittest.main()

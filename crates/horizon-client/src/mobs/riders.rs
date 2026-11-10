@@ -394,13 +394,16 @@ fn controller<'a>(m: &Mob, w: &'a MobWorld) -> Option<&'a Seen> {
     if m.no_ai {
         return None;
     }
-    m.extra.rider.and_then(|id| w.seen(id)).filter(|r| {
-        r.alive
-            && !w.data.entity_has(
-                "minecraft:non_controlling_rider",
-                &format!("minecraft:{}", super::species::def(r.species).name),
-            )
-    })
+    m.extra
+        .rider
+        .and_then(|id| w.passenger_object(id))
+        .filter(|r| {
+            r.alive
+                && !w.data.entity_has(
+                    "minecraft:non_controlling_rider",
+                    &format!("minecraft:{}", super::species::def(r.species).name),
+                )
+        })
 }
 /// Vehicle goal flags are independent of whether the rider has a combat target.
 /// Ravager.updateControlFlags permits raiders, unlike Mob.updateControlFlags.
@@ -588,7 +591,9 @@ pub fn resume_after_consumption(
     events: &mut Vec<super::MobEvent>,
 ) -> bool {
     tick_with(mobs, index, w, level, events, |m, w, level, events| {
-        super::ai::resume_after_consumption(m, w, level, was_on_fire, events)
+        let kept = super::ai::resume_after_consumption(m, w, level, was_on_fire, events);
+        super::neutral_anger::after_tick(m, w.game_time);
+        kept
     })
 }
 
@@ -791,6 +796,42 @@ mod tests {
     }
 
     // Lower-layer loan test, not a native GoalContext integration test.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn retained_controller_disables_goals_without_becoming_a_target() {
+        let mut vehicle = of(71, Species::Spider);
+        let mut rider = of(72, Species::Skeleton);
+        rider.extra.mount = Some(vehicle.id);
+        vehicle.extra.rider = Some(rider.id);
+        let retained = [rider.seen(None)];
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required");
+        assert!(crate::mobs::world::with_resource_test_world(
+            std::path::Path::new(&root),
+            &[],
+            true,
+            true,
+            |_, _| {},
+            |w, _| {
+                let w = MobWorld {
+                    passenger_objects: &retained,
+                    ..w.clone()
+                };
+                drive(&mut vehicle, &w);
+                assert_eq!(vehicle.ai.goals.disabled & CONTROLLED, CONTROLLED);
+                assert!(w.seen(rider.id).is_none());
+                assert!(w.target_info(super::super::Who::Mob(rider.id)).is_none());
+                assert_eq!(w.others_near(vehicle.bounds()).count(), 0);
+                vehicle.extra.rider = None;
+                drive(&mut vehicle, &w);
+                assert_eq!(vehicle.ai.goals.disabled & CONTROLLED, 0);
+                vehicle.extra.rider = Some(rider.id);
+                vehicle.no_ai = true;
+                drive(&mut vehicle, &w);
+                assert_eq!(vehicle.ai.goals.disabled & CONTROLLED, 0);
+            }
+        ));
+    }
+
     #[test]
     fn navigation_loan_restores_both_owners_after_unwind() {
         for unwind in [false, true] {

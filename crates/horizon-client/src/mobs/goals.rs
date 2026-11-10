@@ -2367,11 +2367,12 @@ impl Goal for Tempt {
         let Some(p) = cx.w.selected_player() else {
             return false;
         };
-        // Attributes.TEMPT_RANGE default 10; never picks a spectator.
+        let range =
+            cx.w.player_visibility(p, m.id, p.visibility_percent(m.species()));
         p.alive
             && !p.spectator
             && (self.wants(&p.main_hand) || self.wants(&p.off_hand))
-            && m.distance_sqr(p.position) <= 100.0
+            && m.distance_sqr(p.position) <= (10.0 * range).max(2.0).powi(2)
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         if self.can_scare
@@ -3655,7 +3656,6 @@ mod remove_all_tests {
         assert!(ran, "the test world's resources are missing");
     }
 }
-
 #[cfg(test)]
 mod avoid_entity_targeting_tests {
     use super::*;
@@ -3748,6 +3748,56 @@ mod avoid_entity_targeting_tests {
             assert!(in_range, "the player is inside the plain distance range");
             assert!(picked, "the rabbit ignored a player in the open");
         }
+    }
+
+    /// Upstream's visibility regression, also through the selected-guest path.
+    #[test]
+    fn an_invisible_player_tempts_only_within_two_blocks() {
+        let mut outcomes = Vec::new();
+        if !with_test_world(&[], |w, types| {
+            let kind = Arc::new(types.types["minecraft:cow"].clone());
+            for guest in [false, true] {
+                for (invisible, x) in [(false, 5.5), (true, 5.5), (true, 1.5)] {
+                    let mut world = w.clone();
+                    let mut p = test_player(Vec3::new(x, 64.0, 0.5));
+                    p.main_hand = Some("minecraft:wheat".into());
+                    p.invisible = invisible;
+                    let selection = super::super::player_selection::PlayerSelection::new(
+                        vec![super::super::player_selection::TickPlayer {
+                            entity_id: 42,
+                            connection: Some(7),
+                            view: p.clone(),
+                        }],
+                        Some(42),
+                    )
+                    .unwrap();
+                    world.player = Some(if guest {
+                        test_player(Vec3::new(100.0, 64.0, 0.5))
+                    } else {
+                        p
+                    });
+                    world.player_selection = guest.then_some(&selection);
+                    let mut m = Mob::new(1, kind.clone(), Vec3::new(0.5, 64.0, 0.5), 0.0);
+                    m.ai.goals.add(
+                        3,
+                        Tempt::new(1.25, Arc::from(vec!["minecraft:wheat".to_string()]), false),
+                    );
+                    let mut level = crate::health::TestLevel::new(0);
+                    let mut events = Vec::new();
+                    let mut cx = Cx {
+                        w: &world,
+                        level: &mut level.level(),
+                        events: &mut events,
+                    };
+                    let mut goals = std::mem::take(&mut m.ai.goals);
+                    goals.tick(&mut m, &mut cx);
+                    outcomes.push(goals.is_running("Tempt"));
+                }
+            }
+        }) {
+            return;
+        }
+        assert_eq!(outcomes, vec![true, false, true, true, false, true]);
     }
 
     /// `TemptGoal` finds its player with `TargetingConditions.forNonCombat()`,

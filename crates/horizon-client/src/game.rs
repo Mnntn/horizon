@@ -3014,7 +3014,7 @@ struct Game<'a> {
     maps: maps::Maps,
     /// The ender dragon fight (game/mobs/dragon.rs).
     fight: dragon::Fight,
-    dragon: horizon_client::join_seq::ResidentSlot<dragon::Dragon>,
+    dragon: native_entity_refs::dragon_parts_table::DragonSlot,
     crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
     breath_clouds: horizon_client::join_seq::ResidentList<dragon::Breath>,
     dragon_model: Option<horizon_client::mobs::Part>,
@@ -3202,7 +3202,7 @@ struct Game<'a> {
     persist: persist::EntityMemory,
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
-    entity_attachments: HashMap<[i32; 4], horizon_mod_runtime::attachments::Attachments>,
+    entity_attachments: HashMap<u32, horizon_mod_runtime::attachments::Attachments>,
     entity_initialization: entity_initialization::EntityInitialization,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
@@ -8708,7 +8708,7 @@ impl Game<'_> {
         self.draw_debug_overlay(&mut batch, size);
         self.frame_graph
             .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
-        self.draw_pad_cursor(&mut batch);
+        self.draw_pad_over_hud(&mut batch);
         batch
     }
     fn hud_layers(&mut self, size: [u32; 2]) -> HudBatch {
@@ -8855,6 +8855,7 @@ impl Game<'_> {
             if self.camera_type.is_first_person()
                 && (!spectator || self.spectator_crosshair())
                 && !self.debug_crosshair()
+                && !self.overlay_holds_view()
             {
                 let attack = (indicator == 1).then_some(strength);
                 let full = attack.is_some_and(|a| {
@@ -8977,6 +8978,7 @@ impl Game<'_> {
                     Some(draws) => draws,
                     None => self.health_hud.layout(&inputs, wi, hi),
                 };
+                self.keep_status_rows(&draws, wi, hi);
                 // The rows draw in one pass here, so a mod's `player_health`
                 // layer stands for the armor, food and air rows too.
                 self.gui_layer("minecraft:player_health", &mut batch, |g, batch| {
@@ -9078,7 +9080,9 @@ impl Game<'_> {
             self.draw_mod_gui_layers(Some("minecraft:chat"), &mut batch);
             self.draw_chat(&mut batch);
         } else if show_hud {
-            self.gui_layer("minecraft:chat", &mut batch, |g, batch| g.draw_chat(batch));
+            if !self.overlay_holds_view() {
+                self.gui_layer("minecraft:chat", &mut batch, |g, batch| g.draw_chat(batch));
+            }
             self.gui_layer("minecraft:tab_list", &mut batch, |g, batch| {
                 g.draw_tab_list(batch);
             });
@@ -9154,11 +9158,7 @@ impl Game<'_> {
         // after this point and so over what a mod drew.
         self.draw_screen_with_post_hook(&mut batch, drawn);
         self.draw_saving_indicator(&mut batch);
-        // ToastManager.extractRenderState: F1 hides the toasts too.
-        self.draw_toasts(&mut batch, !show_hud);
-        self.draw_tutorial_toasts(&mut batch, !show_hud);
-        self.draw_pack_toasts(&mut batch, !show_hud);
-        self.draw_music_toast(&mut batch, !show_hud);
+        self.draw_every_toast(&mut batch, !show_hud);
         if self.server_packs.prompt.is_none() {
             self.remote_hud(&mut batch);
             self.draw_sign_editor(&mut batch);
@@ -10019,6 +10019,7 @@ impl Game<'_> {
             maps: Some(&maps),
         };
         let env = Env {
+            crafting_remainder: Some(self),
             player: self
                 .lan_acting_uuid
                 .or_else(|| self.remote.as_ref().map(|r| r.profile())),
@@ -10332,11 +10333,6 @@ impl Game<'_> {
                 let taken = result.clone();
                 let cells = self.craft_size * self.craft_size;
                 let ingredients = self.craft_grid[..cells].to_vec();
-                let remainders = world_recipes!(self).remainders(
-                    &recipe,
-                    &self.craft_grid[..cells],
-                    self.craft_size,
-                );
                 if shift {
                     if self.add_stack_to_inventory(result).is_some() {
                         break;
@@ -10353,6 +10349,7 @@ impl Game<'_> {
                         _ => return,
                     }
                 }
+                let remainders = self.craft_grid_remainders(&recipe);
                 for cell in self.craft_grid.iter_mut() {
                     if let Some(s) = cell {
                         s.count -= 1;
@@ -13833,7 +13830,7 @@ impl Game<'_> {
             eye[2].floor() as i32,
         );
         let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
-        let shown = self.hands_to_render();
+        let shown = self.hands_shown();
         let used_hand = self.used_hand();
         let spinning = self
             .player
@@ -15233,6 +15230,7 @@ impl Game<'_> {
             self.camera_type.is_first_person(),
             self.ui.hide_gui,
             self.shows_panorama(),
+            self.overlay_holds_view(),
         ) {
             let scale = HudBatch::new(size, self.settings.gui_scale_inputs()).scale;
             crosshair.debug_crosshair(at, view_pitch, view_yaw, scale);
@@ -17227,17 +17225,7 @@ fn load_world_rest(
         let items = startup::time("rest.items", || {
             Items::load(root, registry, facts, overlay, resources.item_defaults())
         })?;
-        mod_api::__private::resolve_items(items.registry_order.iter().map(|id| &**id)).map_err(
-            |errors| {
-                errors
-                    .into_iter()
-                    .map(|error| {
-                        format!("mod {} requested unknown item {}", error.mod_id, error.id)
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            },
-        )?;
+        api_values::resolve_item_registry(&items)?;
         log::info!("load items: {:.2}s", started.elapsed().as_secs_f32());
         progress.set(7);
         // The recipe tables, the stations and the recipe book read one folder:
@@ -17743,7 +17731,7 @@ pub(crate) fn run_with(
     mods::register_client_presentations(options.execution_role);
     mods::register_color_resolvers(options.execution_role);
     mods::register_block_tint_sources(options.execution_role);
-    mods::register_particle_providers(options.execution_role);
+    mods::register_particles(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not

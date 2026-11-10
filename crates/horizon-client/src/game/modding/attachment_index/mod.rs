@@ -60,10 +60,8 @@ impl Game<'_> {
             return;
         };
         let Some(map) = self
-            .persist
-            .uuids
-            .get(&id)
-            .and_then(|uuid| self.entity_attachments.get_mut(uuid))
+            .entity_attachments
+            .get_mut(&id)
             .filter(|map| map.has_index_entries())
         else {
             return;

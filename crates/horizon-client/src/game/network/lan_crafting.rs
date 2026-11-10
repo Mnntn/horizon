@@ -146,6 +146,7 @@ impl Game<'_> {
 
     pub(super) fn menu_env(&self) -> Env<'_> {
         Env {
+            crafting_remainder: Some(self),
             player: self
                 .lan_acting_uuid
                 .or_else(|| self.remote.as_ref().map(|r| r.profile())),
@@ -196,6 +197,7 @@ impl Game<'_> {
         .map(|held| self.level_maps(&held));
         let host = self.lan.as_ref()?;
         let env = Env {
+            crafting_remainder: Some(self),
             player: Some(host.hub.guests[gi].uuid),
             player_entity_id: Some(host.hub.guests[gi].entity_id),
             loop_context: &self.loop_context,

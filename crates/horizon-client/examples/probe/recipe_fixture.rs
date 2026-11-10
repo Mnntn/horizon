@@ -49,7 +49,11 @@ pub fn main() -> horizon_client::Result<()> {
                 match recipes.find(crate::test_resources::server_loop_context(), &grid, n) {
                     None => "none".to_owned(),
                     Some((id, result)) => {
-                        let rest = recipes.remainders(id, &grid, n);
+                        let rest = recipes.remainders(id, &grid, n, &|s| {
+                            horizon_client::crafting::CraftingRemainder::crafting_remainder(
+                                &items, s,
+                            )
+                        });
                         let rest: Vec<String> = rest
                             .iter()
                             .enumerate()

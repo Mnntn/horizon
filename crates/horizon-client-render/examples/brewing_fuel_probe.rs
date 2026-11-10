@@ -40,7 +40,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         stand.total_fuel = 0;
         stand.items[4] = Some(stack);
         for _ in 0..2 {
-            stand.tick(&brewing, &items, &providers);
+            stand.tick(&brewing, &items, &providers, &|s| {
+                items
+                    .get(&s.item)?
+                    .crafting_remainder
+                    .as_deref()
+                    .map(|id| ItemStack::new(id, 1))
+            });
             writeln!(
                 out,
                 "{} {} {} {} {}",

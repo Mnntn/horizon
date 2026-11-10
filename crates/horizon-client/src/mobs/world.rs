@@ -603,6 +603,12 @@ impl MobWorld<'_> {
             }
         }
     }
+    /// A passenger edge can name an object refused level residency.
+    /// Keep this separate from combat and spatial lookup through `seen`.
+    pub fn passenger_object(&self, id: u32) -> Option<&Seen> {
+        self.seen(id)
+            .or_else(|| self.passenger_objects.iter().find(|s| s.id == id))
+    }
     pub fn seen(&self, id: u32) -> Option<&Seen> {
         match self.others_index {
             Some(index) => index
@@ -733,6 +739,26 @@ pub(crate) fn with_resource_test_world(
     f: impl FnOnce(&MobWorld<'_>, &super::MobTypes),
 ) -> bool {
     if !root.join("entity-types.json").exists() || !root.join("movement-properties.nbt").exists() {
+        use std::{
+            collections::HashSet,
+            io::Write,
+            sync::{LazyLock, Mutex},
+        };
+        static SKIPPED: LazyLock<Mutex<HashSet<String>>> =
+            LazyLock::new(|| Mutex::new(HashSet::new()));
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("<unnamed test>");
+        let mut skipped = SKIPPED.lock().unwrap();
+        if skipped.insert(name.to_owned()) {
+            // Bypass libtest's successful-test capture: missing data must remain
+            // visible even without --nocapture. Repeated fixture calls count once.
+            writeln!(
+                std::io::stderr().lock(),
+                "skipped: no vanilla data; test={name}; skipped tests={}",
+                skipped.len()
+            )
+            .expect("writing the missing-data skip report");
+        }
         return false;
     }
     let assets = crate::assets::Assets::load(root).unwrap();
@@ -789,6 +815,7 @@ pub(crate) fn with_resource_test_world(
         who_lookup: None,
         others_grid: None,
         others_index: None,
+        passenger_objects: &[],
         others_villagers: None,
         others_solid: None,
         daylight: true,
@@ -892,5 +919,57 @@ mod scaffolding_sight_tests {
             },
         );
         let _ = ran;
+    }
+}
+
+#[cfg(test)]
+mod missing_data_report_tests {
+    #[test]
+    fn missing_mob_data_reports_one_counted_skip_per_test() {
+        const CHILD: &str = "HORIZON_MISSING_MOB_DATA_REPORT_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let root = std::env::temp_dir().join(format!(
+                "horizon-missing-mob-data-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir(&root).unwrap();
+            for _ in 0..2 {
+                assert!(!super::with_resource_test_world(
+                    &root,
+                    &[],
+                    true,
+                    true,
+                    |_, _| panic!("missing data must not build the world"),
+                    |_, _| panic!("missing data must not run the case"),
+                ));
+            }
+            std::fs::remove_dir(root).unwrap();
+            return;
+        }
+        let test = concat!(
+            module_path!(),
+            "::missing_mob_data_reports_one_counted_skip_per_test"
+        )
+        .split_once("::")
+        .unwrap()
+        .1;
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test]) // Deliberately keep libtest's default capture.
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert_eq!(
+            stderr.matches("skipped: no vanilla data").count(),
+            1,
+            "{stderr}"
+        );
+        assert!(stderr.contains("skipped tests=1"), "{stderr}");
+        assert!(stderr.contains(test), "{stderr}");
     }
 }

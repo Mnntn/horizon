@@ -21,17 +21,17 @@ fn both_targets_read_the_same_root_records_in_both_toml_forms() {
         Internal {
             path: "Round::listening".into(),
             kind: Some("field".into()),
-            hash: "field-hash".into(),
+            hash: Some("field-hash".into()),
         },
         Internal {
             path: "Round::listening".into(),
             kind: Some("method".into()),
-            hash: "method-hash".into(),
+            hash: Some("method-hash".into()),
         },
         Internal {
             path: "Game".into(),
             kind: None,
-            hash: "game-hash".into(),
+            hash: Some("game-hash".into()),
         },
     ];
     for declarations in [

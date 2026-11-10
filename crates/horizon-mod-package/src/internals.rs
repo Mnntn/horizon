@@ -116,10 +116,15 @@ pub fn resolve<'a>(
     })
 }
 
-/// Check a declaration's fingerprint before a mod is compiled.
+/// Check a declaration's fingerprint before a mod is compiled. An absent fingerprint follows
+/// `entries`, the pinned game's catalog; the declaration must still resolve.
 pub fn check(entries: &[ListedInternal], mod_id: &str, declared: &Internal) -> Result<(), Error> {
     let entry = resolve(entries, mod_id, &declared.path, declared.kind.as_deref())?;
-    if entry.hash != declared.hash {
+    if declared
+        .hash
+        .as_ref()
+        .is_some_and(|hash| *hash != entry.hash)
+    {
         return Err(Error::Changed {
             mod_id: mod_id.to_owned(),
             path: declared.path.clone(),
@@ -145,10 +150,10 @@ mod tests {
             let mut declared = Internal {
                 path: path.into(),
                 kind: Some(kind.into()),
-                hash: "function".into(),
+                hash: Some("function".into()),
             };
             check(&entries, "example", &declared).unwrap();
-            declared.hash = "field".into();
+            declared.hash = Some("field".into());
             assert!(
                 matches!(check(&entries, "example", &declared), Err(Error::Changed { signature, .. }) if signature == "fn listening(&self) -> bool")
             );
@@ -170,6 +175,31 @@ mod tests {
                 Err(Error::Missing { .. })
             ));
         }
+    }
+
+    #[test]
+    fn an_absent_hash_follows_the_catalog_and_must_still_resolve() {
+        let entries: Vec<ListedInternal> = serde_json::from_value(serde_json::json!([
+            { "path": "Game::world", "kind": "field", "signature": "World", "hash": "world" }
+        ]))
+        .unwrap();
+        let mut declared = Internal {
+            path: "Game::world".into(),
+            kind: None,
+            hash: None,
+        };
+        check(&entries, "example", &declared).unwrap();
+        declared.hash = Some("stale".into());
+        assert!(matches!(
+            check(&entries, "example", &declared),
+            Err(Error::Changed { .. })
+        ));
+        declared.hash = None;
+        declared.path = "Game::gone".into();
+        assert!(matches!(
+            check(&entries, "example", &declared),
+            Err(Error::Missing { .. })
+        ));
     }
 
     #[test]

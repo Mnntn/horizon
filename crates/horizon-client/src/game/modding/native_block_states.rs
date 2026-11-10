@@ -8,9 +8,9 @@ use horizon_world::fluid::{FluidKind, FluidState as EngineFluidState};
 use horizon_world::level::{fluid_drip_particle, fluid_explosion_resistance, fluid_randomly_ticks};
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 use mod_api::{
-    BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateRange, EffectKey, FluidDefinition,
-    FluidKey, FluidState, FluidStateError, FluidTypeProperties, ItemKey, StateConstraint,
-    StateMatchError, StateProperty,
+    BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateRange, EffectKey, EnchantmentKey,
+    EntityTypeKey, FluidDefinition, FluidKey, FluidState, FluidStateError, FluidTypeProperties,
+    ItemKey, MenuKey, StateConstraint, StateMatchError, StateProperty,
 };
 use std::sync::{Arc, Mutex};
 
@@ -161,6 +161,38 @@ impl Game<'_> {
             .expect("invalid block entity type key slot")
             .to_owned()
     }
+    /// Every block key in registry order, mod blocks after vanilla's.
+    pub(super) fn block_keys(&self) -> Vec<BlockKey> {
+        mod_api::__private::block_keys()
+    }
+    /// Every item key in registry order, mod items after vanilla's.
+    pub(super) fn item_keys(&self) -> Vec<ItemKey> {
+        mod_api::__private::item_keys()
+    }
+    /// Every entity-type key in registry order.
+    pub(super) fn entity_type_keys(&self) -> Vec<EntityTypeKey> {
+        mod_api::__private::entity_type_keys()
+    }
+    /// Every menu-type key in registry order.
+    pub(super) fn menu_keys(&self) -> Vec<MenuKey> {
+        mod_api::__private::menu_keys()
+    }
+    /// Every enchantment key in registry order.
+    pub(super) fn enchantment_keys(&self) -> Vec<EnchantmentKey> {
+        mod_api::__private::enchantment_keys()
+    }
+    /// The canonical entity type id retained by the load-owned slot.
+    pub(super) fn entity_type_key_id(&self, key: EntityTypeKey) -> String {
+        mod_api::__private::entity_type_key_id(key).expect("invalid entity type key slot")
+    }
+    /// The canonical menu type id retained by the load-owned slot.
+    pub(super) fn menu_key_id(&self, key: MenuKey) -> String {
+        mod_api::__private::menu_key_id(key).expect("invalid menu key slot")
+    }
+    /// The canonical enchantment id retained by the load-owned slot.
+    pub(super) fn enchantment_key_id(&self, key: EnchantmentKey) -> String {
+        mod_api::__private::enchantment_key_id(key).expect("invalid enchantment key slot")
+    }
 
     /// The state `name` names, read as `/setblock` reads a block
     /// (`BlockStateParser.parseForBlock`): `minecraft:oak_stairs[facing=east]`,
@@ -269,9 +301,26 @@ impl Game<'_> {
     /// `Item.getCraftingRemainder`: Horizon currently stores the remainder's
     /// item id, so the result is a single plain stack.
     pub(super) fn item_crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack> {
-        let item = self.res.items().get(&stack.item)?;
-        let remainder = item.crafting_remainder.as_deref()?;
-        Some(ItemStack::new(remainder, 1))
+        crate::crafting::CraftingRemainder::crafting_remainder(self.res.items(), stack)
+    }
+
+    pub(in crate::game) fn crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack> {
+        let mut remainder = self.item_crafting_remainder(stack);
+        if !self.options.execution_role.is_client()
+            && mod_api::__private::item_listens(mod_api::HookId::CraftingRemainder, &stack.item)
+        {
+            self.native_crafting_remainder(stack, &mut remainder);
+        }
+        remainder.filter(|value| value.count > 0)
+    }
+
+    pub(in crate::game) fn craft_grid_remainders(&self, recipe: &str) -> Vec<Option<ItemStack>> {
+        self.recipes().remainders(
+            recipe,
+            &self.craft_grid[..self.craft_size * self.craft_size],
+            self.craft_size,
+            &|s| self.crafting_remainder(s),
+        )
     }
 
     /// `Block.asItem`: the block's item name, including air for a block with
@@ -366,6 +415,12 @@ pub(super) fn serialize(state: &BlockState) -> String {
 fn description_id(kind: &str, id: &str) -> Option<String> {
     let (namespace, path) = id.split_once(':')?;
     Some(format!("{kind}.{namespace}.{}", path.replace('/', ".")))
+}
+
+impl crate::crafting::CraftingRemainder for Game<'_> {
+    fn crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack> {
+        Game::crafting_remainder(self, stack)
+    }
 }
 
 #[cfg(test)]
@@ -495,6 +550,69 @@ mod tests {
                 host.item_block(mod_api::__private::item_key(CRATE).unwrap()),
                 mod_api::__private::block_key(CRATE)
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn host_key_iteration_matches_the_26_3_registries_in_registry_order() {
+        use mod_api::Host;
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        // The content root publishes the built-in entity-type and menu orders, as startup does.
+        let root = super::super::mods::content_root(&base, &Default::default())
+            .unwrap()
+            .prepared()
+            .to_path_buf();
+        super::super::native_entity_refs::tests::with_game_at(root.clone(), |game| {
+            let host: &dyn Host = game;
+            let blocks = host.block_keys();
+            assert_eq!(blocks.len(), 1286);
+            assert_eq!(blocks[0].id(host), "minecraft:air");
+            assert_eq!(blocks.last().unwrap().id(host), "minecraft:firefly_bush");
+
+            let items = host.item_keys();
+            assert_eq!(items.len(), 1658);
+            assert_eq!(items[0].id(host), "minecraft:air");
+            assert_eq!(items.last().unwrap().id(host), "minecraft:ominous_bottle");
+
+            let entities = host.entity_type_keys();
+            assert_eq!(entities.len(), 161);
+            assert_eq!(entities[0].id(host), "minecraft:acacia_boat");
+            assert_eq!(
+                entities.last().unwrap().id(host),
+                "minecraft:fishing_bobber"
+            );
+
+            let menus = host.menu_keys();
+            assert_eq!(menus.len(), 25);
+            assert_eq!(menus[0].id(host), "minecraft:generic_9x1");
+            assert_eq!(menus.last().unwrap().id(host), "minecraft:stonecutter");
+
+            // Enchantments load with the item tables, which this harness stops short of;
+            // read them the way a world open does.
+            let items = horizon_client::items::Items::load(
+                &root,
+                game.pack.assets.registry,
+                game.res.facts(),
+                &horizon_world::loot::PackOverlay::NONE,
+                game.res.item_defaults(),
+            )
+            .unwrap();
+            mod_api::__private::resolve_enchantments(
+                items.enchantments.list.iter().map(|entry| &*entry.id),
+            )
+            .unwrap();
+            let enchantments = host.enchantment_keys();
+            assert_eq!(enchantments.len(), 43);
+            assert_eq!(enchantments[0].id(host), "minecraft:aqua_affinity");
+            assert_eq!(
+                enchantments.last().unwrap().id(host),
+                "minecraft:wind_burst"
+            );
+
+            // A second read is the same table in the same order.
+            assert_eq!(host.block_keys(), blocks);
+            assert_eq!(host.enchantment_keys(), enchantments);
         });
     }
 
@@ -931,6 +1049,194 @@ mod facts_tests {
             let invalid = BlockStateRecord::new(stone.block(), u16::MAX).into();
             assert_eq!(facts.destroy_speed(invalid), None);
             assert_eq!(facts.sound(invalid), None);
+        });
+    }
+}
+
+#[cfg(test)]
+mod crafting_remainder_tests {
+    use super::*;
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    struct Worn;
+    #[mod_api::horizon_part]
+    impl mod_api::ItemPart for Worn {
+        fn crafting_remainder(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::CraftingRemainderEvent<'_>,
+        ) {
+            CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            *event.remainder = if event.stack.damage() == 0 {
+                let mut stack = event.stack.clone();
+                stack.set_count(65).unwrap();
+                Some(stack)
+            } else if event.stack.damage() >= 4 {
+                None
+            } else {
+                let mut stack = event.stack.clone();
+                stack.set_count(1).unwrap();
+                stack.set_damage(event.stack.damage() + 1);
+                Some(stack)
+            };
+        }
+    }
+    struct Empty;
+    #[mod_api::horizon_part]
+    impl mod_api::ItemPart for Empty {
+        fn crafting_remainder(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::CraftingRemainderEvent<'_>,
+        ) {
+            CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            *event.remainder = None;
+        }
+    }
+    struct DefaultPart;
+    #[mod_api::horizon_part]
+    impl mod_api::ItemPart for DefaultPart {
+        fn inventory_tick(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::InventoryTickEvent<'_>,
+        ) {
+        }
+    }
+    struct RemainderMod;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for RemainderMod {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            let tool = r.item_key("minecraft:wooden_hoe");
+            r.item_part(tool, Worn);
+            let milk = r.item_key("minecraft:milk_bucket");
+            r.item_part(milk, DefaultPart);
+            let water = r.item_key("minecraft:water_bucket");
+            r.item_part(water, Empty);
+        }
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn crafting_remainder_without_parts_matches_data() {
+        let mods: mod_api::Mods = Vec::new().into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                assert!(!mod_api::__private::has_part_hook(
+                    mod_api::HookId::CraftingRemainder
+                ));
+                let grid = [
+                    Some(ItemStack::new("minecraft:milk_bucket", 1)),
+                    None,
+                    Some(ItemStack::new("minecraft:stone", 1)),
+                    None,
+                ];
+                let remaining = game
+                    .recipes()
+                    .remainders("missing", &grid, 2, &|s| game.crafting_remainder(s));
+                assert_eq!(
+                    remaining,
+                    vec![
+                        Some(ItemStack::new("minecraft:bucket", 1)),
+                        None,
+                        None,
+                        None
+                    ]
+                );
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn crafting_remainder_part_override_and_default() {
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("remainder", Box::new(RemainderMod))].into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                super::super::native_entity_refs::tests::resolve_parts(game).unwrap();
+                let mut tool = ItemStack {
+                    damage: 2,
+                    ..ItemStack::new("minecraft:wooden_hoe", 1)
+                };
+                tool.data_mut()
+                    .set_other("minecraft:max_damage", Some(horizon_core::nbt::Tag::Int(5)));
+                tool = game.crafting_remainder(&tool).unwrap();
+                assert_eq!((tool.damage, tool.count), (3, 1));
+                tool = game.crafting_remainder(&tool).unwrap();
+                assert_eq!((tool.damage, tool.count), (4, 1));
+                assert!(game.crafting_remainder(&tool).is_none());
+                let calls = CALLS.load(std::sync::atomic::Ordering::Relaxed);
+                for id in ["minecraft:milk_bucket", "minecraft:lava_bucket"] {
+                    let remainder = game.crafting_remainder(&ItemStack::new(id, 1)).unwrap();
+                    assert_eq!((&*remainder.item, remainder.count), ("minecraft:bucket", 1));
+                }
+                assert_eq!(
+                    CALLS.load(std::sync::atomic::Ordering::Relaxed),
+                    calls,
+                    "items without this subscription call no Part"
+                );
+                let water = ItemStack::new("minecraft:water_bucket", 1);
+                assert!(
+                    game.crafting_remainder(&water).is_none(),
+                    "None suppresses the data remainder"
+                );
+                let bucket = game.item_crafting_remainder(&water).unwrap();
+                assert_eq!((&*bucket.item, bucket.count), ("minecraft:bucket", 1));
+                assert!(game.item_crafting_remainder(&tool).is_none());
+                assert!(
+                    game.crafting_remainder(&ItemStack::new("minecraft:wooden_hoe", 1))
+                        .is_none(),
+                    "oversized Part output is refused"
+                );
+                use crate::furnace::FurnaceCooking;
+                let fuel = ItemStack {
+                    damage: 2,
+                    ..ItemStack::new("minecraft:wooden_hoe", 1)
+                };
+                let mut furnace = crate::containers::Furnace {
+                    kind: crate::containers::FurnaceKind::Furnace,
+                    items: [
+                        Some(ItemStack::new("minecraft:iron_ore", 1)),
+                        Some(fuel.clone()),
+                        None,
+                    ],
+                    lit_remaining: 0,
+                    lit_total: 0,
+                    cooking_timer: 0,
+                    cooking_total: 0,
+                    speed: 1.0,
+                    recipes_used: Default::default(),
+                };
+                let mut drops = Vec::new();
+                furnace.tick(
+                    &game.loop_context,
+                    game.recipes(),
+                    game.items(),
+                    game.res.providers(),
+                    &mut drops,
+                    &|s| game.crafting_remainder(s),
+                );
+                let grid = [Some(fuel), None, None, None];
+                let crafted = game
+                    .recipes()
+                    .remainders("missing", &grid, 2, &|s| game.crafting_remainder(s));
+                assert_eq!(furnace.items[1], crafted[0]);
+                assert_eq!(
+                    furnace.items[1].as_ref().map(|s| (s.damage, s.count)),
+                    Some((3, 1))
+                );
+                let role = game.options.execution_role;
+                game.options.execution_role =
+                    crate::game::execution_role::ExecutionRole::DedicatedServer;
+                let remainder = game.crafting_remainder(grid[0].as_ref().unwrap()).unwrap();
+                assert_eq!((remainder.damage, remainder.count), (3, 1));
+                game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
+                let calls = CALLS.load(std::sync::atomic::Ordering::Relaxed);
+                assert!(game.crafting_remainder(grid[0].as_ref().unwrap()).is_none());
+                assert_eq!(CALLS.load(std::sync::atomic::Ordering::Relaxed), calls);
+                game.options.execution_role = role;
+            })
         });
     }
 }

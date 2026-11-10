@@ -195,10 +195,8 @@ impl Game<'_> {
             // Constructor writes were canonical but unbound before insertion.
             // The real lifetime is now resident, before join listeners query it.
             if self
-                .persist
-                .uuids
+                .entity_attachments
                 .get(&id)
-                .and_then(|uuid| self.entity_attachments.get(uuid))
                 .is_some_and(|map| map.has_index_entries())
                 && let Err(error) = self.bind_resident_entity_attachments(id)
             {

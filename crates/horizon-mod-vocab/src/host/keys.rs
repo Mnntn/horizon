@@ -1,6 +1,37 @@
 //! Host method declarations; access defaults and game forwarders are generated.
 #![allow(unused_variables)]
 use crate::*;
+/// The host's registry-wide key reads of the `keys` area, implemented by the game
+/// and reached through [`Host`].
+#[horizon_mod_api_macros::host_area]
+pub trait KeysHost {
+    /// Side: both.
+    /// Every block key in the registry's registration order: vanilla's first, then
+    /// mod blocks in the order they registered. A block registry lists a name once
+    /// per state; this yields it once. Empty before the block table completes.
+    #[access(Metadata)]
+    fn block_keys(&self) -> Vec<BlockKey>;
+    /// Side: both.
+    /// Every item key in the registry's registration order: vanilla's first, then
+    /// mod items in the order they registered. Empty before the item table completes.
+    #[access(Metadata)]
+    fn item_keys(&self) -> Vec<ItemKey>;
+    /// Side: both.
+    /// Every built-in entity-type key in registry order (`BuiltInRegistries.ENTITY_TYPE`
+    /// order): vanilla's first, then mod types in the order they registered.
+    #[access(Metadata)]
+    fn entity_type_keys(&self) -> Vec<EntityTypeKey>;
+    /// Side: both.
+    /// Every built-in menu-type key in registry order (`BuiltInRegistries.MENU` order):
+    /// vanilla's first, then mod types in the order they registered.
+    #[access(Metadata)]
+    fn menu_keys(&self) -> Vec<MenuKey>;
+    /// Side: both.
+    /// Every enchantment key in global sorted loaded-registry order, including
+    /// vanilla and mod data-pack entries together (`RegistryDataLoader` sorts by id).
+    #[access(Metadata)]
+    fn enchantment_keys(&self) -> Vec<EnchantmentKey>;
+}
 /// The handles' reads of the `keys` area, implemented by the game and reached through [`Backend`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
@@ -41,4 +72,16 @@ pub trait KeysBackend {
     /// The canonical block entity type id retained by the load-owned slot.
     #[access(WorldOnly)]
     fn block_entity_type_key_id(&self, key: BlockEntityTypeKey) -> String;
+    /// Side: both.
+    /// The canonical entity type id retained by the load-owned slot.
+    #[access(Metadata)]
+    fn entity_type_key_id(&self, key: EntityTypeKey) -> String;
+    /// Side: both.
+    /// The canonical menu type id retained by the load-owned slot.
+    #[access(Metadata)]
+    fn menu_key_id(&self, key: MenuKey) -> String;
+    /// Side: both.
+    /// The canonical enchantment id retained by the load-owned slot.
+    #[access(Metadata)]
+    fn enchantment_key_id(&self, key: EnchantmentKey) -> String;
 }

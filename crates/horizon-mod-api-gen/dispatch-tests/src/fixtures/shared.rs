@@ -427,7 +427,7 @@ impl Hooks for Mod {
             .or_insert_with(|| serde_json::json!([]));
         value.as_array_mut().unwrap().push(self.id.into());
     }
-    fn level_tick_pre(&self, _: &mut dyn ServerHost, _: &mut LevelTickPreEvent<'_>) {
+    fn level_tick_pre(&self, _: HostSide, _: &mut LevelTickPreEvent) {
         self.calls.lock().unwrap().push(self.id);
     }
     fn zoom(&self, _: &dyn ClientHost, _: &mut ZoomEvent) -> Option<Zoom> {

@@ -3,8 +3,10 @@
 
 ### The typed API from mixin code
 
-A helper injection can use the typed API: bind the game or the `Host` and call attachments and handles. The
-worked examples, and which shape to choose, are in [Injections](../../injections.md#make-your-injection-convertible).
+An `[[inject]]` listener can use the typed API: an API point's listener gets the side's `Host` and calls
+attachments and handles through it. The worked examples, and which shape to choose, are in
+[Injections](../../injections.md#make-your-injection-convertible); each mixin injector's form is in
+[From mixins and legacy kinds](../../injections.md#from-mixins-and-legacy-kinds).
 
 A catalog hook's trait method, event and return make up its `hook_version` contract
 ([Named hook points](../../how-to/native-mods/011-named-hook-points.md#named-hook-points)). These per-hook contract versions are catalog metadata, not minimum game

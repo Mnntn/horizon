@@ -76,7 +76,7 @@ fn saved_spit_and_bullet_query_before_access_and_round_trip() {
             game.native_removals_flush();
             assert!(index.lock().unwrap().snapshot(&key).is_empty());
             // Reload from the serialized data, not a retained in-memory map.
-            game.entity_attachments.remove(&uuid);
+            game.entity_attachments.remove(&entity.id());
             game.world.loaded_entities.push(((0, 0), vec![saved]));
             game.spawn_loaded_entities();
             let restored = index.lock().unwrap().snapshot(&key);

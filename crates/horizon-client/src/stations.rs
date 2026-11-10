@@ -2081,6 +2081,7 @@ mod tests {
         let banners = Banners::load(&root, &defaults);
         let names = Names::default();
         let env = menu::Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: ctx,

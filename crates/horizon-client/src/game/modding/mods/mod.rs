@@ -446,10 +446,11 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
     Game::native_register_select_item_model_property(&RegistrationContext::new(), &mut properties);
     horizon_assets::item_model::register_select_properties(properties);
 }
-/// The source types native mods register for resource definitions, kept once at start, before
+/// The types native mods register for resource definitions, kept once at start, before
 /// resources load: item tint sources (`native_register_item_tint_sources`), so `tints` entries on
-/// them read the mod's colour, and atlas sprite sources (`native_register_sprite_sources`), so
-/// atlas definitions' entries on them list the mod's sprites.
+/// them read the mod's colour; atlas sprite sources (`native_register_sprite_sources`), so atlas
+/// definitions' entries on them list the mod's sprites; and model loaders
+/// (`native_register_model_loaders`), so models naming one get the mod's quads.
 pub(super) fn register_resource_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
@@ -460,6 +461,9 @@ pub(super) fn register_resource_sources(role: ExecutionRole) {
     let mut sources = Vec::new();
     Game::native_register_sprite_sources(&RegistrationContext::new(), &mut sources);
     horizon_client_render::mod_sprite_sources::register(sources);
+    let mut loaders = Vec::new();
+    Game::native_register_model_loaders(&RegistrationContext::new(), &mut loaders);
+    horizon_client_render::mod_model_loaders::register(loaders);
 }
 /// The client presentation registrations, resolved once before the first level opens: the
 /// dimension transition screens and the entity spectator shaders.
@@ -519,15 +523,19 @@ pub(super) fn register_block_tint_sources(role: ExecutionRole) {
     Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_block_tint_sources(registry.into_layers());
 }
-/// The native mods' particle providers (`native_register_particle_providers`), kept once at
-/// start, before resources load; every particle sprite-set load resolves each type's provider.
-pub(super) fn register_particle_providers(role: ExecutionRole) {
+/// The native mods' particle providers (`native_register_particle_providers`) and render groups
+/// (`native_register_particle_groups`), kept once at start, before resources load; every particle
+/// sprite-set load resolves each type's provider and group.
+pub(super) fn register_particles(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut registry = mod_api::ParticleProviderRegistry::default();
     Game::native_register_particle_providers(&RegistrationContext::new(), &mut registry);
     horizon_client::particles::register_particle_providers(registry.into_providers());
+    let mut groups = Vec::new();
+    Game::native_register_particle_groups(&RegistrationContext::new(), &mut groups);
+    horizon_client::particles::register_particle_groups(groups);
 }
 
 /// `root` with the content mods that are on layered over it
@@ -885,8 +893,27 @@ pub(super) fn content_root(
     })?;
     register_entity_types(&overlay.mods);
     register_menu_types(&overlay.mods);
+    register_iterated_registries(overlay.root.prepared())?;
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);
     Ok(overlay.root)
+}
+
+/// Publish the built-in registry orders mods iterate. The report already
+/// includes the types and menus the content overlay registered, in registration
+/// order (`BuiltInRegistries` protocol ids).
+fn register_iterated_registries(root: &std::path::Path) -> horizon_client::Result<()> {
+    use horizon_protocol::registry::Builtin;
+    let path = Builtin::find(root).ok_or("registries.json not found")?;
+    let builtin = Builtin::load(&path)?;
+    if let Some(ids) = builtin.get("minecraft:entity_type") {
+        mod_api::__private::resolve_entity_types(ids.names.iter().map(String::as_str))
+            .map_err(|errors| errors.join("\n"))?;
+    }
+    if let Some(ids) = builtin.get("minecraft:menu") {
+        mod_api::__private::resolve_menus(ids.names.iter().map(String::as_str))
+            .map_err(|errors| errors.join("\n"))?;
+    }
+    Ok(())
 }
 
 fn register_block_entity_types(

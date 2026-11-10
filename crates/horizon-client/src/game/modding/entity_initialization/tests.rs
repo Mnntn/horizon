@@ -163,10 +163,11 @@ fn borrowed_spawn_first_read_and_dimension_transfer_keep_one_initialization() {
                 .find(|t| horizon_client::entity_nbt::uuid(t) == Some(uuid))
                 .unwrap();
             // Portals move a live entity using its saved representation, retaining its map.
+            let state = game.take_transferred_entity_state(id);
             game.mobs.retain(|mob| mob.id != id);
             game.detach_entity(id);
             game.enter_level(Dim::Nether).unwrap();
-            let moved = game.load_mob(saved, None).unwrap();
+            let moved = game.load_mob_transferred(saved, None, Some(state)).unwrap();
             assert_eq!(VALUE.get(game, Holder::Entity(moved)), Ok(41));
             assert_eq!(calls.lock().unwrap().len(), 1);
             game.forget_entity(moved);
@@ -174,6 +175,102 @@ fn borrowed_spawn_first_read_and_dimension_transfer_keep_one_initialization() {
             let replacement = game.load_mob(tag("minecraft:cow", uuid[0]), None).unwrap();
             assert_eq!(VALUE.get(game, Holder::Entity(replacement)), Ok(41));
             assert_eq!(calls.lock().unwrap().len(), 2);
+            // Non-Mob transfers must retain values that cannot be serialized at all.
+            for (n, kind) in [
+                "minecraft:item",
+                "minecraft:oak_boat",
+                "minecraft:minecart",
+                "minecraft:arrow",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let uuid = [300 + n as i32, 2, 3, 4];
+                let mut data = tag(kind, uuid[0]);
+                if kind == "minecraft:item"
+                    && let Tag::Compound(c) = &mut data
+                {
+                    c.insert(
+                        "Item".into(),
+                        Tag::compound([
+                            ("id", Tag::String("minecraft:stone".into())),
+                            ("count", Tag::Int(1)),
+                        ]),
+                    );
+                }
+                game.load_listed(kind, Some(uuid), None, data.clone())
+                    .unwrap();
+                let source = *game
+                    .persist
+                    .uuids
+                    .iter()
+                    .find(|(_, u)| **u == uuid)
+                    .unwrap()
+                    .0;
+                VALUE.set(game, Holder::Entity(source), 73).unwrap();
+                let before = calls.lock().unwrap().len();
+                let state = game.take_transferred_entity_state(source);
+                let entity = game.entity(source).unwrap();
+                assert!(game.entity_discard(entity));
+                game.native_removals_flush();
+                game.forget_entity(source);
+                let destination = if game.dim == Dim::Nether {
+                    Dim::Overworld
+                } else {
+                    Dim::Nether
+                };
+                game.enter_level(destination).unwrap();
+                game.load_listed_transferred(kind, Some(uuid), None, data, state)
+                    .unwrap();
+                let arrived = *game
+                    .persist
+                    .uuids
+                    .iter()
+                    .find(|(_, u)| **u == uuid)
+                    .unwrap()
+                    .0;
+                assert_ne!(source, arrived);
+                assert_eq!(VALUE.get(game, Holder::Entity(arrived)), Ok(73), "{kind}");
+                assert_eq!(
+                    calls.lock().unwrap().len(),
+                    before,
+                    "{kind} transferred, not constructed"
+                );
+            }
+            let count = calls.lock().unwrap().len();
+            let state = game.take_transferred_entity_state(replacement);
+            assert!(
+                game.load_listed_transferred(
+                    "minecraft:armor_stand",
+                    Some([900, 2, 3, 4]),
+                    None,
+                    tag("minecraft:armor_stand", 900),
+                    state,
+                )
+                .is_err()
+            );
+            assert!(
+                game.armor_stands.is_empty(),
+                "unsupported transfer never constructs a fallback"
+            );
+            assert_eq!(calls.lock().unwrap().len(), count);
+            // Constructor ownership is pruned by object identity before UUID cleanup.
+            // Equal UUIDs must not make an unreachable object's marker erase a survivor;
+            // player holders and objects belonging to parked levels stay untouched.
+            let removed = Holder::Entity(900_001);
+            let retained = Holder::Entity(900_002);
+            let parked = Holder::Entity(900_003);
+            let player = Holder::Player(900_001);
+            game.entity_initialization
+                .initialized
+                .extend([removed, retained, parked, player]);
+            game.persist.uuids.insert(900_001, [901, 2, 3, 4]);
+            game.persist.uuids.insert(900_002, [901, 2, 3, 4]);
+            game.prune_entity_initializations(&HashSet::from([900_002]));
+            assert!(!game.entity_initialization.initialized.contains(&removed));
+            for holder in [retained, parked, player] {
+                assert!(game.entity_initialization.initialized.contains(&holder));
+            }
         })
     });
 }
@@ -262,8 +359,45 @@ fn client_login_tracking_and_retracking_initialize_the_client_store_once() {
                     1
                 );
             }
+            // Removing and retracking creates a new object even for the same ID/UUID.
+            game.handle_packet(C::RemoveEntities(play::RemoveEntities {
+                ids: vec![20, 21, 22],
+            }))
+            .unwrap();
+            for (id, kind) in [
+                (20, "minecraft:pig"),
+                (21, "minecraft:arrow"),
+                (22, "minecraft:player"),
+            ] {
+                game.handle_packet(C::AddEntity(play::AddEntity {
+                    id,
+                    uuid: id as u128,
+                    kind: registry.id(kind).unwrap(),
+                    position: [1.0, 70.0, 3.0],
+                    velocity: [0.0; 3],
+                    pitch: 0,
+                    yaw: 0,
+                    head_yaw: 0,
+                    data: 0,
+                }))
+                .unwrap();
+                let holder = if kind == "minecraft:player" {
+                    Holder::Player(id as u128)
+                } else {
+                    Holder::Entity(id as u32)
+                };
+                assert_eq!(
+                    calls
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|(_, h)| *h == holder)
+                        .count(),
+                    2
+                );
+            }
             assert!(calls.lock().unwrap().iter().all(|(client, _)| *client));
-            assert_eq!(calls.lock().unwrap().len(), 4);
+            assert_eq!(calls.lock().unwrap().len(), 7);
         })
     });
 }
@@ -376,6 +510,81 @@ fn a_loaded_entity_reads_its_saved_attachments_over_the_listeners_and_is_named_b
             assert_eq!(
                 kinds.lock().unwrap().as_slice(),
                 &[(Holder::Entity(id), "minecraft:pig".to_owned())]
+            );
+            // Equal saved UUIDs identify distinct objects, including rejected passengers.
+            game.native_level_opened(Dim::Overworld);
+            SAVED.set(&mut saved, Holder::Level, 9).unwrap();
+            let mut child = tag("minecraft:pig", 200);
+            if let Tag::Compound(c) = &mut child {
+                c.insert(
+                    horizon_mod_runtime::attachments::ATTACHMENTS_KEY.into(),
+                    Tag::Compound(saved.to_nbt()),
+                );
+            }
+            let ghost = game.load_mob(child.clone(), Some(id)).unwrap();
+            assert!(game.entity(ghost).is_none());
+            assert_eq!(
+                SAVED.get(game, Holder::Entity(ghost)),
+                Err(mod_api::AttachmentError::MissingHolder)
+            );
+            assert_eq!(
+                SAVED.get(
+                    game.entity_attachments.get_mut(&ghost).unwrap(),
+                    Holder::Entity(ghost)
+                ),
+                Ok(9)
+            );
+            assert_eq!(SAVED.get(game, Holder::Entity(id)), Ok(7));
+            assert_eq!(kinds.lock().unwrap().len(), 2);
+            game.prune_entity_attachments();
+            assert!(game.entity_attachments.contains_key(&ghost));
+            use mod_api::{AttachmentQueries, AttachmentQueriesMut};
+            let batch = game.query_mut(&SAVED).unwrap();
+            assert_eq!(batch.iter().count(), 1);
+            let row = batch.iter().next().unwrap().unwrap();
+            assert_eq!(*row.value(), 7);
+            // Serialize by object ID: the child's equal UUID cannot select the root's map.
+            crate::game::persist::write_attachments(&mut child, ghost, &game.entity_attachments);
+            let child_state = game.take_transferred_entity_state(ghost);
+            let parent_state = game.take_transferred_entity_state(id);
+            game.persist.off_level.remove(&ghost);
+            game.mobs.retain(|mob| mob.id != id);
+            game.detach_entity(ghost);
+            game.detach_entity(id);
+            game.enter_level(Dim::Nether).unwrap();
+            // Passenger-first destination admission reverses which equal-UUID object is resident.
+            let arrived = game
+                .load_mob_transferred(child, None, Some(child_state))
+                .unwrap();
+            let refused = game
+                .load_mob_transferred(tag("minecraft:pig", 200), Some(arrived), Some(parent_state))
+                .unwrap();
+            assert_eq!(SAVED.get(game, Holder::Entity(arrived)), Ok(9));
+            assert!(game.entity(refused).is_none());
+            assert_eq!(
+                kinds.lock().unwrap().len(),
+                2,
+                "transfer is not reconstruction"
+            );
+            assert_eq!(game.query(&SAVED).unwrap().iter().count(), 1);
+            assert_eq!(
+                row.set(game, 88),
+                Err(mod_api::AttachmentRowError::StaleHolder)
+            );
+            assert_eq!(*row.value(), 7);
+            game.persist.off_level.remove(&refused);
+            game.forget_entity(refused);
+            game.prune_entity_attachments();
+            assert_eq!(SAVED.get(game, Holder::Entity(arrived)), Ok(9));
+            assert_eq!(game.query(&SAVED).unwrap().iter().count(), 1);
+            game.forget_entity(arrived);
+            game.mobs.retain(|mob| mob.id != arrived);
+            let rebuilt = game.load_mob(tag("minecraft:pig", 200), None).unwrap();
+            assert_eq!(SAVED.get(game, Holder::Entity(rebuilt)), Ok(41));
+            assert_eq!(
+                kinds.lock().unwrap().len(),
+                3,
+                "unload/reload constructs again"
             );
         })
     });

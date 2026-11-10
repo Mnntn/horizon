@@ -36,6 +36,7 @@ pub trait FurnaceCooking {
         items: &Items,
         providers: &Providers,
         drops: &mut Vec<ItemStack>,
+        remainder: &dyn Fn(&ItemStack) -> Option<ItemStack>,
     ) -> Option<bool>;
     fn idle(&self) -> bool;
 }
@@ -78,6 +79,7 @@ impl FurnaceCooking for Furnace {
         items: &Items,
         providers: &Providers,
         drops: &mut Vec<ItemStack>,
+        remainder: &dyn Fn(&ItemStack) -> Option<ItemStack>,
     ) -> Option<bool> {
         let was_lit = self.lit_remaining > 0;
         let mut lit = false;
@@ -122,10 +124,7 @@ impl FurnaceCooking for Furnace {
                                 // remainder takes the slot once the stack is used up, else
                                 // it is dropped.
                                 if let Some(f) = self.items[1].as_mut() {
-                                    let remainder = items
-                                        .get(&f.item)
-                                        .and_then(|i| i.crafting_remainder.as_deref())
-                                        .map(|r| ItemStack::new(r, 1));
+                                    let remainder = remainder(f);
                                     f.count -= 1;
                                     if f.count == 0 {
                                         self.items[1] = remainder;
@@ -228,7 +227,7 @@ mod tests {
     /// A data root holding one recipe, `test:ore` into `test:ingot`, and an item table
     /// with two fuels: `test:coal` (no remainder) and `test:cell` (a content mod's item
     /// that leaves `test:husk`). The folder is gone when this returns.
-    fn data(name: &str) -> (Items, Recipes, Providers) {
+    pub(super) fn data(name: &str) -> (Items, Recipes, Providers) {
         let root =
             std::env::temp_dir().join(format!("horizon-furnace-{name}-{}", std::process::id(),));
         let _ = fs::remove_dir_all(&root);
@@ -299,7 +298,9 @@ mod tests {
                 let mut drops = Vec::new();
                 assert!(!f.idle());
                 assert_eq!(
-                    f.tick(context, &recipes, &items, &providers, &mut drops),
+                    f.tick(context, &recipes, &items, &providers, &mut drops, &|s| {
+                        crate::crafting::CraftingRemainder::crafting_remainder(&items, s)
+                    }),
                     None
                 );
                 assert!(drops.is_empty());
@@ -372,7 +373,9 @@ mod tests {
             );
             let mut drops = Vec::new();
             assert_eq!(
-                f.tick(context, &recipes, &items, &providers, &mut drops),
+                f.tick(context, &recipes, &items, &providers, &mut drops, &|s| {
+                    crate::crafting::CraftingRemainder::crafting_remainder(&items, s)
+                }),
                 eligible.then_some(true),
                 "output {before:?}"
             );
@@ -380,7 +383,9 @@ mod tests {
             if eligible {
                 assert!(f.items[1].is_none());
                 for _ in 1..200 {
-                    f.tick(context, &recipes, &items, &providers, &mut drops);
+                    f.tick(context, &recipes, &items, &providers, &mut drops, &|s| {
+                        crate::crafting::CraftingRemainder::crafting_remainder(&items, s)
+                    });
                 }
                 assert_eq!(f.items[0].as_ref().unwrap().count, 2);
                 assert_eq!(
@@ -430,6 +435,7 @@ mod tests {
                 &items,
                 &providers,
                 &mut drops,
+                &|s| crate::crafting::CraftingRemainder::crafting_remainder(&items, s),
             );
             assert_eq!(lit, None, "{before:?}");
             assert!(drops.is_empty(), "{before:?}");
@@ -445,6 +451,7 @@ mod tests {
                 &items,
                 &providers,
                 &mut Vec::new(),
+                &|s| crate::crafting::CraftingRemainder::crafting_remainder(&items, s),
             ),
             Some(true)
         );
@@ -476,6 +483,7 @@ mod tests {
             &items,
             &providers,
             &mut drops,
+            &|s| crate::crafting::CraftingRemainder::crafting_remainder(&items, s),
         );
         assert_eq!(lit, Some(true), "the fuel lit the furnace");
         (furnace, drops)
@@ -510,6 +518,82 @@ mod tests {
         assert!(drops.is_empty());
         let (furnace, drops) = burn("test:coal", 2);
         assert_eq!(fuel_slot(&furnace), Some(("test:coal", 1)));
+        assert!(drops.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod crafting_remainder_tests {
+    use super::*;
+    // A five-use tool: using it at damage four breaks it.
+    fn worn(stack: &ItemStack) -> Option<ItemStack> {
+        (stack.damage < 4).then(|| ItemStack {
+            count: 1,
+            damage: stack.damage + 1,
+            ..stack.clone()
+        })
+    }
+    #[test]
+    fn crafting_remainder_preserves_cell_and_uses_current_damage() {
+        let (_, recipes, _) = super::tests::data("stack-remainder");
+        for (size, cell) in [(3, 4), (2, 3)] {
+            let mut grid = vec![None; size * size];
+            grid[cell] = Some(ItemStack {
+                damage: 2,
+                ..ItemStack::new("test:cell", 1)
+            });
+            let first = recipes.remainders("missing", &grid, size, &worn);
+            assert_eq!(
+                first[cell].as_ref().map(|s| (s.damage, s.count)),
+                Some((3, 1))
+            );
+            assert_eq!(first.iter().flatten().count(), 1);
+            let second = recipes.remainders("missing", &first, size, &worn);
+            assert_eq!(
+                second[cell].as_ref().map(|s| (s.damage, s.count)),
+                Some((4, 1))
+            );
+            assert!(
+                recipes
+                    .remainders("missing", &second, size, &worn)
+                    .iter()
+                    .all(Option::is_none)
+            );
+        }
+    }
+    #[test]
+    fn crafting_remainder_fuel_and_crafting_agree() {
+        let (items, recipes, providers) = super::tests::data("stack-remainder-fuel");
+        let stack = ItemStack {
+            damage: 2,
+            ..ItemStack::new("test:cell", 1)
+        };
+        let grid = [Some(stack.clone()), None, None, None];
+        let crafted = recipes.remainders("missing", &grid, 2, &worn);
+        let mut furnace = crate::containers::Furnace {
+            kind: crate::containers::FurnaceKind::Furnace,
+            items: [Some(ItemStack::new("test:ore", 1)), Some(stack), None],
+            lit_remaining: 0,
+            lit_total: 0,
+            cooking_timer: 0,
+            cooking_total: 0,
+            speed: 1.0,
+            recipes_used: Default::default(),
+        };
+        let mut drops = Vec::new();
+        furnace.tick(
+            crate::test_resources::server_loop_context(),
+            &recipes,
+            &items,
+            &providers,
+            &mut drops,
+            &worn,
+        );
+        assert_eq!(furnace.items[1], crafted[0]);
+        assert_eq!(
+            furnace.items[1].as_ref().map(|s| (s.damage, s.count)),
+            Some((3, 1))
+        );
         assert!(drops.is_empty());
     }
 }

@@ -73,6 +73,73 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// The catalog entry an inject targets: a function or method, or a struct for a field.
+fn target<'a>(
+    internals: &'a [ListedInternal],
+    inject: &horizon_mod_package::manifest::inject::Inject,
+) -> Option<&'a ListedInternal> {
+    let kind = if inject.kind == Kind::Field {
+        "struct"
+    } else {
+        "fn"
+    };
+    internals.iter().find(|i| {
+        i.path == inject.at
+            && !i.shape_only
+            && (i.kind == kind || (kind == "fn" && i.kind == "method"))
+    })
+}
+
+/// What moving the pin from the `old` catalog to the `new` one does to the injects that carry
+/// no hash, which follow the pin: a changed signature is refused as `E_INJECT_CHANGED` unless
+/// its id is in `accept`, exactly as a stale pinned hash is refused at build, and a target the
+/// new game lacks is `E_INJECT_MISSING`. Returns the reports and whether to refuse.
+pub(crate) fn pin_moves(
+    manifest: &Manifest,
+    old: &[ListedInternal],
+    new: &[ListedInternal],
+    accept: &[&str],
+) -> (Vec<String>, bool) {
+    let mut reports = Vec::new();
+    let mut refused = false;
+    for inject in manifest
+        .inject
+        .iter()
+        .filter(|inject| inject.hash.is_none())
+    {
+        let id = format!("{}:{}", manifest.id, inject.id);
+        let Some(now) = target(new, inject) else {
+            reports.push(
+                InjectError::Missing {
+                    id,
+                    at: inject.at.clone(),
+                }
+                .to_string(),
+            );
+            refused = true;
+            continue;
+        };
+        let before = target(old, inject);
+        if before.is_some_and(|before| before.hash == now.hash) {
+            continue;
+        }
+        reports.push(
+            InjectError::Changed {
+                id,
+                at: inject.at.clone(),
+                old: before.map_or_else(
+                    || "absent from the old game".to_owned(),
+                    |before| format!("{} ({})", before.hash, before.signature),
+                ),
+                new: format!("{} ({})", now.hash, now.signature),
+            }
+            .to_string(),
+        );
+        refused |= !accept.contains(&inject.id.as_str());
+    }
+    (reports, refused)
+}
+
 fn plan(
     text: &str,
     manifest: &Manifest,
@@ -93,17 +160,7 @@ fn plan(
     }
     for (index, inject) in manifest.inject.iter().enumerate() {
         let id = format!("{}:{}", manifest.id, inject.id);
-        let kind = if inject.kind == Kind::Field {
-            "struct"
-        } else {
-            "fn"
-        };
-        let item = internals.iter().find(|i| {
-            i.path == inject.at
-                && !i.shape_only
-                && (i.kind == kind || (kind == "fn" && i.kind == "method"))
-        });
-        let Some(item) = item else {
+        let Some(item) = target(internals, inject) else {
             reports.push(
                 InjectError::Missing {
                     id,
@@ -169,18 +226,20 @@ fn plan(
                 }
             }
         }
-        let changed = inject.hash != item.hash;
-        if changed {
+        // A declaration without a hash follows the pin: there is nothing of its own to refresh.
+        let pinned = inject.hash.as_deref();
+        let changed = pinned.is_some_and(|hash| hash != item.hash);
+        if let Some(hash) = pinned.filter(|_| changed) {
             let previous = old
                 .iter()
-                .find(|i| i.path == inject.at && i.hash == inject.hash)
+                .find(|i| i.path == inject.at && i.hash == hash)
                 .map(|i| i.signature.as_str())
                 .unwrap_or("signature unavailable in cached snapshots");
             reports.push(
                 InjectError::Changed {
                     id,
                     at: inject.at.clone(),
-                    old: format!("{} ({previous})", inject.hash),
+                    old: format!("{hash} ({previous})"),
                     new: format!("{} ({})", item.hash, item.signature),
                 }
                 .to_string(),
@@ -360,6 +419,36 @@ mod tests {
         assert!(reports[0].starts_with("E_INJECT_CHANGED: "));
         assert!(reports[0].ends_with(expected), "{}", reports[0]);
     }
+    #[test]
+    fn moving_the_pin_refuses_a_changed_function_an_unpinned_inject_follows() {
+        let text =
+            format!("{TEXT}[[inject]]\nid='tick'\nat='game::tick'\nkind='head'\nwith='tick'\n");
+        let manifest = Manifest::parse(&text).unwrap();
+        assert_eq!(manifest.inject[0].hash, None);
+        let (old, _) = fixture();
+        // The same signature on the new game: nothing to say, nothing refused.
+        assert_eq!(pin_moves(&manifest, &old, &old, &[]), (vec![], false));
+        let mut new = old.clone();
+        new[0].hash = "new-signature".into();
+        new[0].signature = "fn tick(&mut self, value: u32)".into();
+        let (reports, refused) = pin_moves(&manifest, &old, &new, &[]);
+        assert!(refused);
+        assert_eq!(
+            reports,
+            [
+                "E_INJECT_CHANGED: example:tick: game::tick signature-fixture (fn tick(&mut self)) -> \
+              new-signature (fn tick(&mut self, value: u32)); run inject update"
+            ]
+        );
+        // Accepting it takes the change; the declaration stays without a hash.
+        assert!(!pin_moves(&manifest, &old, &new, &["tick"]).1);
+        let (reports, refused) = pin_moves(&manifest, &old, &[], &["tick"]);
+        assert!(refused && reports[0].starts_with("E_INJECT_MISSING: example:tick"));
+        // A pinned inject is left to the build's own check, as before.
+        let pinned = Manifest::parse(&format!("{text}hash='signature-fixture'\n")).unwrap();
+        assert_eq!(pin_moves(&pinned, &old, &new, &[]), (vec![], false));
+    }
+
     #[test]
     fn inject_update_noop_leaves_inode_and_mtime() {
         let dir = reviewer_directory("update-noop");

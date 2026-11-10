@@ -2,6 +2,11 @@
 //! and reload listeners (`AddPackFindersEvent`).
 use crate::{Identifier, Text};
 
+/// The largest resource [`ResourcesHost::resource`](crate::prelude::ResourcesHost::resource)
+/// returns, in bytes. A larger winning file reads as `None` rather than as a
+/// truncated or unbounded value.
+pub const MAX_RESOURCE_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Which repository is being discovered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

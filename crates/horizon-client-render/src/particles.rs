@@ -20,7 +20,7 @@ use horizon_core::{
 };
 use horizon_world::block_collision::BlockCollisionRegistry;
 mod options;
-use mod_api::ParticleProvider;
+use mod_api::{ParticleBlend, ParticleProvider};
 pub use options::ParticleOptions;
 use std::{
     array,
@@ -30,8 +30,12 @@ use std::{
 
 pub use horizon_client_core::particle_type::ParticleType;
 pub use horizon_items::firework::{DYE_FIREWORK_COLORS, FireworkExplosion, FireworkShape};
+mod groups;
+mod mod_behaviour;
 mod native;
 mod spawn;
+pub use groups::register_particle_groups;
+use mod_behaviour::{ModBehaviour, mod_curve};
 pub use native::{ParticleController, ParticleUpdate, register_particle_providers};
 pub mod polytone;
 mod polytone_gpu;
@@ -222,123 +226,17 @@ enum DripStage {
     Land,
 }
 
-/// How a mod particle walks through its sprite set.
-#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum ModAnimation {
-    /// Over its lifetime, first to last sprite.
-    Age,
-    /// Cycles the sprites every `frame_ticks`.
-    Loop,
-    /// One random sprite, kept (what a particle without `animation` does).
-    Random,
-    /// The first sprite, kept.
-    First,
-}
-#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct ModBehaviour {
-    velocity: Option<[f64; 3]>,
-    /// Random extra velocity, each axis uniform in `-jitter..=jitter`.
-    velocity_jitter: Option<[f64; 3]>,
-    animation: Option<ModAnimation>,
-    /// Ticks per frame of the `loop` animation.
-    frame_ticks: Option<u16>,
-    gravity: Option<f32>,
-    friction: Option<f32>,
-    lifetime: Option<i32>,
-    size: Option<[f32; 2]>,
-    alpha: Option<[f32; 2]>,
-}
-impl ModBehaviour {
-    fn parse(json: &serde_json::Value) -> Option<Self> {
-        let behaviour: Self = serde_json::from_value(json.clone()).ok()?;
-        if behaviour
-            .velocity
-            .is_some_and(|v| v.iter().any(|c| !c.is_finite() || c.abs() > 16.0))
-            || behaviour
-                .velocity_jitter
-                .is_some_and(|v| v.iter().any(|c| !(0.0..=16.0).contains(c)))
-            || behaviour.frame_ticks.is_some_and(|v| {
-                !(1..=200).contains(&v) || behaviour.animation != Some(ModAnimation::Loop)
-            })
-            || behaviour
-                .gravity
-                .is_some_and(|v| !v.is_finite() || v.abs() > 100.0)
-            || behaviour
-                .friction
-                .is_some_and(|v| !(0.0..=1.0).contains(&v))
-            || behaviour
-                .lifetime
-                .is_some_and(|v| !(1..=12000).contains(&v))
-            || behaviour
-                .size
-                .is_some_and(|v| v.iter().any(|c| !(0.0..=16.0).contains(c)))
-            || behaviour
-                .alpha
-                .is_some_and(|v| v.iter().any(|c| !(0.0..=1.0).contains(c)))
-        {
-            return None;
-        }
-        Some(behaviour)
-    }
-
-    /// `spawn` is the velocity the spawn call passed; a declared velocity is added to it,
-    /// with the jitter drawn from `random`.
-    fn apply(self, particle: &mut Particle, spawn: [f64; 3], random: &mut LegacyRandom) {
-        if self.velocity.is_some() || self.velocity_jitter.is_some() {
-            let base = self.velocity.unwrap_or([0.0; 3]);
-            let jitter = self.velocity_jitter.unwrap_or([0.0; 3]);
-            for axis in 0..3 {
-                let spread = if jitter[axis] > 0.0 {
-                    f64::from(random.next_float() * 2.0 - 1.0) * jitter[axis]
-                } else {
-                    0.0
-                };
-                particle.velocity[axis] = base[axis] + spawn[axis] + spread;
-            }
-        }
-        if let Some(gravity) = self.gravity {
-            particle.gravity = gravity;
-        }
-        if let Some(friction) = self.friction {
-            particle.friction = friction;
-        }
-        if let Some(lifetime) = self.lifetime {
-            particle.lifetime = lifetime;
-        }
-        match self.animation {
-            Some(ModAnimation::Loop) => particle.frame_ticks = self.frame_ticks.unwrap_or(2),
-            Some(ModAnimation::Age) => {}
-            // No `animation`, `random` or `first`: the sprite chosen at spawn is kept.
-            Some(ModAnimation::Random | ModAnimation::First) | None => particle.set = None,
-        }
-        if self.size.is_some() || self.alpha.is_some() {
-            let size = self.size.unwrap_or([particle.size; 2]);
-            let alpha = self.alpha.unwrap_or([particle.rgba[3]; 2]);
-            particle.size = size[0];
-            particle.rgba[3] = alpha[0];
-            particle.behaviour = Behaviour::Mod { size, alpha };
-        } else if matches!(self.animation, Some(ModAnimation::Age | ModAnimation::Loop)) {
-            // The tick that walks the sprite set (base tick, then `sprite_from_age`).
-            particle.behaviour = Behaviour::Animated;
-        }
-    }
-}
-
-fn mod_curve([start, end]: [f32; 2], age: i32, lifetime: i32) -> f32 {
-    let progress = (age as f32 / lifetime.max(1) as f32).clamp(0.0, 1.0);
-    start + (end - start) * progress
-}
-
-/// A native mod's sprite set: its handle in `set_sprites`, the behaviour its JSON declares
-/// and the provider that moves its particles, if a mod registered one. Resolved at load, so a
-/// spawn and a tick never look a provider up by name.
+/// A native mod's sprite set: its handle in `set_sprites`, the behaviour its JSON declares,
+/// the provider that moves its particles, if a mod registered one, and the render group they
+/// draw in, if a mod listed the type in one. Resolved at load, so a spawn, a tick and a draw
+/// never look a provider or a group up by name.
 #[derive(Clone)]
 struct ModSet {
     set: u32,
     behaviour: Option<ModBehaviour>,
     provider: Option<Arc<dyn ParticleProvider>>,
+    /// The handle of the registered group (`groups::registered`), none for the built-in one.
+    group: Option<u32>,
 }
 
 /// One live particle (`Particle` + `SingleQuadParticle` state).
@@ -391,6 +289,8 @@ pub struct Particle {
     orientation: polytone_gpu::Orientation,
     /// Blended additively (a Polytone `additive_translucent` particle).
     additive: bool,
+    /// The registered render group this particle belongs to, none for the built-in group.
+    group: Option<u32>,
 }
 fn aabb_at(p: [f64; 3], w: f32, h: f32) -> Aabb {
     let w = f64::from(w) / 2.0;
@@ -756,6 +656,7 @@ impl Particle {
             model: None,
             orientation: polytone_gpu::Orientation::Camera,
             additive: false,
+            group: None,
         }
     }
     /// The normal age/removal test and previous pose, without vanilla motion.
@@ -1171,6 +1072,12 @@ impl PendingParticle {
 /// `ParticleEngine` plus the sprite sets of `ParticleResources`.
 pub struct ParticleEngine {
     particles: Vec<Particle>,
+    /// The mods' registered render groups, indexed by their handle: each keeps its own live
+    /// particles, drawn after `particles`.
+    groups: Vec<groups::Group>,
+    /// The registered groups as this engine was built (`register_particle_groups`), which each
+    /// type's group handle indexes; resolved at every load.
+    group_defs: &'static [mod_api::ParticleGroup],
     pending: Vec<PendingParticle>,
     /// Particle spawns deferred until all live particles have ticked.
     spawned_in_tick: Option<Vec<(ParticleOptions, [f64; 3], [f64; 3])>>,
@@ -1398,6 +1305,8 @@ impl ParticleEngine {
     ) -> Self {
         let mut engine = Self {
             particles: Vec::new(),
+            groups: groups::Group::all(groups::registered()),
+            group_defs: groups::registered(),
             pending: Vec::new(),
             spawned_in_tick: None,
             random: LegacyRandom::new(0x7061_7274),
@@ -1444,6 +1353,9 @@ impl ParticleEngine {
         // Controllers' numeric sprite-set handles belong to this resource
         // generation. Discard them rather than selecting another set after reload.
         self.particles.retain(|p| p.controller.is_none());
+        for group in &mut self.groups {
+            group.particles.retain(|p| p.controller.is_none());
+        }
         self.pending
             .retain(|p| p.ordinary().is_none_or(|p| p.controller.is_none()));
         self.atlas = atlas
@@ -1463,6 +1375,26 @@ impl ParticleEngine {
         for name in self.providers.keys() {
             if !self.mod_sets.contains_key(name) {
                 log::warn!("Particle provider {name} has no particles/<path>.json sprite set");
+            }
+        }
+        self.resolve_groups();
+    }
+    /// Gives each type a registered group lists the group's handle, once per load. A type no
+    /// sprite set matches, or another group lists already, is logged and left out.
+    fn resolve_groups(&mut self) {
+        for (handle, group) in self.group_defs.iter().enumerate() {
+            for name in &group.particles {
+                match self.mod_sets.get_mut(name) {
+                    Some(set) if set.group.is_none() => set.group = Some(handle as u32),
+                    Some(_) => log::warn!(
+                        "Particle {name} is in another particle group already; left out of {}",
+                        group.id
+                    ),
+                    None => log::warn!(
+                        "Particle {name} of group {} has no particles/<path>.json sprite set",
+                        group.id
+                    ),
+                }
             }
         }
     }
@@ -1555,6 +1487,7 @@ impl ParticleEngine {
                         set: self.set_sprites.len() as u32,
                         behaviour,
                         provider,
+                        group: None,
                     },
                 );
                 self.set_sprites.push(sprites);
@@ -1570,22 +1503,25 @@ impl ParticleEngine {
         (self.names.len() - 1) as u32
     }
     pub fn len(&self) -> usize {
-        self.particles.len()
+        self.particles.len() + self.groups.iter().map(|g| g.particles.len()).sum::<usize>()
     }
     pub fn is_empty(&self) -> bool {
-        self.particles.is_empty()
+        self.particles.is_empty() && self.groups.iter().all(|g| g.particles.is_empty())
     }
     /// The live particles of the groups this engine holds, as `ParticleEngine.countParticles`
     /// counts them: ordinary particles, firework starters (`NO_RENDER`) and elder guardian
     /// apparitions (`ELDER_GUARDIANS`). Queued particles and tracking emitters are not counted.
     pub fn group_count(&self) -> usize {
-        self.particles.len() + self.starters.len() + self.elder_guardians.len()
+        self.len() + self.starters.len() + self.elder_guardians.len()
     }
     /// `ParticleEngine.clearParticles`, for the groups this engine holds: the live
     /// particles, firework starters, elder guardians, queued particles and tracking emitters.
     pub fn clear(&mut self) {
         self.emitters.clear();
         self.particles.clear();
+        for group in &mut self.groups {
+            group.particles.clear();
+        }
         self.starters.clear();
         self.elder_guardians.clear();
         self.pending.clear();
@@ -1643,11 +1579,13 @@ impl ParticleEngine {
         if minimal || !distance.is_finite() || distance > 1024.0 {
             return None;
         }
-        let set = self.mod_sets.get(name)?.set;
+        let entry = self.mod_sets.get(name)?;
+        let (set, group) = (entry.set, entry.group);
         let mut random = LegacyRandom::new(self.seeds.next_long());
         let mut particle = Particle::at(&mut random, ParticleType::Smoke, position);
         particle.random = random;
         particle.set = Some(set);
+        particle.group = group;
         particle.sprite = Sprite::Index(*self.set_sprites.get(set as usize)?.first()?);
         particle.behaviour = Behaviour::Controlled { translucent };
         particle.controller = Some(Box::new(controller));
@@ -2082,7 +2020,12 @@ impl ParticleEngine {
         }
         if let Some(name) = &o.mod_particle {
             let entry = self.mod_sets.get(name.as_ref())?;
-            let (set, behaviour, provider) = (entry.set, entry.behaviour, entry.provider.clone());
+            let (set, behaviour, provider, group) = (
+                entry.set,
+                entry.behaviour,
+                entry.provider.clone(),
+                entry.group,
+            );
             let mut r = LegacyRandom::new(seed);
             let mut q = Particle::moving(&mut r, ParticleType::Smoke, p, v);
             q.ty = ParticleType::Smoke;
@@ -2090,16 +2033,14 @@ impl ParticleEngine {
             q.rgba = [1.0; 4];
             q.lifetime = 20 + r.next_int_bound(20).unwrap_or(0);
             q.set = Some(set);
+            q.group = group;
             let sprites = &self.set_sprites[set as usize];
             q.sprite = Sprite::Index(
                 sprites[r.next_int_bound(sprites.len() as i32).unwrap_or(0) as usize],
             );
             if let Some(behaviour) = behaviour {
                 behaviour.apply(&mut q, v, &mut r);
-                if matches!(
-                    behaviour.animation,
-                    Some(ModAnimation::First | ModAnimation::Age | ModAnimation::Loop)
-                ) {
+                if behaviour.starts_on_first_sprite() {
                     q.sprite = Sprite::Index(sprites[0]);
                 }
             }
@@ -3781,6 +3722,14 @@ impl ParticleEngine {
         }
         particles.retain(|p| !p.removed);
         self.particles = particles;
+        for handle in 0..self.groups.len() {
+            let mut particles = std::mem::take(&mut self.groups[handle].particles);
+            for p in &mut particles {
+                self.tick_particle(p, level);
+            }
+            particles.retain(|p| !p.removed);
+            self.groups[handle].particles = particles;
+        }
         for (options, pos, velocity) in self.spawned_in_tick.take().unwrap_or_default() {
             self.add(&options, pos, velocity);
         }
@@ -3802,8 +3751,14 @@ impl ParticleEngine {
                         self.tick_particle(&mut p, level);
                         p.after_constructor_tick();
                     }
-                    if self.group_has_space(self.particles.len()) {
-                        self.particles.push(p);
+                    let live = p.group.map_or(self.particles.len(), |handle| {
+                        self.groups[handle as usize].particles.len()
+                    });
+                    if self.group_has_space(live) {
+                        match p.group {
+                            Some(handle) => self.groups[handle as usize].particles.push(p),
+                            None => self.particles.push(p),
+                        }
                     }
                 }
             }
@@ -4756,6 +4711,16 @@ impl ParticleEngine {
         );
     }
 
+    /// Every live particle in draw order: the built-in group's, then each registered group's in
+    /// registration order, with the blend that group sets (none for the built-in group).
+    fn drawn(&self) -> impl Iterator<Item = (&Particle, Option<ParticleBlend>)> {
+        self.particles.iter().map(|p| (p, None)).chain(
+            self.groups
+                .iter()
+                .flat_map(|g| g.particles.iter().map(|p| (p, Some(g.blend)))),
+        )
+    }
+
     fn render_inner<const CULL: bool>(
         &self,
         camera: DVec3,
@@ -4776,7 +4741,7 @@ impl ParticleEngine {
         additive.clear();
         let mut section_cache =
             (CULL && frustum.is_some()).then(ParticleSectionFrustumCache::default);
-        for p in &self.particles {
+        for (p, blend) in self.drawn() {
             if p.no_render {
                 continue;
             }
@@ -4836,6 +4801,11 @@ impl ParticleEngine {
                 },
             };
             let Some(r) = rect else { continue };
+            let layer = match blend {
+                Some(ParticleBlend::Opaque) => false,
+                Some(ParticleBlend::Translucent) => true,
+                None => layer,
+            };
             let (center, size) = culled_geometry.unwrap_or_else(|| {
                 let a = f64::from(partial);
                 let pos = DVec3::new(
@@ -5722,6 +5692,7 @@ mod tests {
                         set: 0,
                         behaviour: Some(ModBehaviour::parse(&declaration).unwrap()),
                         provider: None,
+                        group: None,
                     },
                 );
                 for seed in 0..16 {

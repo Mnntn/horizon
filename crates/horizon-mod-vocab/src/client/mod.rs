@@ -32,6 +32,7 @@ pub(crate) mod key_mapping;
 pub mod mesher;
 pub(crate) mod model_instance;
 pub(crate) mod model_layers;
+pub(crate) mod model_loader;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod music;

@@ -150,10 +150,7 @@ fn checked_place(id: &str, inject: &Inject, place: u32) -> Result<PointId, Strin
         return Err(format!("{id}: no API record for place {place}"));
     };
     if inject.access != Access::Api
-        || !matches!(
-            inject.kind,
-            Kind::Head | Kind::ModifyArg | Kind::Replace | Kind::Return
-        )
+        || !matches!(inject.kind, Kind::Head | Kind::Replace | Kind::Return)
         || (inject.kind == Kind::Return) != at_return
         || horizon_mod_point_emit::plain_path(&inject.at)
             != horizon_mod_point_emit::plain_path(target)
@@ -180,13 +177,14 @@ mod tests {
             local: None,
             local_type: None,
             position: None,
+            expr: None,
             id: "own".into(),
             at: at.into(),
             kind,
             with: "own".into(),
             access: Access::Api,
             priority: 0,
-            hash: "pin".into(),
+            hash: Some("pin".into()),
             call: None,
             nth: None,
             ctx: None,

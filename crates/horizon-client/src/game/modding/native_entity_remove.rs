@@ -37,13 +37,38 @@ impl Game<'_> {
             }
             Some(t) => {
                 // Read before the entity counts as removed: its handle stops resolving.
-                let passengers = self.entity_passengers(entity).unwrap_or_default();
+                let vehicle_y = match t {
+                    Target::Boat(id) => {
+                        self.boats.iter().find(|b| b.id == id).map(|b| b.position.y)
+                    }
+                    Target::Cart(id) => {
+                        self.carts.iter().find(|c| c.id == id).map(|c| c.position.y)
+                    }
+                    _ => None,
+                };
+                let passengers: Vec<_> = self
+                    .entity_passengers(entity)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|passenger| {
+                        vehicle_y.is_none()
+                            || !matches!(
+                                self.native_entity_target(*passenger),
+                                Some(Target::Mob(_))
+                            )
+                    })
+                    .collect();
                 // `Entity.setRemoved`: the reason first, so the hooks below see
                 // it removed; then the passengers get off and the level is told.
                 // Only players and mobs ride, so this kind has no vehicle to leave.
                 self.persist.removals.push(t);
                 for passenger in passengers {
                     self.entity_stop_riding(passenger);
+                }
+                if let Some(y) = vehicle_y {
+                    // Complete actual Mob edges here, including rejected objects.
+                    // The deferred physical removal then has no edge to notify twice.
+                    self.dismount_destroyed_vehicle_mobs(entity.id(), y);
                 }
                 self.native_entity_left(entity.id());
                 true

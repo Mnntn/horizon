@@ -13,6 +13,7 @@ fn fixture() -> (Manifest, Catalog) {
         points: serde_json::from_value(serde_json::json!([{
             "name":"run", "target":"game::run", "raw":true, "at_return":true,
             "returns":"cancel", "host":"none", "return_ty":"()",
+            "raw_shape":{"return_ty":"()", "outcome":"cancel", "receiver":{"kind":"none"}},
             "listener":"game::__RunListener", "return_listener":"game::__RunReturnListener"
         }])).unwrap(),
         sites: serde_json::from_value(serde_json::json!([{
@@ -32,13 +33,14 @@ fn api_head_without_prebuilt_slot_is_refused() {
         local: None,
         local_type: None,
         position: None,
+        expr: None,
         id: "missing".into(),
         at: "game::run".into(),
         kind: Kind::Head,
         with: "listen".into(),
         access: Access::Api,
         priority: 0,
-        hash: "signature".into(),
+        hash: Some("signature".into()),
         call: None,
         nth: None,
         ctx: None,
@@ -55,11 +57,9 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
     for kind in [
         Kind::Head,
         Kind::Return,
-        Kind::ModifyArg,
         Kind::Replace,
         Kind::BeforeCall,
         Kind::AfterCall,
-        Kind::ModifyCallArg,
         Kind::ModifyValue,
         Kind::WrapCall,
         Kind::WrapIf,
@@ -73,7 +73,6 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 kind,
                 Kind::BeforeCall
                     | Kind::AfterCall
-                    | Kind::ModifyCallArg
                     | Kind::ModifyValue
                     | Kind::WrapCall
                     | Kind::WrapIf
@@ -81,34 +80,37 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
             );
             manifest.inject.push(Inject {
                 local: None,
-                local_type: None,
+                local_type: (kind == Kind::Field).then(|| "u32".into()),
                 position: None,
+                expr: None,
                 id: "test".into(),
                 at: "game::run".into(),
                 kind,
                 with: "listen".into(),
                 access,
                 priority: 7,
-                hash: "signature".into(),
+                hash: Some("signature".into()),
                 call: call.then(|| "game::step".into()),
                 nth: call.then_some(0),
                 ctx: call.then(|| "context".into()),
             });
-            if kind == Kind::ModifyLocal && access == Access::Internals {
+            let source_only = match kind {
+                Kind::ModifyLocal => Some(NoSlotReason::LocalSourceOnly),
+                Kind::Expression => Some(NoSlotReason::ExpressionSourceOnly),
+                _ => None,
+            };
+            if let Some(only) = source_only.filter(|_| access == Access::Internals) {
                 assert_eq!(
                     routes(&catalog, &manifest).unwrap(),
-                    vec![Route::Source(NoSlotReason::LocalSourceOnly)]
+                    vec![Route::Source(only)]
                 );
                 continue;
             }
             let pending = match (kind, access) {
-                (Kind::ModifyCallArg, Access::Api) => Some(NoSlotReason::ApiSitesUnsupported),
-                (Kind::ModifyCallArg, _) => Some(NoSlotReason::SourcePending),
                 (Kind::ModifyLocal, Access::Api) => Some(NoSlotReason::LocalSourceOnly),
-                (Kind::Field, _) => Some(NoSlotReason::ExtensionSlotsPending),
-                (Kind::Expression, Access::Api) => Some(NoSlotReason::KindHasNoSlot),
-                (Kind::Expression, _) => Some(NoSlotReason::SourcePending),
-                (Kind::Replace, Access::Internals) => Some(NoSlotReason::ReplacePending),
+                (Kind::Field, Access::Api) => Some(NoSlotReason::FieldRequiresSource),
+                (Kind::Field, Access::Internals) => None,
+                (Kind::Expression, Access::Api) => Some(NoSlotReason::ExpressionSourceOnly),
                 (_, Access::Api) if call => Some(NoSlotReason::ApiSitesUnsupported),
                 _ => None,
             };
@@ -120,6 +122,19 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 continue;
             }
             check(&catalog, &manifest).unwrap();
+            if kind == Kind::Field {
+                let facade = catalog.facade(&manifest).unwrap();
+                let main = api::main_rs("/* MOD_SLOTS */", &[&manifest], &catalog);
+                assert!(!facade.source.contains("FieldCall"));
+                assert!(!facade.source.contains("fn listen"));
+                assert!(!main.contains("mod_0::listen"));
+                assert!(points(&catalog.points, &manifest).next().is_none());
+                assert!(report(&catalog, &manifest)
+                    .next()
+                    .unwrap()
+                    .contains("source"));
+                continue;
+            }
             let facade = catalog.facade(&manifest).unwrap();
             let main = api::main_rs("/* MOD_SLOTS */", &[&manifest], &catalog);
             if access == Access::Api {
@@ -139,7 +154,9 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
             assert_eq!(main.matches("mod_0_internals::raw::").count(), 1, "{main}");
             assert!(main.contains("mod_0::listen"), "{main}");
             assert!(
-                main.contains(if call {
+                main.contains(if kind == Kind::Replace {
+                    "mod_points::replace!(internals mod_0_internals::raw::run, cancel, none, \"example\", 7, \"test\", mod_0::listen)"
+                } else if call {
                     "(\"example\", 7, \"test\","
                 } else {
                     ".ordered(7, \"test\")"
@@ -169,13 +186,14 @@ fn an_api_listener_at_a_point_without_an_api_record_is_refused_naming_the_type()
         local: None,
         local_type: None,
         position: None,
+        expr: None,
         id: "test".into(),
         at: "game::run".into(),
         kind: Kind::Head,
         with: "listen".into(),
         access,
         priority: 0,
-        hash: "signature".into(),
+        hash: Some("signature".into()),
         call: None,
         nth: None,
         ctx: None,
@@ -204,18 +222,20 @@ fn a_replace_at_a_point_whose_return_has_no_api_form_is_refused_naming_it() {
     catalog.points[0].returns = "none".into();
     catalog.points[0].raw_shape = Some(horizon_mod_point_emit::RawReturn {
         return_ty: "Frame<'_>".into(),
+        ..Default::default()
     });
     manifest.inject.push(Inject {
         local: None,
         local_type: None,
         position: None,
+        expr: None,
         id: "own".into(),
         at: "game::run".into(),
         kind: Kind::Replace,
         with: "listen".into(),
         access: Access::Api,
         priority: 0,
-        hash: "signature".into(),
+        hash: Some("signature".into()),
         call: None,
         nth: None,
         ctx: None,
@@ -256,19 +276,69 @@ fn a_replace_at_a_point_whose_return_has_no_api_form_is_refused_naming_it() {
 }
 
 #[test]
+fn an_internals_replace_needs_a_listed_point_whose_raw_record_carries_the_outcome() {
+    let (mut manifest, mut catalog) = fixture();
+    manifest.inject.push(Inject {
+        local: None,
+        local_type: None,
+        position: None,
+        expr: None,
+        id: "own".into(),
+        at: "game::run".into(),
+        kind: Kind::Replace,
+        with: "listen".into(),
+        access: Access::Internals,
+        priority: 0,
+        hash: Some("signature".into()),
+        call: None,
+        nth: None,
+        ctx: None,
+    });
+    check(&catalog, &manifest).unwrap();
+    let refused = |catalog: &Catalog, manifest: &Manifest, reason: NoSlotReason| match check(
+        catalog, manifest,
+    ) {
+        Err(error @ InjectError::NoSlot { reason: actual, .. }) if actual == reason => {
+            error.to_string()
+        }
+        other => panic!("{other:?}"),
+    };
+    // A `Result<(), E>` raw cancel answers `Ok(())`; a borrowed return has no raw `result`.
+    for (outcome, ty) in [
+        ("cancel", "Result < (), StoreError >"),
+        ("none", "&mut usize"),
+    ] {
+        let raw = catalog.points[0].raw_shape.as_mut().unwrap();
+        raw.outcome = outcome.into();
+        raw.return_ty = ty.into();
+        let text = refused(&catalog, &manifest, NoSlotReason::ReplaceWithoutValue);
+        assert!(
+            text.contains("example:own") && text.contains(&format!("`{ty}`")),
+            "{text}"
+        );
+    }
+    // An unlisted function takes no internals replace on the source route: the refusal names the
+    // slot row that lists it.
+    catalog.points.clear();
+    let text = refused(&catalog, &manifest, NoSlotReason::NotListed);
+    assert!(text.contains("slots/example.txt: game::run"), "{text}");
+}
+
+#[test]
 fn unified_route_checks_freshness_and_selects_native_function_source() {
     let (mut manifest, mut catalog) = fixture();
     manifest.inject.push(Inject {
         local: None,
         local_type: None,
         position: None,
+        expr: None,
         id: "test".into(),
         at: "game::run".into(),
         kind: Kind::WrapIf,
         with: "listen".into(),
         access: Access::Internals,
         priority: 0,
-        hash: "signature".into(),
+        hash: Some("signature".into()),
         call: Some("game::step".into()),
         nth: Some(0),
         ctx: Some("context".into()),
@@ -278,12 +348,12 @@ fn unified_route_checks_freshness_and_selects_native_function_source() {
         check(&catalog, &manifest),
         Err(InjectError::Invalid { field: "kind", .. })
     ));
-    manifest.inject[0].hash = "stale".into();
+    manifest.inject[0].hash = Some("stale".into());
     assert!(matches!(
         check(&catalog, &manifest),
         Err(InjectError::Changed { .. })
     ));
-    manifest.inject[0].hash = "signature".into();
+    manifest.inject[0].hash = Some("signature".into());
     manifest.inject[0].call = None;
     manifest.inject[0].kind = Kind::Head;
     catalog.points.clear();
@@ -292,14 +362,11 @@ fn unified_route_checks_freshness_and_selects_native_function_source() {
         .next()
         .unwrap()
         .contains("source (private slot"));
-    manifest.inject[0].kind = Kind::ModifyArg;
-    assert!(matches!(
-        check(&catalog, &manifest),
-        Err(InjectError::NoSlot {
-            reason: NoSlotReason::SourcePending,
-            ..
-        })
-    ));
+    manifest.inject[0].kind = Kind::Expression;
+    assert_eq!(
+        routes(&catalog, &manifest).unwrap(),
+        vec![Route::Source(NoSlotReason::ExpressionSourceOnly)]
+    );
     manifest.inject[0].kind = Kind::Head;
     catalog.internals.clear();
     assert!(matches!(
@@ -315,13 +382,14 @@ fn unstaged_source_value_before_listed_wrap_if_does_not_panic() {
         local: None,
         local_type: None,
         position: None,
+        expr: None,
         id: "value".into(),
         at: "game::run".into(),
         kind: Kind::ModifyValue,
         with: "listen".into(),
         access: Access::Internals,
         priority: 7,
-        hash: "signature".into(),
+        hash: Some("signature".into()),
         call: Some("game::other".into()),
         nth: Some(0),
         ctx: Some("other-statement".into()),

@@ -799,7 +799,7 @@ impl Game<'_> {
     /// The ticks the server has run (`Level.getGameTime`), shared by every
     /// level as in vanilla. API 381.
     pub(super) fn level_game_time(&self, level: LevelRef) -> Option<i64> {
-        self.native_level_world(level)?;
+        self.native_level_read_world(level)?;
         Some(self.world.game_time)
     }
     /// The time of day in ticks (`Level.getOverworldClockTime`), shared by

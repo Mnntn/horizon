@@ -1,5 +1,8 @@
 //! Load-owned declarations and resolved mappings for registration-slot keys.
-use crate::{BlockEntityTypeKey, BlockKey, DimensionKey, EffectKey, FluidKey, ItemKey};
+use crate::{
+    BlockEntityTypeKey, BlockKey, DimensionKey, EffectKey, EnchantmentKey, EntityTypeKey, FluidKey,
+    ItemKey, MenuKey,
+};
 
 impl BlockKey {
     /// Validate an incoming slot against declarations, not a world's resolved mappings.
@@ -120,6 +123,164 @@ pub fn item_key(id: &str) -> Option<ItemKey> {
 /// Resolve a typed identifier at a load boundary without formatting it as a string.
 pub fn item_key_by_identifier(id: &crate::Identifier) -> Option<ItemKey> {
     Some(ItemKey(*resolved_items().get()?.identifiers.get(id)?))
+}
+
+/// The built-in entity-type registry's keys, and the loaded enchantment
+/// registry's, in registry order. Each table is replaced as a whole at its load
+/// boundary; a key is a slot in the table that resolved it.
+static ENTITY_TYPES: std::sync::LazyLock<
+    std::sync::RwLock<Option<horizon_mod_runtime::registry_keys::Names>>,
+> = std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+static MENUS: std::sync::LazyLock<
+    std::sync::RwLock<Option<horizon_mod_runtime::registry_keys::Names>>,
+> = std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+static ENCHANTMENTS: std::sync::LazyLock<
+    std::sync::RwLock<Option<horizon_mod_runtime::registry_keys::Names>>,
+> = std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+
+fn resolve_ordered<'a>(
+    table: &std::sync::RwLock<Option<horizon_mod_runtime::registry_keys::Names>>,
+    ids: impl IntoIterator<Item = &'a str>,
+    kind: &str,
+) -> Result<(), Vec<String>> {
+    let mut table = table.write().unwrap_or_else(|error| error.into_inner());
+    let names = table.get_or_insert_with(Default::default);
+    let mut order = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for id in ids {
+        if !seen.insert(id) {
+            continue;
+        }
+        let slot = names
+            .request("horizon", id)
+            .map_err(|error| vec![format!("invalid {kind} registry key {id:?}: {error}")])?;
+        order.push(slot);
+    }
+    names.order = order;
+    Ok(())
+}
+
+fn ordered_keys<K>(
+    table: &std::sync::RwLock<Option<horizon_mod_runtime::registry_keys::Names>>,
+    key: impl Fn(u32) -> K,
+) -> Vec<K> {
+    let order = table
+        .read()
+        .ok()
+        .and_then(|names| names.as_ref().map(|names| names.order.clone()))
+        .unwrap_or_default();
+    order.into_iter().map(key).collect()
+}
+
+fn ordered_id(
+    table: &std::sync::RwLock<Option<horizon_mod_runtime::registry_keys::Names>>,
+    slot: u32,
+) -> Option<String> {
+    table.read().ok()?.as_ref()?.id(slot).map(str::to_owned)
+}
+
+fn ordered_slot_is_live(
+    table: &std::sync::RwLock<Option<horizon_mod_runtime::registry_keys::Names>>,
+    slot: u32,
+) -> bool {
+    table
+        .read()
+        .ok()
+        .and_then(|table| table.as_ref().map(|names| names.id(slot).is_some()))
+        .unwrap_or(false)
+}
+
+/// Complete the built-in entity-type registry in `ids`' registration order.
+pub fn resolve_entity_types<'a>(ids: impl IntoIterator<Item = &'a str>) -> Result<(), Vec<String>> {
+    resolve_ordered(&ENTITY_TYPES, ids, "entity type")
+}
+
+/// Complete the built-in menu registry in `ids`' registration order.
+pub fn resolve_menus<'a>(ids: impl IntoIterator<Item = &'a str>) -> Result<(), Vec<String>> {
+    resolve_ordered(&MENUS, ids, "menu")
+}
+
+/// Complete the data-loaded enchantment registry in `ids`' registry order.
+pub fn resolve_enchantments<'a>(ids: impl IntoIterator<Item = &'a str>) -> Result<(), Vec<String>> {
+    resolve_ordered(&ENCHANTMENTS, ids, "enchantment")
+}
+
+/// Every block key in vanilla's registry order, mod blocks after vanilla's.
+pub fn block_keys() -> Vec<BlockKey> {
+    let order = resolved_block_keys()
+        .get()
+        .map_or_else(Vec::new, |blocks| blocks.names.order.clone());
+    order.into_iter().map(BlockKey).collect()
+}
+
+/// Every item key in vanilla's registry order, mod items after vanilla's.
+pub fn item_keys() -> Vec<ItemKey> {
+    resolved_items()
+        .get()
+        .map_or_else(Vec::new, |names| names.order.clone())
+        .into_iter()
+        .map(ItemKey)
+        .collect()
+}
+
+/// Every built-in entity-type key in registry order.
+pub fn entity_type_keys() -> Vec<EntityTypeKey> {
+    ordered_keys(&ENTITY_TYPES, EntityTypeKey)
+}
+
+/// Every built-in menu key in registry order.
+pub fn menu_keys() -> Vec<MenuKey> {
+    ordered_keys(&MENUS, MenuKey)
+}
+
+/// Every loaded enchantment key in registry order.
+pub fn enchantment_keys() -> Vec<EnchantmentKey> {
+    ordered_keys(&ENCHANTMENTS, EnchantmentKey)
+}
+
+impl EntityTypeKey {
+    /// Validate an incoming slot against the built-in registry, not a world's mapping.
+    #[cfg(any(not(target_arch = "wasm32"), test))]
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        ordered_slot_is_live(&ENTITY_TYPES, slot)
+            .then_some(Self(slot))
+            .ok_or("unknown EntityTypeKey slot")
+    }
+}
+
+impl MenuKey {
+    /// Validate an incoming slot against the built-in registry, not a world's mapping.
+    #[cfg(any(not(target_arch = "wasm32"), test))]
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        ordered_slot_is_live(&MENUS, slot)
+            .then_some(Self(slot))
+            .ok_or("unknown MenuKey slot")
+    }
+}
+
+impl EnchantmentKey {
+    /// Validate an incoming slot against the loaded registry, not a world's mapping.
+    #[cfg(any(not(target_arch = "wasm32"), test))]
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        ordered_slot_is_live(&ENCHANTMENTS, slot)
+            .then_some(Self(slot))
+            .ok_or("unknown EnchantmentKey slot")
+    }
+}
+
+/// The canonical name of a built-in entity-type key, for diagnostics.
+pub fn entity_type_key_id(key: EntityTypeKey) -> Option<String> {
+    ordered_id(&ENTITY_TYPES, key.0)
+}
+
+/// The canonical name of a built-in menu key, for diagnostics.
+pub fn menu_key_id(key: MenuKey) -> Option<String> {
+    ordered_id(&MENUS, key.0)
+}
+
+/// The canonical name of a loaded enchantment key, for diagnostics.
+pub fn enchantment_key_id(key: EnchantmentKey) -> Option<String> {
+    ordered_id(&ENCHANTMENTS, key.0)
 }
 
 impl EffectKey {
@@ -453,6 +614,20 @@ mod block_tests {
             assert_eq!(block_key(name), None);
         }
         assert_eq!(block_id(air), Some("minecraft:air"));
+        let ordered: Vec<_> = block_keys()
+            .into_iter()
+            .filter_map(|key| block_id(key))
+            .collect();
+        assert_eq!(
+            ordered,
+            [
+                "test:machine",
+                "minecraft:zombie_head",
+                "minecraft:stone",
+                "minecraft:air",
+                "minecraft:birch_log",
+            ]
+        );
         // Reversing the registry's enumeration cannot change any completed key.
         crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Requests))])
             .unwrap();
@@ -470,6 +645,95 @@ mod block_tests {
         crate::install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
         assert!(block_key("minecraft:air").is_none());
         assert!(BlockKey::from_slot(air.0).is_err());
+    }
+}
+
+#[cfg(test)]
+mod key_order_tests {
+    use crate::{Hooks, ModEntry, Registrar, RegistrationContext};
+
+    struct Requests;
+    #[crate::__subscriptions]
+    impl Hooks for Requests {
+        fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+            let _ = registrar.block_key("minecraft:stone");
+        }
+    }
+
+    #[test]
+    fn registry_order_puts_vanilla_first_and_mods_after_them() {
+        crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Requests))])
+            .unwrap();
+        super::resolve_block_keys(
+            [
+                "minecraft:air",
+                "minecraft:stone",
+                "minecraft:granite",
+                "test:machine",
+            ],
+            |_| {
+                horizon_mod_runtime::block_definitions::BlockDefinition::new(
+                    &[&Default::default()],
+                    0,
+                )
+                .map_err(|error| format!("{error:?}"))
+            },
+        )
+        .unwrap();
+        let ordered: Vec<_> = super::block_keys()
+            .into_iter()
+            .filter_map(|key| super::block_id(key))
+            .collect();
+        assert_eq!(
+            ordered,
+            [
+                "minecraft:air",
+                "minecraft:stone",
+                "minecraft:granite",
+                "test:machine",
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod ordered_key_tests {
+    #[test]
+    fn built_in_registry_order_lists_vanilla_first_and_mods_after_them() {
+        super::resolve_entity_types(["minecraft:pig", "minecraft:zombie", "test:probe"]).unwrap();
+        // The registry's own order, not sorted: `pig` registers before `zombie`.
+        let ordered: Vec<_> = super::entity_type_keys()
+            .into_iter()
+            .map(|key| super::entity_type_key_id(key).unwrap())
+            .collect();
+        assert_eq!(ordered, ["minecraft:pig", "minecraft:zombie", "test:probe"]);
+        let first = super::entity_type_keys()[0];
+        assert_eq!(super::EntityTypeKey::from_slot(first.0), Ok(first));
+        assert!(super::EntityTypeKey::from_slot(u32::MAX).is_err());
+        // A second load of the same registry keeps every key and the order.
+        super::resolve_entity_types(["minecraft:pig", "minecraft:zombie", "test:probe"]).unwrap();
+        assert_eq!(super::entity_type_keys(), super::entity_type_keys());
+        assert_eq!(
+            super::entity_type_key_id(first).as_deref(),
+            Some("minecraft:pig")
+        );
+    }
+
+    #[test]
+    fn a_reload_keeps_retained_enchantment_slots_and_lists_the_new_order() {
+        super::resolve_enchantments(["minecraft:sharpness", "minecraft:mending"]).unwrap();
+        let sharpness = super::enchantment_keys()[0];
+        super::resolve_enchantments(["minecraft:mending", "minecraft:sharpness"]).unwrap();
+        // The retained slot still names sharpness; the listed order follows the reload.
+        assert_eq!(
+            super::enchantment_key_id(sharpness).as_deref(),
+            Some("minecraft:sharpness")
+        );
+        let ordered: Vec<_> = super::enchantment_keys()
+            .into_iter()
+            .map(|key| super::enchantment_key_id(key).unwrap())
+            .collect();
+        assert_eq!(ordered, ["minecraft:mending", "minecraft:sharpness"]);
     }
 }
 

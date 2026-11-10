@@ -16,7 +16,8 @@ pub(super) fn points<'a>(
         .inject
         .iter()
         .filter(|entry| {
-            entry.access == Access::Internals
+            entry.kind != Kind::Field
+                && entry.access == Access::Internals
                 && entry.call.is_none()
                 && listed.iter().any(|point| {
                     super::internals::plain_path(&point.target)
@@ -39,14 +40,23 @@ pub(super) fn sites<'a>(
     manifest
         .inject
         .iter()
-        .filter(|entry| entry.call.is_some())
+        .filter(|entry| entry.call.is_some() || entry.expr.is_some())
         .map(|entry| (entry, selected(sites, entry).expect("slot route checked")))
 }
 
 fn selected<'a>(sites: &'a [Site], entry: &Inject) -> Option<&'a Site> {
     sites.iter().find(|site| {
         super::internals::plain_path(&site.target) == super::internals::plain_path(&entry.at)
-            && Some(&site.call) == entry.call.as_ref()
+            && Some(&site.call)
+                == entry
+                    .call
+                    .clone()
+                    .or_else(|| {
+                        horizon_mod_api_gen::sites::expression::spelling(entry.expr.as_ref()?).ok()
+                    })
+                    .as_ref()
+            && site.expression.as_ref().map(|e| &e.ty)
+                == entry.local_type.as_ref().filter(|_| entry.expr.is_some())
             && Some(&site.ctx) == entry.ctx.as_ref()
             && Some(site.ordinal) == entry.nth
             && site.local.as_ref().map(|l| (&l.binding, &l.ty, l.after))
@@ -79,11 +89,7 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
         .inject
         .iter()
         .filter_map(|entry| {
-            let item = catalog.internals.iter().find(|item| {
-                !item.shape_only
-                    && plain(&item.path) == plain(&entry.at)
-                    && matches!(item.kind.as_str(), "fn" | "method" | "struct")
-            })?;
+            let item = catalog.target(&entry.at)?;
             let point = catalog
                 .points
                 .iter()
@@ -153,21 +159,23 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
             (Route::Slot(SlotKind::Site), _, Access::Api) => {
                 Some(NoSlotReason::ApiSitesUnsupported)
             }
-            (_, Kind::ModifyCallArg, _) => Some(NoSlotReason::SourcePending),
+            // An internals replace is built from the listed point's raw shape: an unlisted
+            // function needs its slot row first, which the declaration names.
+            (Route::Source(reason), Kind::Replace, Access::Internals) => Some(reason),
             (
                 Route::Source(_),
-                Kind::Head
+                Kind::Field
+                | Kind::Head
                 | Kind::Return
                 | Kind::BeforeCall
                 | Kind::ModifyLocal
+                | Kind::Expression
                 | Kind::AfterCall
                 | Kind::ModifyValue
                 | Kind::WrapCall
                 | Kind::WrapIf,
                 Access::Internals,
             ) => None,
-            (Route::Source(_), _, _) => Some(NoSlotReason::SourcePending),
-            (_, Kind::Replace, Access::Internals) => Some(NoSlotReason::ReplacePending),
             _ => None,
         };
         if let Some(reason) = pending {
@@ -183,8 +191,19 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
             .iter()
             .find(|point| plain(&point.target) == plain(&inject.at))
             .filter(|_| inject.kind == Kind::Replace)
-            .and_then(|point| {
-                horizon_mod_point_emit::replaceable(&inject.id, &inject.at, &point.emitted()).err()
+            .and_then(|point| match inject.access {
+                Access::Api => {
+                    horizon_mod_point_emit::replaceable(&inject.id, &inject.at, &point.emitted())
+                        .err()
+                }
+                Access::Internals => horizon_mod_point_emit::internals_replace(
+                    inject,
+                    &manifest.id,
+                    &point.emitted(),
+                    "raw",
+                    &inject.with,
+                )
+                .err(),
             });
         if let Some(why) = replace_refusal {
             return Err(InjectError::NoSlot {

@@ -302,6 +302,7 @@ pub struct UiState {
     pub room: horizon_client::hud_kit::room::Room,
     /// F2 screenshots not written yet: each reports in chat once its PNG is.
     pub screenshot_messages: Vec<std::path::PathBuf>,
+    pub screenshot_writes: Vec<super::screenshot_writer::ScreenshotWrite>,
     /// The options screens.
     pub options: horizon_client::options_ui::OptionsUi,
     /// The prepared resources before resource packs are layered on.
@@ -2221,8 +2222,15 @@ impl Game<'_> {
         mut pending: horizon_client::gfx::PendingScreenshot,
     ) -> Option<std::result::Result<[u32; 2], String>> {
         if !self.ui.screenshot_messages.contains(&pending.path) {
-            // Another request replaced F2 before its frame was drawn.
-            return Some(pending.save().map_err(|e| e.to_string()));
+            if !pending.background {
+                return Some(pending.save().map_err(|e| e.to_string()));
+            }
+            self.ui
+                .screenshot_writes
+                .push(super::screenshot_writer::ScreenshotWrite::start(
+                    pending, None, None, false,
+                ));
+            return None;
         }
         let at = self
             .ui
@@ -2250,13 +2258,15 @@ impl Game<'_> {
             return None;
         }
         let root = horizon_client::logging::player_dir().join("screenshots");
-        let result = pending
-            .save_in(&root, &file_name)
-            .map_err(|e| e.to_string());
-        self.ui.screenshot_messages.remove(at);
-        self.ui.screenshot_messages.insert(0, pending.path);
-        self.finish_screenshot(&result, message);
-        Some(result)
+        self.ui
+            .screenshot_writes
+            .push(super::screenshot_writer::ScreenshotWrite::start(
+                pending,
+                Some((root, file_name)),
+                message,
+                true,
+            ));
+        None
     }
     /// After a frame: report a finished F2 screenshot in chat.
     pub(super) fn finish_screenshot(

@@ -22,6 +22,9 @@ pub struct Names {
     pub identifiers: BTreeMap<horizon_core::identifier::Identifier, u32>,
     pub utf16_slots: HashMap<Vec<u16>, u32>,
     pub world_fluids: Vec<Option<u32>>,
+    /// Slots in the completed registry's registration order, when a completion
+    /// recorded one. Empty while the table holds only mod requests.
+    pub order: Vec<u32>,
 }
 
 #[derive(Clone)]
@@ -91,14 +94,28 @@ impl Names {
         ids: impl IntoIterator<Item = &'a str>,
         unknown: impl FnMut(&'static str, &str) -> E,
     ) -> Result<Self, Vec<E>> {
-        let all: std::collections::BTreeSet<_> = ids.into_iter().collect();
-        self.resolve(|id| all.contains(id).then_some(()), unknown)?;
+        let all: Vec<_> = ids.into_iter().collect();
+        let known: std::collections::BTreeSet<_> = all.iter().copied().collect();
+        self.resolve(|id| known.contains(id).then_some(()), unknown)?;
         let mut names = self.clone();
-        for id in all {
+        // Slots keep their historical sorted completion order, so adding an
+        // entry to one registry generation never renumbers another.
+        for id in &known {
             names
                 .request("horizon", id)
                 .expect("registry owns valid ids");
         }
+        let mut seen = std::collections::BTreeSet::new();
+        names.order = all
+            .into_iter()
+            .filter(|id| seen.insert(*id))
+            .map(|id| {
+                *names
+                    .slots
+                    .get(id)
+                    .expect("completed registry owns every id")
+            })
+            .collect();
         Ok(names)
     }
 
@@ -352,6 +369,26 @@ mod item_tag_tests {
         assert!(names.request("bad", "Not valid").is_err());
         assert_eq!(names.entries.len(), 1);
     }
+    #[test]
+    fn completion_records_the_input_order_once_per_name() {
+        let names = Names::default()
+            .complete(
+                ["test:zebra", "minecraft:air", "test:zebra", "test:apple"],
+                |_, _| (),
+            )
+            .unwrap();
+        let order: Vec<_> = names
+            .order
+            .iter()
+            .map(|&slot| names.id(slot).unwrap())
+            .collect();
+        // The registry's order, not sorted and not request order; a block name
+        // repeated by its states is listed once.
+        assert_eq!(order, ["test:zebra", "minecraft:air", "test:apple"]);
+        // Completion still numbers slots in its historical sorted order.
+        assert_eq!(names.order, [2, 0, 1]);
+    }
+
     #[test]
     fn tag_name_keys_keep_their_identity_and_refuse_unknown_slots() {
         let first = Identifier::parse("test:retained_tag_name").unwrap();

@@ -17,9 +17,28 @@ when the full SHA in `tools/file_size_baseline.txt` changes and:
 - it is a direct parent of a merge commit in `base..HEAD`.
 
 A fake SHA, an old base ancestor, an ordinary new ancestor without a merge,
-and missing provenance all fail. Entries above the current non-test size fail
-as stale-high, including entries for deleted files. Other changes may only lower
-or remove caps. The PR body lists every cap and its growth for human review.
+and missing provenance all fail. In a sync PR, entries above the current non-test size fail
+as stale-high, including entries for deleted files. Outside a sync, entries are ignored;
+adding or raising one still fails, and shrinking a listed file needs no baseline edit.
+The PR body lists every sync cap and its growth for human review.
+
+## Regenerating the baseline
+
+Only a sync PR uses `tools/file_size_baseline.txt`: when its header is unchanged against the merge
+base, the checker ignores the entries and holds every file to its size on the base, so a PR that shrinks a
+listed file does not touch the file. A sync declares its upstream commit in the header and the entries cap
+the files that grew past the limit. Do not edit entries by hand. Regenerate:
+
+    python3 tools/sync/write_file_size_baseline.py --base origin/main --marker <full upstream SHA>
+
+The command writes one entry, at the exact current size, for each Rust file over 3000 code lines that grew past
+its size on the merge base, skipping generated files and `third_party/`. `--marker` is required when something
+grew and must be new compared with the base; without growth the header is kept and the file has no entries.
+`--check` prints the result without writing it.
+
+On a conflict in the baseline (a rollup that carries a sync, or a sync merged with a PR that touched it): take
+either side, run the command on the merged tree, and commit the result as its own commit. Run it again at the
+end of a sync, after the last code change, and run `python3 tools/check_file_size.py --base origin/main`.
 
 A fork-only side-branch merge cannot establish upstream provenance. A PR could
 still merge a real upstream commit and add unrelated caps: review must confirm

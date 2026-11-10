@@ -133,6 +133,16 @@ impl dyn Registrar + '_ {
     }
 }
 
+/// Whether this item's resolved Parts subscribe to `hook`, before stack conversion.
+pub fn item_listens(hook: HookId, id: &str) -> bool {
+    if !has_part_hook(hook) {
+        return false;
+    }
+    parts(hook, "item routing")
+        .for_hook(hook)
+        .is_some_and(|table| !table.item(|| Some(id)).is_empty())
+}
+
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {

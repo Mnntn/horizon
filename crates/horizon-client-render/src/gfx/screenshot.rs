@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 /// CPU-side frame returned to the game before any screenshot file is written.
 pub struct PendingScreenshot {
     pub path: PathBuf,
+    /// F2 and world-icon requests finish asynchronously; control captures do not.
+    pub background: bool,
     pub(super) image: mod_api::ScreenshotImage,
     pub(super) hdr: Option<HdrScreenshot>,
 }
@@ -18,6 +20,55 @@ pub(super) struct HdrScreenshot {
 pub struct SavedScreenshot {
     pub size: [u32; 2],
     pub hdr_path: Option<PathBuf>,
+}
+
+type SaveOutcome = (PathBuf, std::result::Result<[u32; 2], String>);
+
+/// A screenshot being encoded after the owning-thread hook has returned.
+pub struct ScreenshotSave {
+    pub original: PathBuf,
+    receiver: std::sync::mpsc::Receiver<SaveOutcome>,
+}
+impl ScreenshotSave {
+    fn spawn(original: PathBuf, write: impl FnOnce() -> SaveOutcome + Send + 'static) -> Self {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let completed = sender.clone();
+        let spawned = std::thread::Builder::new()
+            .name("Screenshot writer".into())
+            .spawn(move || {
+                let _ = completed.send(write());
+            });
+        if let Err(error) = spawned {
+            let _ = sender.send((original.clone(), Err(error.to_string())));
+        }
+        Self { original, receiver }
+    }
+
+    /// Poll without waiting for the PNG encoder or disk.
+    pub fn try_complete(&self) -> Option<SaveOutcome> {
+        match self.receiver.try_recv() {
+            Ok(outcome) => Some(outcome),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some((
+                self.original.clone(),
+                Err("screenshot writer stopped".into()),
+            )),
+        }
+    }
+}
+impl PendingScreenshot {
+    /// Encode the approved pixels on a worker. A mod-supplied destination is
+    /// validated by the same write boundary as a synchronous save.
+    pub fn save_background(mut self, destination: Option<(PathBuf, String)>) -> ScreenshotSave {
+        ScreenshotSave::spawn(self.path.clone(), move || {
+            let result = match destination {
+                Some((root, name)) => self.save_in(&root, &name),
+                None => self.save(),
+            }
+            .map_err(|e| e.to_string());
+            (self.path, result)
+        })
+    }
 }
 
 impl PendingScreenshot {
@@ -174,12 +225,72 @@ mod tests {
     fn frame(path: PathBuf, hdr: bool) -> PendingScreenshot {
         PendingScreenshot {
             path,
+            background: true,
             image: mod_api::ScreenshotImage::new(1, 1, vec![12, 34, 56, 255]),
             hdr: hdr.then(|| HdrScreenshot {
                 size: [1, 1],
                 pixels: vec![0, 0, 255, 255, 128, 0],
             }),
         }
+    }
+
+    #[test]
+    fn background_encoding_does_not_wait_on_the_frame_thread() {
+        let (entered, started) = std::sync::mpsc::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let (queued, returned) = std::sync::mpsc::channel();
+        let frame_thread = std::thread::spawn(move || {
+            let owner = std::thread::current().id();
+            let path = PathBuf::from("shot.png");
+            let save = ScreenshotSave::spawn(path.clone(), move || {
+                entered.send(std::thread::current().id()).unwrap();
+                blocked.recv().unwrap();
+                (path, Ok([1, 1]))
+            });
+            assert!(queued.send((owner, save)).is_ok());
+        });
+        let (owner, save) = returned
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        frame_thread.join().unwrap();
+        assert_ne!(
+            started
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap(),
+            owner
+        );
+        assert!(save.try_complete().is_none());
+        release.send(()).unwrap();
+        assert_eq!(
+            save.receiver
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+                .1,
+            Ok([1, 1])
+        );
+    }
+
+    #[test]
+    fn background_save_keeps_hook_edits_and_renames_both_copies() {
+        let root = tempfile::tempdir().unwrap();
+        let mut pending = frame(root.path().join("unused.png"), true);
+        pending.image_mut().rgba = vec![9, 8, 7, 255];
+        let save = pending.save_background(Some((root.path().to_owned(), "changed.png".into())));
+        let (path, result) = save
+            .receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(result, Ok([1, 1]));
+        assert_eq!(path, root.path().join("changed.png"));
+        assert!(root.path().join("changed-hdr.png").exists());
+        assert!(!root.path().join("unused.png").exists());
+        let mut reader =
+            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()))
+                .read_info()
+                .unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!(&pixels[..info.buffer_size()], &[9, 8, 7, 255]);
     }
 
     #[test]

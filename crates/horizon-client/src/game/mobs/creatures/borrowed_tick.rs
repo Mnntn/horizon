@@ -47,6 +47,8 @@ fn route_player_events(
 pub(super) struct BorrowedMobTick<'a> {
     pub(super) mobs: &'a mut horizon_client::join_seq::JoinList<Mob>,
     pub(super) snapshot: &'a mut Vec<Seen>,
+    pub(super) passenger_objects: &'a [Seen],
+    pub(super) blocked: &'a std::collections::HashSet<u32>,
     pub(super) events: &'a mut Vec<MobEvent>,
     pub(super) pushes: &'a mut horizon_client::mobs::PendingPushes,
     pub(super) dead: &'a mut Vec<Mob>,
@@ -76,6 +78,8 @@ impl Game<'_> {
         horizon_client::health::LentLevel,
         Option<Box<dyn std::any::Any + Send>>,
     ) {
+        let passenger_objects = state.passenger_objects;
+        let blocked = state.blocked;
         let mut mobs = state.mobs.take_owned_pass();
         let mut snapshot = std::mem::take(state.snapshot);
         let mut events = std::mem::take(state.events);
@@ -139,6 +143,7 @@ impl Game<'_> {
                     .map(super::super::boat_leads::boat_state)
                     .collect();
                 let mut base = self.mob_world_base(&[]);
+                base.passenger_objects = passenger_objects;
                 let mut level = horizon_client::health::DamageLevel::lent(
                     &self.world,
                     self.pack.assets.registry,
@@ -167,6 +172,11 @@ impl Game<'_> {
                         }
                     };
                     let m = &mut mobs[i];
+                    if blocked.contains(&m.id) {
+                        cursor += 1;
+                        resuming = false;
+                        continue;
+                    }
                     if m.removed && !resuming {
                         keep[slot] = false;
                         snapshot[slot].alive = false;
@@ -628,6 +638,27 @@ impl Game<'_> {
         }
         laps.lap("creature_loop");
         if dispatch_panic.is_none() {
+            if !self.persist.off_level.is_empty() {
+                let mounted: std::collections::HashSet<_> = mobs
+                    .iter()
+                    .chain(self.mob_objects())
+                    .filter_map(|passenger| passenger.extra.mount)
+                    .collect();
+                for mob in &mobs {
+                    let kept = index
+                        .get(&mob.id)
+                        .and_then(|&slot| keep.get(slot as usize))
+                        .copied()
+                        .unwrap_or(true);
+                    if !kept && mounted.contains(&mob.id) {
+                        let mut removed = mob.clone();
+                        removed.removed = true;
+                        self.persist
+                            .off_level
+                            .insert(mob.id, crate::game::persist::OffLevel::Mob(removed));
+                    }
+                }
+            }
             if positions.is_none() {
                 let mut flags = keep.into_iter();
                 mobs.retain(|_| flags.next().unwrap_or(true));
@@ -661,5 +692,121 @@ impl Game<'_> {
         *state.path_writes = path_writes;
         *state.gone = gone;
         (lent, dispatch_panic)
+    }
+}
+
+impl Game<'_> {
+    /// The killing blow of a mob as the death hooks name it: its damage
+    /// type and the causing entity's id (0 for none).
+    pub(super) fn mob_damage_source(&self, m: &Mob) -> (&'static str, u32) {
+        let (damage_type, attacker) = match m.last_damage {
+            Some((d, _)) => (source_damage_type(d), d.attacker),
+            None => ("minecraft:generic", None),
+        };
+        let attacker = match attacker {
+            Some(Who::Mob(id)) => id,
+            Some(Who::Player) => self
+                .last_hurt_by_player
+                .get(&m.id)
+                .and_then(|credit| self.resolve_player_credit(*credit))
+                .and_then(|conn| self.player_entity_id_by_connection(conn))
+                .map_or(0, |id| id as u32),
+            None => 0,
+        };
+        (damage_type, attacker)
+    }
+}
+
+impl Game<'_> {
+    pub(super) fn retained_passenger_snapshot(&self, uuid: Option<[i32; 4]>) -> Vec<Seen> {
+        if self.persist.off_level.is_empty() {
+            Vec::new()
+        } else {
+            self.persist
+                .off_level
+                .values()
+                .map(|object| match object {
+                    crate::game::persist::OffLevel::Mob(m) => seen(m, uuid),
+                })
+                .collect()
+        }
+    }
+}
+
+#[cfg(test)]
+mod off_level_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn borrowed_tick_resolves_the_retained_controller() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            use horizon_client::mobs::goals::{JUMP, LOOK, MOVE};
+            game.options.dedicated = Some(Vec::new());
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let spider = game
+                .res
+                .mob_types()
+                .get("minecraft:spider")
+                .unwrap()
+                .clone();
+            let skeleton = game
+                .res
+                .mob_types()
+                .get("minecraft:skeleton")
+                .unwrap()
+                .clone();
+            let at = Vec3::new(1.0, 80.0, 0.5);
+            let mut vehicle = Mob::new(71, spider, at, 0.0);
+            vehicle.extra.rider = Some(72);
+            let mut rider = Mob::new(72, skeleton, at, 0.0);
+            rider.extra.mount = Some(71);
+            rider.age = 19;
+            game.mobs.push(vehicle);
+            game.persist
+                .off_level
+                .insert(72, crate::game::persist::OffLevel::Mob(rider));
+            game.tick_creature_entities().unwrap();
+            assert_eq!(
+                game.mob_object(71).unwrap().ai.goals.disabled & (MOVE | JUMP | LOOK),
+                MOVE | JUMP | LOOK
+            );
+            assert_eq!(game.mob_object(72).unwrap().age, 19);
+            assert_eq!(game.mobs.len(), 1);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn resident_descendant_does_not_tick_until_detached() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            let mut parent = Mob::new(72, pig.clone(), Vec3::new(1.0, 80.0, 0.5), 0.0);
+            parent.extra.mount = Some(71);
+            let mut child = Mob::new(73, pig, parent.position, 0.0);
+            child.extra.mount = Some(72);
+            child.no_ai = true;
+            child.age = 19;
+            child.fire_ticks = 20;
+            game.persist
+                .off_level
+                .insert(72, crate::game::persist::OffLevel::Mob(parent));
+            game.mobs.push(child);
+            game.tick_creature_entities().unwrap();
+            let child = game.mob_object(73).unwrap();
+            assert_eq!(child.age, 19);
+            assert_eq!(child.fire_ticks, 20);
+            game.mob_object_mut(73).unwrap().extra.mount = None;
+            game.tick_creature_entities().unwrap();
+            assert_eq!(game.mob_object(73).unwrap().age, 20);
+        });
     }
 }

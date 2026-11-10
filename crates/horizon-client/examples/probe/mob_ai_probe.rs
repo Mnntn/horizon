@@ -1223,6 +1223,7 @@ pub fn main() -> horizon_client::Result<()> {
                     who_lookup: None,
                     others_grid: $grid,
                     others_index: None,
+                    passenger_objects: &[],
                     others_villagers: None,
                     others_solid: None,
                     daylight: (world.day_time.rem_euclid(24000)) < 12000,

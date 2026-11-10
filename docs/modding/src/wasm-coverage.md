@@ -30,6 +30,11 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Host::item_compost_chance` | crosses | Wire call |
 | `Host::enchantments_compatible` | crosses | Wire call |
 | `Host::entity_type_in_tag` | crosses | Wire call |
+| `Host::block_keys` | crosses | Wire call |
+| `Host::item_keys` | crosses | Wire call |
+| `Host::entity_type_keys` | crosses | Wire call |
+| `Host::menu_keys` | crosses | Wire call |
+| `Host::enchantment_keys` | crosses | Wire call |
 | `Host::is_loaded` | crosses | Wire call |
 | `Host::chunk` | crosses | Wire call |
 | `Host::living` | crosses | Wire call |
@@ -43,6 +48,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Host::recipe_result` | crosses | Wire call |
 | `Host::known_recipes` | crosses | Wire call |
 | `Host::recipe_book_category` | crosses | Wire call |
+| `Host::resource` | crosses | Wire call |
 | `Host::unresolved_fluid_id` | crosses | Wire call |
 | `Host::block_in_tag` | crosses | Wire call |
 | `Host::state_outline` | crosses | Wire call |
@@ -334,6 +340,9 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::block_key` | crosses | Wire call |
 | `Backend::effect_key` | crosses | Wire call |
 | `Backend::block_entity_type_key_id` | crosses | Wire call |
+| `Backend::entity_type_key_id` | crosses | Wire call |
+| `Backend::menu_key_id` | crosses | Wire call |
+| `Backend::enchantment_key_id` | crosses | Wire call |
 | `Backend::level_find_closest_biome` | crosses | Wire call |
 | `Backend::level_find_nearest_structure` | crosses | Wire call |
 | `Backend::level_get_sky_darken` | crosses | Wire call |
@@ -969,6 +978,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Registrar::register_key_mapping` | crosses | Wire call |
 | `Registrar::attach_menu_part` | crosses | Wire call |
 | `Registrar::particle_key` | crosses | Wire call |
+| `Registrar::recipe_book_type` | crosses | Wire call |
 | `Registrar::register_setting` | crosses | Wire call |
 | `Registrar::declare_spawn_placement` | crosses | Wire call |
 | `Registrar::add_structure_type` | crosses | Wire call |
@@ -1407,6 +1417,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::armor_hurt` | crosses | Wire call |
 | `Hooks::arrow_nock` | crosses | Wire call |
 | `Hooks::baby_entity_spawn` | crosses | Wire call |
+| `Hooks::bake_model_loader` | crosses | Wire call |
 | `Hooks::block_drops` | crosses | Wire call |
 | `Hooks::block_entity_type_add_blocks` | crosses | Wire call |
 | `Hooks::block_grow_feature` | crosses | Wire call |
@@ -1517,6 +1528,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::living_damage_post` | crosses | Wire call |
 | `Hooks::living_damage_pre` | crosses | Wire call |
 | `Hooks::living_death` | crosses | Wire call |
+| `Hooks::living_death_post` | crosses | Wire call |
 | `Hooks::living_destroy_block` | crosses | Wire call |
 | `Hooks::living_drops` | crosses | Wire call |
 | `Hooks::get_equipment_drop_chance` | crosses | Wire call |
@@ -1580,6 +1592,8 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_gui_layers` | crosses | Wire call |
 | `Hooks::register_item_tint_sources` | crosses | Wire call |
 | `Hooks::register_layer_definitions` | crosses | Wire call |
+| `Hooks::register_model_loaders` | crosses | Wire call |
+| `Hooks::register_particle_groups` | crosses | Wire call |
 | `Hooks::register_particle_providers` | crosses | Wire call |
 | `Hooks::register_preset_editors` | crosses | Wire call |
 | `Hooks::register_range_select_item_model_property` | crosses | Wire call |
@@ -1714,6 +1728,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ItemPart::use_animation` | crosses | Wire call |
 | `ItemPart::on_use_tick` | crosses | Wire call |
 | `ItemPart::release_using` | crosses | Wire call |
+| `ItemPart::crafting_remainder` | crosses | Wire call |
 | `ItemPart::item_interact_mob` | crosses | Wire call |
 | `ItemPart::on_item_use_first` | crosses | Wire call |
 | `MenuPart::menu_subscribed` | crosses | Wire call |

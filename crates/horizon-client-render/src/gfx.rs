@@ -408,7 +408,8 @@ mod readback;
 mod resident;
 mod reuse;
 mod screenshot;
-pub use screenshot::PendingScreenshot;
+pub use screenshot::{PendingScreenshot, ScreenshotSave};
+mod screenshot_readback;
 mod stars;
 mod surface_setup;
 use surface_setup::{AdapterChoice, AdapterFailure, open_adapter, pick_adapter, set_up_surface};
@@ -1256,8 +1257,8 @@ pub struct ScreenshotRequest {
     /// F2's: drawn at the game's resolution (Resolution Scale above 100%) times
     /// `Renderer::screenshot_quality`, not the window's.
     pub scaled: bool,
-    /// Written on a thread of its own (F2's, the world icon's): its outcome comes back a
-    /// frame or a few later in `Renderer::saved_screenshots`, not `screenshot_result`.
+    /// Read back on a worker (F2 and world icons); CPU pixels arrive in
+    /// `Renderer::screenshot_result` for the owning thread's hook before encoding.
     pub background: bool,
 }
 /// A solid terrain pipeline without HDR output's lighting (terrain.wgsl's `HDR_LIGHTING`),
@@ -1759,6 +1760,7 @@ pub struct Renderer {
     pub screenshot: Option<ScreenshotRequest>,
     /// Readback outcome: CPU pixels for the game to approve before writing, or an error.
     pub screenshot_result: Option<std::result::Result<PendingScreenshot, String>>,
+    screenshot_readbacks: screenshot_readback::Readbacks,
     /// Screenshot Quality (Horizon setting): a `scaled` screenshot's frame is this many
     /// times the game's resolution (1, 2, 4 or 8).
     pub screenshot_quality: u32,
@@ -5480,6 +5482,7 @@ impl Renderer {
             started: Instant::now(),
             screenshot: None,
             screenshot_result: None,
+            screenshot_readbacks: screenshot_readback::Readbacks::default(),
             screenshot_quality: 1,
             screenshot_halvings: 0,
             gamma: 0.5,
@@ -12233,11 +12236,28 @@ impl Renderer {
                 self.screenshot = Some(request);
             } else {
                 self.screenshot_halvings = 0;
-                self.screenshot_result = Some(
-                    self.read_screenshot(&request, &buffer, hdr_readback.as_ref())
-                        .map_err(|e| e.to_string()),
-                );
+                let reader = screenshot_readback::Reader {
+                    device: self.device.clone(),
+                    config: self.config.clone(),
+                };
+                if request.background {
+                    if let Err(error) =
+                        self.screenshot_readbacks
+                            .start(reader, request, buffer, hdr_readback)
+                    {
+                        self.screenshot_result = Some(Err(error.to_string()));
+                    }
+                } else {
+                    self.screenshot_result = Some(
+                        reader
+                            .read_screenshot(&request, &buffer, hdr_readback.as_ref())
+                            .map_err(|e| e.to_string()),
+                    );
+                }
             }
+        }
+        if self.screenshot_result.is_none() {
+            self.screenshot_result = self.screenshot_readbacks.poll();
         }
         // The frame's own waits for the submit thread (its queue writes and passes).
         self.last_wait += self.queue.take_waited();
@@ -12849,75 +12869,6 @@ impl Renderer {
             self.screenshot_result = Some(Err(error));
             None
         }
-    }
-    /// The pixels `copy_frame` read back into `buffer`, 4 bytes each, row after row.
-    fn read_frame(&self, buffer: &wgpu::Buffer) -> Result<Vec<[u8; 4]>> {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        buffer.map_async(wgpu::MapMode::Read, .., move |r| {
-            let _ = sender.send(r);
-        });
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| e.to_string())?;
-        receiver
-            .recv()
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())?;
-        let (width, height, row) = (
-            self.config.width as usize,
-            self.config.height as usize,
-            padded_row(self.config.width) as usize,
-        );
-        let mut pixels = Vec::with_capacity(width * height);
-        {
-            let data = buffer.get_mapped_range(..).map_err(|e| e.to_string())?;
-            for y in 0..height {
-                pixels.extend_from_slice(data[y * row..y * row + width * 4].as_chunks::<4>().0);
-            }
-        }
-        buffer.unmap();
-        Ok(pixels)
-    }
-    fn read_screenshot(
-        &self,
-        request: &ScreenshotRequest,
-        buffer: &wgpu::Buffer,
-        hdr_buffer: Option<&wgpu::Buffer>,
-    ) -> Result<PendingScreenshot> {
-        let bgra = matches!(
-            self.config.format.remove_srgb_suffix(),
-            wgpu::TextureFormat::Bgra8Unorm
-        );
-        let mut pixels = Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
-        for px in self.read_frame(buffer)? {
-            let (r, b) = if bgra { (px[2], px[0]) } else { (px[0], px[2]) };
-            pixels.extend_from_slice(&[r, px[1], b, 255]);
-        }
-        // NativeImage.resizeSubRectTo on takeAutoScreenshot's grab: the icon
-        // is the frame's centre square averaged down to its size.
-        let (width, height, pixels) = match request.size {
-            Some(size) => (
-                size[0],
-                size[1],
-                square_downscale(&pixels, self.config.width, self.config.height, size),
-            ),
-            None => (self.config.width, self.config.height, pixels),
-        };
-        let hdr = hdr_buffer.and_then(|buffer| match self.read_frame(buffer) {
-            Ok(pixels) => Some(screenshot::HdrScreenshot {
-                size: [self.config.width, self.config.height],
-                pixels: hdr10_to_rgb16(&pixels),
-            }),
-            Err(e) => {
-                log::warn!("Horizon renderer: HDR screenshot readback: {e}");
-                None
-            }
-        });
-        Ok(PendingScreenshot {
-            path: request.path.clone(),
-            image: mod_api::ScreenshotImage::new(width, height, pixels),
-            hdr,
-        })
     }
 }
 /// `screenshots/2026-10-28_12.00.00.png` -> `screenshots/2026-10-28_12.00.00-hdr.png`.

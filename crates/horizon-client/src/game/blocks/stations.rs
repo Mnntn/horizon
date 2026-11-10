@@ -3367,6 +3367,7 @@ impl Game<'_> {
         &mut self,
         pos: (i32, i32, i32),
     ) -> horizon_client::Result<()> {
+        let fuel = self.brewing_fuel_remainder(pos);
         let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
             return Ok(());
         };
@@ -3379,6 +3380,7 @@ impl Game<'_> {
             &world_stations!(self).brewing,
             world_items!(self),
             self.res.providers(),
+            &|s| fuel.resolve(world_items!(self), s),
         );
         let consumed_fuel = was_unfueled && b.fuel > 0;
         let started = was_idle && b.brew_time > 0;
@@ -3396,15 +3398,12 @@ impl Game<'_> {
             });
             // A cancelled Pre fires Post itself, with the slots the mods left.
             let cancelled = matches!(asked, Some((_, true)));
+            let rest = self.brewing_ingredient_remainder(pos, cancelled);
             let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
                 return Ok(());
             };
-            b.brew_after_pre(
-                asked,
-                &world_stations!(self).brewing,
-                world_items!(self),
-                &mut out,
-            );
+            let brewing = &world_stations!(self).brewing;
+            b.brew_after_pre(asked, brewing, &|_| rest.clone(), &mut out);
             self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));
             post = hooked && (out.brewed || cancelled);
         }

@@ -80,6 +80,7 @@ pub fn main() -> horizon_client::Result<()> {
                 &items,
                 &providers,
                 &mut drops,
+                &|s| horizon_client::crafting::CraftingRemainder::crafting_remainder(&items, s),
             ) {
                 lit_state = lit;
             }

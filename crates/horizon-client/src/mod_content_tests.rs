@@ -1,5 +1,5 @@
 use super::*;
-use crate::{assets::Assets, blocks::BlockFacts, items::Items};
+use crate::{assets::Assets, blocks::BlockFacts, crafting::CraftingRemainder, items::Items};
 use horizon_mod_package::manifest::JarRef;
 use horizon_world::native_load_context::DataLoadOrigin;
 
@@ -1633,7 +1633,7 @@ fn content_root_loads_with_every_table() {
         .find(crate::test_resources::server_loop_context(), &grid, 2)
         .unwrap();
     assert_eq!(&*result.item, "ruby:ruby");
-    let rest = recipes.remainders(id, &grid, 2);
+    let rest = recipes.remainders(id, &grid, 2, &|s| items.crafting_remainder(s));
     assert_eq!(rest[0].as_ref().map(|s| &*s.item), Some("minecraft:bowl"));
     assert!(!items.items.contains_key("ruby:ruby_glass"));
     let pickaxe = &items.block_tags["minecraft:mineable/pickaxe"];

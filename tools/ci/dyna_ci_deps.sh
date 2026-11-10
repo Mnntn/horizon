@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 # Install and cache the Ubuntu runner's build dependencies without root.
 set -euo pipefail
+# The Ubuntu mirror proxy sometimes serves an index or package mid-sync ("File has unexpected size"): a later try
+# succeeds. Bounded, with a short growing pause; apt's own error is already on stderr, and after the last try the
+# command's exit status is returned, so `set -e` fails the step with that real error.
+tries="${DYNA_CI_APT_TRIES:-4}"
+pause="${DYNA_CI_APT_PAUSE:-5}"
+retry() {
+  local attempt=1 status=0
+  while :; do
+    "$@" && return 0
+    status=$?
+    [ "$attempt" -lt "$tries" ] || { echo "$1 failed after $attempt tries (exit $status)" >&2; return "$status"; }
+    echo "$1 failed (exit $status), try $attempt of $tries; retrying in $((pause * attempt))s" >&2
+    sleep "$((pause * attempt))"
+    attempt=$((attempt + 1))
+  done
+}
 prefix="$DYNA_CI_BUILD/apt-prefix"
 aptroot="$HOME/dyna-ci-apt"
 hash=$(sha256sum "$0" | cut -d ' ' -f1)
@@ -16,8 +32,8 @@ if [ ! -f "$prefix/.dyna-hash" ] || [ "$(< "$prefix/.dyna-hash")" != "$hash" ]; 
   opts=(-o "Dir::Etc::sourcelist=$aptroot/sources.list" -o Dir::Etc::sourceparts=-
         -o "Dir::State::lists=$aptroot/lists" -o "Dir::State::status=$aptroot/status"
         -o "Dir::Cache::archives=$aptroot/archives" -o APT::Sandbox::User=root)
-  apt-get "${opts[@]}" update
-  apt-get "${opts[@]}" -y --download-only --no-install-recommends install \
+  retry apt-get "${opts[@]}" update
+  retry apt-get "${opts[@]}" -y --download-only --no-install-recommends install \
     pkg-config libasound2-dev libudev-dev libxkbcommon-x11-dev libwayland-dev \
     libx11-xcb-dev libfontconfig-dev libvulkan-dev \
     libxcursor1 libxi6 libxrandr2

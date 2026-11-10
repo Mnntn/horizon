@@ -153,7 +153,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `getXpRepairRatio(stack)` | Partial | `mending_repair` (`hooks/base.rs`, a global hook) | Changes the repair amount for Mending; the per-item ratio is not a separate read, and the hook is not scoped to the item. |
 | `onStopUsing(stack, entity, timeLeft)` | Partial | `ItemPart::release_using` (`hooks/base.rs`) | Runs on an early release only, after the vanilla item's release; finishing the use or switching to another item stops it without asking. Both sides. |
 | `onLeftClickEntity(stack, player, entity)` | Missing | — | `hurt_enemy` only hears after the hit landed and cannot veto it. [#1039](https://github.com/arismoko/horizon/issues/1039). |
-| `getCraftingRemainder(instance)` | Partial | content `crafting_remainder`, `host.item_crafting_remainder` | Data and a read cover content items; no per-item Part override. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `getCraftingRemainder(instance)` | Covered | `ItemPart::crafting_remainder`, content `crafting_remainder` | The per-stack Part override replaces the data remainder in crafting, fuel and quick moves. |
 | `getEntityLifespan(stack, level)` | Partial | `item_expire` (`hooks/base.rs`) | Adds extra ticks to a dropped item's life; no absolute lifespan and not per-item. |
 | `hasCustomEntity(stack)` | Missing | — | No custom dropped-entity selection. |
 | `createEntity(level, entity, stack)` | Missing | — | Same. |
@@ -303,7 +303,7 @@ their rows have landed or become partial since and should be narrowed when they 
   soil; `canHarvestBlock` is partly `player_harvest_check`; `getToolModifiedState` is partly
   `block_tool_modification`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
-  has content data plus `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `damageItem`
+  has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `damageItem`
   has the global `item_damaged`; `getXpRepairRatio` has a global `mending_repair` that changes the amount.
 - **Block group rows that still need their own answer:** `isLadder`, `getExpDrop`, `onBlockExploded`,
   `getWeakChanges`, `onNeighborChange`, `getBounceRestitution`, `isSlimeBlock`, `isStickyBlock`,

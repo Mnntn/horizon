@@ -120,15 +120,15 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | files | prod refs | test refs |
 |---|---|---|---|---|
-| horizon-client | horizon-mod-api | 442 | 2608 | 4502 |
+| horizon-client | horizon-mod-api | 457 | 2648 | 4699 |
 | horizon-client | horizon-mod-api-gen | 7 | 8 | 0 |
 | horizon-client | horizon-mod-package | 23 | 77 | 79 |
 | horizon-client | horizon-mod-render | 10 | 18 | 3 |
-| horizon-client | horizon-mod-runtime | 59 | 64 | 161 |
-| horizon-client-lib | horizon-mod-api | 51 | 227 | 71 |
+| horizon-client | horizon-mod-runtime | 61 | 65 | 167 |
+| horizon-client-lib | horizon-mod-api | 53 | 231 | 79 |
 | horizon-client-lib | horizon-mod-package | 9 | 46 | 47 |
 | horizon-client-lib | horizon-mod-runtime | 13 | 43 | 49 |
-| horizon-client-render | horizon-mod-api | 29 | 141 | 97 |
+| horizon-client-render | horizon-mod-api | 31 | 154 | 110 |
 | horizon-client-render | horizon-mod-package | 3 | 5 | 1 |
 | horizon-client-render | horizon-mod-render | 3 | 6 | 0 |
 | horizon-client-render | horizon-mod-runtime | 8 | 21 | 15 |
@@ -139,19 +139,19 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | area | files | prod refs | test refs |
 |---|---|---|---|
-| game/modding | 156 | 1318 | 2106 |
-| game/native_hooks | 103 | 416 | 407 |
-| client (non-game) | 71 | 377 | 242 |
-| game/mobs | 26 | 163 | 444 |
+| game/modding | 157 | 1342 | 2136 |
+| game/native_hooks | 107 | 419 | 429 |
+| client (non-game) | 73 | 381 | 250 |
+| game/mobs | 28 | 165 | 444 |
 | game/interface | 45 | 146 | 439 |
-| game/network | 24 | 161 | 369 |
-| game/blocks | 26 | 101 | 307 |
-| game/world | 20 | 80 | 211 |
-| horizon-client-render | 39 | 173 | 113 |
-| game/entities | 25 | 45 | 132 |
+| game/network | 26 | 167 | 369 |
+| game/blocks | 28 | 107 | 318 |
+| game/world | 23 | 81 | 249 |
+| horizon-client-render | 42 | 186 | 126 |
+| game/entities | 26 | 45 | 234 |
 | game/items | 11 | 62 | 94 |
 | game/runtime | 8 | 28 | 117 |
-| game.rs | 1 | 133 | 0 |
+| game.rs | 1 | 132 | 0 |
 | game/administration | 10 | 18 | 44 |
 | game/host | 3 | 43 | 0 |
 | horizon-items | 2 | 2 | 3 |
@@ -161,12 +161,12 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | strand | prod refs | test refs | of which in modding/ + native_hooks/ (prod) |
 |---|---|---|---|
-| loading | 235 | 682 | 73 |
-| host | 107 | 376 | 79 |
+| loading | 237 | 719 | 73 |
+| host | 108 | 397 | 79 |
 | slots | 4 | 0 | 0 |
-| attachments | 165 | 282 | 49 |
-| content_render | 286 | 379 | 158 |
-| hooks | 2471 | 3309 | 1375 |
+| attachments | 166 | 293 | 50 |
+| content_render | 295 | 388 | 167 |
+| hooks | 2516 | 3455 | 1392 |
 
 ### Engine files outside modding/ and native_hooks/: what they need of `mod_api`
 
@@ -174,17 +174,17 @@ Each file is put in the highest tier it uses in production code: `dispatch` (Hoo
 
 | highest tier | files |
 |---|---|
-| dispatch | 17 |
-| value | 134 |
-| more | 45 |
+| dispatch | 19 |
+| value | 138 |
+| more | 46 |
 
-- **dispatch** items, by files using them: `__private::listened` (59), `HookId` (6), `InteractionResult` (6), `HookId::LivingChangeTarget` (5), `__private::has_scoped_hook` (3), `HookId::AnvilUpdate` (2), `HookId::ArmorHurt` (2), `HookId::BlockDrops` (2), `HookId::CanContinueSleeping` (2), `HookId::EffectParticleModification` (2), `HookId::EnchantedEntityLoot` (2), `HookId::PlayerHarvestCheck` (2), `HookId::PlayerTickPost` (2), `HookId::PlayerTickPre` (2), `__private::PlayerSetSpawnCall` (2), `__private::PlayerTickPostCall` (2), `__private::PlayerTickPreCall` (2), `__private::built::ExplosionStart` (2), `__private::built::LootDrops` (2), `__private::built::ToolUse` (2), `HookId::AddServerReloadListeners` (1), `HookId::AnimalTame` (1), `HookId::BabyEntitySpawn` (1), `HookId::BlockBreakProgressUpdate` (1), `HookId::BlockDamageAbort` (1)
+- **dispatch** items, by files using them: `__private::listened` (63), `HookId` (7), `InteractionResult` (6), `HookId::LivingChangeTarget` (5), `__private::has_scoped_hook` (3), `HookId::AnvilUpdate` (2), `HookId::ArmorHurt` (2), `HookId::BlockDrops` (2), `HookId::CanContinueSleeping` (2), `HookId::CraftingRemainder` (2), `HookId::EffectParticleModification` (2), `HookId::EnchantedEntityLoot` (2), `HookId::LivingDeathPost` (2), `HookId::PlayerHarvestCheck` (2), `HookId::PlayerTickPost` (2), `HookId::PlayerTickPre` (2), `__private::PlayerSetSpawnCall` (2), `__private::PlayerTickPostCall` (2), `__private::PlayerTickPreCall` (2), `__private::built::ExplosionStart` (2), `__private::built::LootDrops` (2), `__private::built::ToolUse` (2), `__private::has_part_hook` (2), `HookId::AddServerReloadListeners` (1), `HookId::AnimalTame` (1)
 
-- **value** items, by files using them: `Identifier` (15), `SoundSource` (14), `EntityRef::new` (12), `DimensionKey` (9), `EntityRef` (8), `BehaviorRefusal` (5), `BehaviorRegistrarBackend` (5), `LivingRef` (5), `LivingRef::new` (5), `RegisteredBehavior` (5), `entity::health::HurtSource` (5), `Activity` (4), `BehaviorRefusal::UnknownActivity` (4), `BlockSide` (4), `MobRef::new` (4), `Transaction` (4), `client::particles::PositionSource` (4), `run_transaction` (4), `text::TextFormError` (4), `*` (3), `DimensionKey::OVERWORLD` (3), `FakeEffect::Menu` (3), `LevelRef` (3), `PlayerRef` (3), `Pose` (3)
+- **value** items, by files using them: `Identifier` (16), `SoundSource` (14), `EntityRef::new` (12), `DimensionKey` (9), `EntityRef` (8), `BehaviorRefusal` (5), `BehaviorRegistrarBackend` (5), `LivingRef` (5), `LivingRef::new` (5), `RegisteredBehavior` (5), `entity::health::HurtSource` (5), `Activity` (4), `BehaviorRefusal::UnknownActivity` (4), `BlockSide` (4), `MobRef::new` (4), `Transaction` (4), `client::particles::PositionSource` (4), `run_transaction` (4), `text::TextFormError` (4), `*` (3), `DimensionKey::OVERWORLD` (3), `FakeEffect::Menu` (3), `ItemStack` (3), `LevelRef` (3), `PlayerRef` (3)
 
-- **more** items, by files using them: `__private::mods` (20), `__private::game::*` (7), `__private::ModPhase::Registration` (4), `__private::PhaseOwner::scope` (4), `content::crash::ModCall` (4), `content::crash::enter_native_mod` (4), `RegistrationContext::new` (3), `__private::ModPhase::Setup` (3), `__private::ModPhase::World` (3), `__private::dimension_key` (3), `__private::effect_key_by_index` (3), `HostSide` (2), `__private::PhaseOwner` (2), `__private::fluid_key` (2), `__private::game::RegistrationContextNew` (2), `__private::game::player_ref` (2), `content::crash::clear_detail` (2), `content::crash::current_native_call` (2), `content::crash::set_detail` (2), `ClientHost` (1), `Host` (1), `RegistrationContext` (1), `ServerHost` (1), `__private::LoadAccess::ClientSetup` (1), `__private::LoadAccess::PublishedResources` (1)
+- **more** items, by files using them: `__private::mods` (20), `__private::game::*` (7), `__private::ModPhase::Registration` (5), `__private::PhaseOwner::scope` (5), `content::crash::ModCall` (4), `content::crash::enter_native_mod` (4), `RegistrationContext::new` (3), `__private::ModPhase::Setup` (3), `__private::ModPhase::World` (3), `__private::dimension_key` (3), `__private::effect_key_by_index` (3), `__private::game::RegistrationContextNew` (3), `HostSide` (2), `RegistrationContext` (2), `__private::PhaseOwner` (2), `__private::fluid_key` (2), `__private::game::player_ref` (2), `content::crash::clear_detail` (2), `content::crash::current_native_call` (2), `content::crash::set_detail` (2), `ClientHost` (1), `Host` (1), `ServerHost` (1), `__private::LoadAccess::ClientSetup` (1), `__private::LoadAccess::PublishedResources` (1)
 
-Outside the host areas, 2259 `mod_api` references are in test code; 207 of them name `testing`, `part_tests` or `with_test_packages`.
+Outside the host areas, 2426 `mod_api` references are in test code; 227 of them name `testing`, `part_tests` or `with_test_packages`.
 
 ### The move set by phase (files under game/modding/ and game/native_hooks/)
 
@@ -192,19 +192,19 @@ Outside the host areas, 2259 `mod_api` references are in test code; 207 of them 
 
 | strand | files | lines | inherent impls | foreign trait impls | to make public | inbound refs (prod) | inbound files |
 |---|---|---|---|---|---|---|---|
-| loading (phase 1) | 5 | 3999 | 5 | 0 | 49 | 101 | 26 |
-| host (phase 2) | 4 | 1442 | 3 | 11 | 44 | 13 | 9 |
+| loading (phase 1) | 5 | 4024 | 5 | 0 | 49 | 102 | 26 |
+| host (phase 2) | 4 | 1445 | 3 | 11 | 44 | 13 | 9 |
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| attachments (phase 4) | 13 | 2578 | 5 | 0 | 16 | 33 | 9 |
+| attachments (phase 4) | 13 | 2856 | 7 | 0 | 16 | 117 | 13 |
 | content_render (phase 5) | 5 | 2698 | 5 | 1 | 40 | 43 | 17 |
-| hooks (phase 6) | 389 | 99319 | 359 | 18 | 573 | 1639 | 226 |
+| hooks (phase 6) | 397 | 100864 | 365 | 18 | 579 | 1660 | 231 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
 |  | files | lines |
 |---|---|---|
-| all | 2 | 1048 |
-| pure (no generated include, unsafe, process state or non-core crate path) | 0 | 0 |
+| all | 5 | 1160 |
+| pure (no generated include, unsafe, process state or non-core crate path) | 2 | 75 |
 | includes generator output (OUT_DIR) | 1 |  |
 | `unsafe` | 1 | 45 |
 | process state (static, thread_local, locks, atomics, cells) | 1 | 31 |

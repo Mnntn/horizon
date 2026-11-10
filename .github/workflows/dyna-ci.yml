@@ -57,6 +57,7 @@ jobs:
       actions: read
     outputs:
       self_hosted: ${{ !inputs.github-fallback && steps.hosted.outputs.forced_github != 'true' && steps.runner.outputs.self_hosted || 'false' }}
+      routing_reason: ${{ steps.runner.outputs.routing_reason }}
       # Every ignored-tests shard on main pushes and dispatches; empty on pull requests.
       ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
       # Where lint and verify run when they don't go to Dyna's pool: boat-large for listed outside contributors
@@ -87,9 +88,9 @@ jobs:
           name: boat-base-1
           path: boat-base.json
           retention-days: 2
-      # The pool's switch and lease are read live: `vars` is fixed when the run is created, and a main run
-      # that waits in the concurrency group would otherwise see a lease that expired while it waited.
-      # A fork's pull request gets no token to read them and stays on GitHub's runners.
+      # Prefer the live pool switch/lease. github.token normally cannot read Variables;
+      # its snapshot fallback uses run creation time, bounded to an hour of queue age.
+      # Fork pull requests remain on GitHub's runners.
       - id: runner
         env:
           GH_TOKEN: ${{ github.token }}
@@ -107,7 +108,17 @@ jobs:
           case "${LEASE:-}" in '' | *[!0-9]*) LEASE= ;; esac
           case "${ENABLED:-}" in true | false) ;; *) ENABLED= ;; esac
           echo "pool lease: live=${LEASE:-unreadable} snapshot=${VARS_LEASE:-none}"
-          ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
+          SOURCE=live
+          CREATED=
+          if [ -z "${LEASE:-}" ]; then
+            SOURCE=snapshot
+            # Actions read is sufficient for run metadata, unlike the Variables endpoint.
+            CREATED_AT=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" -q .created_at 2>/dev/null || true)
+            if [ -n "$CREATED_AT" ]; then
+              CREATED=$(date -d "$CREATED_AT" +%s 2>/dev/null || true)
+            fi
+          fi
+          ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} LEASE_SOURCE=$SOURCE CREATED=$CREATED bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
       - id: hosted
         env:
           GH_TOKEN: ${{ github.token }}
@@ -439,7 +450,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      # Not every dyna-large runner has the data yet. Dispatches skip the tests there; main pushes fail.
+      # Missing data must fail on both main pushes and nightly dispatches.
       - name: Prepare checkout-keyed vanilla data
         id: data
         env:
@@ -448,9 +459,8 @@ jobs:
           for dir in minecraft datagen horizon-client tools; do
             if [ ! -d "/cache/horizon-local/$dir" ]; then
               echo "prepared data unavailable on this runner"
-              if [ "$EVENT" = push ]; then exit 1; fi
-              echo "present=false" >> "$GITHUB_OUTPUT"
-              exit 0
+              echo "Prepared data unavailable: $dir ($EVENT)" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
             fi
           done
           HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
@@ -467,23 +477,36 @@ jobs:
         run: |
           export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
           python3 tools/ci/with_xvfb.py python3 tools/ci/ignored_tests.py "$SHARD"
-  # Aggregate the main-push and dispatch shards: green when each passed or was skipped.
+  # Never turn missing prepared-data coverage into a green main/nightly run.
   ignored-tests:
     needs: [changes, ignored-tests-shards]
     if: >-
       always() && !cancelled() &&
-      needs.changes.outputs.self_hosted == 'true' &&
+      !inputs.prepare-output-check &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Every ignored-tests shard passed or was skipped
+      - name: Require prepared-data coverage
+        env:
+          RESULT: ${{ needs.ignored-tests-shards.result }}
+          ROUTE: ${{ needs.changes.outputs.self_hosted }}
+          REASON: ${{ needs.changes.outputs.routing_reason }}
+          CHANGES: ${{ needs.changes.result }}
+          FORCED_GITHUB: ${{ needs.changes.outputs.forced_github }}
         run: |
-          result="${{ needs.ignored-tests-shards.result }}"
-          case "$result" in
-            success | skipped) echo "ignored-tests shards: $result" ;;
-            *) echo "::error::ignored-tests shards: $result" && exit 1 ;;
-          esac
+          {
+            echo "## Prepared-data coverage"
+            echo "Shard result: $RESULT; changes: $CHANGES; self-hosted: $ROUTE; forced GitHub: $FORCED_GITHUB"
+            echo "Routing: $REASON"
+            if [ "$RESULT" = skipped ]; then
+              echo "Missing coverage: pool routing was disabled/unavailable or the shard matrix was empty. Restore the pool lease/switch if expired; do not treat this run as tested."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$RESULT" != success ]; then
+            echo "::error::Prepared-data coverage required; shard result: $RESULT; self-hosted: $ROUTE; $REASON"
+            exit 1
+          fi
   # The launcher is its own workspace (launcher/Cargo.toml), so verify's cargo runs never build it. A pull request that
   # changes it or a crate it builds is checked here, and so is every push to main: two pull requests can each pass
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).

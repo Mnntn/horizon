@@ -119,6 +119,7 @@ fn run(proof: Proof, private: bool) {
                 &discovery,
                 &entries,
                 &[horizon_platform::mod_build::api_gen::sites::Declaration {
+                    expression: None,
                     local: None,
                     target: "horizon_client::game::Game::next_autosave_interval".into(),
                     selector: "horizon_client::game::autosave_interval".into(),
@@ -191,22 +192,28 @@ fn run(proof: Proof, private: bool) {
         .unwrap();
     }
     for entry in &mut bundle.manifest.internals {
-        entry.hash = catalog
-            .internals
-            .iter()
-            .find(|item| internals::plain_path(&item.path) == internals::plain_path(&entry.path))
-            .unwrap()
-            .hash
-            .clone();
+        entry.hash = Some(
+            catalog
+                .internals
+                .iter()
+                .find(|item| {
+                    internals::plain_path(&item.path) == internals::plain_path(&entry.path)
+                })
+                .unwrap()
+                .hash
+                .clone(),
+        );
     }
     for entry in &mut bundle.manifest.inject {
-        entry.hash = catalog
-            .internals
-            .iter()
-            .find(|item| internals::plain_path(&item.path) == internals::plain_path(&entry.at))
-            .unwrap()
-            .hash
-            .clone();
+        entry.hash = Some(
+            catalog
+                .internals
+                .iter()
+                .find(|item| internals::plain_path(&item.path) == internals::plain_path(&entry.at))
+                .unwrap()
+                .hash
+                .clone(),
+        );
         if let Some(call) = &entry.call {
             let site = if let Some(site) = &discovered_call {
                 sites::Site::from(site.clone())

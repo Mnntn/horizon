@@ -9,6 +9,7 @@ pub mod item_model;
 mod json;
 pub mod math;
 pub mod model;
+pub mod model_loaders;
 pub mod obj;
 pub mod palette;
 pub mod resolve;

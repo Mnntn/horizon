@@ -818,7 +818,15 @@ mod tests {
                     snow_ai_step(&mut golem, w, &mut events);
                     let placed = events
                         .iter()
-                        .filter(|e| matches!(e, MobEvent::SetBlockName { .. }))
+                        .filter(|event| {
+                            let MobEvent::PlaceBlock { mob, pos, state } = event else {
+                                return false;
+                            };
+                            assert_eq!(*mob, golem.id);
+                            assert_eq!(*pos, [1, 1, 1]);
+                            assert_eq!(&*w.facts.get(*state).name, "minecraft:snow");
+                            true
+                        })
                         .count();
                     assert_eq!(placed > 0, expect, "{floor} under {here}");
                 },

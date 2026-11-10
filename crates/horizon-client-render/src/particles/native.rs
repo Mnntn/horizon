@@ -134,7 +134,7 @@ impl ParticleController for Provided {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::*;
     use mod_api::{ModParticle, ParticleProvider};
     use std::sync::Arc;
@@ -161,13 +161,13 @@ mod tests {
         }
     }
     /// An empty world with no blocks, which a tick reads nothing of.
-    struct Scene {
+    pub(in crate::particles) struct Scene {
         world: World,
         facts: BlockFacts,
         collision: BlockCollisionRegistry<'static>,
     }
     impl Scene {
-        fn new() -> Self {
+        pub(in crate::particles) fn new() -> Self {
             // Leaked: the collision registry borrows it for as long as the scene lives.
             let registry: &'static BlockRegistry = Box::leak(Box::new(
                 BlockRegistry::from_nbt(&Tag::compound([
@@ -206,7 +206,7 @@ mod tests {
                 collision,
             }
         }
-        fn level(&self) -> ParticleLevel<'_> {
+        pub(in crate::particles) fn level(&self) -> ParticleLevel<'_> {
             ParticleLevel {
                 world: &self.world,
                 facts: &self.facts,
@@ -228,6 +228,7 @@ mod tests {
                 set: 0,
                 behaviour: None,
                 provider: None,
+                group: None,
             },
         );
         e.set_sprites.push(vec![0, 1]);

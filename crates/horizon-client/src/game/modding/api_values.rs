@@ -70,6 +70,31 @@ mod landing_write;
 #[path = "api_values/recipe_inputs.rs"]
 pub(in crate::game) mod recipe_inputs;
 
+/// Publish a loaded item table's registry identities: the item keys in the table's
+/// command-registry order, then the enchantment keys in the loaded registry's order.
+/// Both tables load together, so one call keeps the two orderings from drifting.
+pub(in crate::game) fn resolve_item_registry(items: &crate::items::Items) -> Result<(), String> {
+    mod_api::__private::resolve_items(items.registry_order.iter().map(|id| &**id)).map_err(
+        |errors| {
+            errors
+                .into_iter()
+                .map(|error| format!("mod {} requested unknown item {}", error.mod_id, error.id))
+                .collect::<Vec<_>>()
+                .join("\n")
+        },
+    )?;
+    resolve_enchantment_registry(items)
+}
+
+/// Publish the loaded enchantment registry's keys in `RegistryDataLoader`'s order,
+/// separately for a path that reloads only the data-pack tables.
+pub(in crate::game) fn resolve_enchantment_registry(
+    items: &crate::items::Items,
+) -> Result<(), String> {
+    mod_api::__private::resolve_enchantments(items.enchantments.list.iter().map(|entry| &*entry.id))
+        .map_err(|errors| errors.join("\n"))
+}
+
 /// Publish immutable metadata with completed keys before any mesh tables or callbacks use it.
 /// Registry definitions do not change on pack reload; world-number mappings are separate.
 pub(in crate::game) fn resolve_block_definitions(
@@ -80,16 +105,23 @@ pub(in crate::game) fn resolve_block_definitions(
         return bind_worker_blocks(registry);
     }
     let mut blocks = std::collections::BTreeMap::<_, Vec<_>>::new();
+    // The map is sorted for lookup, but keys publish in registry order: the
+    // first state that names a block is that block's registration position.
+    let mut ordered = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for index in 0..registry.len() {
         let state = registry
             .state(horizon_world::registry::BlockStateId(index as u32))
             .expect("registry index is in bounds");
+        if seen.insert(state.name.as_str()) {
+            ordered.push(state.name.as_str());
+        }
         blocks
             .entry(state.name.as_str())
             .or_default()
             .push((index, &state.properties));
     }
-    mod_api::__private::resolve_block_keys(blocks.keys().copied(), |name| {
+    mod_api::__private::resolve_block_keys(ordered, |name| {
         let states = &blocks[name];
         let default = registry
             .default_state(name)

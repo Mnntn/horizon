@@ -5,14 +5,14 @@
 mod matrix;
 #[path = "support/checks.rs"]
 mod matrix_checks;
-#[path = "fixture/src/modify_arg.rs"]
-mod modify_arg;
 #[path = "support/no_hooks.rs"]
 mod no_hooks;
 #[path = "fixture/src/replace.rs"]
 mod replace;
 #[path = "fixture/src/shutdown.rs"]
 mod shutdown;
+#[path = "fixture/src/turn.rs"]
+mod turn;
 use horizon_mod_package::manifest::Package;
 use horizon_mod_wasm::{WasmPackage, load};
 
@@ -135,9 +135,9 @@ fn real_member() {
     for (a, b, value) in replace::CASES {
         assert_eq!(average(a, b), value, "{a} {b}");
     }
-    // The guest's `modify_arg` (`modify_arg::turn_angle`): the body runs with its argument.
-    let _: mod_points::listeners::GameCommandsWrapDegreesListener = modify_arg::turn_angle;
-    for (angle, wrapped) in modify_arg::CASES {
+    // The guest's head listener (`turn::turn_angle`): the body runs with its argument.
+    let _: mod_points::listeners::GameCommandsWrapDegreesListener = turn::turn_angle;
+    for (angle, wrapped) in turn::CASES {
         assert_eq!(wrap_degrees(angle), wrapped, "{angle}");
     }
 }

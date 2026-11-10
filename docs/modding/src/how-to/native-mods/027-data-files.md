@@ -17,6 +17,15 @@ Client-side asset reads use [client asset reload listeners](../../reference/hook
 listeners cannot read `assets/`. Packaged assets also participate in the game's normal resource
 packs.
 
+Outside a listener, `host.resource(pack_type, &identifier)` reads one file from the selected
+stack: `PackType::ServerData` takes `mymod:machines/furnace.json` from `data/`, and
+`PackType::ClientResources` takes `mymod:models/block/furnace.json` from `assets/`. As with
+`ResourceManager.getResource`, the highest selected pack that supplies the file wins; filters,
+a world's datapacks and a mod's own root data all apply. The answer is the winning bytes, or
+`None` for a missing, unreadable or over-64-MiB file. Use a reload listener for a whole folder
+or for parsing at reload time; a single read does not reload packs. Directory-pack
+symlinks follow vanilla pack behavior: linked resource files are read through the pack.
+
 Code-only bytes belong inside the crate: use Cargo's ordinary `build.rs` to generate a table in
 `OUT_DIR`, then compile it with `include_bytes!(concat!(env!("OUT_DIR"), "/table.bin"))`.
 They are not runtime pack resources and do not participate in resource reloads.

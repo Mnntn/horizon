@@ -84,6 +84,16 @@ pub struct Declaration {
     pub ctx: String,
     pub origin: String,
     pub local: Option<Local>,
+    /// An `expression` site: `selector` is then the expression's tokens, not a callee.
+    pub expression: Option<Expression>,
+}
+
+/// An `expression` site's declared value type, and the injections that declared it (`mod:inject`,
+/// comma-separated) for attributing a failure at the site.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct Expression {
+    pub ty: String,
+    pub origin: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
@@ -192,6 +202,7 @@ impl Slots {
                     )
                 };
                 Ok(Some(Declaration {
+                    expression: None,
                     local: None,
                     target,
                     selector: selector.replace(' ', ""),
@@ -263,6 +274,8 @@ fn slot_extension_matches_disk_parser() {
 pub struct Site {
     #[serde(default)]
     pub local: Option<Local>,
+    #[serde(default)]
+    pub expression: Option<Expression>,
     pub name: String,
     pub target: String,
     pub selector: String,
@@ -280,6 +293,7 @@ pub struct Site {
 }
 
 pub(crate) mod analysis;
+pub mod expression;
 pub mod identity;
 mod local;
 pub(crate) mod resolve;

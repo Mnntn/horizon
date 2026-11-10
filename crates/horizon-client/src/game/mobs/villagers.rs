@@ -697,3 +697,48 @@ mod nested_spawn_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod off_level_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn retained_ancestor_does_not_consume_a_due_villager_sensor() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:villager")
+                .unwrap()
+                .clone();
+            let mut m = Mob::new(73, kind.clone(), Vec3::new(1.0, 80.0, 0.5), 0.0);
+            villager_brain::init(&mut m, 0, 0, 0);
+            let mut health = horizon_client::health::TestLevel::new(0);
+            for _ in 0..40 {
+                villager_brain::tick(
+                    &mut m,
+                    &game.mob_world_base(&[]),
+                    &mut health.level(),
+                    &mut Vec::new(),
+                );
+            }
+            m.extra.mount = Some(72);
+            game.mobs.push(m);
+            let ghost = Mob::new(72, kind, Vec3::ZERO, 0.0);
+            game.persist
+                .off_level
+                .insert(72, crate::game::persist::OffLevel::Mob(ghost));
+            game.tick_creature_entities().unwrap();
+            assert!(
+                villager_brain::take_item_scan(game.mob_object_mut(73).unwrap()),
+                "a frozen resident's due sensor was consumed by independent item sensing"
+            );
+        });
+    }
+}
