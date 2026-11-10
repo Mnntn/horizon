@@ -28,6 +28,10 @@ impl Fixture {
         for (file, text) in [
             ("Cargo.toml", "[workspace]\nmembers=[]\n"),
             (
+                "Cargo.lock",
+                "version = 4\n[[package]]\nname = \"horizon-client\"\nversion = \"0.1.0\"\n",
+            ),
+            (
                 "crates/horizon-client/Cargo.toml",
                 "[package]\nname='horizon-client'\n",
             ),

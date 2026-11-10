@@ -590,6 +590,16 @@ fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
         "[package]\nname='horizon-mod-points'\n",
     )
     .unwrap();
+    std::fs::write(
+        root.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"horizon-client\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("crates/horizon-client/Cargo.toml"),
+        "[package]\nname='horizon-client'\nversion='0.1.0'\n",
+    )
+    .unwrap();
     let source = "fn f() -> i32 { let mut n: i32 = 3; sink(n); n * 2 } fn sink(n: i32) {}";
     let metadata = serde_json::json!([
         {"path":"horizon_client::game::f", "kind":"fn", "signature":"fn f() -> i32", "hash":"fingerprint"},
