@@ -1069,3 +1069,6 @@ fn data_maps_updated_fires_for_each_registry_on_first_open_and_every_reload() {
 
 #[path = "villager_secondary_reload_tests.rs"]
 mod villager_secondary_reload_tests;
+
+#[path = "datapack_publication_tests.rs"]
+mod datapack_publication_tests;

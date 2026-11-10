@@ -560,3 +560,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(feature = "testing")]
+#[path = "datapack_registry_fixture_support.rs"]
+mod fixture_support;
