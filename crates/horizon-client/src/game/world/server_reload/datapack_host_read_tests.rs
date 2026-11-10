@@ -1,5 +1,5 @@
 use super::*;
-use mod_api::{DatapackReadError as E, DimensionKey, Host, LevelRef, WorldEpoch};
+use mod_api::{DatapackReadError as E, DimensionKey, LevelRef, WorldEpoch};
 #[test]
 #[ignore = "needs prepared resources and isolated homes"]
 fn native_datapack_host_reads_enforce_level_session_and_generation() {

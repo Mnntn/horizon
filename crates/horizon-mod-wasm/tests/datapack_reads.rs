@@ -1,24 +1,34 @@
 //! Run the declaring guest through Wasmtime and the generated Host imports.
 #[path = "support/no_hooks.rs"]
 mod no_hooks;
-use mod_api::*;
 use mod_api::__private::game::BackendRefOf;
-struct World(DatapackRegistrySet, std::cell::Cell<[u32; 3]>, std::cell::Cell<bool>);
+use mod_api::*;
+struct World(
+    DatapackRegistrySet,
+    std::cell::Cell<[u32; 3]>,
+    std::cell::Cell<bool>,
+);
 impl Host for World {
-    fn backend(&self) -> Option<BackendRef<'_>> { Some(BackendRef::of(self)) }
+    fn backend(&self) -> Option<BackendRef<'_>> {
+        Some(BackendRef::of(self))
+    }
 }
 impl Backend for World {}
 mod_api::impl_backend_areas!(World, except(levels));
 mod_api::impl_host_areas!(World, except(levels));
 impl mod_api::prelude::LevelsHost for World {
     fn is_loaded(&self, id: &str) -> bool {
-        if id == "datapack_fixture_completed" { self.2.set(true); }
+        if id == "datapack_fixture_completed" {
+            self.2.set(true);
+        }
         id == "datapack_fixture" || id == "datapack_fixture_completed"
     }
 }
 impl mod_api::prelude::LevelsBackend for World {
     fn level_datapack_entries(&self, _: LevelRef, registry: &str) -> Option<Vec<String>> {
-        let mut calls = self.1.get(); calls[0] += 1; self.1.set(calls);
+        let mut calls = self.1.get();
+        calls[0] += 1;
+        self.1.set(calls);
         Some(
             self.0
                 .entries(registry)
@@ -34,7 +44,9 @@ impl mod_api::prelude::LevelsBackend for World {
         registry: &str,
         entry: &str,
     ) -> Result<DatapackHandle, DatapackReadError> {
-        let mut calls = self.1.get(); calls[1] += 1; self.1.set(calls);
+        let mut calls = self.1.get();
+        calls[1] += 1;
+        self.1.set(calls);
         self.0.handle(registry, entry)
     }
     fn level_datapack_read(
@@ -42,7 +54,9 @@ impl mod_api::prelude::LevelsBackend for World {
         _: LevelRef,
         handle: &DatapackHandle,
     ) -> Result<Vec<(String, DatapackValue)>, DatapackReadError> {
-        let mut calls = self.1.get(); calls[2] += 1; self.1.set(calls);
+        let mut calls = self.1.get();
+        calls[2] += 1;
+        self.1.set(calls);
         Ok(self.0.get(handle)?.values.clone())
     }
 }
@@ -53,8 +67,12 @@ mod_api::impl_server_host_areas!(World);
 fn real_wasm_datapack_reads_preserve_values_and_ordering() {
     struct Logger;
     impl log::Log for Logger {
-        fn enabled(&self, _: &log::Metadata<'_>) -> bool { true }
-        fn log(&self, record: &log::Record<'_>) { eprintln!("{}", record.args()); }
+        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record<'_>) {
+            eprintln!("{}", record.args());
+        }
         fn flush(&self) {}
     }
     let _ = log::set_logger(&Logger);
@@ -103,11 +121,23 @@ fn real_wasm_datapack_reads_preserve_values_and_ordering() {
         ],
     )
     .unwrap();
-    let mut world = World(DatapackRegistrySet::first(candidate, 8), std::cell::Cell::new([0; 3]), std::cell::Cell::new(false));
+    let mut world = World(
+        DatapackRegistrySet::first(candidate, 8),
+        std::cell::Cell::new([0; 3]),
+        std::cell::Cell::new(false),
+    );
     mod_api::testing::with_mods(loaded.mods.into(), || {
         mod_api::__private::mark_game_thread();
         mod_api::dispatch_server_stopped(&mut world, true);
-        assert!(world.2.get(), "all assertions in the guest must finish; calls: {:?}", world.1.get());
-        assert_eq!(world.1.get(), [2, 2, 1], "the real guest must execute all three host imports");
+        assert!(
+            world.2.get(),
+            "all assertions in the guest must finish; calls: {:?}",
+            world.1.get()
+        );
+        assert_eq!(
+            world.1.get(),
+            [2, 2, 1],
+            "the real guest must execute all three host imports"
+        );
     });
 }
