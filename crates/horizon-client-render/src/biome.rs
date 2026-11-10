@@ -404,6 +404,16 @@ impl Biomes {
             .get(usize::from(id))
             .map_or("minecraft:plains", |b| b.name.as_str())
     }
+    /// A biome's `Biome.ClimateSettings` by name; None for a name this table lacks.
+    pub fn properties(&self, name: &str) -> Option<mod_api::BiomeProperties> {
+        let info = self.list.get(usize::from(*self.index.get(name)?))?;
+        Some(mod_api::BiomeProperties {
+            temperature: info.temperature,
+            downfall: info.downfall,
+            has_precipitation: info.precipitation,
+            frozen: info.frozen,
+        })
+    }
     pub fn grass(&self, id: u16, x: f64, z: f64) -> u32 {
         let b = self.get(id);
         match b.modifier {
@@ -800,5 +810,61 @@ mod source_tests {
         )]));
         assert_eq!(colormap(&source, "grass").unwrap(), [0x0c2238]);
         assert!(colormap(&source, "missing").is_err());
+    }
+}
+
+#[cfg(test)]
+mod climate_tests {
+    use super::*;
+    use mod_api::BiomeProperties;
+    use serde_json::json;
+
+    /// Climates as Mojang's biome files declare them, so a dropped or swapped field fails.
+    #[test]
+    fn properties_are_the_biome_files_climate() {
+        let biomes = Biomes::from_jsons(&[
+            (
+                "minecraft:plains",
+                json!({"temperature": 0.8, "downfall": 0.4, "has_precipitation": true}),
+            ),
+            (
+                "minecraft:desert",
+                json!({"temperature": 2.0, "downfall": 0.0, "has_precipitation": false}),
+            ),
+            (
+                "minecraft:snowy_plains",
+                json!({"temperature": 0.0, "downfall": 0.5, "has_precipitation": true}),
+            ),
+            (
+                "minecraft:frozen_ocean",
+                json!({"temperature": 0.0, "downfall": 0.5, "has_precipitation": true,
+                    "temperature_modifier": "frozen"}),
+            ),
+            (
+                "minecraft:ocean",
+                json!({"temperature": 0.5, "downfall": 0.5, "has_precipitation": true}),
+            ),
+        ]);
+        let climate = |name: &str| biomes.properties(name).unwrap();
+        let want = |temperature, downfall, has_precipitation, frozen| BiomeProperties {
+            temperature,
+            downfall,
+            has_precipitation,
+            frozen,
+        };
+        assert_eq!(climate("minecraft:plains"), want(0.8, 0.4, true, false));
+        assert_eq!(climate("minecraft:desert"), want(2.0, 0.0, false, false));
+        assert_eq!(
+            climate("minecraft:snowy_plains"),
+            want(0.0, 0.5, true, false)
+        );
+        assert_eq!(climate("minecraft:ocean"), want(0.5, 0.5, true, false));
+        // The only biome that catches a dropped `frozen`.
+        assert_eq!(
+            climate("minecraft:frozen_ocean"),
+            want(0.0, 0.5, true, true)
+        );
+        assert_eq!(biomes.properties("minecraft:nowhere"), None);
+        assert_eq!(biomes.properties(""), None);
     }
 }

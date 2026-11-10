@@ -80,6 +80,12 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_client_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
     /// Side: both.
+    /// A biome's climate by id (`minecraft:plains`), from the level's biome table, data packs
+    /// included: temperature, downfall, whether it has precipitation and the frozen modifier
+    /// (`Biome.ClimateSettings`). None for a stale handle or an unknown biome. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_properties(&self, level: LevelRef, biome: &str) -> Option<BiomeProperties>;
+    /// Side: both.
     /// The dimension's logical height (`ServerLevel.getLogicalHeight`), which may differ
     /// from build height. Reads active and parked server levels or the client's current level.
     /// None for a stale or unavailable level. Does not load chunks.

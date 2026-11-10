@@ -167,6 +167,16 @@ impl Game<'_> {
         self.native_read_biome(level, pos)
     }
 
+    /// A biome's `Biome.ClimateSettings` from the world's biome table, data packs included.
+    pub(super) fn level_biome_properties(
+        &self,
+        level: LevelRef,
+        biome: &str,
+    ) -> Option<mod_api::BiomeProperties> {
+        self.native_level_read_world(level)?;
+        world_biomes!(self).properties(biome)
+    }
+
     /// `ServerLevel.getLogicalHeight`: the dimension's logical height, not its build height.
     pub(super) fn level_logical_height(&self, level: LevelRef) -> Option<i32> {
         Some(self.native_level_read_world(level)?.shape.logical_height)
