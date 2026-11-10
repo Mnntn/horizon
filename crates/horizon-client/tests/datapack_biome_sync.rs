@@ -146,3 +146,103 @@ fn server_load() -> horizon_world::native_load_context::LoadContext {
         [],
     )
 }
+
+#[test]
+fn a_server_replacement_of_a_known_biome_keeps_its_id_and_changes_its_data() {
+    let root = std::env::temp_dir().join(format!("horizon-replace-biomes-{}", std::process::id()));
+    let _scratch = Scratch(root.clone());
+    let base = write_base(&root);
+    let replaced: Value = serde_json::from_str(
+        r##"{"effects":{"water_color":"#112233"},"attributes":{"minecraft:visual/ambient_particles":{"argument":[{"particle":{"type":"minecraft:ash"},"probability":0.25}]}}}"##,
+    )
+    .unwrap();
+    let received = vec![
+        ("minecraft:plains".to_owned(), Some(json_to_tag(&replaced))),
+        ("minecraft:river".to_owned(), None),
+    ];
+    let client = client_biomes(&base, &received).expect("plains differs from the client's file");
+    assert_eq!(client.id("minecraft:plains"), base.id("minecraft:plains"));
+    let plains = client.get(client.id("minecraft:plains"));
+    assert_eq!(plains.water, 0x112233);
+    assert_eq!(plains.ambient_particles.len(), 1);
+    assert_eq!(plains.ambient_particles[0].0.name(), "ash");
+    assert_eq!(plains.ambient_particles[0].1, 0.25);
+    // The tables that read the biome's file see the replacement; river is untouched.
+    assert!(client.pack_file("minecraft:plains").is_some());
+    assert!(client.pack_file("minecraft:river").is_none());
+}
+
+#[test]
+fn a_biome_the_mods_modifiers_changed_is_sent_to_a_client_that_knows_the_vanilla_pack() {
+    let root = std::env::temp_dir().join(format!("horizon-modified-biomes-{}", std::process::id()));
+    let _scratch = Scratch(root.clone());
+    let base = write_base(&root);
+    // What `write_state` saves: the modifiers changed plains, and the root holds the result.
+    std::fs::write(
+        root.join("biome-modifiers.json"),
+        r#"{"unmodified":{"minecraft:plains":"{}"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("data/minecraft/worldgen/biome/plains.json"),
+        r##"{"effects":{"grass_color":"#112233"}}"##,
+    )
+    .unwrap();
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
+    let sync = SyncData::load(
+        &root,
+        &horizon_world::loot::PackOverlay::NONE,
+        &defaults,
+        &horizon_client::crafting::ResolvedSources::load_or_empty(
+            &root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &server_load(),
+        ),
+    )
+    .unwrap();
+    let sent = sync.registry_packets(true, &LevelShapes::VANILLA);
+    let biomes = sent.iter().find(|r| r.registry == BIOME_REGISTRY).unwrap();
+    let entry = |name: &str| biomes.entries.iter().find(|e| e.id == name).unwrap();
+    assert!(
+        entry("minecraft:plains").data.is_some(),
+        "the changed one is sent"
+    );
+    assert!(
+        entry("minecraft:river").data.is_none(),
+        "an unchanged one is not"
+    );
+    // The client takes the server's colour over its own file's.
+    let received: Vec<_> = biomes
+        .entries
+        .iter()
+        .map(|e| (e.id.clone(), e.data.clone()))
+        .collect();
+    let client = client_biomes(&base, &received).expect("plains differs");
+    assert_eq!(client.get(client.id("minecraft:plains")).grass, 0x112233);
+}
+
+#[test]
+fn recolouring_twice_starts_from_the_biome_files_each_time() {
+    let root = std::env::temp_dir().join(format!("horizon-recolor-biomes-{}", std::process::id()));
+    let _scratch = Scratch(root.clone());
+    let base = write_base(&root);
+    let grass = |b: &Biomes| b.get(b.id("minecraft:plains")).grass;
+    let darker = |_: &str, c: &mut BiomeColors| c.grass -= 0x10;
+    let once = base.recolored_from(&base, darker).expect("colours changed");
+    assert_eq!(grass(&once), grass(&base) - 0x10);
+    // The same colours again, asked from the base: nothing to rebuild.
+    assert!(base.recolored_from(&once, darker).is_none());
+    // Other colours replace the first ones rather than add to them.
+    let lighter = |_: &str, c: &mut BiomeColors| c.grass += 0x10;
+    let next = base.recolored_from(&once, lighter).unwrap();
+    assert_eq!(grass(&next), grass(&base) + 0x10);
+}
+
+fn server_load() -> horizon_world::native_load_context::LoadContext {
+    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+    LoadContext::new(
+        DataLoadOrigin::ServerDataLoad,
+        std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default())),
+        [],
+    )
+}
