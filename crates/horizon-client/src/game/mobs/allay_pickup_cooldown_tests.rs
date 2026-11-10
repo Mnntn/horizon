@@ -86,6 +86,10 @@ fn saved(game: &mut Game<'_>, i: usize) -> Option<Tag> {
 fn an_allay_keeps_its_item_pickup_cooldown_memory() {
     let mut resources = None;
     let mut game = game(&mut resources);
+    crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+        &mut game,
+        ChunkPos::new(0, 0),
+    );
     let i = index(&mut game);
     // The supplied memory is loaded into the pickup cooldown and saved back.
     assert_eq!(game.mobs[i].extra.ints[3], 30, "loaded");

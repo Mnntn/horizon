@@ -13841,6 +13841,10 @@ mod h169_glide_travel_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn h169_registered_eligible_husk_actually_travels_as_a_glider() {
         with_game(|game| {
+            crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+                game,
+                ChunkPos::new(0, 0),
+            );
             game.world.game_time = 0;
             for (n, no_ai, glide, x) in [(1, 0, 1, 4.5), (2, 1, 1, 8.5), (3, 0, 0, 12.5)] {
                 assert!(game.run_command(&format!(

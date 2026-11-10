@@ -2908,6 +2908,10 @@ mod postbaseline_lodestone_controls {
                 .id
         };
         let (all, mixed, inactive) = (id(100), id(101), id(102));
+        crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+            &mut game,
+            horizon_core::position::ChunkPos::new(0, 0),
+        );
         // Direct class ticks do not refresh the headless fixture's tickets.
         // Use the existing ticket model: only chunk zero is forced to tick.
         game.tickets.update(Some(crate::ticket_levels::Sources {
