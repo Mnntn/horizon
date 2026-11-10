@@ -25,7 +25,7 @@ const STEPS: [&str; 11] = [
 pub struct BiomeModifierSpawner {
     /// The entity type (`mymod:ghoul`).
     pub entity: String,
-    /// Relative weight in the spawn category; at least 1.
+    /// Relative weight in the spawn category; zero is allowed.
     pub weight: u32,
     /// Smallest group size.
     pub min_count: u32,
@@ -105,7 +105,7 @@ pub enum BiomeModifierError {
     InvalidName,
     /// A generation step name vanilla does not have.
     UnknownStep,
-    /// A spawner with weight 0 or a smallest group above its largest.
+    /// A spawner outside signed integer bounds, with an empty group, or inverted group bounds.
     InvalidSpawner,
     /// A spawn cost that is not a finite number.
     InvalidCost,
@@ -157,7 +157,11 @@ impl BiomeModifier {
                 }
                 for spawner in spawners {
                     names_ok(std::slice::from_ref(&spawner.entity), false)?;
-                    if spawner.weight == 0 || spawner.min_count > spawner.max_count {
+                    if spawner.weight > i32::MAX as u32
+                        || spawner.min_count == 0
+                        || spawner.min_count > spawner.max_count
+                        || spawner.max_count > i32::MAX as u32
+                    {
                         return Err(BiomeModifierError::InvalidSpawner);
                     }
                 }
@@ -311,6 +315,28 @@ mod tests {
     }
 
     #[test]
+    fn spawn_boundaries_match_the_reader() {
+        for (weight, min_count, max_count, valid) in [
+            (0, 1, 1, true),
+            (i32::MAX as u32, 1, i32::MAX as u32, true),
+            (1, 0, 1, false),
+            (u32::MAX, 1, 1, false),
+            (1, u32::MAX, u32::MAX, false),
+            (1, 1, u32::MAX, false),
+        ] {
+            let m = modifier(BiomeModifierOperation::AddSpawns {
+                spawners: vec![BiomeModifierSpawner {
+                    entity: "minecraft:zombie".into(),
+                    weight,
+                    min_count,
+                    max_count,
+                }],
+            });
+            assert_eq!(m.check().is_ok(), valid);
+        }
+    }
+
+    #[test]
     fn invalid_modifiers_are_refused_by_reason() {
         let bad = |op| modifier(op).check();
         assert_eq!(
@@ -346,7 +372,7 @@ mod tests {
                 BiomeModifierError::InvalidName,
             ),
             (
-                spawner("ruby:ghoul", 0, 1, 1),
+                spawner("ruby:ghoul", 1, 0, 1),
                 BiomeModifierError::InvalidSpawner,
             ),
             (
