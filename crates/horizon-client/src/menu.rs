@@ -605,9 +605,6 @@ fn tidy(slot: &mut Option<ItemStack>) {
     }
 }
 
-/// The equipment slots of `Role::Armor`, by `EquipmentSlot.getIndex` (feet first).
-const ARMOR_SLOTS: [&str; 4] = ["feet", "legs", "chest", "head"];
-
 /// Dispatch registered vanilla and mod menu slot placement and maximum stack rules.
 /// The slot is its backing container index. The shared application bounds the
 /// final maximum.
@@ -1710,23 +1707,7 @@ impl Menu {
     fn vanilla_may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
         match self.slots[s].role {
             Role::Plain | Role::CreativeDisplay => true,
-            // `ArmorSlot.mayPlace`: `LivingEntity.isEquippableInSlot` for the player.
-            Role::Armor(eq) => {
-                let data = Self::equippable(env, stack).is_some_and(|e| {
-                    ARMOR_SLOTS.iter().position(|s| *s == e.slot) == Some(eq)
-                        && e.allows("minecraft:player")
-                });
-                env.player_entity_id.map_or(data, |player| {
-                    crate::mobs::equip::can_equip(
-                        env.loop_context,
-                        stack,
-                        ARMOR_SLOTS[eq],
-                        player as u32,
-                        "minecraft:player",
-                        data,
-                    )
-                })
-            }
+            Role::Armor(eq) => Self::armor_may_place(env, eq, stack),
             // LivingEntity.isEquippableInSlot: the stack's equippable slot,
             // and the mount among its allowed entities.
             Role::MountEquip(slot) => Self::equippable(env, stack).is_some_and(|e| {
@@ -2017,7 +1998,7 @@ impl Menu {
     fn equipment_slot(&self, s: usize) -> Option<&'static str> {
         let slot = self.slots[s];
         match slot.role {
-            Role::Armor(eq) => Some(ARMOR_SLOTS[eq]),
+            Role::Armor(eq) => Some(equippable::ARMOR_SLOTS[eq]),
             _ if slot.container == PLAYER && slot.index == OFFHAND => Some("offhand"),
             _ => None,
         }

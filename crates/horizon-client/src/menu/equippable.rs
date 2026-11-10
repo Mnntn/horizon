@@ -18,7 +18,28 @@ impl Equippable {
     }
 }
 
+/// The equipment slots of `Role::Armor`, by `EquipmentSlot.getIndex` (feet first).
+pub(super) const ARMOR_SLOTS: [&str; 4] = ["feet", "legs", "chest", "head"];
+
 impl Menu {
+    /// `ArmorSlot.mayPlace`: `LivingEntity.isEquippableInSlot` for the player of `env`, armour
+    /// slot `eq` of [`ARMOR_SLOTS`]. The stack's `equippable` component answers first and the
+    /// parts of its item may change that (`IItemExtension.canEquip`).
+    pub(super) fn armor_may_place(env: &Env, eq: usize, stack: &ItemStack) -> bool {
+        let data = Self::equippable(env, stack)
+            .is_some_and(|e| ARMOR_SLOTS[eq] == e.slot && e.allows("minecraft:player"));
+        env.player_entity_id.map_or(data, |player| {
+            crate::mobs::equip::can_equip(
+                env.loop_context,
+                stack,
+                ARMOR_SLOTS[eq],
+                player as u32,
+                "minecraft:player",
+                data,
+            )
+        })
+    }
+
     /// `ItemStack.get(DataComponents.EQUIPPABLE)`: the stack's component,
     /// else the item's default; a removed component leaves none.
     pub(super) fn equippable(env: &Env, stack: &ItemStack) -> Option<Equippable> {
