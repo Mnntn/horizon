@@ -48,6 +48,16 @@ pub(super) struct RecipeTables {
     received: Option<Vec<String>>,
 }
 
+#[cfg(test)]
+impl RecipeTables {
+    pub(in crate::game) fn install_test_recipes(
+        &mut self,
+        recipes: horizon_client::crafting::Recipes,
+    ) {
+        self.synced = Some(recipes);
+    }
+}
+
 /// Item id -> its index in [`Recipes::items`].
 struct Index(HashMap<Arc<str>, u32>);
 impl Index {

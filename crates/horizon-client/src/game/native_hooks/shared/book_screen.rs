@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "book_screen/lifecycle_tests.rs"]
+mod lifecycle_tests;
+
 impl Game<'_> {
     /// The mod screen showing now, if any.
     pub(in crate::game) fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
