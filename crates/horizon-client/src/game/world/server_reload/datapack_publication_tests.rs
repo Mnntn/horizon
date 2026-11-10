@@ -106,6 +106,29 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                     game.mods.datapack_registries.as_ref().unwrap().generation(),
                     3
                 );
+                let features = game.level.enabled_features.clone();
+                game.reload_datapacks(true, &features).unwrap();
+                assert_eq!(
+                    game.mods.datapack_registries.as_ref().unwrap().generation(),
+                    4
+                );
+                assert!(game.run_command("datapack disable \"file/override\""));
+                assert_eq!(power(game), DatapackValue::Int(3));
+                assert_eq!(
+                    game.mods.datapack_registries.as_ref().unwrap().generation(),
+                    5
+                );
+                assert!(game.run_command("datapack enable \"file/override\" last"));
+                assert_eq!(power(game), DatapackValue::Int(9));
+                assert_eq!(
+                    game.mods.datapack_registries.as_ref().unwrap().generation(),
+                    6
+                );
+                game.reload_datapacks(false, &features).unwrap();
+                assert_eq!(
+                    game.mods.datapack_registries.as_ref().unwrap().generation(),
+                    6
+                );
                 game.mods
                     .datapack_registries
                     .as_mut()
@@ -144,3 +167,34 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
 
 #[path = "datapack_host_read_tests.rs"]
 mod datapack_host_read_tests;
+#[test]
+#[ignore = "needs prepared resources and isolated homes"]
+fn remote_reload_never_decodes_local_registry_files() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path();
+    write(
+        &root.join("datapacks/local/pack.mcmeta"),
+        r#"{"pack":{"description":"remote poison"}}"#,
+    );
+    write(
+        &root.join("datapacks/local/data/registry_test/registry_test/spell/fire.json"),
+        "{malformed",
+    );
+    write(
+        &root.join("datapacks.json"),
+        r#"{"enabled":["file/local"],"disabled":[]}"#,
+    );
+    mod_api::testing::with_mods(
+        vec![ModEntry::new("registry_test", Box::new(RegistryMod))].into(),
+        || {
+            crate::game::native_entity_refs::tests::with_client_game(|game| {
+                let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
+                game.connect_local(pipe, "DatapackRemote").unwrap();
+                game.world_root = root.to_owned();
+                game.reload_datapacks(true, &[]).unwrap();
+                assert!(game.mods.datapack_registries.is_none());
+                assert!(game.mods.datapack_candidate.is_none());
+            });
+        },
+    );
+}
