@@ -119,10 +119,11 @@ pub struct AnimationHolder {
 }
 
 impl AnimationHolder {
-    /// `AnimationDefinition.bake(root)`: each bone resolved once to the first part of that name in
-    /// a depth-first search of `root` (`ModelPart.getAnyDescendantWithName`). Bake once, as a
-    /// renderer does in its constructor, and keep the result: a bone the model lacks is logged
-    /// here and left out.
+    /// `AnimationDefinition.bake(root)`: each bone resolved once through the model's part lookup
+    /// (`ModelPart.createPartLookup`). The name `root` always selects the actual root; other names
+    /// select the first match, visiting each part's immediate children before their descendants.
+    /// Bake once, as a renderer does in its constructor, and keep the result: a bone the model
+    /// lacks is logged here and left out.
     pub fn bake(&self, root: &ModelPart) -> KeyframeAnimation {
         let mut entries = Vec::new();
         for (bone, channels) in &self.bones {
@@ -182,7 +183,13 @@ impl KeyframeAnimation {
         scale_factor: f32,
     ) {
         let millis = (walk_pos * 50.0 * speed_factor) as i64;
-        let scale = (walk_speed * scale_factor).min(1.0);
+        let strength = walk_speed * scale_factor;
+        // Java Math.min propagates NaN; Rust's f32::min would turn it into full strength.
+        let scale = if strength.is_nan() {
+            strength
+        } else {
+            strength.min(1.0)
+        };
         self.apply_at(root, millis, scale);
     }
     /// `KeyframeAnimation.applyStatic()`: the first frame only.

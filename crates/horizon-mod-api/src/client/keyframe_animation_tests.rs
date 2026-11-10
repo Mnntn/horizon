@@ -193,3 +193,66 @@ fn animation_state_follows_vanillas_transitions() {
         "wraps, never panics"
     );
 }
+
+#[test]
+fn oracle_root_bone_targets_actual_root_without_children() {
+    let mut root = part(vec![]);
+    let holder = AnimationHolder {
+        length: 1.0,
+        looping: false,
+        bones: vec![(
+            "root".into(),
+            vec![channel(
+                AnimationTarget::Position,
+                vec![key(0.0, [1.0, 2.0, 3.0], Interpolation::Linear)],
+            )],
+        )],
+    };
+    holder.bake(&root).apply_static(&mut root);
+    assert_eq!((root.x, root.y, root.z), (1.0, 2.0, 3.0));
+}
+
+#[test]
+fn oracle_root_bone_takes_precedence_over_child_named_root() {
+    let mut root = part(vec![("root", part(vec![]))]);
+    let holder = AnimationHolder {
+        length: 1.0,
+        looping: false,
+        bones: vec![(
+            "root".into(),
+            vec![channel(
+                AnimationTarget::Position,
+                vec![key(0.0, [1.0, 2.0, 3.0], Interpolation::Linear)],
+            )],
+        )],
+    };
+    holder.bake(&root).apply_static(&mut root);
+    let child = root.get_child("root").unwrap();
+    assert_eq!((child.x, child.y, child.z), (0.0, 0.0, 0.0));
+    assert_eq!((root.x, root.y, root.z), (1.0, 2.0, 3.0));
+}
+
+#[test]
+fn oracle_walk_nan_strength_propagates_like_java_math_min() {
+    let mut root = part(vec![("head", part(vec![]))]);
+    let holder = AnimationHolder {
+        length: 1.0,
+        looping: false,
+        bones: vec![(
+            "head".into(),
+            vec![channel(
+                AnimationTarget::Position,
+                vec![key(0.0, [1.0, 2.0, 3.0], Interpolation::Linear)],
+            )],
+        )],
+    };
+    holder
+        .bake(&root)
+        .apply_walk(&mut root, 0.0, f32::NAN, 1.0, 1.0);
+    let head = root.get_child("head").unwrap();
+    assert!(
+        head.x.is_nan() && head.y.is_nan() && head.z.is_nan(),
+        "Java Math.min(NaN, 1) propagates NaN, got {:?}",
+        (head.x, head.y, head.z)
+    );
+}

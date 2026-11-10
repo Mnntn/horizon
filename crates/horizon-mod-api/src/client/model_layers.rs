@@ -678,10 +678,13 @@ impl ModelPart {
         self.load_pose(self.initial_pose);
     }
 
-    /// The path, by child index, to the first part named `name` in a depth-first search
-    /// (`ModelPart.getAnyDescendantWithName`: each part's own children before its
-    /// grandchildren). `None` when no part has that name.
+    /// The path, by child index, selected by `ModelPart.createPartLookup`: `root` is this
+    /// part; other names use the first match, visiting each part's immediate children before
+    /// their descendants. `None` when no part has that name.
     pub(crate) fn descendant_path(&self, name: &str) -> Option<Vec<u32>> {
+        if name == "root" {
+            return Some(Vec::new());
+        }
         if let Some(index) = self.children.iter().position(|(child, _)| child == name) {
             return Some(vec![index as u32]);
         }
