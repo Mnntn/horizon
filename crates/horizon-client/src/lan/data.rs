@@ -51,15 +51,14 @@ pub const SYNCHRONIZED: &[&str] = &[
 ];
 pub const BIOME_REGISTRY: &str = "minecraft:worldgen/biome";
 /// The table a client plays a server with: `known` and the biomes of the
-/// server's biome registry that it lacks, built from their data; None when
-/// there are none.
+/// server's biome registry, including replacements, built from their data;
+/// None when the server sends no biome data.
 pub fn client_biomes(
     known: &crate::biome::Biomes,
     registry: &[(String, Option<Tag>)],
 ) -> Option<crate::biome::Biomes> {
     let files: Vec<(&str, Value)> = registry
         .iter()
-        .filter(|(name, _)| !known.contains(name))
         .filter_map(|(name, data)| {
             Some((
                 name.as_str(),
@@ -70,10 +69,7 @@ pub fn client_biomes(
     if files.is_empty() {
         return None;
     }
-    log::info!(
-        "Horizon: the server has {} biomes the game lacks",
-        files.len()
-    );
+    log::info!("Horizon: the server has {} biome definitions", files.len());
     Some(known.with_packs(files.iter().map(|(n, v)| (*n, v))))
 }
 /// KnownPack.vanilla("core") for this version.
