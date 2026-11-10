@@ -70,12 +70,13 @@ fn qualified(id: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::tests::{stack, with_menu};
     use super::super::{Input, Kind};
     use horizon_core::nbt::Tag;
 
-    fn equippable(fields: Vec<(&str, Tag)>) -> Option<crate::items::ItemStack> {
+    /// A stone whose `equippable` component has `fields`.
+    pub(in crate::menu) fn equippable(fields: Vec<(&str, Tag)>) -> Option<crate::items::ItemStack> {
         let mut stone = stack("stone", 1)?;
         stone
             .data_mut()

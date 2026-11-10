@@ -33,7 +33,7 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `IBlockExtension` | 60 | 3 | 23 | 34 | 0 |
 | `IBlockStateExtension` | 57 | 2 | 22 | 33 | 0 |
-| `IItemExtension` | 46 | 7 | 16 | 23 | 0 |
+| `IItemExtension` | 46 | 8 | 15 | 23 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
 | `IBlockEntityExtension` | 9 | 1 | 3 | 4 | 1 |
@@ -159,7 +159,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `createEntity(level, entity, stack)` | Missing | — | Same. |
 | `onEntityItemUpdate(stack, itemEntity)` | Missing | — | No per-item dropped-entity tick. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `doesSneakBypassUse(stack, level, pos, player)` | Missing | — | No sneak-bypass query. |
-| `canEquip(stack, slot, entity)` | Partial | `equippable.allowed_entities`, `entity_capability::goes_in_slot` | Component data decides slot and allowed entities; no per-stack code predicate. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `canEquip(stack, slot, entity)` | Covered | `ItemPart::can_equip` (`hooks/can_equip.rs`) | Starts as the `equippable` component's answer (slot and `allowed_entities`); the part sets it either way. Asked for the player's armour slots, a dispenser's equip and a mob's pickup, with the entity's id and type rather than a readable handle, as the menu loop has no `Host`. |
 | `getEquipmentSlot(stack)` | Covered | `ItemResource::equippable_slot`, `host.item_equippable_slot` | Read from the effective `equippable` component. |
 | `onEntitySwing(stack, entity, hand)` | Missing | — | No per-item swing callback. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `getDamage(stack)` | Covered | `ItemStack::damage` | The stack's numeric damage override. |
@@ -303,7 +303,7 @@ their rows have landed or become partial since and should be narrowed when they 
   soil; `canHarvestBlock` is partly `player_harvest_check`; `getToolModifiedState` is partly
   `block_tool_modification`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
-  has content data plus `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `damageItem`
+  has content data plus `host.item_crafting_remainder`; `canEquip` is `ItemPart::can_equip`; `damageItem`
   has the global `item_damaged`; `getXpRepairRatio` has a global `mending_repair` that changes the amount.
 - **Block group rows that still need their own answer:** `isLadder`, `getExpDrop`, `onBlockExploded`,
   `getWeakChanges`, `onNeighborChange`, `getBounceRestitution`, `isSlimeBlock`, `isStickyBlock`,

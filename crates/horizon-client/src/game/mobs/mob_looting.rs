@@ -95,8 +95,24 @@ impl Game<'_> {
     /// many items that takes. `None` when the mob has no use for it.
     fn equip_item_if_possible(&mut self, index: usize, stack: &ItemStack) -> Option<u32> {
         let item = &*stack.item;
-        let equip_slot = self.items().get(item).and_then(|i| i.equip_slot.clone());
+        let info = self.items().get(item);
+        let equip_slot = info.and_then(|i| i.equip_slot.clone());
         let mut slot = equip::slot_for(equip_slot.as_deref())?;
+        // `LivingEntity.isEquippableInSlot`: the item's allowed entities, then its parts.
+        let m = &self.mobs[index];
+        let allowed = info
+            .and_then(|i| i.equip_allowed.as_ref())
+            .is_none_or(|allowed| allowed.contains(&*m.kind.id));
+        if !equip::can_equip(
+            &self.loop_context,
+            stack,
+            slot.name(),
+            m.id,
+            &m.kind.id,
+            allowed,
+        ) {
+            return None;
+        }
         let mut replace = self.can_replace(index, stack, slot);
         // An armour piece that beats nothing it is worn with falls back to an
         // empty main hand.
@@ -210,6 +226,92 @@ impl Game<'_> {
             if g.acting_uuid() == owner {
                 g.trigger_item_entity("minecraft:thrown_item_picked_up_by_entity", &stack, &target);
             }
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    /// What the part of an iron helmet answers to `can_equip`: yes for one entity type only.
+    #[derive(Clone)]
+    struct OnlyFor(&'static str, Arc<Mutex<Vec<(String, u32)>>>);
+    #[mod_api::horizon_part]
+    impl mod_api::ItemPart for OnlyFor {
+        fn can_equip(&self, _: &dyn mod_api::LoopContext, event: &mut mod_api::CanEquipEvent<'_>) {
+            self.1
+                .lock()
+                .unwrap()
+                .push((event.slot.to_owned(), event.entity));
+            event.can_equip = event.kind == self.0;
+        }
+    }
+    struct Hatter(OnlyFor);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Hatter {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            let helmet = r.item_key("minecraft:iron_helmet");
+            r.item_part(helmet, self.0.clone());
+        }
+    }
+
+    /// `Mob.equipItemIfPossible` asks `isEquippableInSlot` first, and `IItemExtension.canEquip`
+    /// is that answer: a part of the iron helmet that accepts only skeletons keeps it off a
+    /// zombie that would take it, and puts it on a skeleton. Items without a part follow their
+    /// component.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_can_equip_part_decides_which_mob_wears_a_picked_up_item() {
+        use horizon_core::geometry::Vec3;
+
+        let asked = Arc::default();
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "hatter",
+            Box::new(Hatter(OnlyFor("minecraft:skeleton", Arc::clone(&asked)))),
+        )]
+        .into();
+        crate::entry::install_client_hooks();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                for (id, name) in [(1, "minecraft:zombie"), (2, "minecraft:skeleton")] {
+                    let kind = game.res.mob_types().get(name).unwrap().clone();
+                    game.mobs
+                        .push(Mob::new(id, kind, Vec3::new(0.5, 64.0, 0.5), 0.0));
+                }
+                let worn = |game: &Game<'_>, index: usize, slot: Slot| {
+                    finalize::item(&game.mobs[index], slot.index()).map(|item| item.to_string())
+                };
+                let helmet = ItemStack::new("minecraft:iron_helmet", 1);
+                // The zombie is refused, and nothing it was asked about changed.
+                assert_eq!(game.equip_item_if_possible(0, &helmet), None);
+                assert_eq!(worn(game, 0, Slot::Head), None);
+                assert_eq!(worn(game, 0, Slot::MainHand), None);
+                assert_eq!(
+                    std::mem::take(&mut *asked.lock().unwrap()),
+                    [("head".to_owned(), 1)]
+                );
+                // The skeleton is accepted.
+                assert_eq!(game.equip_item_if_possible(1, &helmet), Some(1));
+                assert_eq!(
+                    worn(game, 1, Slot::Head).as_deref(),
+                    Some("minecraft:iron_helmet")
+                );
+                assert_eq!(
+                    std::mem::take(&mut *asked.lock().unwrap()),
+                    [("head".to_owned(), 2)]
+                );
+                // No part for a diamond helmet: the zombie takes it as vanilla.
+                let diamond = ItemStack::new("minecraft:diamond_helmet", 1);
+                assert_eq!(game.equip_item_if_possible(0, &diamond), Some(1));
+                assert_eq!(
+                    worn(game, 0, Slot::Head).as_deref(),
+                    Some("minecraft:diamond_helmet")
+                );
+                assert!(asked.lock().unwrap().is_empty());
+            });
         });
     }
 }

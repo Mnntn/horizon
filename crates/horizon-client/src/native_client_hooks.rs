@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 pub struct NativeClientHooks {
     pub menu_slot_rules: fn(&LoopContext, &str, usize, &ItemStack, &mut bool, &mut u32),
     pub item_stacked_on_other: fn(&LoopContext, &mut crate::menu::StackedOnOther<'_>, &mut bool),
+    pub can_equip: fn(&LoopContext, &ItemStack, &str, u32, &str, &mut bool),
     pub living_heal: fn(&LoopContext, u32, &mut f32, &mut bool),
     pub living_breathe: fn(&LoopContext, u32, &str, &mut bool, &mut i32, &mut i32),
     pub farmland_trample: fn(&LoopContext, u32, [i32; 3], u32, f64, &mut bool),
@@ -45,6 +46,19 @@ pub(crate) fn menu_slot_rules(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.menu_slot_rules)(context, menu, slot, stack, may_place, max_stack);
+    }
+}
+
+pub(crate) fn can_equip(
+    context: &LoopContext,
+    stack: &ItemStack,
+    slot: &str,
+    entity: u32,
+    kind: &str,
+    can_equip: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.can_equip)(context, stack, slot, entity, kind, can_equip);
     }
 }
 

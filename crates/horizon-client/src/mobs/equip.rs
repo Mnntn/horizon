@@ -3,6 +3,8 @@
 //! decide whether a mob takes an item off the ground at all (`wantsToPickUp`,
 //! `canHoldItem`). `game/mobs/mob_looting.rs` reads the item data and calls these.
 use super::Species;
+use crate::items::ItemStack;
+use horizon_world::native_load_context::LoopContext;
 
 /// An `EquipmentSlot`, in the order `finalize::item` and `drops::SLOTS` keep
 /// them.
@@ -21,10 +23,54 @@ impl Slot {
     pub fn is_armor(self) -> bool {
         matches!(self, Slot::Feet | Slot::Legs | Slot::Chest | Slot::Head)
     }
+    /// `EquipmentSlot.getName`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Slot::MainHand => "mainhand",
+            Slot::OffHand => "offhand",
+            Slot::Feet => "feet",
+            Slot::Legs => "legs",
+            Slot::Chest => "chest",
+            Slot::Head => "head",
+        }
+    }
     /// The `drops::SLOTS` index (`set_item`, `item`, `set_drop_chance`).
     pub fn index(self) -> usize {
         self as usize
     }
+}
+
+/// NeoForge's `IItemExtension.canEquip`: may `stack` go into the equipment slot `slot` (its
+/// `EquipmentSlot` name) of the entity `entity` of type `kind`? `can_equip` arrives holding the
+/// data answer (`LivingEntity.isEquippableInSlot`'s) and a part of the stack's item may change it.
+/// The menus, the dispenser and a mob's pickup ask it, on replayed ticks too, so a listener must
+/// be a pure function of its inputs.
+#[inline(never)]
+pub fn native_can_equip(
+    context: &LoopContext,
+    stack: &ItemStack,
+    slot: &str,
+    entity: u32,
+    kind: &str,
+    can_equip: &mut bool,
+) {
+    crate::native_client_hooks::can_equip(context, stack, slot, entity, kind, can_equip);
+}
+
+/// `LivingEntity.isEquippableInSlot` with `IItemExtension.canEquip`: `data` is what the stack's
+/// `equippable` component answers for `entity` of type `kind` in `slot`, and the parts of the
+/// stack's item may change it (`native_can_equip`).
+pub fn can_equip(
+    context: &LoopContext,
+    stack: &ItemStack,
+    slot: &str,
+    entity: u32,
+    kind: &str,
+    data: bool,
+) -> bool {
+    let mut can_equip = data;
+    native_can_equip(context, stack, slot, entity, kind, &mut can_equip);
+    can_equip
 }
 
 /// `LivingEntity.getEquipmentSlotForItem`: the item's own `equippable` slot,

@@ -1155,6 +1155,26 @@ pub(crate) fn menu_slot_rules(
     mod_api::dispatch_menu_slot_rules(&context, menu, slot, &stack, may_place, max_stack);
 }
 
+/// Adapt the per-stack equip predicate: no stack is converted unless a part subscribes.
+pub(crate) fn can_equip(
+    context: &horizon_world::native_load_context::LoopContext,
+    stack: &EngineStack,
+    slot: &str,
+    entity: u32,
+    kind: &str,
+    can_equip: &mut bool,
+) {
+    if !mod_api::__private::has_part_hook(mod_api::HookId::CanEquip) {
+        return;
+    }
+    let Ok(stack) = stack.try_into_api() else {
+        return;
+    };
+    let reader = horizon_client_render::api_context::LoopReader(context);
+    let context = reader.context();
+    mod_api::dispatch_can_equip(&context, &stack, slot, entity, kind, can_equip);
+}
+
 pub(crate) fn stacked_on_other(
     context: &horizon_world::native_load_context::LoopContext,
     event: &mut crate::menu::StackedOnOther<'_>,

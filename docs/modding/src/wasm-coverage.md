@@ -1714,6 +1714,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ItemPart::use_animation` | crosses | Wire call |
 | `ItemPart::on_use_tick` | crosses | Wire call |
 | `ItemPart::release_using` | crosses | Wire call |
+| `ItemPart::can_equip` | crosses | Wire call |
 | `ItemPart::item_interact_mob` | crosses | Wire call |
 | `ItemPart::on_item_use_first` | crosses | Wire call |
 | `MenuPart::menu_subscribed` | crosses | Wire call |

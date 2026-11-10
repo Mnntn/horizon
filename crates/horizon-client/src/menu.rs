@@ -605,6 +605,9 @@ fn tidy(slot: &mut Option<ItemStack>) {
     }
 }
 
+/// The equipment slots of `Role::Armor`, by `EquipmentSlot.getIndex` (feet first).
+const ARMOR_SLOTS: [&str; 4] = ["feet", "legs", "chest", "head"];
+
 /// Dispatch registered vanilla and mod menu slot placement and maximum stack rules.
 /// The slot is its backing container index. The shared application bounds the
 /// final maximum.
@@ -1707,13 +1710,23 @@ impl Menu {
     fn vanilla_may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
         match self.slots[s].role {
             Role::Plain | Role::CreativeDisplay => true,
-            Role::Armor(eq) => Self::equippable(env, stack).is_some_and(|e| {
-                ["feet", "legs", "chest", "head"]
-                    .iter()
-                    .position(|s| *s == e.slot)
-                    == Some(eq)
-                    && e.allows("minecraft:player")
-            }),
+            // `ArmorSlot.mayPlace`: `LivingEntity.isEquippableInSlot` for the player.
+            Role::Armor(eq) => {
+                let data = Self::equippable(env, stack).is_some_and(|e| {
+                    ARMOR_SLOTS.iter().position(|s| *s == e.slot) == Some(eq)
+                        && e.allows("minecraft:player")
+                });
+                env.player_entity_id.map_or(data, |player| {
+                    crate::mobs::equip::can_equip(
+                        env.loop_context,
+                        stack,
+                        ARMOR_SLOTS[eq],
+                        player as u32,
+                        "minecraft:player",
+                        data,
+                    )
+                })
+            }
             // LivingEntity.isEquippableInSlot: the stack's equippable slot,
             // and the mount among its allowed entities.
             Role::MountEquip(slot) => Self::equippable(env, stack).is_some_and(|e| {
@@ -2004,7 +2017,7 @@ impl Menu {
     fn equipment_slot(&self, s: usize) -> Option<&'static str> {
         let slot = self.slots[s];
         match slot.role {
-            Role::Armor(eq) => Some(["feet", "legs", "chest", "head"][eq]),
+            Role::Armor(eq) => Some(ARMOR_SLOTS[eq]),
             _ if slot.container == PLAYER && slot.index == OFFHAND => Some("offhand"),
             _ => None,
         }
@@ -4889,6 +4902,8 @@ pub(crate) mod tests {
     #[test]
     fn installed_slot_rules_change_mod_menu_placement() {
         static JUMPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        static EQUIPS: std::sync::Mutex<Vec<(String, u32, String)>> =
+            std::sync::Mutex::new(Vec::new());
         let installed =
             crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
                 menu_slot_rules: |context, menu, slot, _, may_place, max_stack| {
@@ -4901,6 +4916,15 @@ pub(crate) mod tests {
                 },
                 item_stacked_on_other: |context, _, canceled| {
                     *canceled = context.setting("rules_mod", "stack").is_some();
+                },
+                can_equip: |context, _, slot, entity, kind, can_equip| {
+                    if context.setting("rules_mod", "stack").is_some() {
+                        EQUIPS
+                            .lock()
+                            .unwrap()
+                            .push((slot.to_owned(), entity, kind.to_owned()));
+                        *can_equip = !*can_equip;
+                    }
                 },
                 living_heal: |context, _, amount, cancel| {
                     if context.setting("rules_mod", "stack").is_some() {
@@ -5184,6 +5208,41 @@ pub(crate) mod tests {
         };
         assert_eq!(health(&before), (2.0, false, true, 1, false, 2.0));
         assert_eq!(health(&after), (3.0, true, false, 5, true, 3.0));
+        // The equip predicate reads it too: the inventory menu's head slot asks it for the
+        // player (entity 41), and a part turns the component's answer round either way.
+        let head_slot_takes = |context: &LoopContext, slot: &str| {
+            let stone = equippable::tests::equippable(vec![(
+                "slot",
+                horizon_core::nbt::Tag::String(slot.into()),
+            )])
+            .unwrap();
+            let mut takes = false;
+            bare_env_in(context, |env| {
+                takes = Menu::new(Kind::Inventory).may_place(env, 5, &stone);
+            });
+            takes
+        };
+        assert!(head_slot_takes(&before, "head"));
+        assert!(!head_slot_takes(&before, "feet"));
+        assert!(EQUIPS.lock().unwrap().is_empty());
+        assert!(!head_slot_takes(&after, "head"));
+        assert!(head_slot_takes(&after, "feet"));
+        let player = ("head".to_owned(), 41, "minecraft:player".to_owned());
+        assert_eq!(*EQUIPS.lock().unwrap(), [player.clone(), player]);
+        // The server's own menu for a guest asks it for the guest, on a click and on a
+        // shift-click, which moves nothing when it refuses.
+        assert_eq!(
+            crate::lan::menu::tests::helmet_goes_on(&before),
+            (true, true, 2)
+        );
+        EQUIPS.lock().unwrap().clear();
+        assert_eq!(
+            crate::lan::menu::tests::helmet_goes_on(&after),
+            (false, false, 2)
+        );
+        let guest = ("head".to_owned(), 2, "minecraft:player".to_owned());
+        assert!(EQUIPS.lock().unwrap().iter().all(|asked| *asked == guest));
+        assert!(!EQUIPS.lock().unwrap().is_empty());
         std::fs::remove_dir_all(&settings).unwrap();
     }
 

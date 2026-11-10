@@ -13,6 +13,9 @@ use crate::{
 };
 use horizon_world::native_load_context::LoopContext;
 
+/// The equipment slots of the inventory menu's armour slots 5 to 8, in menu order.
+const ARMOR_SLOTS: [&str; 4] = ["head", "chest", "legs", "feet"];
+
 /// What the menus need to know about items and the slots' rules.
 pub trait Rules {
     fn items(&self) -> &Items;
@@ -459,7 +462,16 @@ impl View<'_> {
     }
     fn vanilla_may_place(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> bool {
         if self.container.is_none() && (5..=8).contains(&i) {
-            return rules.armor_index(&stack.item) == Some(i - 5);
+            // `ArmorSlot.mayPlace`: `LivingEntity.isEquippableInSlot` for the guest.
+            let data = rules.armor_index(&stack.item) == Some(i - 5);
+            return crate::mobs::equip::can_equip(
+                self.loop_context,
+                stack,
+                ARMOR_SLOTS[i - 5],
+                self.guest.entity_id as u32,
+                "minecraft:player",
+                data,
+            );
         }
         !(self.shulker
             && self.container.as_ref().is_some_and(|c| i < c.len())
@@ -752,16 +764,22 @@ fn quick_move(view: &mut View, i: usize, rules: &dyn Rules) {
             .armor_index(&stack.item)
             .filter(|a| view.get(5 + a).is_none());
         if let Some(a) = armor {
-            view.set(
-                5 + a,
-                Some(ItemStack {
-                    count: 1,
-                    ..stack.clone()
-                }),
-            );
-            let mut rest = stack.clone();
-            rest.count -= 1;
-            (rest.count > 0).then_some(rest)
+            // `moveItemStackTo` asks `ArmorSlot.mayPlace`: a refusal moves nothing, and the
+            // stack doesn't fall through to the inventory.
+            if view.may_place(5 + a, &stack, rules) {
+                view.set(
+                    5 + a,
+                    Some(ItemStack {
+                        count: 1,
+                        ..stack.clone()
+                    }),
+                );
+                let mut rest = stack.clone();
+                rest.count -= 1;
+                (rest.count > 0).then_some(rest)
+            } else {
+                Some(stack)
+            }
         } else if rules.equip_slot(&stack.item) == Some("offhand") && view.get(45).is_none() {
             // A shield or a totem goes to the empty off hand before the
             // hotbar (InventoryMenu.quickMoveStack's OFFHAND branch).
@@ -1370,7 +1388,7 @@ fn quick_craft(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::lan::{Joined, PlayerSender};
 
@@ -2696,6 +2714,49 @@ mod tests {
         fn equip_slot(&self, _: &str) -> Option<&str> {
             None
         }
+    }
+
+    /// Whether a guest's click puts an iron helmet from the cursor on, and whether a shift-click
+    /// from the hotbar wears it, in the head slot `ArmorSlot.mayPlace` guards, with the hooks
+    /// asked inside `context`. Together with the guest's entity id.
+    pub(crate) fn helmet_goes_on(context: &LoopContext) -> (bool, bool, i32) {
+        /// An empty item catalog, where only an iron helmet is armour (for the head).
+        struct HelmetRules(Items);
+        impl Rules for HelmetRules {
+            fn items(&self) -> &Items {
+                &self.0
+            }
+            fn enchantments(&self) -> &Enchantments {
+                enchantments()
+            }
+            fn max_stack(&self, _: &str) -> u32 {
+                64
+            }
+            fn armor_index(&self, item: &str) -> Option<usize> {
+                (item == "minecraft:iron_helmet").then_some(0)
+            }
+        }
+        let rules = HelmetRules(Items::for_tests(Default::default()));
+        let mut g = guest();
+        let entity = g.entity_id;
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: None,
+            shulker: false,
+            container_limits: Vec::new(),
+            hidden: &[],
+            loop_context: context,
+        };
+        let helmet = ItemStack::new("minecraft:iron_helmet", 1);
+        view.guest.carried = Some(helmet.clone());
+        click(&mut view, &mut drag, 5, 0, input::PICKUP, &rules);
+        let clicked = view.get(5).is_some();
+        view.set(5, None);
+        view.guest.carried = None;
+        view.set(36, Some(helmet));
+        click(&mut view, &mut drag, 36, 0, input::QUICK_MOVE, &rules);
+        (clicked, view.get(5).is_some(), entity)
     }
 
     /// A shift-click from the off-hand slot wears the armour it holds:
