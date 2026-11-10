@@ -2555,8 +2555,7 @@ fn place_in_biomes(
             overlay.write(&file, text.as_bytes())?;
         }
     }
-    overlay.write(MODIFIERS, &serde_json::to_vec(&saved)?)?;
-    overlay.write(BIOMES, &serde_json::to_vec(&doc)?)
+    biomes::write_state(overlay, &saved, &doc, modifiers)
 }
 
 /// Registry metadata shared by both modifier loaders, after tag overlays are merged.
@@ -2693,16 +2692,14 @@ impl SavedModifiers {
 /// pack is in, to the final biomes and tags: a pack's file for a biome
 /// (Terralith's `minecraft:plains`) keeps the mods' features and spawns, and
 /// a pack's biome its tags put under a modifier's selector gets them too.
-/// `None` when the root's biomes stand: no modifiers, or packs that bring no
-/// biome and no biome tag.
+/// `None` when the root's biomes stand: no modifiers, or nothing declared and packs that bring
+/// no biome and no tag. `declared` are mods' code modifiers (mod, file, text), applied last.
 pub fn biome_modifiers_over_packs(
     root: &Path,
     packs: &horizon_world::worldgen::overrides::WorldgenOverrides,
+    declared: &[[String; 3]],
 ) -> Result<Option<horizon_world::worldgen::overrides::WorldgenOverrides>> {
-    if packs.entries("biomes").next().is_none() && packs.tags("biome_tags").next().is_none() {
-        return Ok(None);
-    }
-    let Ok(bytes) = fs::read(root.join(MODIFIERS)) else {
+    let Some(bytes) = biomes::saved_bytes(root, packs, declared) else {
         return Ok(None);
     };
     let saved: SavedModifiers =
@@ -2715,7 +2712,7 @@ pub fn biome_modifiers_over_packs(
     };
     let mut warnings = Vec::new();
     let mut modifiers = Vec::new();
-    for [m, file, text] in &saved.modifiers {
+    for [m, file, text] in saved.modifiers.iter().chain(declared) {
         modifiers.extend(biomes::Modifier::read(m, file, text, &mut warnings)?);
     }
     // What the generator reads without the modifiers over the packs.
@@ -3419,7 +3416,7 @@ pub fn build(
             placed_doc = Some(doc);
         }
     }
-    if !modifiers.is_empty() {
+    if !modifiers.is_empty() || (!mods.is_empty() && base.join(BIOMES).exists()) {
         place_in_biomes(
             base,
             &overlay,

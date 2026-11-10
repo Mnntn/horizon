@@ -378,3 +378,65 @@ fn code_only_inventory_changes_cache_roots_and_recipe_conditions_without_content
     // the inventory and conditions they were constructed with.
     assert_eq!(recipes(&first), ["code_only"]);
 }
+
+/// A biome modifier a code mod declares applies over the content root with no data pack at
+/// all, and a root whose mods ship no modifier file still keeps its biomes as they were.
+#[test]
+fn a_biome_modifier_declared_in_code_applies_to_the_root_biomes() {
+    let base = biome_base("biome-modifiers-declared");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(&scratch.join("zinc"), &[]);
+    let out = scratch.join("out");
+    build_fixture(&base, &base.join("jars"), &[m], &out).unwrap();
+    // No file modifier: the biome bundle is the base's, byte for byte.
+    assert_eq!(
+        fs::read(out.join("worldgen/biomes.json")).unwrap(),
+        fs::read(base.join("worldgen/biomes.json")).unwrap()
+    );
+    let packs = horizon_world::worldgen::overrides::WorldgenOverrides::default();
+    assert!(
+        biome_modifiers_over_packs(&out, &packs, &[])
+            .unwrap()
+            .is_none()
+    );
+    let declared = mod_api::BiomeModifier {
+        biomes: vec!["#minecraft:is_overworld".to_owned()],
+        operation: mod_api::BiomeModifierOperation::AddFeatures {
+            features: vec!["zinc:ore_zinc".to_owned()],
+            step: "underground_ores".to_owned(),
+        },
+    };
+    let declared = [[
+        "zinc".to_owned(),
+        "data/zinc/neoforge/biome_modifier/declared.json".to_owned(),
+        declared.json(),
+    ]];
+    let after = biome_modifiers_over_packs(&out, &packs, &declared)
+        .unwrap()
+        .expect("a declared modifier changes the biomes");
+    let plains = after
+        .entries("biomes")
+        .find(|(id, _)| *id == "minecraft:plains")
+        .unwrap()
+        .1;
+    let plains: serde_json::Value = serde_json::from_str(plains).unwrap();
+    assert_eq!(
+        plains["features"],
+        serde_json::json!([
+            [],
+            ["minecraft:lake"],
+            [],
+            [],
+            [],
+            [],
+            ["minecraft:ore_coal", "zinc:ore_zinc"]
+        ])
+    );
+    // The nether is not in the overworld tag: untouched, so not written out.
+    assert!(
+        after
+            .entries("biomes")
+            .all(|(id, _)| id != "minecraft:nether_wastes")
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}

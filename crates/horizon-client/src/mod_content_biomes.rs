@@ -792,3 +792,37 @@ fn remove_spawn_costs(biome: &mut J, entities: &[String]) -> std::result::Result
     entries.retain(|(k, _)| !entities.contains(&full(k)));
     Ok(())
 }
+
+/// Writes the state a content build saves for `biome_modifiers_over_packs` (the modifiers and
+/// the registries packs leave alone) and, when a file modifier changed the biomes, the biome
+/// bundle. Without file modifiers the bundle stands byte for byte; the saved state is what
+/// modifiers declared in code are applied with at world open.
+pub(super) fn write_state(
+    overlay: &super::Overlay<'_>,
+    saved: &super::SavedModifiers,
+    doc: &J,
+    modifiers: &[Modifier],
+) -> Result<()> {
+    overlay.write(super::MODIFIERS, &serde_json::to_vec(saved)?)?;
+    if modifiers.is_empty() {
+        return Ok(());
+    }
+    overlay.write(super::BIOMES, &serde_json::to_vec(doc)?)
+}
+
+/// The saved modifier state of the content root `root` (`write_state`), unless a world's packs
+/// and the modifiers mods declared in code leave the root's biomes as they are: nothing
+/// declared, and no pack brings a biome or a biome tag, or the root saved none.
+pub(super) fn saved_bytes(
+    root: &std::path::Path,
+    packs: &horizon_world::worldgen::overrides::WorldgenOverrides,
+    declared: &[[String; 3]],
+) -> Option<Vec<u8>> {
+    if declared.is_empty()
+        && packs.entries("biomes").next().is_none()
+        && packs.tags("biome_tags").next().is_none()
+    {
+        return None;
+    }
+    std::fs::read(root.join(super::MODIFIERS)).ok()
+}

@@ -5494,7 +5494,7 @@ fn biome_modifiers_apply_over_world_packs() {
         "file/terra",
         r#"{"values":["terra:alpine"]}"#.to_owned(),
     );
-    let after = biome_modifiers_over_packs(&out, &packs)
+    let after = biome_modifiers_over_packs(&out, &packs, &[])
         .unwrap()
         .unwrap_or(packs);
     let features = |id: &str| -> serde_json::Value {
