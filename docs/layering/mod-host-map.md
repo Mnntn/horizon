@@ -95,8 +95,7 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | kind | mod crate's layer | Cargo.toml line | strand |
 |---|---|---|---|---|---|
-| horizon-client | horizon-mod-api | dev | platform | 196 | hooks |
-| horizon-client | horizon-mod-api | normal | platform | 23 | hooks |
+| horizon-client | horizon-mod-api | dev | platform | 0 | hooks |
 | horizon-client | horizon-mod-api-gen | build | engine | 14 | slots |
 | horizon-client | horizon-mod-api-macros | normal | engine | 25 | slots |
 | horizon-client | horizon-mod-package | normal | engine | 58 | loading |
@@ -104,17 +103,18 @@ Counts are source references (one per `use` leaf or path), split into production
 | horizon-client | horizon-mod-render | normal | platform | 22 | content_render |
 | horizon-client | horizon-mod-runtime | dev | engine | 195 | content_render |
 | horizon-client | horizon-mod-runtime | normal | engine | 21 | content_render |
+| horizon-client | horizon-mod-vocab | normal | engine | 0 | hooks |
 | horizon-client | horizon-mod-wasm | normal | platform | 26 | loading |
-| horizon-client-lib | horizon-mod-api | dev | platform | 131 | hooks |
-| horizon-client-lib | horizon-mod-api | normal | platform | 18 | hooks |
+| horizon-client-lib | horizon-mod-api | dev | platform | 0 | hooks |
 | horizon-client-lib | horizon-mod-package | normal | engine | 50 | loading |
 | horizon-client-lib | horizon-mod-runtime | normal | engine | 17 | content_render |
-| horizon-client-render | horizon-mod-api | dev | platform | 93 | hooks |
-| horizon-client-render | horizon-mod-api | normal | platform | 15 | hooks |
+| horizon-client-lib | horizon-mod-vocab | normal | engine | 0 | hooks |
+| horizon-client-render | horizon-mod-api | dev | platform | 0 | hooks |
 | horizon-client-render | horizon-mod-api-macros | normal | engine | 16 | slots |
 | horizon-client-render | horizon-mod-package | normal | engine | 26 | loading |
 | horizon-client-render | horizon-mod-render | normal | platform | 14 | content_render |
 | horizon-client-render | horizon-mod-runtime | normal | engine | 13 | content_render |
+| horizon-client-render | horizon-mod-vocab | normal | engine | 0 | hooks |
 | horizon-items | horizon-mod-package | normal | engine | 10 | loading |
 | horizon-protocol | horizon-mod-runtime | normal | engine | 10 | content_render |
 
@@ -169,8 +169,8 @@ Counts are source references (one per `use` leaf or path), split into production
 | host | 108 | 379 | 79 |
 | slots | 8 | 0 | 0 |
 | attachments | 165 | 282 | 49 |
-| content_render | 286 | 381 | 158 |
-| hooks | 2469 | 3333 | 1375 |
+| content_render | 285 | 381 | 157 |
+| hooks | 2470 | 3333 | 1376 |
 
 ### Engine files outside modding/ and native_hooks/: what they need of `mod_api`
 
@@ -201,15 +201,15 @@ Outside the host areas, 2291 `mod_api` references are in test code; 207 of them 
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | attachments (phase 4) | 13 | 2578 | 5 | 0 | 16 | 33 | 9 |
 | content_render (phase 5) | 5 | 2698 | 5 | 1 | 40 | 43 | 17 |
-| hooks (phase 6) | 389 | 99319 | 359 | 18 | 573 | 1639 | 226 |
+| hooks (phase 6) | 389 | 99323 | 359 | 18 | 573 | 1639 | 226 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
 |  | files | lines |
 |---|---|---|
-| all | 2 | 1048 |
-| pure (no generated include, unsafe, process state or non-core crate path) | 0 | 0 |
-| includes generator output (OUT_DIR) | 1 |  |
+| all | 4 | 1072 |
+| pure (no generated include, unsafe, process state or non-core crate path) | 2 | 12 |
+| includes generator output (OUT_DIR) | 2 |  |
 | `unsafe` | 1 | 45 |
 | process state (static, thread_local, locks, atomics, cells) | 1 | 31 |
 
@@ -217,5 +217,6 @@ Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `h
 
 Blockers by file (generated includes, `unsafe`, state), lines:
 
+- `src/lib.rs`: generated_include 5,11
 - `src/wire/wire_guest.rs`: generated_include 15; unsafe 19,33,38,40,52,200,224,279,314,315,316,320…; state 7,9,26,170,171,174,177,178,203,207,208,221…
 <!-- generated: end -->
