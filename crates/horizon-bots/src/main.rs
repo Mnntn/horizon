@@ -843,6 +843,13 @@ fn join(o: &Options, name: &str) -> Result<Connection, String> {
         )
         .map_err(err)?;
     }
+    // VOCAB_TICK_FIXTURE_SEND: declare the inert fixture before the known-packs reply.
+    c.send(&configuration::Serverbound::CustomPayload(configuration::CustomPayload {
+        channel: horizon_protocol::mod_list::CHANNEL.into(),
+        data: horizon_protocol::mod_list::encode(&[horizon_protocol::mod_list::Entry {
+            id: "vocab_tick".into(), version: "0.1.0".into(), side: horizon_protocol::mod_list::Side::Both,
+        }]),
+    }).encode()).map_err(err)?;
     loop {
         let (id, body) = c.recv().map_err(err)?;
         let reply = match id {
@@ -854,6 +861,15 @@ fn join(o: &Options, name: &str) -> Result<Connection, String> {
             | cb::DISCONNECT
             | cb::FINISH_CONFIGURATION => {
                 match configuration::Clientbound::decode(id, &body).map_err(err)? {
+                    // VOCAB_TICK_FIXTURE_MANIFEST: this workload has no client behavior or content.
+                    configuration::Clientbound::CustomPayload(p) if p.channel == horizon_protocol::mod_list::CHANNEL => {
+                        configuration::Serverbound::CustomPayload(configuration::CustomPayload {
+                            channel: p.channel,
+                            data: horizon_protocol::mod_list::encode(&[horizon_protocol::mod_list::Entry {
+                                id: "vocab_tick".into(), version: "0.1.0".into(), side: horizon_protocol::mod_list::Side::Both,
+                            }]),
+                        })
+                    }
                     configuration::Clientbound::SelectKnownPacks(p) => {
                         configuration::Serverbound::SelectKnownPacks(p)
                     }
