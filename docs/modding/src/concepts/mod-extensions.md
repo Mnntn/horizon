@@ -412,7 +412,7 @@ Built as stage P (the [how-to](../injections.md#mod-points-patching-another-mod)
 3. `stage_mod` (`horizon-mod-api-gen/src/points/mod_crate.rs`) is the staging pass for a mod crate. `cargo horizon-mod build --wasm` runs it on every member, and the launcher on every native mod crate it compiles.
 4. The mod's catalog and the routing of an addon's injection to it (`horizon-mod-package`, `manifest::inject::mod_points`) are shared by every loader.
 5. The listened paths run out of line (in the internal cold dispatch module), so an unlistened point costs a slot load and a branch at its head and one at its return.
-6. Wasm group routing (a wasm addon's listeners registered in its library's table inside the group) follows in its own change.
+6. Wasm members dynamically share each mod library, but each member links its own `mod_api` copy. Generated typed registration functions execute in the library member and build listeners in that member's registry; only listener function pointers and scalar metadata cross. The group registers every member's listeners before calling every library's seal, before mod initialization. Native continues to use its single shared registry directly.
 
 ### Mixed native and wasm
 

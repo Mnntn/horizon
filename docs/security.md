@@ -83,6 +83,16 @@ and some are waiting for Ludovic:
   collects no telemetry, so it cannot determine this from usage data. Then drop `SHA256SUMS.sig` from nightly-build.yml's
   publish step and the `--tag nightly` check before it, and remove `NIGHTLY` from horizon-release-sign. Releases (not
   Nightlies) keep their single `SHA256SUMS.sig`, which is already signed for their tag.
+  **Fork releases (`arismoko/horizon`):** the launcher chooses keys by repository. Only
+  `crates/horizon-release-sign/fork-release-keys.txt` authorizes fork downloads; upstream's keys
+  authorize only `horizon-rust/horizon`, and unknown repositories have no trusted keys. An empty
+  fork key file refuses every fork release. Upstream's legacy checksum pins never authorize a
+  fork archive: every fork game or launcher download needs a fork signature. The real private key
+  exists only as the repository secret `RELEASE_SIGNING_KEY`; dry runs receive no release secrets
+  and sign with an ephemeral test key instead. To rotate, first ship the next public key in the
+  same fork key file, then enable `RELEASE_SIGNING_KEY_NEXT` for overlapping signatures before
+  replacing the primary secret and eventually retiring the old public key. Nightly title,
+  channel and exact-version signature binding remain unchanged.
 - **The release machinery needs Ludovic.** The workflows, the release and signing tools, the update-checking code
   and the installers are listed in `.github/CODEOWNERS`. Once main's protection requires code owners' reviews, a
   change to any of them waits for Ludovic's approval. Everything else still merges as soon as its checks pass.

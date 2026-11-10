@@ -88,6 +88,7 @@ fn module(body: &str) -> WasmMod {
     let bytes = guest(*mod_api::wire::LAYOUT, body);
     WasmMod::instantiate(
         &engine,
+        &[],
         &[Member {
             name: "test",
             module: &bytes,
@@ -324,6 +325,7 @@ fn a_member_cannot_bypass_group_limits_with_private_memories() {
         wat::parse_str(r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (memory 1))"#).unwrap();
     let refusal = WasmMod::instantiate(
         &engine().unwrap(),
+        &[],
         &[Member {
             name: "private",
             module: &bytes,
@@ -344,6 +346,7 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
     .unwrap();
     let module = WasmMod::instantiate(
         &engine().unwrap(),
+        &[],
         &[
             Member {
                 name: "std",
@@ -418,6 +421,7 @@ fn real_members_link_when_built() {
     let engine = engine().unwrap();
     let modules = WasmMod::instantiate(
         &engine,
+        &[],
         &[
             Member {
                 name: "std",
@@ -546,6 +550,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
     let engine = engine().unwrap();
     let modules = WasmMod::instantiate(
         &engine,
+        &[],
         &[
             Member {
                 name: "first",
@@ -565,6 +570,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
     .unwrap();
     let refusal = WasmMod::instantiate(
         &engine,
+        &[],
         &[
             Member {
                 name: "first",
@@ -653,6 +659,7 @@ fn layout_mismatch_is_a_mods_page_refusal() {
     let bytes = guest(*mod_api::wire::LAYOUT ^ 1, "i64.const 0");
     let refusal = WasmMod::instantiate(
         &engine,
+        &[],
         &[Member {
             name: "test",
             module: &bytes,
@@ -680,6 +687,7 @@ fn point_record_layout_mismatch_is_refused() {
     .unwrap();
     let refusal = WasmMod::instantiate(
         &engine().unwrap(),
+        &[],
         &[Member {
             name: "points",
             module: &bytes,
@@ -1187,4 +1195,121 @@ fn memory_growth_limit_traps_and_poison_is_shared_by_proxies() {
         super::runtime_tests::module("ref.null func i32.const 1048576 table.grow drop i64.const 0");
     assert_eq!(call(&module), None);
     assert!(module.running.poisoned.load(Ordering::Relaxed));
+}
+
+#[test]
+fn registration_refusal_names_the_indexed_mod_injection() {
+    let manifest: horizon_mod_package::Manifest = serde_json::from_value(serde_json::json!({
+        "id": "addon", "name": "Addon", "version": "1.0.0", "description": "", "api": "0.2",
+        "capabilities": [], "dependencies": {"chem-lib": "*"},
+        "inject": [
+            {"id": "engine", "at": "game::tick", "kind": "head", "with": "listener", "hash": "unused"},
+            {"id": "first", "at": "chem_lib::first", "kind": "head", "with": "listener", "hash": "unused"},
+            {"id": "second", "at": "chem_lib::second", "kind": "head", "with": "listener", "hash": "unused"}
+        ]
+    })).unwrap();
+    for index in [1, 2, 3] {
+        // Add a registration export to the real boundary module before compiling it.
+        let text = format!(
+            r#"(module
+            (@custom "dylink.0" "\01\04\00\00\00\00")
+            (import "env" "memory" (memory 1))
+            (func (export "horizon_layout") (result i64) i64.const {})
+            (func (export "horizon_in") (param i32) (result i32) i32.const 0)
+            (func (export "horizon_hook") (param i32) (result i64) i64.const 0)
+            (func (export "horizon_mod_points_register") (result i32) i32.const {index}))"#,
+            *mod_api::wire::LAYOUT
+        );
+        let bytes = wat::parse_str(text).unwrap();
+        let refusal = WasmMod::instantiate(
+            &engine().unwrap(),
+            &[("libaddon.so", &manifest)],
+            &[Member {
+                name: "libaddon.so",
+                module: &bytes,
+            }],
+        )
+        .err()
+        .expect("registration must refuse");
+        let Refusal::Runtime(message) = refusal else {
+            panic!("unexpected refusal: {refusal:?}")
+        };
+        let expected = match index {
+            1 => "addon:first: refused by library registry",
+            2 => "addon:second: refused by library registry",
+            _ => "libaddon.so: invalid mod point registration refusal index 3",
+        };
+        assert_eq!(message, expected);
+    }
+}
+
+#[test]
+fn a_mod_point_listener_without_its_bridge_or_its_library_seal_is_refused_at_load() {
+    let manifest = |id: &str, dependencies: serde_json::Value, inject: serde_json::Value| {
+        serde_json::from_value::<horizon_mod_package::Manifest>(serde_json::json!({
+            "id": id, "name": id, "version": "1.0.0", "description": "", "api": "0.2",
+            "capabilities": [], "dependencies": dependencies, "inject": inject
+        }))
+        .unwrap()
+    };
+    let addon = manifest(
+        "addon",
+        serde_json::json!({"chem-lib": "*"}),
+        serde_json::json!([{"id": "first", "at": "chem_lib::first", "kind": "head", "with": "listener", "hash": "unused"}]),
+    );
+    let library = manifest("chem-lib", serde_json::json!({}), serde_json::json!([]));
+    let member = |exports: &str| {
+        wat::parse_str(format!(
+            r#"(module
+            (@custom "dylink.0" "\01\04\00\00\00\00")
+            (import "env" "memory" (memory 1))
+            (func (export "horizon_layout") (result i64) i64.const {})
+            (func (export "horizon_in") (param i32) (result i32) i32.const 0)
+            (func (export "horizon_hook") (param i32) (result i64) i64.const 0)
+            {exports})"#,
+            *mod_api::wire::LAYOUT
+        ))
+        .unwrap()
+    };
+    let register = r#"(func (export "horizon_mod_points_register") (result i32) i32.const 0)"#;
+    let seal = r#"(func (export "horizon_mod_points_seal"))"#;
+    let load = |addon_exports: &str, library_exports: &str| {
+        let (addon_bytes, library_bytes) = (member(addon_exports), member(library_exports));
+        WasmMod::instantiate(
+            &engine().unwrap(),
+            &[("libaddon.so", &addon), ("libchem_lib.so", &library)],
+            &[
+                Member {
+                    name: "libchem_lib.so",
+                    module: &library_bytes,
+                },
+                Member {
+                    name: "libaddon.so",
+                    module: &addon_bytes,
+                },
+            ],
+        )
+        .map(|_| ())
+        .map_err(|refusal| match refusal {
+            Refusal::Runtime(message) => message,
+            other => panic!("unexpected refusal: {other:?}"),
+        })
+    };
+    assert_eq!(load(register, seal), Ok(()));
+    assert_eq!(
+        load("", seal),
+        Err(
+            "addon:first: libaddon.so has no mod point registration; rebuild it with `cargo \
+             horizon-mod build --wasm`"
+                .into()
+        )
+    );
+    assert_eq!(
+        load(register, ""),
+        Err(
+            "addon:first: library chem-lib has no mod point seal in this group; rebuild it with \
+             `cargo horizon-mod build --wasm`"
+                .into()
+        )
+    );
 }

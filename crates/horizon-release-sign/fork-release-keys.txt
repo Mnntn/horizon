@@ -1,0 +1,5 @@
+# arismoko/horizon release verification keys, base64 Ed25519 public keys only.
+# Root inserts the real public key after the nonpublishing dry run is verified.
+# Empty intentionally: fork release installation fails closed until configured.
+# Rotation: add the next public key here before enabling RELEASE_SIGNING_KEY_NEXT.
+# Never put a private key or a test signing key in this file.

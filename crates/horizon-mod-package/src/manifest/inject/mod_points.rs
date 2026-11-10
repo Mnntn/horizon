@@ -72,6 +72,12 @@ pub enum Refusal {
     Changed(Box<Changed>),
     /// The function exists but its author opted it out with `#[mod_api::no_point]`.
     OptedOut { id: String, at: String },
+    /// The library's crate isn't named after its mod id, so no manifest can name its points.
+    LibraryCrate {
+        id: String,
+        library: String,
+        krate: String,
+    },
     /// `internals` reaches the library's own types, so it needs the library's target.
     CrossTargetInternals { id: String, library: String },
     /// An `api` record crosses targets only with a `Wire` form for every parameter.
@@ -119,6 +125,12 @@ impl fmt::Display for Refusal {
                 f,
                 "E_INJECT_MISSING: {id}: {at} has no point (opted out with #[mod_api::no_point])"
             ),
+            Self::LibraryCrate { id, library, krate } => write!(
+                f,
+                "{id}: mod point library {library}'s crate is {krate}; a mod point library's crate \
+                 is named after its mod id: {}",
+                library.replace('-', "_")
+            ),
             Self::CrossTargetInternals { id, library } => write!(
                 f,
                 "{id}: internals access to {library} needs the same target: the same binary on \
@@ -149,6 +161,15 @@ pub fn route<'a>(
     let id = format!("{mod_id}:{}", inject.id);
     let plain = |path: &str| path.replace(' ', "");
     let catalog = library.catalog;
+    // An addon's manifest names a library by mod id, and an `at` by crate, so both targets reach
+    // a library's points through the one rule `Manifest::mod_point_dependency` applies.
+    if catalog.krate != library.id.replace('-', "_") {
+        return Err(Refusal::LibraryCrate {
+            id,
+            library: library.id.to_owned(),
+            krate: catalog.krate.clone(),
+        });
+    }
     let Some(point) = catalog
         .points
         .iter()

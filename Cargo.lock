@@ -508,6 +508,7 @@ dependencies = [
  "horizon-mod-package",
  "horizon-mod-point-emit",
  "horizon-mod-point-shape",
+ "horizon-mod-wasm",
  "horizon-port-pack",
  "libc",
  "rustc-demangle",
@@ -519,6 +520,7 @@ dependencies = [
  "ureq",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
+ "wasmtime",
  "zip",
 ]
 

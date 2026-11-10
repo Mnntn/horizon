@@ -30,6 +30,7 @@ pub const SIGNATURE_V2: &str = "SHA256SUMS.v2.sig";
 
 const KEYS: &str = include_str!("../release-keys.txt");
 const LEGACY: &str = include_str!("../legacy-releases.txt");
+const FORK_KEYS: &str = include_str!("../fork-release-keys.txt");
 
 /// An Ed25519 public key.
 pub type PublicKey = [u8; 32];
@@ -37,7 +38,21 @@ pub type PublicKey = [u8; 32];
 /// The public keys built in: those in `release-keys.txt`. A file that doesn't parse gives none,
 /// so every download is refused rather than trusted (a test keeps the file valid).
 pub fn trusted_keys() -> Vec<PublicKey> {
-    parse_keys(KEYS).unwrap_or_default()
+    trusted_keys_for("horizon-rust/horizon")
+}
+
+/// Repository-scoped release trust. Unknown repositories and an unconfigured fork fail closed.
+/// The fork's public release keys have one canonical home: `fork-release-keys.txt`.
+pub fn trusted_keys_for(repository: &str) -> Vec<PublicKey> {
+    parse_keys(repository_keys(repository, KEYS, FORK_KEYS)).unwrap_or_default()
+}
+
+fn repository_keys<'a>(repository: &str, upstream: &'a str, fork: &'a str) -> &'a str {
+    match repository {
+        "horizon-rust/horizon" => upstream,
+        "arismoko/horizon" => fork,
+        _ => "",
+    }
 }
 
 /// The keys in a keys file: one base64 key per line; blank lines and `#` comments are skipped.
@@ -274,6 +289,14 @@ fn digest_in(
 /// The pinned SHA-256 of `asset` in a release from before signing (legacy-releases.txt). Callers
 /// use it instead of the release's files when there is one: [`signed_digest`] otherwise.
 pub fn legacy_digest(tag: &str, asset: &str) -> Option<&'static str> {
+    legacy_digest_for("horizon-rust/horizon", tag, asset)
+}
+
+/// Historical pins belong to upstream only. The fork has no unsigned game-release history.
+pub fn legacy_digest_for(repository: &str, tag: &str, asset: &str) -> Option<&'static str> {
+    if repository != "horizon-rust/horizon" {
+        return None;
+    }
     legacy_entries(LEGACY).find_map(|(t, a, hex)| (t == tag && a == asset).then_some(hex))
 }
 
@@ -400,6 +423,59 @@ impl SigningKey {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn repository_trust_is_isolated_and_unknown_repositories_fail_closed() {
+        let (upstream, _) = SigningKey::generate().unwrap();
+        let (fork, _) = SigningKey::generate().unwrap();
+        let upstream_text = upstream.public_base64();
+        let fork_text = fork.public_base64();
+        let keys = |repo| parse_keys(repository_keys(repo, &upstream_text, &fork_text)).unwrap();
+        let sums = sums_file(&[("game.tar.gz".into(), "ab".repeat(32))]);
+        let tag = "nightly-2026-11-10-abcdef0";
+        for (repository, signer, other) in [
+            ("horizon-rust/horizon", &upstream, &fork),
+            ("arismoko/horizon", &fork, &upstream),
+        ] {
+            assert!(
+                verify(
+                    tag,
+                    sums.as_bytes(),
+                    &signer.sign(tag, sums.as_bytes()),
+                    &keys(repository)
+                )
+                .is_ok()
+            );
+            assert!(
+                verify(
+                    tag,
+                    sums.as_bytes(),
+                    &other.sign(tag, sums.as_bytes()),
+                    &keys(repository)
+                )
+                .is_err()
+            );
+            assert!(
+                verify(
+                    "nightly",
+                    sums.as_bytes(),
+                    &signer.sign(tag, sums.as_bytes()),
+                    &keys(repository)
+                )
+                .is_err()
+            );
+        }
+        assert!(keys("unknown/horizon").is_empty());
+        assert!(trusted_keys_for("unknown/horizon").is_empty());
+        assert_eq!(
+            trusted_keys_for("horizon-rust/horizon"),
+            parse_keys(KEYS).unwrap()
+        );
+        assert_eq!(
+            trusted_keys_for("arismoko/horizon"),
+            parse_keys(FORK_KEYS).unwrap()
+        );
+    }
+
     use super::*;
 
     fn signed(tag: &str) -> (SigningKey, String, String) {

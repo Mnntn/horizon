@@ -1390,5 +1390,6 @@
   "Could not unpack the source: {error}": "Could not unpack the source: {error}",
   "The source archive contains a path outside its folder.": "The source archive contains a path outside its folder.",
   "{mod_id} needs {name} {version}, which isn't in Horizon's Cargo.lock. A native mod's registry dependencies must be versions the game already locks: its crate can use only the crates Horizon itself uses, in the versions its Cargo.lock has.": "{mod_id} needs {name} {version}, which isn't in Horizon's Cargo.lock. A native mod's registry dependencies must be versions the game already locks: its crate can use only the crates Horizon itself uses, in the versions its Cargo.lock has.",
-  "Horizon locks {name} {versions}.": "Horizon locks {name} {versions}."
+  "Horizon locks {name} {versions}.": "Horizon locks {name} {versions}.",
+  "{id}: mod point library {library}'s crate is {krate}; a mod point library's crate is named after its mod id: {expected}": "{id}: mod point library {library}'s crate is {krate}; a mod point library's crate is named after its mod id: {expected}"
 }

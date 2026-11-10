@@ -1,6 +1,7 @@
 //! Cargo owns the group's crate graph. Each mod unit emits both its exact rlib and PIC member.
 use super::*;
 use std::collections::BTreeMap;
+mod points;
 
 struct Member {
     root: PathBuf,
@@ -278,7 +279,6 @@ pub(super) fn build(
     });
     let mut ids = std::collections::BTreeSet::new();
     for member in &mut members {
-        (member.registrations, member.points) = registrations(&member.manifest, catalog)?;
         if !ids.insert(member.manifest["id"].as_str().ok_or("no id")?) {
             return Err("duplicate mod id in Cargo group".into());
         }
@@ -310,10 +310,11 @@ pub(super) fn build(
         }
         None => Default::default(),
     };
+    let point_registrations = points::prepare(&mut members, &wire, catalog)?;
     let mut configs = serde_json::Map::new();
     let mut features = Vec::new();
     let mut point_names = std::collections::BTreeSet::<String>::new();
-    for member in &members {
+    for (member, point_registration) in members.iter().zip(&point_registrations) {
         copy(&member.root, &member.stage)?;
         // Every member crate gets its own points (#2339), listed in the package it builds.
         let points = horizon_mod_api_gen::points::mod_crate::stage_mod(&member.stage, &wire)?;
@@ -329,6 +330,15 @@ pub(super) fn build(
             .map_err(|e| e.to_string())?
             .parse()
             .map_err(|e| format!("Cargo.toml: {e}"))?;
+        let lib = cargo
+            .get("lib")
+            .and_then(|lib| lib.get("path"))
+            .and_then(|p| p.as_str())
+            .unwrap_or("src/lib.rs");
+        let lib = member.stage.join(lib);
+        let mut source = std::fs::read_to_string(&lib).map_err(|e| e.to_string())?;
+        source.push_str(point_registration);
+        std::fs::write(lib, source).map_err(|e| e.to_string())?;
         // Expand workspace inheritance before moving this package into the group workspace.
         let member_metadata = metadatas
             .iter()

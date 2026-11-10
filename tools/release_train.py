@@ -496,6 +496,13 @@ def green_main_head(parity=False):
     releases), the newest commit parity-main passed on whose checks passed too: parity-main runs on batches of
     merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing. A
     later batch that failed holds only the merges after that commit, which the green one doesn't contain."""
+    if REPO == "arismoko/horizon":
+        # The fork replaces checks/parity-main with dyna-checks. Never query disabled
+        # upstream workflows, and never turn an untested main head into a release base.
+        runs = gh_json("run", "list", "--repo", REPO, "--workflow", "dyna-checks", "--branch", "main",
+                       "--event", "push", "--status", "success", "--limit", "50", "--json", "headSha,status,conclusion")
+        return next((entry["headSha"] for entry in runs
+                     if entry["status"] == "completed" and entry["conclusion"] == "success"), None)
     if parity:
         # Only the successful runs: while merges land, one run at a time finishes (the pending one is replaced at
         # every push), and a later failed or timed-out batch must not starve the Nightly of the commit an earlier

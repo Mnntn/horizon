@@ -36,7 +36,7 @@ pub fn digest(
     keys: &[PublicKey],
     fetch: impl Fn(&str) -> Result<Option<Vec<u8>>, String>,
 ) -> Result<String, String> {
-    if let Some(hex) = horizon_release_sign::legacy_digest(tag, asset) {
+    if let Some(hex) = horizon_release_sign::legacy_digest_for(REPO, tag, asset) {
         return Ok(hex.to_owned());
     }
     let sums = fetch(&asset_url(tag, SUMS))?;
@@ -81,7 +81,7 @@ mod tests {
     }
 
     #[test]
-    fn the_launcher_ships_with_a_release_key() {
+    fn upstream_retains_its_release_key() {
         // With no key in release-keys.txt every release after the pinned ones would be refused:
         // this fails until the release environment's public key is listed (docs/security.md).
         assert!(
@@ -91,16 +91,28 @@ mod tests {
     }
 
     #[test]
-    fn releases_from_before_signing_install_only_with_their_pinned_files() {
+    fn an_upstream_legacy_archive_offered_under_a_fork_tag_is_refused() {
         let tampered =
             |_: &str| -> Result<Option<Vec<u8>>, String> { Ok(Some(b"anything".to_vec())) };
-        let pinned =
-            horizon_release_sign::legacy_digest("v2026.10.12", "horizon-linux-x86_64.tar.gz")
-                .expect("v2026.10.12 is from before signing");
-        assert_eq!(
-            digest("v2026.10.12", "horizon-linux-x86_64.tar.gz", &[], tampered),
-            Ok(pinned.to_owned())
-        );
+        assert!(horizon_release_sign::legacy_digest_for(
+            "horizon-rust/horizon",
+            "v2026.10.12",
+            "horizon-linux-x86_64.tar.gz"
+        )
+        .is_some());
+        assert!(horizon_release_sign::legacy_digest_for(
+            "arismoko/horizon",
+            "v2026.10.12",
+            "horizon-linux-x86_64.tar.gz"
+        )
+        .is_none());
+        assert!(horizon_release_sign::legacy_digest_for(
+            "unknown/horizon",
+            "v2026.10.12",
+            "horizon-linux-x86_64.tar.gz"
+        )
+        .is_none());
+        assert!(digest("v2026.10.12", "horizon-linux-x86_64.tar.gz", &[], tampered).is_err());
     }
 
     #[test]
