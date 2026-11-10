@@ -40,7 +40,7 @@ pub(crate) struct State {
     outputs: Vec<Vec<u8>>,
     imports: Vec<Vec<u8>>,
     depth: usize,
-    epoch_budget: u64,
+    fuel_budget: u64,
     group: usize,
     lending: Arc<AtomicUsize>,
 }
@@ -64,7 +64,7 @@ impl Default for State {
             outputs: Vec::new(),
             imports: Vec::new(),
             depth: 0,
-            epoch_budget: 0,
+            fuel_budget: 0,
             group: 0,
             lending: Arc::default(),
         }
@@ -73,18 +73,8 @@ impl Default for State {
 
 pub(crate) fn engine() -> wasmtime::Result<Engine> {
     let mut config = wasmtime::Config::new();
-    config.epoch_interruption(true);
+    config.consume_fuel(true);
     let engine = Engine::new(&config)?;
-    let weak = engine.weak();
-    std::thread::Builder::new()
-        .name("wasm epoch".into())
-        .spawn(move || {
-            loop {
-                std::thread::sleep(Duration::from_millis(1));
-                let Some(engine) = weak.upgrade() else { break };
-                engine.increment_epoch();
-            }
-        })?;
     Ok(engine)
 }
 
@@ -442,12 +432,12 @@ impl WasmMod {
     ) -> Result<Vec<Self>, Refusal> {
         let mut store = Store::new(engine, State::default());
         store.limiter(|state| &mut state.limits);
-        store.set_epoch_deadline(30_000);
+        store.set_fuel(10_000_000_000).expect("fuel enabled");
         let mut armed = false;
         let mut group = Group::link_with(store, members, |store, module, name| {
             // Compilation is not guest execution and must not consume its load deadline.
             if !armed {
-                store.set_epoch_deadline(30_000);
+                store.set_fuel(10_000_000_000).expect("fuel enabled");
                 armed = true;
             }
             if module != "horizon" {
@@ -585,12 +575,12 @@ impl WasmMod {
             None => {
                 let store = &mut locked.as_mut()?.store;
                 let budget = if class == CallClass::Load {
-                    30_000
+                    10_000_000_000
                 } else {
-                    100
+                    100_000_000
                 };
-                store.set_epoch_deadline(budget);
-                store.data_mut().epoch_budget = budget;
+                store.set_fuel(budget).expect("fuel enabled");
+                store.data_mut().fuel_budget = budget;
                 store.as_context_mut()
             }
         };
@@ -600,12 +590,12 @@ impl WasmMod {
             }
             return None;
         }
-        let budget = store.data().epoch_budget;
+        let budget = store.data().fuel_budget;
         let depth = store.data().depth + 1;
         if depth > 64 {
             if !self.running.poisoned.swap(true, Ordering::Relaxed) {
                 log::error!(
-                    "wasm mod {} stopped its group: {class:?} depth {depth} exceeds budget 64 (active epoch budget {budget})",
+                    "wasm mod {} stopped its group: {class:?} depth {depth} exceeds budget 64 (active fuel budget {budget})",
                     self.id
                 );
             }
@@ -636,6 +626,7 @@ impl WasmMod {
         // This guard unwinds before the resource scope, whose native destructors
         // must already see the group stopped.
         let panic_stop = PoisonOnPanic(&self.running.poisoned);
+        let fuel_before = store.get_fuel().expect("fuel enabled");
         let result = (|| -> wasmtime::Result<R> {
             let released = self.released.take();
             if !released.is_empty() {
@@ -659,6 +650,14 @@ impl WasmMod {
             }
             Ok(value)
         })();
+        static MEASURE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *MEASURE.get_or_init(|| std::env::var_os("HORIZON_MEASURE_FUEL").is_some()) {
+            eprintln!(
+                "FUEL mod={} class={class:?} id={id:?} depth={depth} used={}",
+                self.id,
+                fuel_before - store.get_fuel().expect("fuel enabled")
+            );
+        }
         store.data_mut().inputs[depth] = w;
         store.data_mut().outputs[depth] = output;
         let first_failure = result.is_err() && !self.running.poisoned.swap(true, Ordering::Relaxed);
@@ -670,7 +669,7 @@ impl WasmMod {
             Err(e) => {
                 if first_failure {
                     log::error!(
-                        "wasm mod {} stopped its group: {class:?}, depth {depth}, active epoch budget {budget}: {e:#}",
+                        "wasm mod {} stopped its group: {class:?}, depth {depth}, active fuel budget {budget}: {e:#}",
                         self.id
                     );
                 }
