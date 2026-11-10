@@ -380,7 +380,7 @@ mod lod;
 mod native_material;
 mod native_pack;
 mod native_post;
-pub use mod_render::render as native_render;
+use crate::render_slots as native_render;
 mod native_shadow;
 mod native_sky;
 mod occlusion;
@@ -12001,36 +12001,32 @@ impl Renderer {
                 Some((_, depth)) => (depth, self.world_post.size().unwrap_or(size)),
                 None => (&self.depth, size),
             };
-            native_render::world_drawn(&mut native_render::WorldDrawn::from(
-                mod_render::render::built::WorldDrawn {
-                    device: &self.device,
-                    queue: &self.queue,
-                    encoder: &mut encoder,
-                    color: &target_texture,
-                    color_view: &view_target,
-                    color_format: self.output.frame.overlay_format,
-                    size,
-                    depth,
-                    depth_size,
-                    view_proj,
-                    jittered,
-                    camera: frame.camera,
-                    entities: frame.entities,
-                    spans: frame.entity_spans,
-                    motion: frame.entity_motion,
-                    atlas: self.hud.atlas_texture.as_ref(),
-                    quad_indices: &self.indices,
-                    block_sprites: native_render::BlockSpriteArrays::from(
-                        mod_render::render::built::BlockSpriteArrays {
-                            views: &self.sprite_views,
-                            split: self.sprite_split,
-                            size: self.sprite_textures[0].width(),
-                            nearest: &self.sprite_nearest,
-                            filtered: &self.sprite_sampler,
-                        },
-                    ),
+            native_render::world_drawn(&mut native_render::WorldDrawn {
+                device: &self.device,
+                queue: &self.queue,
+                encoder: &mut encoder,
+                color: &target_texture,
+                color_view: &view_target,
+                color_format: self.output.frame.overlay_format,
+                size,
+                depth,
+                depth_size,
+                view_proj,
+                jittered,
+                camera: frame.camera,
+                entities: frame.entities,
+                spans: frame.entity_spans,
+                motion: frame.entity_motion,
+                atlas: self.hud.atlas_texture.as_ref(),
+                quad_indices: &self.indices,
+                block_sprites: native_render::BlockSpriteArrays {
+                    views: &self.sprite_views,
+                    split: self.sprite_split,
+                    size: self.sprite_textures[0].width(),
+                    nearest: &self.sprite_nearest,
+                    filtered: &self.sprite_sampler,
                 },
-            ));
+            });
         }
         // A 0.2 pack in SDR: its picture finishes on 8 bits before the hand, the camera overlays
         // and the HUD draw over it (`overlay_format`).
@@ -12413,22 +12409,20 @@ impl Renderer {
         }
         // A native mod's turn after the hand, on the real frame only.
         if overlay.real && !frame.title {
-            native_render::hand_drawn(&mut native_render::HandDrawn::from(
-                mod_render::render::built::HandDrawn {
-                    device: &self.device,
-                    queue: &self.queue,
-                    encoder: &mut *encoder,
-                    color: target_texture,
-                    color_view: view_target,
-                    color_format: self.output.frame.overlay_format,
-                    size: [self.config.width, self.config.height],
-                    hand: if overlay.hand_drawn { frame.hand } else { &[] },
-                    view_proj: overlay.hand_view_proj,
-                    camera: frame.camera,
-                    atlas: self.hud.atlas_texture.as_ref(),
-                    quad_indices: &self.indices,
-                },
-            ));
+            native_render::hand_drawn(&mut native_render::HandDrawn {
+                device: &self.device,
+                queue: &self.queue,
+                encoder: &mut *encoder,
+                color: target_texture,
+                color_view: view_target,
+                color_format: self.output.frame.overlay_format,
+                size: [self.config.width, self.config.height],
+                hand: if overlay.hand_drawn { frame.hand } else { &[] },
+                view_proj: overlay.hand_view_proj,
+                camera: frame.camera,
+                atlas: self.hud.atlas_texture.as_ref(),
+                quad_indices: &self.indices,
+            });
         }
         // GameRenderer.render: LevelRenderer.blitEntityOutline after the level and the hand.
         self.entity_outline.draw(

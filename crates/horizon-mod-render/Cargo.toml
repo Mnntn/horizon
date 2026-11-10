@@ -10,6 +10,7 @@ description = "Unstable native-only raw rendering places for mods"
 name = "mod_render"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+horizon-client-render = { path = "../horizon-client-render", default-features = false }
 horizon-mod-api = { path = "../horizon-mod-api" }
 horizon-mod-points = { path = "../horizon-mod-points" }
 wgpu = { version = "30.0.1", default-features = false, features = ["std"] }

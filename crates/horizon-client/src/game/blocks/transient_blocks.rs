@@ -3,8 +3,8 @@
 //! that holds it has been rebuilt (a landed falling block would otherwise
 //! leave a gap between the entity going and the mesh catching up).
 use super::Game;
+use horizon_client_render::render_geometry::Vertex;
 use horizon_world::registry::BlockStateId;
-use mod_render::render::Vertex;
 use std::{
     collections::{HashMap, VecDeque},
     time::{Duration, Instant},

@@ -15,7 +15,6 @@ mod residency;
 #[cfg(test)]
 mod retained_limits_tests;
 use super::api_values::{TryIntoApi, TryIntoEngine};
-
 use super::level_sounds::LevelSound;
 use super::{
     Dim, Game, Hand, InteractTarget, entity_culling::EntityCullDecision,
@@ -43,6 +42,7 @@ use horizon_client::{
     particles::{ParticleOptions, ParticleType},
     projectiles::{Hit, Projectile, ProjectileKind, ProjectileWorld, clip_including_border},
 };
+use horizon_client_render::render_geometry::EntitySpan;
 use horizon_core::{
     geometry::{Aabb, Direction, Vec3, traverse_blocks, trig::Mth},
     position::BlockPos,
@@ -8418,7 +8418,7 @@ impl Game<'_> {
                 if hidden {
                     let mut skin = self.skin_frame.borrow_mut();
                     let end = skin.vertices as usize;
-                    mod_render::render::EntitySpan::hide(&mut skin.spans, mark.2 as usize, end);
+                    EntitySpan::hide(&mut skin.spans, mark.2 as usize, end);
                 }
             }
             out.truncate(len - 2);

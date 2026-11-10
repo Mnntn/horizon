@@ -70,4 +70,3 @@ impl EntitySpan {
         true
     }
 }
-

@@ -669,7 +669,7 @@ impl Game<'_> {
     pub(super) fn cushion_geometry(
         &self,
         camera: glam::DVec3,
-        out: &mut Vec<mod_render::render::Vertex>,
+        out: &mut Vec<horizon_client_render::render_geometry::Vertex>,
     ) {
         let Some(model) = self.cushion_model.as_ref() else {
             return;

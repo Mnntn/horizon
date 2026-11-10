@@ -95,23 +95,21 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | kind | mod crate's layer | Cargo.toml line | strand |
 |---|---|---|---|---|---|
-| horizon-client | horizon-mod-api | dev | platform | 171 | hooks |
-| horizon-client | horizon-mod-api | normal | platform | 24 | hooks |
+| horizon-client | horizon-mod-api | dev | platform | 170 | hooks |
+| horizon-client | horizon-mod-api | normal | platform | 23 | hooks |
 | horizon-client | horizon-mod-api-gen | build | engine | 14 | slots |
-| horizon-client | horizon-mod-api-macros | normal | engine | 25 | slots |
-| horizon-client | horizon-mod-package | normal | engine | 57 | loading |
-| horizon-client | horizon-mod-render | normal | platform | 23 | content_render |
-| horizon-client | horizon-mod-runtime | dev | engine | 170 | content_render |
+| horizon-client | horizon-mod-api-macros | normal | engine | 24 | slots |
+| horizon-client | horizon-mod-package | normal | engine | 56 | loading |
+| horizon-client | horizon-mod-runtime | dev | engine | 169 | content_render |
 | horizon-client | horizon-mod-runtime | normal | engine | 22 | content_render |
 | horizon-client-lib | horizon-mod-api | dev | platform | 131 | hooks |
 | horizon-client-lib | horizon-mod-api | normal | platform | 18 | hooks |
 | horizon-client-lib | horizon-mod-package | normal | engine | 50 | loading |
 | horizon-client-lib | horizon-mod-runtime | normal | engine | 17 | content_render |
-| horizon-client-render | horizon-mod-api | dev | platform | 93 | hooks |
-| horizon-client-render | horizon-mod-api | normal | platform | 15 | hooks |
-| horizon-client-render | horizon-mod-api-macros | normal | engine | 16 | slots |
-| horizon-client-render | horizon-mod-package | normal | engine | 26 | loading |
-| horizon-client-render | horizon-mod-render | normal | platform | 14 | content_render |
+| horizon-client-render | horizon-mod-api | dev | platform | 92 | hooks |
+| horizon-client-render | horizon-mod-api | normal | platform | 14 | hooks |
+| horizon-client-render | horizon-mod-api-macros | normal | engine | 15 | slots |
+| horizon-client-render | horizon-mod-package | normal | engine | 25 | loading |
 | horizon-client-render | horizon-mod-runtime | normal | engine | 13 | content_render |
 | horizon-items | horizon-mod-package | normal | engine | 10 | loading |
 | horizon-protocol | horizon-mod-runtime | normal | engine | 10 | content_render |
@@ -123,14 +121,12 @@ Counts are source references (one per `use` leaf or path), split into production
 | horizon-client | horizon-mod-api | 457 | 2648 | 4699 |
 | horizon-client | horizon-mod-api-gen | 7 | 8 | 0 |
 | horizon-client | horizon-mod-package | 23 | 77 | 79 |
-| horizon-client | horizon-mod-render | 10 | 18 | 3 |
 | horizon-client | horizon-mod-runtime | 61 | 65 | 167 |
 | horizon-client-lib | horizon-mod-api | 53 | 231 | 79 |
 | horizon-client-lib | horizon-mod-package | 9 | 46 | 47 |
 | horizon-client-lib | horizon-mod-runtime | 13 | 43 | 49 |
 | horizon-client-render | horizon-mod-api | 31 | 154 | 110 |
 | horizon-client-render | horizon-mod-package | 3 | 5 | 1 |
-| horizon-client-render | horizon-mod-render | 3 | 6 | 0 |
 | horizon-client-render | horizon-mod-runtime | 8 | 21 | 15 |
 | horizon-items | horizon-mod-package | 2 | 2 | 3 |
 | horizon-protocol | horizon-mod-runtime | 1 | 2 | 0 |
@@ -140,15 +136,15 @@ Counts are source references (one per `use` leaf or path), split into production
 | area | files | prod refs | test refs |
 |---|---|---|---|
 | game/modding | 157 | 1342 | 2136 |
-| game/native_hooks | 107 | 419 | 429 |
+| game/native_hooks | 107 | 419 | 427 |
 | client (non-game) | 73 | 381 | 250 |
-| game/mobs | 28 | 165 | 444 |
-| game/interface | 45 | 146 | 439 |
+| game/mobs | 28 | 162 | 444 |
+| game/interface | 44 | 134 | 438 |
 | game/network | 26 | 167 | 369 |
-| game/blocks | 28 | 107 | 318 |
+| game/blocks | 26 | 105 | 318 |
 | game/world | 23 | 81 | 249 |
-| horizon-client-render | 42 | 186 | 126 |
-| game/entities | 26 | 45 | 234 |
+| horizon-client-render | 40 | 180 | 126 |
+| game/entities | 25 | 44 | 234 |
 | game/items | 11 | 62 | 94 |
 | game/runtime | 8 | 28 | 117 |
 | game.rs | 1 | 132 | 0 |
@@ -165,7 +161,7 @@ Counts are source references (one per `use` leaf or path), split into production
 | host | 108 | 397 | 79 |
 | slots | 4 | 0 | 0 |
 | attachments | 166 | 293 | 50 |
-| content_render | 295 | 388 | 167 |
+| content_render | 271 | 385 | 167 |
 | hooks | 2516 | 3455 | 1392 |
 
 ### Engine files outside modding/ and native_hooks/: what they need of `mod_api`

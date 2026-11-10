@@ -109,7 +109,7 @@ impl UiResources {
                     horizon_client::gfx::panorama::Faces::load(root, root)
                 })
             });
-            let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
+            let mod_image = horizon_client_render::render_slots::world_drawn_hooked();
             let atlas = startup::time("ui.atlas", || {
                 HudAtlas::build_over_with_image(root, root, mod_image)
             });

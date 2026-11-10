@@ -5893,8 +5893,8 @@ pub(super) mod particle_count_tests {
         glowing: Vec<u8>,
         gpu: (usize, usize, u32),
         motion: Vec<(u32, u64)>,
-        spans: Vec<mod_render::render::EntitySpan>,
-        gpu_spans: Vec<mod_render::render::EntitySpan>,
+        spans: Vec<horizon_client_render::render_geometry::EntitySpan>,
+        gpu_spans: Vec<horizon_client_render::render_geometry::EntitySpan>,
         outlines: (usize, u32),
     }
     fn frame_geometry(frame: &super::super::Frame<'_>) -> FrameGeometry {

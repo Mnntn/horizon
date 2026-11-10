@@ -11,6 +11,10 @@ Raw frame functions are native escape hatches, not methods on `Hooks`. For examp
 internals injection at `horizon_mod_render::render::world_drawn` names its listener with
 `with`; use the current catalog hash and `kind = "head"`. The launcher supplies the
 checked raw listener signature, and the ordinary registry owns its priority and lifetime.
+The renderer owns the frame geometry and dispatch slots; the mod host installs adapters before
+startup. `mod_render::render::{Vertex, EntitySpan}` re-exports the engine's geometry without
+copying buffers. `RenderNeeds` requests are copied back into the engine's frame requirements;
+world and hand callbacks borrow the current GPU resources without allocating per frame.
 
 #### Teleport hooks
 

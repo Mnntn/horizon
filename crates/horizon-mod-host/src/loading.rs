@@ -22,6 +22,7 @@ pub fn main_with(
             std::process::exit(1);
         }
     };
+    mod_render::render::install();
     horizon_engine_slots::install_seal(mod_points::__private::seal);
     horizon_client::entry::start(
         native,

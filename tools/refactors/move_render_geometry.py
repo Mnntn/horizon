@@ -17,7 +17,8 @@ parser.add_argument('--verify')
 args = parser.parse_args()
 if args.verify:
     original = subprocess.check_output(['git', 'show', f'{args.verify}:{SOURCE}'], text=True)
-    assert Path(TARGET).read_text() == geometry(original)
+    # rustfmt removes the blank separator before the next source module.
+    assert Path(TARGET).read_text().removesuffix('\n') == geometry(original).removesuffix('\n\n')
 else:
     path = Path(SOURCE)
     original = path.read_text()

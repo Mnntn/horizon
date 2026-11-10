@@ -2,8 +2,8 @@
 //! `minecraft:moving_piston` block entities (drawn as nothing by the chunk
 //! mesher); this draws each moved block at its interpolated offset.
 use super::Game;
+use horizon_client_render::render_geometry::Vertex;
 use horizon_world::{piston_shape::MovingPistonState, registry::BlockStateId};
-use mod_render::render::Vertex;
 
 impl Game<'_> {
     /// `PistonHeadRenderer.extractRenderState` and `submit`.
