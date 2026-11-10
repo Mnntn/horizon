@@ -78,6 +78,13 @@ pub mod tests {
                         water_fog_color: None,
                         foliage_color: None,
                         grass_color: None,
+                        dry_foliage_color: None,
+                        ambient_particles: None,
+                        ambient_loop: None,
+                        ambient_additions: None,
+                        ambient_mood: None,
+                        background_music: None,
+                        music_volume: None,
                     },
                 };
                 assert_eq!(modifier.check(), Err(BiomeModifierError::InvalidValue));
