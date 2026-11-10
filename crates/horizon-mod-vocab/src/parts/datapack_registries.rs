@@ -44,7 +44,7 @@ impl DatapackRegistriesRegistrar for PartRegistrar {
         &mut self,
         path: &str,
         sync: DatapackRegistrySync,
-        fields: Vec<DatapackField>,
+        mut fields: Vec<DatapackField>,
     ) -> Result<(), DatapackRegistrationError> {
         let result = (|| {
             if crate::world::phase::LoadedMods::new()
@@ -66,6 +66,18 @@ impl DatapackRegistriesRegistrar for PartRegistrar {
                 return Err(DatapackRegistrationError::Duplicate);
             }
             check_schema(&fields)?;
+            for field in &mut fields {
+                if matches!(
+                    field.kind,
+                    crate::DatapackFieldKind::Identifier
+                        | crate::DatapackFieldKind::Reference { .. }
+                ) && let Some(crate::DatapackValue::Text(value)) = &mut field.default
+                {
+                    *value = crate::Identifier::parse(value)
+                        .map_err(|_| DatapackRegistrationError::InvalidDefault)?
+                        .to_string();
+                }
+            }
             self.datapack_registries.push(DatapackRegistryDeclaration {
                 mod_id: self.mod_id.to_owned(),
                 key,
@@ -163,5 +175,37 @@ mod tests {
             DatapackRegistryDeclaration::take(&mut Reader::new(&bytes)).unwrap(),
             declaration
         );
+    }
+}
+
+#[cfg(test)]
+mod default_tests {
+    use super::*;
+    #[test]
+    fn registered_identifier_defaults_match_explicit_values() {
+        for kind in [
+            crate::DatapackFieldKind::Identifier,
+            crate::DatapackFieldKind::Reference {
+                registry: "minecraft:item".into(),
+            },
+        ] {
+            let mut registrar = PartRegistrar::new("defaults");
+            registrar
+                .declare_datapack_registry(
+                    "entry",
+                    DatapackRegistrySync::default(),
+                    vec![DatapackField::with_default(
+                        "id",
+                        kind,
+                        crate::DatapackValue::Text("ice".into()),
+                    )],
+                )
+                .unwrap();
+            let declaration = &registrar.datapack_registries[0];
+            assert_eq!(
+                declaration.decode_entry("{}").unwrap(),
+                declaration.decode_entry(r#"{"id":"ice"}"#).unwrap()
+            );
+        }
     }
 }
