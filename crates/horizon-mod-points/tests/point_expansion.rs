@@ -183,7 +183,7 @@ mod mod_points {
 
     pub mod __private {
         use super::*;
-        pub use ::mod_points::__private::RawKind;
+        pub use ::mod_points::__private::{RawKind, cold};
 
         pub static POINTS: [AtomicBool; 14] = [const { AtomicBool::new(false) }; 14];
         /// The places a `replace` listener owns, as the registry's seal leaves them.
