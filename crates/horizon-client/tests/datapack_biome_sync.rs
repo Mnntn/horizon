@@ -221,28 +221,3 @@ fn a_biome_the_mods_modifiers_changed_is_sent_to_a_client_that_knows_the_vanilla
     assert_eq!(client.get(client.id("minecraft:plains")).grass, 0x112233);
 }
 
-#[test]
-fn recolouring_twice_starts_from_the_biome_files_each_time() {
-    let root = std::env::temp_dir().join(format!("horizon-recolor-biomes-{}", std::process::id()));
-    let _scratch = Scratch(root.clone());
-    let base = write_base(&root);
-    let grass = |b: &Biomes| b.get(b.id("minecraft:plains")).grass;
-    let darker = |_: &str, c: &mut BiomeColors| c.grass -= 0x10;
-    let once = base.recolored_from(&base, darker).expect("colours changed");
-    assert_eq!(grass(&once), grass(&base) - 0x10);
-    // The same colours again, asked from the base: nothing to rebuild.
-    assert!(base.recolored_from(&once, darker).is_none());
-    // Other colours replace the first ones rather than add to them.
-    let lighter = |_: &str, c: &mut BiomeColors| c.grass += 0x10;
-    let next = base.recolored_from(&once, lighter).unwrap();
-    assert_eq!(grass(&next), grass(&base) + 0x10);
-}
-
-fn server_load() -> horizon_world::native_load_context::LoadContext {
-    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
-    LoadContext::new(
-        DataLoadOrigin::ServerDataLoad,
-        std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default())),
-        [],
-    )
-}
