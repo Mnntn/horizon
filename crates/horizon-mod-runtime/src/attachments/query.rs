@@ -3,7 +3,7 @@ use std::{fmt, hash::Hash, slice, sync::Arc};
 
 use super::{
     AttachmentError, AttachmentType,
-    index::{AttachmentIndex, AttachmentOwner, AttachmentRow},
+    index::{AttachmentIndex, AttachmentOwner, AttachmentRow, AttachmentSnapshot},
 };
 
 // no wire: owned by the lower runtime crate, which cannot depend on mod_api's derive;
@@ -40,12 +40,12 @@ impl std::error::Error for AttachmentRowError {}
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct AttachmentBatch<H> {
-    rows: Option<Arc<Vec<AttachmentRow<H>>>>,
+    rows: Option<Arc<AttachmentSnapshot<H>>>,
 }
 
 impl<H> AttachmentBatch<H> {
     /// Wrap a captured index bucket without copying its contents.
-    pub fn new(rows: Arc<Vec<AttachmentRow<H>>>) -> Self {
+    pub fn new(rows: Arc<AttachmentSnapshot<H>>) -> Self {
         Self { rows: Some(rows) }
     }
 

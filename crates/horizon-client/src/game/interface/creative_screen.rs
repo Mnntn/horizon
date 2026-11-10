@@ -420,6 +420,9 @@ impl Game<'_> {
             let (tx, ty) = Creative::tab_position(t);
             if cx >= ox + tx && cx < ox + tx + 26.0 && cy >= oy + ty && cy < oy + ty + 32.0 {
                 select_creative_tab(&mut self.creative_screen, &mut self.inv_clicks, i);
+                // The tab's slots and page replace the previous tab's: the
+                // build reads the new ones from this click on.
+                self.build_screen();
                 self.refresh_saved_hotbars();
                 self.inv_drag = None;
                 self.last_inv_click = None;

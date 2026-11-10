@@ -74,7 +74,7 @@ impl BenchHost {
         }
         host
     }
-    fn raw(&self) -> Arc<Vec<runtime::index::AttachmentRow<AttachmentHolder>>> {
+    fn raw(&self) -> Arc<runtime::index::AttachmentSnapshot<AttachmentHolder>> {
         self.index
             .lock()
             .unwrap()

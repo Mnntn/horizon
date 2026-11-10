@@ -64,9 +64,9 @@ impl Game<'_> {
             .clone();
         match target {
             t @ (Target::Player | Target::Guest(_)) => self
-                .for_player(t, |g| g.apply_consume_effect(stack, &effect, None, false))
+                .for_player(t, |g| g.apply_consume_effect(stack, &effect, None))
                 .flatten(),
-            Target::Mob(_) => self.apply_consume_effect(stack, &effect, Some(living), false),
+            Target::Mob(_) => self.apply_consume_effect(stack, &effect, Some(living)),
             _ => None,
         }
     }

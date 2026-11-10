@@ -102,6 +102,7 @@ fn fixture() -> (Scratch, Assets, RenderAssets, MeshTables, Biomes) {
         pbr_size: 1,
         connected: Default::default(),
         fusion: Default::default(),
+        mod_animations: Default::default(),
         generation: 1,
     };
     let assets = Assets {

@@ -22,7 +22,7 @@ const VALUE: AttachmentType<i32> = AttachmentType {
 fn snapshot(
     game: &Game<'_>,
     dim: Dim,
-) -> Arc<Vec<horizon_mod_runtime::attachments::index::AttachmentRow<AttachmentHolder>>> {
+) -> Arc<horizon_mod_runtime::attachments::index::AttachmentSnapshot<AttachmentHolder>> {
     game.attachment_indexes[&dim]
         .lock()
         .unwrap()

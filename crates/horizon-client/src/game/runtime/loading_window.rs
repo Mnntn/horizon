@@ -363,6 +363,10 @@ pub(super) fn start_game<'a>(
         game.run_boat_authority_fixture(std::path::Path::new(&directory))?;
         return Ok(None);
     }
+    if let Ok(spec) = std::env::var("HORIZON_SCREEN_BUILD_FIXTURE") {
+        game.screen_build_fixture(&spec)?;
+        return Ok(None);
+    }
     if let Ok(spec) = std::env::var("HORIZON_DISPENSE_FIXTURE") {
         game.run_component_harness(integrated::ComponentHarness::Dispenser(spec))?;
         return Ok(None);

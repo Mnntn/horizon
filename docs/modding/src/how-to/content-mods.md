@@ -528,6 +528,21 @@ it. A world opened without the
 mod keeps the saved ones as they are, frozen in place. Not yet: a dispenser doesn't throw it, and a vanilla client on a
 server with it may be disconnected when one spawns.
 
+A code mod can launch a thrown type with
+`host.spawn_projectile_from_rotation(owner, &entity_type, &stack, offset, power, inaccuracy)`.
+This is the owner-based `Projectile.spawnProjectileFromRotation` operation, not a summon:
+ownership is set before shooting and the existing launch hook runs after insertion.
+It supports registered mod thrown types and vanilla snowballs, eggs, pearls, potions,
+experience bottles and wind charges. Spread uses the projectile's own random in x/y/z
+order, and known owner movement is inherited (vertical movement only when airborne).
+It does not consume an item, award use statistics or apply cooldowns; invalid parameters
+or unsupported types return `None` without spawning or drawing random values.
+The owner must be in the current level; a guest in another dimension is refused.
+The carried item count is one; the supplied stack is unchanged. A stack whose
+enchantments contain a nonempty `projectile_spawned` component is also refused:
+generic post-insertion enchantment effects are not implemented yet (tracked in #2670),
+so this operation never silently discards them.
+
 A living type copies a mob, `minecraft:zombie` or `minecraft:villager`, the way NeoForge's
 `EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla class. It has no `item` or `damage`. `attributes`
 sets default attribute values that differ from its template's (`EntityAttributeCreationEvent`), by attribute id, and

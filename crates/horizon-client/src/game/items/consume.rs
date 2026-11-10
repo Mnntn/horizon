@@ -97,7 +97,7 @@ impl Game<'_> {
         // the client's listener, particles and sounds above still run there.
         if self.is_logical_server() {
             for effect in &consumable.effects {
-                self.apply_consume_effect(stack, effect, None, true);
+                self.apply_consume_effect(stack, effect, None);
             }
         }
         let event = if consumable.animation == UseAnimation::Drink {

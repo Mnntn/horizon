@@ -119,7 +119,7 @@ impl Game<'_> {
         // read from the protector copy (the totem's clear-then-effects, or a
         // custom list; `death_protection={}` has none).
         for effect in self.death_effects(&protector) {
-            self.apply_consume_effect(&protector, &effect, None, true);
+            self.apply_consume_effect(&protector, &effect, None);
         }
         Some(Body {
             protector: Some(protector),

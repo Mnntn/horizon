@@ -96,7 +96,12 @@ impl crate::wire::Wire for AttachmentBatch {
         use horizon_core::nbt::{self, Limits, Tag};
         let rows: Vec<(AttachmentWriteToken, Vec<u8>)> = input.take()?;
         let mut result = Vec::with_capacity(rows.len());
+        let mut identities = std::collections::HashSet::with_capacity(rows.len());
         for (token, bytes) in rows {
+            let (holder, generation) = token.0.parts();
+            if !identities.insert((*holder, generation)) {
+                return Err(WireError::Invalid("duplicate attachment residency"));
+            }
             let (tag, consumed) = nbt::read_network(&bytes, Limits::default())
                 .map_err(|_| WireError::Invalid("invalid attachment NBT"))?;
             let Tag::Compound(saved) = tag else {
@@ -111,7 +116,9 @@ impl crate::wire::Wire for AttachmentBatch {
                     .into_row(Arc::new(runtime::AttachmentEntry::from_saved(saved))),
             );
         }
-        Ok(Self(runtime::AttachmentBatch::new(Arc::new(result))))
+        Ok(Self(runtime::AttachmentBatch::new(Arc::new(
+            runtime::index::AttachmentSnapshot::from_rows(result),
+        ))))
     }
 }
 
@@ -126,6 +133,21 @@ mod tests {
         copy_on_death: false,
         sync: false,
     };
+    #[test]
+    fn wire_attachment_batch_refuses_duplicate_residencies() {
+        use crate::wire::{Reader, WireError, Writer};
+        use horizon_core::nbt::{self, Compound, Limits, Tag};
+        let holder = AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(1), 42));
+        let token = AttachmentWriteToken(index::AttachmentOwner::from_parts(holder, 7));
+        let bytes = nbt::write_network(&Tag::Compound(Compound::new()), Limits::default()).unwrap();
+        let mut out = Writer::new();
+        out.put(&vec![(token.clone(), bytes.clone()), (token, bytes)]);
+        assert!(matches!(
+            Reader::new(out.bytes()).take::<AttachmentBatch>(),
+            Err(WireError::Invalid("duplicate attachment residency"))
+        ));
+    }
+
     #[test]
     fn wire_attachment_rows_and_stale_tokens() {
         use crate::wire::{Reader, Writer};

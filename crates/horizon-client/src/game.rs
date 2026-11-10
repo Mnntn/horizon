@@ -2619,8 +2619,6 @@ struct Game<'a> {
     gpu_passes: bool,
     screen: Screen,
     screen_state: screen_build::ScreenState,
-    /// The layout the last frame drew the inventory's effect panels with.
-    effects_layout: std::cell::Cell<Option<horizon_client::inventory_effects::EffectsLayout>>,
     window: Option<Arc<Window>>,
     /// What `window_resize` last reported: the physical size and the GUI settings behind the scaled size.
     resize_state: Option<ResizeState>,
@@ -5121,25 +5119,7 @@ impl Game<'_> {
         }
     }
     fn tick_items(&mut self) {
-        // EntityTickEvent.Pre for the items about to tick, and the Post after them.
-        let mut round = self.native_tick_round();
-        if round.listening() {
-            let ticking = self.entity_ticking_area();
-            let merging = self.remote.is_none();
-            let mut i = 0;
-            while let Some(item) = self.dropped.get(i) {
-                let (id, x, z) = (
-                    item.id,
-                    item.position.x.floor() as i32,
-                    item.position.z.floor() as i32,
-                );
-                if !(merging && self.joined_during_entity_pass(id)) && ticking(x, z) {
-                    let kind = native_ticks::TickKind::Fixed("minecraft:item");
-                    self.native_tick_pre_batch(&mut round, id, kind);
-                }
-                i += 1;
-            }
-        }
+        let mut round = self.item_update_round();
         self.tick_dropped_items(&mut round);
         self.drain_entity_inside();
         self.native_tick_post_batch(round);
@@ -5214,6 +5194,7 @@ impl Game<'_> {
                 items[i].position.x.floor() as i32,
                 items[i].position.z.floor() as i32,
             ) || round.canceled(items[i].id)
+                || round.halted(items[i].id)
             {
                 continue;
             }
@@ -7979,7 +7960,6 @@ impl Game<'_> {
         consumed: &horizon_client::items::ItemStack,
         effect: &horizon_client::items::ConsumeEffect,
         mob: Option<mod_api::LivingRef>,
-        allow_native: bool,
     ) -> Option<bool> {
         use horizon_client::items::ConsumeEffect;
         Some(match effect {
@@ -8079,11 +8059,7 @@ impl Game<'_> {
                 true
             }
             ConsumeEffect::Native { kind, data } => {
-                if !allow_native {
-                    return None;
-                }
-                self.native_consume_effect(kind, data);
-                return None;
+                consume_effect_dispatch::dispatch(kind, || self.native_consume_effect(kind, data))
             }
         })
     }
@@ -16471,7 +16447,6 @@ impl<'a> Game<'a> {
             gpu_passes: false,
             screen: Screen::Playing,
             screen_state: screen_build::ScreenState::default(),
-            effects_layout: std::cell::Cell::new(None),
             window: None,
             resize_state: None,
             renderer: None,

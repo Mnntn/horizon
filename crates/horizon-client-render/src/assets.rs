@@ -103,6 +103,8 @@ pub struct RenderAssets {
     pub connected: crate::connected::ConnectedTextures,
     /// Fusion connected textures (empty without Fusion's connecting textures and models).
     pub fusion: crate::fusion::FusionTextures,
+    /// The keyframe animations mods and packs ship (`neoforge/animations/entity`), by id.
+    pub mod_animations: crate::mod_animations::Animations,
     /// Counts up on every successful resource load, including model-only changes.
     /// Only publishing this store invalidates the previous store's model handles and sprites.
     pub generation: u64,
@@ -118,6 +120,11 @@ impl RenderAssets {
             .standalone_slot(&id.to_string())
             .ok_or(mod_api::ModelError::UnknownModel)?;
         Ok(mod_api::__private::built::model_ref(self.generation, slot))
+    }
+    /// The keyframe animation `id` of this published store
+    /// (`assets/<namespace>/neoforge/animations/entity/<path>.json`).
+    pub fn animation(&self, id: &mod_api::Identifier) -> Option<mod_api::AnimationHolder> {
+        self.mod_animations.get(id).cloned()
     }
 
     /// Validate a handle once at consumption, before appending any geometry.
@@ -470,6 +477,7 @@ impl RenderAssets {
             pbr_size: sprites.pbr_size,
             connected,
             fusion,
+            mod_animations: crate::mod_animations::Animations::load(root.source()),
             generation: GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
         })
     }

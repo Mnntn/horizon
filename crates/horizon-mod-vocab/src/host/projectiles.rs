@@ -4,6 +4,30 @@ use crate::*;
 /// The server host's methods of the `projectiles` area, implemented by the game and reached through [`ServerHost`].
 #[horizon_mod_api_macros::host_area]
 pub trait ProjectilesServerHost {
+    /// Side: server. `Projectile.spawnProjectileFromRotation` for a thrown item
+    /// projectile: snowball, egg, pearl, potion, experience bottle, wind charge,
+    /// or a registered mod thrown type. Constructs at the owner's eyes minus
+    /// 0.1F blocks (wind charges use eye height directly), sets ownership before
+    /// shooting, inherits known movement
+    /// (vertical only while airborne), adds to the level and fires projectile_launch.
+    /// Spread draws x, y, z triangular noise from the new projectile's own random.
+    /// Does not consume the stack or apply item-use cooldowns or statistics.
+    /// None for an unavailable owner or one in another level, unsupported type,
+    /// invalid stack or non-finite
+    /// shot parameter. Also refuses a stack whose enchantments carry a nonempty
+    /// `projectile_spawned` component: the engine does not yet implement those
+    /// generic post-insertion effects. No random is drawn and nothing spawns on
+    /// those refusals. The original stack is unchanged; carried count is one.
+    #[access(WorldOnly)]
+    fn spawn_projectile_from_rotation(
+        &mut self,
+        owner: LivingRef,
+        entity_type: &Identifier,
+        stack: &ItemStack,
+        offset: f32,
+        power: f32,
+        inaccuracy: f32,
+    ) -> Option<ProjectileRef>;
     /// Side: server.
     /// Narrows an entity to a projectile: one in the projectile list, a trident
     /// a player threw or a firework rocket. None for another kind, a stale

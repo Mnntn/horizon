@@ -36,7 +36,9 @@ pub trait Hooks {
     /// under 120) and `horizontal_offset` shifts the stack right (negative
     /// left). Set `canceled` and the panels are not drawn: draw your own with
     /// `native_screen_render_post`. Once a frame while the screen draws them,
-    /// on the window only. The exclusion areas follow this choice a frame late.
+    /// on the window only; if the effects space changes within a frame (the
+    /// recipe book opening between two layout builds), it is asked again for
+    /// the new space. The exclusion areas follow this choice in the same frame.
     #[hook(
         side = "client",
         contract = "cancel",

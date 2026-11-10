@@ -205,6 +205,20 @@ pub trait RenderAssets {
             crate::world::phase::LoadAccess::PublishedResources,
         )
     }
+    /// Side: client.
+    /// Published asset/data read: available in Setup, Reloading and World.
+    /// The keyframe animation `id`, from `assets/<namespace>/neoforge/animations/entity/<path>.json`
+    /// in the mod's or a pack's resources (NeoForge's `Model.getAnimation`), as the latest resource
+    /// load read it; `None` when no file gives it or the file failed to load. Get and
+    /// [`AnimationHolder::bake`] it once in `client_setup` and again in `client_resources_reloaded`,
+    /// not each frame.
+    fn animation(&self, id: &Identifier) -> Option<AnimationHolder> {
+        crate::world::phase::unprovided(
+            "RenderAssets::animation",
+            "animation",
+            crate::world::phase::LoadAccess::PublishedResources,
+        )
+    }
 }
 
 /// Client-side persistent copies of resolved models.

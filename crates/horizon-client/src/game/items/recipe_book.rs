@@ -682,6 +682,9 @@ impl Game<'_> {
         if inside(cursor, bx, by, 20.0, 18.0) {
             let open = !self.book_open(book_type);
             self.level.recipe_book.open[book_type.index()] = open;
+            // The open book moves the menu beside it: the build follows now,
+            // so this click's hit tests use the new place.
+            self.build_screen();
             self.send_book_settings(book_type);
             if !open {
                 self.recipe_ui.overlay = None;
@@ -1118,6 +1121,7 @@ impl Game<'_> {
             return;
         }
         self.level.recipe_book.open[book_type.index()] = false;
+        self.build_screen();
         self.send_book_settings(book_type);
         self.recipe_ui.overlay = None;
     }
@@ -1396,6 +1400,7 @@ impl Game<'_> {
             self.level.recipe_book.open[i] = open;
             self.level.recipe_book.filtering[i] = filtering;
         }
+        self.build_screen();
     }
     /// ClientboundPlaceGhostRecipePacket: the recipe last placed, faded into
     /// the open menu's grid.

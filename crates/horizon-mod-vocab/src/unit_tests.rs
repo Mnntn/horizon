@@ -582,6 +582,77 @@ fn an_inventory_tick_reaches_only_the_parts_of_the_ticked_item() {
 }
 
 #[test]
+fn an_item_update_reaches_only_the_parts_of_the_ticked_item_and_cancels_for_its_own() {
+    #[derive(Clone)]
+    struct Updated(Arc<Mutex<Vec<EntityRef>>>, bool);
+    #[mod_api::horizon_part]
+    impl ItemPart for Updated {
+        fn on_entity_item_update(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut OnEntityItemUpdateEvent<'_>,
+        ) -> Flow {
+            self.0.lock().unwrap().push(event.item.entity());
+            if self.1 { Flow::Cancel } else { Flow::Continue }
+        }
+    }
+    struct Both(Updated, Updated);
+    #[mod_api::__subscriptions]
+    impl Hooks for Both {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+            let (stick, stone) = (r.item_key("minecraft:stick"), r.item_key("minecraft:stone"));
+            r.item_part(stick, self.0.clone());
+            r.item_part(stone, self.1.clone());
+        }
+    }
+    // Another test installs parts with tags: a dispatch must run on a game thread.
+    mark_game_thread();
+    let sticks = Updated(Default::default(), true);
+    let stones = Updated(Default::default(), false);
+    let mods: Mods = vec![ModEntry::new(
+        "updaters",
+        Box::new(Both(sticks.clone(), stones.clone())),
+    )]
+    .into();
+    install(mods.clone());
+    install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    let mut host = FakeHost::new();
+    let stone = crate::parts::tests::stack("minecraft:stone", 1, 0);
+    let diamond = crate::parts::tests::stack("minecraft:diamond", 1, 0);
+    let entity = |id| EntityRef::new(WorldEpoch::new(1), id);
+    let mut update = |stack: &ItemStack, id| {
+        let mut canceled = false;
+        dispatch_on_entity_item_update(
+            &mut host,
+            crate::__private::OnEntityItemUpdateCall {
+                stack,
+                item: ItemEntityRef::new(entity(id)),
+                canceled: &mut canceled,
+            },
+        );
+        canceled
+    };
+    assert!(update(&stick(), 11));
+    assert!(!update(&stone, 12));
+    assert!(!update(&diamond, 13));
+    assert!(update(&stick(), 14));
+    assert_eq!(*sticks.0.lock().unwrap(), [entity(11), entity(14)]);
+    assert_eq!(*stones.0.lock().unwrap(), [entity(12)]);
+    assert!(crate::__private::item_listens(
+        HookId::OnEntityItemUpdate,
+        "minecraft:stick"
+    ));
+    assert!(!crate::__private::item_listens(
+        HookId::OnEntityItemUpdate,
+        "minecraft:diamond"
+    ));
+    assert!(!crate::__private::item_listens(
+        HookId::InventoryTick,
+        "minecraft:diamond"
+    ));
+}
+
+#[test]
 #[should_panic(expected = "Commands::run_command")]
 fn an_unexpected_host_call_names_the_method() {
     /// A mod's own double, with only the services the hook reaches.

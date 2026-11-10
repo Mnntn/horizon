@@ -53,6 +53,7 @@ pub(super) fn synchronous_startup(options: &Options) -> bool {
         || options.benchmark.is_some()
         || options.control.is_some()
         || !options.execution_role.is_client()
+        || std::env::var_os("HORIZON_SCREEN_BUILD_FIXTURE").is_some()
         || std::env::var_os("HORIZON_DISPENSE_FIXTURE").is_some()
         || std::env::var_os("HORIZON_SCULK_FIXTURE").is_some()
         || std::env::var_os("HORIZON_COMMAND_SCRIPT").is_some()

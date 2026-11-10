@@ -1029,7 +1029,7 @@ mod tests {
     fn rows(
         index: &Arc<Mutex<index::AttachmentIndex<u32>>>,
         key: &AttachmentType<i32>,
-    ) -> Arc<Vec<index::AttachmentRow<u32>>> {
+    ) -> Arc<index::AttachmentSnapshot<u32>> {
         index
             .lock()
             .unwrap()

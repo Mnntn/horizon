@@ -3,6 +3,9 @@
 //! snowballs, eggs, ender pearls, gravity 0.03) and fireballs
 //! (`AbstractHurtingProjectile`: no gravity, 0.1 acceleration, 0.95 inertia).
 //! The game applies the effects of a hit.
+#[cfg(test)]
+#[path = "projectile_rotation_tests.rs"]
+mod projectile_rotation_tests;
 use crate::entity_rules::EntityRules;
 use crate::mobs::Who;
 use horizon_core::{
@@ -912,16 +915,15 @@ impl Projectile {
         speed: f32,
         uncertainty: f32,
     ) {
-        let len = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2])
-            .sqrt()
-            .max(1.0e-9);
+        let dir = Vec3::new(dir[0], dir[1], dir[2]).normalize();
         let spread = 0.017_227_5 * f64::from(uncertainty);
         let v = [
-            (dir[0] / len + random.triangle(0.0, spread)) * f64::from(speed),
-            (dir[1] / len + random.triangle(0.0, spread)) * f64::from(speed),
-            (dir[2] / len + random.triangle(0.0, spread)) * f64::from(speed),
+            (dir.x + random.triangle(0.0, spread)) * f64::from(speed),
+            (dir.y + random.triangle(0.0, spread)) * f64::from(speed),
+            (dir.z + random.triangle(0.0, spread)) * f64::from(speed),
         ];
         self.velocity = Vec3::new(v[0], v[1], v[2]);
+        self.needs_sync = true;
         self.update_rotation();
     }
     /// Projectile.shootFromRotation for player throws.
@@ -936,15 +938,16 @@ impl Projectile {
         source_velocity: Vec3,
         source_on_ground: bool,
     ) {
+        use horizon_core::geometry::trig::{DEG_TO_RAD, cos, sin};
         let (p, y, o) = (
-            pitch.to_radians(),
-            yaw.to_radians(),
-            (pitch + offset).to_radians(),
+            f64::from(pitch * DEG_TO_RAD),
+            f64::from(yaw * DEG_TO_RAD),
+            f64::from((pitch + offset) * DEG_TO_RAD),
         );
         let dir = [
-            f64::from(-y.sin() * p.cos()),
-            f64::from(-o.sin()),
-            f64::from(y.cos() * p.cos()),
+            f64::from(-sin(y) * cos(p)),
+            f64::from(-sin(o)),
+            f64::from(cos(y) * cos(p)),
         ];
         self.shoot(random, dir, speed, uncertainty);
         self.velocity = Vec3::new(
@@ -991,8 +994,10 @@ impl Projectile {
     fn update_rotation(&mut self) {
         let v = self.velocity;
         let sd = (v.x * v.x + v.z * v.z).sqrt();
-        self.yaw = v.x.atan2(v.z).to_degrees() as f32;
-        self.pitch = v.y.atan2(sd).to_degrees() as f32;
+        use horizon_core::geometry::trig::atan2;
+        // Projectile.shoot uses Mth.atan2 and widened float degree constants.
+        self.yaw = (atan2(v.x, v.z) * 180.0 / f64::from(std::f32::consts::PI)) as f32;
+        self.pitch = (atan2(v.y, sd) * 180.0 / f64::from(std::f32::consts::PI)) as f32;
         // `Projectile.shoot` ends with `yRotO = getYRot(); xRotO = getXRot()`:
         // a freshly shot projectile interpolates from the rotation it was
         // aimed along, not from where it was created.

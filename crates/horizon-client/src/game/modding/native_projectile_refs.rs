@@ -96,7 +96,7 @@ impl Game<'_> {
 
     /// Resolves hit credit, persistent identity, and a separate non-living
     /// vehicle identity for collision exclusion. None for a stale owner or hook.
-    fn native_projectile_owner_fields(
+    pub(super) fn native_projectile_owner_fields(
         &mut self,
         owner: Option<EntityRef>,
     ) -> Option<(OwnerFields, Option<u32>)> {

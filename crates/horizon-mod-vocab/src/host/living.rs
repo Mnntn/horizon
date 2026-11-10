@@ -318,6 +318,11 @@ pub trait LivingClientBackend {
 pub trait LivingBackendMut {
     /// Side: server.
     /// Apply one loaded consumable effect without consuming the item.
+    /// Mod-defined kinds enter the normal consume_effect hook: Some(true) means
+    /// dispatch was entered, not that a listener changed game state. Reapplying
+    /// the same kind from its own handler on this call stack returns Some(false)
+    /// without recursing; other kinds dispatch normally. None means an unavailable
+    /// item/index/target or an unsupported vanilla effect for that target.
     #[access(WorldOnly)]
     fn living_apply_consume_effect(
         &mut self,

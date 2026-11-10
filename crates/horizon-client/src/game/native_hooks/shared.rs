@@ -923,11 +923,17 @@ impl Game<'_> {
     /// drawn this frame, which `ScreenView.id` comes from. Borrowed:
     /// nothing is copied per frame.
     pub(super) fn screen_view(&self, batch: &HudBatch, screen: Screen) -> ScreenView<'_> {
+        self.screen_view_at(screen, self.screen_rect(batch, screen))
+    }
+    /// `screen_view` with the panel `rect` the caller is laying out: the
+    /// container build tells a mod the panel it is about to draw, not the one
+    /// the previous frame drew.
+    pub(super) fn screen_view_at(&self, screen: Screen, rect: [f32; 4]) -> ScreenView<'_> {
         ScreenView::from(mod_api::__private::built::ScreenView {
             id: screen.id(),
             menu: self.remote_menu_type().filter(|m| !m.is_empty()),
             title: self.remote.as_ref().and_then(|r| r.menu_title_snapshot()),
-            rect: self.screen_rect(batch, screen),
+            rect,
             slots: self.slot_count(),
             mouse: self.cursor(),
             partial_tick: self.clock.fraction() as f32,
@@ -2297,32 +2303,16 @@ impl Game<'_> {
         let size = self.window.as_ref()?.inner_size();
         Some([size.width, size.height])
     }
-    /// The areas the game itself draws beside the open screen's window.
+    /// The areas the game itself draws beside the open screen's window: the
+    /// container build's, or the frame's own arithmetic with no build yet.
     fn screen_own_exclusion(&self, batch: &HudBatch) -> Vec<[f32; 4]> {
-        let mut areas = Vec::new();
-        match self.screen {
-            Screen::Creative => {
-                let image = self.container_image(batch);
-                let (x, y, w, h) = (
-                    image.left as f32,
-                    image.top as f32,
-                    image.width as f32,
-                    image.height as f32,
-                );
-                areas.push([x, y - Creative::TAB_ROW_DEPTH, w, Creative::TAB_ROW_DEPTH]);
-                areas.push([x, y + h, w, Creative::TAB_ROW_DEPTH]);
-                areas.extend(self.inventory_effects_rect(batch, [x, y], w));
-            }
-            Screen::Inventory if self.title.is_none() => {
-                areas.extend(self.recipe_book_rect(batch));
-                if self.container.is_none() && self.craft_size == 2 && !self.mount_active() {
-                    let (x, y) = self.inventory_origin(batch);
-                    areas.extend(self.inventory_effects_rect(batch, [x, y], 176.0));
-                }
-            }
-            _ => {}
+        if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
+            return Vec::new();
         }
-        areas
+        match self.built_container(batch) {
+            Some(layout) => layout.exclusion(),
+            None => self.container_layout(batch).exclusion(),
+        }
     }
     /// The player, in a world.
     pub(super) fn native_player(&self) -> Option<NativePlayer> {

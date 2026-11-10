@@ -136,6 +136,7 @@ impl Game<'_> {
             {
                 if let Some(tab) = self.creative_screen.search_tab() {
                     select_creative_tab(&mut self.creative_screen, &mut self.inv_clicks, tab);
+                    self.build_screen();
                     self.creative_ignore_text = true;
                 }
             }

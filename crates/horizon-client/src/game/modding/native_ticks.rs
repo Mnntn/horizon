@@ -31,12 +31,23 @@ pub(super) struct TickRound {
     ticking: Vec<(u32, TickKind)>,
     /// The entities a Pre canceled.
     canceled: Vec<u32>,
+    /// The items whose part ended their tick (`on_entity_item_update`): they are not
+    /// canceled, so they still hear their Post.
+    halted: Vec<u32>,
 }
 
 impl TickRound {
     /// Whether a mod canceled the tick of entity `id`.
     pub(super) fn canceled(&self, id: u32) -> bool {
         !self.canceled.is_empty() && self.canceled.contains(&id)
+    }
+    /// Whether a part ended the tick of item `id` (`on_entity_item_update`).
+    pub(super) fn halted(&self, id: u32) -> bool {
+        !self.halted.is_empty() && self.halted.contains(&id)
+    }
+    /// A part ended the tick of item `id`.
+    pub(super) fn halt(&mut self, id: u32) {
+        self.halted.push(id);
     }
     /// Whether the mods hear this round.
     pub(super) fn listening(&self) -> bool {
@@ -70,6 +81,7 @@ impl Game<'_> {
                 Vec::new()
             },
             canceled: Vec::new(),
+            halted: Vec::new(),
         }
     }
 

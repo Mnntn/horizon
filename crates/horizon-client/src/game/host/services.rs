@@ -91,4 +91,11 @@ impl RenderAssets for Game<'_> {
         );
         self.native_model(id)
     }
+    fn animation(&self, id: &Identifier) -> Option<AnimationHolder> {
+        mod_api::__private::check_access(
+            "animation",
+            mod_api::__private::LoadAccess::PublishedResources,
+        );
+        self.pack.render.animation(id)
+    }
 }

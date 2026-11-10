@@ -33,7 +33,7 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `IBlockExtension` | 60 | 6 | 21 | 33 | 0 |
 | `IBlockStateExtension` | 57 | 5 | 20 | 32 | 0 |
-| `IItemExtension` | 46 | 7 | 16 | 23 | 0 |
+| `IItemExtension` | 46 | 8 | 16 | 22 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
 | `IBlockEntityExtension` | 9 | 1 | 3 | 4 | 1 |
