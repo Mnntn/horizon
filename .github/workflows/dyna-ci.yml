@@ -202,13 +202,13 @@ jobs:
       - name: Check Dyna dependencies (install fallback without root)
         if: steps.rust.outputs.required != 'false' && env.RUNNER_KIND == 'dyna'
         run: bash tools/ci/dyna_ci_deps.sh
-      - name: Install Rust toolchain and the ALSA and udev headers the client links against
+      - name: Install Rust toolchain and the runner image's packages
         if: steps.rust.outputs.required != 'false'
         env:
           HOSTED: ${{ env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat' }}
         run: |
           if [ "$HOSTED" = true ]; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends $(grep -v '^#' tools/ci/runner-packages.txt)
           else
             if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
               curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
@@ -309,6 +309,9 @@ jobs:
     env:
       VK_ICD_FILENAMES: /nonexistent/no-vulkan-in-verify.json
       VK_DRIVER_FILES: /nonexistent/no-vulkan-in-verify.json
+      # With Vulkan hidden, a runner with Mesa's GL software adapter (boat's image) would still run the GPU tests,
+      # on GL, and fail (#2841); Vulkan only leaves every runner with no adapter, so GPU tests skip here everywhere.
+      WGPU_BACKEND: vulkan
       JOBS: ${{ (needs.changes.outputs.self_hosted == 'true' || startsWith(needs.changes.outputs.hosted_label, 'boat')) && '-j4' || '' }}
       RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
@@ -356,15 +359,14 @@ jobs:
       - name: Check Dyna dependencies (install fallback without root)
         if: steps.rust.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
-      - name: Install Rust toolchain and the ALSA and udev headers the client links against, and Xvfb
+      - name: Install Rust toolchain and the runner image's packages
         if: steps.rust.outputs.required != 'false'
         env:
           HOSTED: ${{ env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat' }}
           DYNA: ${{ needs.changes.outputs.self_hosted }}
-        # Xvfb: GitHub's image has it, boat's does not; test_ci_xvfb's real-display tests need it.
         run: |
           if [ "$HOSTED" = true ]; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev xvfb
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends $(grep -v '^#' tools/ci/runner-packages.txt)
           elif [ "$DYNA" = true ]; then
             if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
               curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal

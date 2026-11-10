@@ -409,3 +409,44 @@ class RustupRetryTests(unittest.TestCase):
         status, calls = self.run_script(failures=10)
         self.assertNotEqual(status, 0)
         self.assertEqual(len(calls), 4)
+
+
+class RunnerPackagesTests(unittest.TestCase):
+    def test_hosted_steps_install_the_image_list_and_the_fallback_stays_within_it(self):
+        root = Path(__file__).parents[1]
+        listed = [line for line in (root / "tools/ci/runner-packages.txt").read_text().splitlines() if not line.startswith("#")]
+        self.assertEqual(len(listed), len(set(listed)))
+        workflow = (root / ".github/workflows/dyna-ci.yml").read_text()
+        self.assertEqual(workflow.count("$(grep -v '^#' tools/ci/runner-packages.txt)"), 2)
+        deps = (root / "tools/ci/dyna_ci_deps.sh").read_text()
+        fallback = deps.split("packages=(", 1)[1].split(")", 1)[0].split()
+        self.assertTrue(fallback)
+        self.assertLessEqual(set(fallback), set(listed))
+
+    def test_the_image_check_fails_on_any_difference(self):
+        spec = importlib.util.spec_from_file_location("check_runner_packages", Path(__file__).parents[1] / "tools/ci/check_runner_packages.py")
+        check = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(check)
+        image = ("FROM ${DYNA_CI_BASE}\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n"
+                 "    xvfb xauth x11-xkb-utils xkb-data pkg-config libasound2-dev libudev-dev libxkbcommon-x11-dev \\\n"
+                 "    libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libxcursor1 libxi6 libxrandr2 \\\n"
+                 "    && rm -rf /var/lib/apt/lists/*\n")
+        listed = check.LIST.read_text()
+        with tempfile.TemporaryDirectory() as directory:
+            containerfile, listing = Path(directory) / "Containerfile", Path(directory) / "packages.txt"
+
+            def outcome(image_text, list_text):
+                containerfile.write_text(image_text)
+                listing.write_text(list_text)
+                with patch.object(sys, "argv", ["check", str(containerfile)]), patch("builtins.print"):
+                    try:
+                        check.main(listing)
+                    except SystemExit as failure:
+                        return str(failure)
+                return None
+            self.assertIsNone(outcome(image, listed))
+            for dropped in ("xauth", "x11-xkb-utils", "xkb-data"):
+                self.assertIn(f"lacks: {dropped}", outcome(image, listed.replace(f"\n{dropped}\n", "\n")))
+            self.assertIn("lacks: extra-package", outcome(image.replace("libxrandr2", "libxrandr2 extra-package"), listed))
+            self.assertIn("beyond the image: mesa-vulkan-drivers", outcome(image, listed + "mesa-vulkan-drivers\n"))
+            self.assertIn("no apt-get install", outcome("FROM base\n", listed))
