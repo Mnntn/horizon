@@ -203,7 +203,7 @@ Outside the host areas, 2426 `mod_api` references are in test code; 227 of them 
 
 |  | files | lines |
 |---|---|---|
-| all | 3 | 1085 |
+| all | 2 | 1048 |
 | pure (no generated include, unsafe, process state or non-core crate path) | 0 | 0 |
 | includes generator output (OUT_DIR) | 1 |  |
 | `unsafe` | 1 | 45 |
