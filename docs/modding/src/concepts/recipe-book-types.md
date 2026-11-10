@@ -272,6 +272,28 @@ view and coalesces a retry after one second; a busy response schedules the next
 retry, and a successful authoritative snapshot cancels it. This bounds response
 amplification without leaving a lost resnapshot or pending UI intent unresolved.
 
+## Toggle layout and large books
+
+`Screen.recipe_book_toggle` optionally reserves a 20 × 18 GUI-pixel toggle at
+an `[x, y]` offset from the menu origin. Like vanilla's screen-specific button
+positions, this is space the screen author must keep clear of slots and labels.
+Both native and wasm declarations carry the same optional value over Wire.
+
+Without an anchor, the client tries an external right, left, then above-menu
+gutter, rejecting positions covered by the overlay panel. Menus wider than 176
+GUI pixels, windows narrower than 379 GUI pixels, or windows narrower than the
+menu width plus 202 GUI pixels use overlay mode instead of shifting slots. If
+the toggle does not fit in the viewport in the closed layout or in the open
+layout, the book is refused with a diagnostic identifying the mod block and menu.
+The diagnostic requests `Screen.recipe_book_toggle` when absent, or reports an
+anchored toggle outside the viewport when the declared anchor does not fit. The menu still opens unchanged; the
+engine never clamps a toggle onto mod slots or clips the menu to make room.
+
+The client caches resolved result/search metadata for the screen binding.
+Stock changes re-evaluate craftability and filtering, but only the selected
+page's twenty recipes materialize ingredient previews. Search still considers
+the entire declared book, not just the visible page.
+
 ## Menu-owned destination roles
 
 During shared registration, `r.menu_recipe_book(menu, &book, recipe_type, layout)`

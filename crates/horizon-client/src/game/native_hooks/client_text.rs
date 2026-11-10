@@ -1,11 +1,17 @@
 use super::*;
 impl Game<'_> {
-    pub(in crate::game) fn text_string(&self, text: &horizon_client::text::Text) -> String {
-        text.plain()
+    pub(in crate::game) fn text_string(
+        &self,
+        text: &horizon_client::text::Text,
+    ) -> Result<String, mod_api::TextFormError> {
+        Ok(text.plain())
     }
 
-    pub(in crate::game) fn text_width(&self, text: &horizon_client::text::Text) -> i32 {
-        self.gui.atlas.font.width_text(text) as i32
+    pub(in crate::game) fn text_width(
+        &self,
+        text: &horizon_client::text::Text,
+    ) -> Result<i32, mod_api::TextFormError> {
+        Ok(self.gui.atlas.font.width_text(text) as i32)
     }
 
     pub(in crate::game) fn text_split(

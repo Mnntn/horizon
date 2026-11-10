@@ -690,7 +690,7 @@ impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLeve
         let Ok(state) = state.try_into_engine(&()) else {
             return false;
         };
-        let Ok(options) = options.try_into_engine(&()) else {
+        let Ok(options) = options.try_into_engine(self.level.items) else {
             return false;
         };
         self.level

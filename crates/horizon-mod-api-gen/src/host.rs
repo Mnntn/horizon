@@ -466,13 +466,17 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     }
                 } else if text_result {
                     // Writes with converted Text arguments call an infallible engine
-                    // body. A read returning an API-owned aggregate already converts
-                    // its fields in the backend and therefore already returns Result.
+                    // body. Read backends return Result so converting API-owned
+                    // aggregate fields can refuse without losing a boundary error.
                     let text_input =
                         entry.sig.inputs.iter().any(
                             |arg| matches!(arg, syn::FnArg::Typed(arg) if text_value(&arg.ty)),
                         );
-                    if text_input {
+                    let read = entry
+                        .sig
+                        .receiver()
+                        .is_some_and(|receiver| receiver.mutability.is_none());
+                    if text_input && !read {
                         format!("Ok({call})")
                     } else {
                         call
@@ -643,7 +647,7 @@ fn boundary_arguments(
         };
         let value = if contains_value(&arg.ty, &["ParticleOptions"]) {
             format!(
-                "match {name}.try_into_engine(&()) {{ Ok(value) => value, Err(_) => return Default::default() }}"
+                "match {name}.try_into_engine(self.items()) {{ Ok(value) => value, Err(_) => return Default::default() }}"
             )
         } else if text || checked_write {
             format!("{conversion}?")

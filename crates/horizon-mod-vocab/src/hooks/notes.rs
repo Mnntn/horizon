@@ -2780,8 +2780,8 @@ registration path.
   Slot clicks keep their `SlotClicked` numbering: inputs, then results.
 
 - `GameLevel::native_send_particles` on authoritative servers. It sends supported
-  vanilla particles to nearby players. Block particles require a valid block state. Item, trail and
-  vibration particles are not supported by the current dispatch. Count zero sends one directional
+  vanilla particles to nearby players. Block particles require a valid block state; item particles
+  require a validated stack. Trail and vibration remain unsupported. Count zero sends one directional
   particle. The return value says whether the call was accepted, not whether any player received it.
 
 - Authoritative world lifecycle events through `native_world_lifecycle`: open failed, final close and

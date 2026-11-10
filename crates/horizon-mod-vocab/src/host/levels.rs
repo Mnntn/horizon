@@ -910,7 +910,8 @@ pub trait LevelsBackendMut {
     /// within 32 blocks, as `ServerLevel.sendParticles` does: each offset is
     /// a Gaussian times `spread`, and `speed` scales their motion (a zero
     /// count sends one particle moving along `spread`). Block particle types
-    /// need `state`; item, trail and vibration particles aren't supported.
+    /// need `state`; item particles need `options.item_stack` (validated against
+    /// the item registry and stack limits). Trail and vibration remain unsupported.
     /// True means queued, not drawn.
     #[access(WorldOnly)]
     fn level_send_particles(

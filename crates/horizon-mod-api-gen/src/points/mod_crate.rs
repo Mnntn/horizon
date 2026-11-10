@@ -400,7 +400,7 @@ pub(crate) fn table(points: &[GamePoint]) -> String {
     let listeners = points.iter().map(|point| parse(&point.api[0]));
     let variants = points.iter().map(|point| parse(&point.api[1]));
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
-    let raw = points.iter().filter(|point| point.raw).flat_map(|point| {
+    let raw: Vec<_> = points.iter().filter(|point| point.raw).flat_map(|point| {
         let head = point.listener.clone().map(|listener| (point.name.clone(), listener));
         let back = point
             .return_listener
@@ -419,13 +419,65 @@ pub(crate) fn table(points: &[GamePoint]) -> String {
                 }
             }
         })
-    });
+    }).collect();
+    // The wrapper executes in the library member, whose private mod_api owns its registry.
+    // Only typed function pointers and scalar metadata cross the dynamic-link boundary.
+    let mut registration = Vec::new();
+    for (module, source) in [
+        (
+            "listeners",
+            points.iter().map(|p| p.api[0].clone()).collect::<Vec<_>>(),
+        ),
+        ("raw", raw.iter().map(ToString::to_string).collect()),
+    ] {
+        for source in source {
+            let file: syn::File = syn::parse_str(&source).expect("generated constructors");
+            for item in file.items {
+                let syn::Item::Fn(function) = item else {
+                    continue;
+                };
+                let name = &function.sig.ident;
+                let bridge = quote::format_ident!("register_{module}_{name}");
+                let mut listener = function
+                    .sig
+                    .inputs
+                    .last()
+                    .expect("listener parameter")
+                    .clone();
+                if module == "listeners"
+                    && let syn::FnArg::Typed(argument) = &mut listener
+                {
+                    let ty = &argument.ty;
+                    *argument.ty = syn::parse_quote!(listeners::#ty);
+                }
+                let module = quote::format_ident!("{module}");
+                let constructor = if module == "raw" {
+                    quote!(#module::#name(id, listener).ordered(priority, injection))
+                } else {
+                    quote!(#module::#name(id, priority, injection, listener))
+                };
+                registration.push(quote! {
+                    /// Registers in this library member's registry; false means registration was refused.
+                    #[inline(never)]
+                    pub fn #bridge(id: &'static str, priority: i32, injection: &'static str, replace: bool, #listener) -> bool {
+                        let slot = #constructor;
+                        let slot = if replace { slot.replacing() } else { slot };
+                        ::mod_api::__private::points::register(&slot).is_ok()
+                    }
+                });
+            }
+        }
+    }
     let doc =
         "A mod's injection points (#2339): a slot per place, set at load where an addon listens.";
     quote! {
         #![doc = #doc]
         #![allow(missing_docs, dead_code, clippy::all)]
         #(#records)*
+        #(#registration)*
+        /// Seals this library member's registry after all group members registered.
+        #[inline(never)]
+        pub fn seal() { ::mod_api::__private::points::seal(); }
         /// A point's place: its head and return.
         #[repr(usize)]
         #[derive(Clone, Copy, PartialEq, Eq, Debug)]

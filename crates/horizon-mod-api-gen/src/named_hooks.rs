@@ -98,6 +98,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn enclosing_inline_module_cfg_refuses_named_hook() {
+        let root =
+            std::env::temp_dir().join(format!("named-hooks-inherited-cfg-{}", std::process::id()));
+        let src = root.join("crates/horizon-client/src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("game.rs"), r#"#[cfg(feature = "x")] mod inner { impl Game<'_> { fn native_probe(&self) { dispatch_probe(); } } }"#).unwrap();
+        let error = resolve(
+            &root,
+            "horizon_client::game::inner::Game<'_>::native_probe",
+            "probe",
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("macro, cfg or cfg_attr"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn logical_game_hook_discovery_and_refusals() {
         let root = std::env::temp_dir().join(format!("named-hooks-{}", std::process::id()));
         let src = root.join("crates/horizon-client/src");

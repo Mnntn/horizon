@@ -539,6 +539,7 @@ fn particle_record_has_declared_field_bytes() {
         to_color: [0.5, 0.6, 0.7],
         trail: Some(([1.0, 2.0, 3.0], 19)),
         item: Some(vec!["example:item".into()]),
+        item_stack: ItemStack::new(ItemKey::from_slot(0).unwrap(), 7),
         geyser: Some((11, 0.75)),
         vibration: Some((
             crate::client::particles::PositionSource::Entity {
@@ -551,7 +552,7 @@ fn particle_record_has_declared_field_bytes() {
         legacy_entity_effect: Some(true),
         legacy_trail_lifetime: true,
     };
-    // Nested tuples add no framing: two groups allow all eleven fields to be decoded
+    // Nested tuples add no framing: two groups allow all twelve fields to be decoded
     // with the same declared types despite Wire's six-element tuple limit.
     fields(
         particle,
@@ -566,6 +567,7 @@ fn particle_record_has_declared_field_bytes() {
             ),
             (
                 Some(vec!["example:item".to_owned()]),
+                ItemStack::new(ItemKey::from_slot(0).unwrap(), 7),
                 Some((11i32, 0.75f32)),
                 Some((
                     crate::client::particles::PositionSource::Entity {

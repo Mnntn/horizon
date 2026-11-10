@@ -18,6 +18,17 @@ pub trait ClientTextClientHost {
     fn text_string(&self, text: &Text) -> Result<String, TextFormError>;
 
     /// Side: client.
+    /// `Component.getVisualOrderText()`: current-language, styled characters in
+    /// visual order, including bidi shaping and mirroring. Available outside
+    /// drawing on native and wasm, including client setup. Invalid components
+    /// return the same boundary errors as `text_string`. Sink indices are local
+    /// UTF-16 offsets, not offsets into the input component tree.
+    /// Action keybinds currently resolve to captions rather than rebound keys,
+    /// as for `text_string`. No NeoForge hook counterpart is documented.
+    #[access(ClientSetup)]
+    fn text_visual_order(&self, text: &Text) -> Result<Vec<VisualTextCharacter>, TextFormError>;
+
+    /// Side: client.
     /// `Font.width(FormattedText)`: the width of a component in unscaled GUI
     /// pixels, using the current language, styles and resource-pack fonts.
     /// Available outside a draw, including client setup and tooltip-component

@@ -1338,6 +1338,7 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
         unimplemented!("LevelWriteHost::play_sound")
     }
     /// `ServerLevel.sendParticles` through `native_send_particles`.
+    /// Item particles require `options.item_stack`; invalid stacks return false.
     fn send_particles(
         &mut self,
         _options: &ParticleOptions,

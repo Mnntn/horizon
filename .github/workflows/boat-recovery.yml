@@ -31,3 +31,16 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: python3 tools/ci/boat_controller.py
+      # A fork's pull request runs see no variables, so publish the boat switch and its user list (both already
+      # public in effect) for boat_health.py. Bounded and schema-checked on both ends; never a secret.
+      - if: ${{ !cancelled() }}
+        env:
+          BOAT_CI: ${{ vars.BOAT_CI }}
+          BOAT_USERS: ${{ vars.BOAT_CI_USERS }}
+        run: python3 tools/ci/boat_health.py publish > boat-routing.json
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: boat-routing
+          path: boat-routing.json
+          retention-days: 1

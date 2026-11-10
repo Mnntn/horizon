@@ -340,7 +340,11 @@ fn member_export(name: &str) -> bool {
 }
 
 fn group_export(name: &str, krate: &str) -> bool {
-    if GUEST_EXPORTS.contains(&name) || name == "horizon_layout_ext" || name.starts_with("__wasm_")
+    if GUEST_EXPORTS.contains(&name)
+        || name == "horizon_layout_ext"
+        || name == "horizon_mod_points_register"
+        || name == "horizon_mod_points_seal"
+        || name.starts_with("__wasm_")
     {
         return true;
     }

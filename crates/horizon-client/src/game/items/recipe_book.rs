@@ -154,8 +154,8 @@ impl Game<'_> {
     /// How far the open book pushes the menu to the right
     /// (`RecipeBookComponent.updateScreenPosition`).
     pub(super) fn recipe_book_shift(&self, width: f32) -> f32 {
-        if self.mod_book_open() && width >= NARROW {
-            return 77.0;
+        if self.mod_book_open() {
+            return self.mod_book_shift(width);
         }
         match self.active_book() {
             Some(book) if self.book_open(book) && width >= NARROW => 77.0,
@@ -166,8 +166,8 @@ impl Game<'_> {
     /// visible in a window narrower than `NARROW`: the book covers the menu,
     /// so no slot is hovered or clicked.
     pub(super) fn book_covers_menu(&self, width: f32) -> bool {
-        width < NARROW
-            && (self.mod_book_open() || self.active_book().is_some_and(|b| self.book_open(b)))
+        (self.mod_book_open() && self.mod_book_overlay(width))
+            || (width < NARROW && self.active_book().is_some_and(|b| self.book_open(b)))
     }
     /// Whether typed keys go to the search box.
     pub(super) fn recipe_search_focused(&self) -> bool {
@@ -627,7 +627,12 @@ impl Game<'_> {
     /// `RecipeBookComponent.getXOrigin` / `getYOrigin` (`widthTooNarrow`
     /// centres the book over the menu).
     fn book_origin(&self, batch: &HudBatch) -> (f32, f32) {
-        let offset = if batch.width < NARROW { 0.0 } else { 86.0 };
+        let narrow = if self.native_screen_book().is_some() {
+            self.mod_book_overlay(batch.width)
+        } else {
+            batch.width < NARROW
+        };
+        let offset = if narrow { 0.0 } else { 86.0 };
         (
             ((batch.width - WIDTH) / 2.0).floor() - offset,
             ((batch.height - HEIGHT) / 2.0).floor(),

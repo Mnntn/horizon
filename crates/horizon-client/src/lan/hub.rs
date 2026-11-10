@@ -45,9 +45,9 @@ use {
 pub mod advancements;
 pub mod chat;
 pub mod chat_filter;
+mod item_particles;
 mod spawn_info;
 use advancements::AdvancementOwners;
-
 pub mod game_event {
     pub const NO_RESPAWN_BLOCK_AVAILABLE: u8 = 0;
     pub const START_RAINING: u8 = 1;
@@ -3402,7 +3402,7 @@ impl Hub {
                     ticks: *ticks,
                 })
             }
-            T::Item | T::Trail => return None,
+            T::Item | T::Trail => return item_particles::encode(self, id, options),
             _ => None,
         };
         Some(Particle { id, data })

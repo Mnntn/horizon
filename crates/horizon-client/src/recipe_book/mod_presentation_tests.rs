@@ -39,7 +39,7 @@ impl DisplayResolver for Resolver {
             _ => vec![],
         }
     }
-    fn craftable(&self, _: &str, display: &Display) -> bool {
+    fn craftable(&self, _: &str, display: &Display, _: &[crate::crafting::Ingredient]) -> bool {
         matches!(display, Display::Smithing { .. })
     }
     fn search_text(&self, stacks: &[ItemStack]) -> String {
@@ -144,7 +144,8 @@ fn panel_search_selection_and_inventory_filter_are_isolated() {
     .unwrap();
     let book = key("demo:first");
     let panel = index.panel("demo:menu", &book).unwrap();
-    let all = panel.presentation(None, "", false, &Resolver);
+    let prepared = panel.prepare(&Resolver);
+    let all = prepared.presentation(None, "", false, 0, &Resolver);
     assert_eq!(all.tab_ids, ["demo:first_search", "demo:a", "demo:b"]);
     assert_eq!(all.tabs.iter().filter(|t| t.selected).count(), 1);
     assert_eq!(
@@ -156,26 +157,97 @@ fn panel_search_selection_and_inventory_filter_are_isolated() {
     );
     assert_eq!(all.recipes[0].button.entries.len(), 5);
     assert!(
-        panel
-            .presentation(Some("demo:c"), "", false, &Resolver)
+        prepared
+            .presentation(Some("demo:c"), "", false, 0, &Resolver)
             .recipes
             .is_empty()
     );
     assert_eq!(
-        panel
-            .presentation(Some("demo:b"), "", false, &Resolver)
+        prepared
+            .presentation(Some("demo:b"), "", false, 0, &Resolver)
             .recipes
             .len(),
         1
     );
-    let filtered = panel.presentation(None, "SMITH", true, &Resolver);
+    let filtered = prepared.presentation(None, "SMITH", true, 0, &Resolver);
     assert_eq!(filtered.recipes.len(), 2);
     assert_eq!(filtered.recipes[0].button.entries.len(), 1);
     assert!(filtered.recipes[0].button.has_craftable);
     assert!(
-        panel
-            .presentation(None, "stone", true, &Resolver)
+        prepared
+            .presentation(None, "stone", true, 0, &Resolver)
             .recipes
             .is_empty()
     );
+}
+
+#[test]
+fn stock_changes_only_materialize_visible_previews() {
+    use std::cell::Cell;
+    struct Counting {
+        resolves: Cell<usize>,
+        searches: Cell<usize>,
+        stock: Cell<bool>,
+    }
+    impl DisplayResolver for Counting {
+        fn resolve(&self, slot: &Slot) -> Vec<ItemStack> {
+            self.resolves.set(self.resolves.get() + 1);
+            Resolver.resolve(slot)
+        }
+        fn search_text(&self, stacks: &[ItemStack]) -> String {
+            self.searches.set(self.searches.get() + 1);
+            Resolver.search_text(stacks)
+        }
+        fn craftable(
+            &self,
+            _: &str,
+            _: &Display,
+            ingredients: &[crate::crafting::Ingredient],
+        ) -> bool {
+            assert_eq!(ingredients.len(), 1);
+            self.stock.get()
+        }
+    }
+    let mut cat = category("demo:book", "demo:category", "demo:first");
+    cat.displays = (0..1000)
+        .map(|i| mod_api::RecipeBookDisplayEntry {
+            recipe: format!("demo:r{i}"),
+            displays: vec![Display::Stonecutter {
+                input: item("input"),
+                result: item("result"),
+                station: item("station"),
+            }],
+        })
+        .collect();
+    let index = ModBookIndex::build(vec![cat], &Resources).unwrap();
+    let key = key("demo:book");
+    let panel = index.panel("demo:menu", &key).unwrap();
+    let resolver = Counting {
+        resolves: Cell::new(0),
+        searches: Cell::new(0),
+        stock: Cell::new(false),
+    };
+    let prepared = panel.prepare(&resolver);
+    assert_eq!(resolver.resolves.get(), 2000);
+    assert_eq!(resolver.searches.get(), 1000);
+    resolver.resolves.set(0);
+    for change in 0..10 {
+        resolver.stock.set(change % 2 == 0);
+        let view = prepared.presentation(None, "", false, 2, &resolver);
+        assert_eq!(view.recipes.len(), 1000);
+        assert_eq!(view.recipes[40].recipe, "demo:r40");
+        assert_eq!(view.recipes[40].button.has_craftable, change % 2 == 0);
+        assert_eq!(
+            view.recipes[40].overlay[0].cells[0].2[0].item.as_ref(),
+            "demo:input"
+        );
+        assert!(view.recipes[39].overlay.is_empty());
+        assert!(view.recipes[60].overlay.is_empty());
+    }
+    assert_eq!(resolver.resolves.get(), 200);
+    assert_eq!(resolver.searches.get(), 1000);
+    resolver.stock.set(false);
+    let filtered = prepared.presentation(None, "", true, 0, &resolver);
+    assert!(filtered.recipes.is_empty());
+    assert_eq!(resolver.resolves.get(), 200);
 }

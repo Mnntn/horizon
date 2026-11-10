@@ -575,6 +575,8 @@ impl Game<'_> {
         } else {
             lang::Language::load(&[&self.pack.source], &code)
         });
+        // Book search terms and resolved result icons belong to these resources.
+        self.recipe_ui.reset_screen();
         self.refresh_remote_language();
         self.audio.reload_with(&self.pack.source, sounds);
         self.clear_lod();

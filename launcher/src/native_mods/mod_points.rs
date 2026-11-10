@@ -160,6 +160,15 @@ pub(super) fn refusal(refusal: &Refusal) -> String {
             "E_INJECT_MISSING: {id}: {at} has no point (opted out with #[mod_api::no_point])",
             &[("id", id), ("at", at)],
         ),
+        Refusal::LibraryCrate { id, library, krate } => trf(
+            "{id}: mod point library {library}'s crate is {krate}; a mod point library's crate is named after its mod id: {expected}",
+            &[
+                ("id", id),
+                ("library", library),
+                ("krate", krate),
+                ("expected", &library.replace('-', "_")),
+            ],
+        ),
         Refusal::CrossTargetInternals { id, library } => trf(
             "{id}: internals access to {library} needs the same target: the same binary on native, the same dependency group on wasm",
             &[("id", id), ("library", library)],

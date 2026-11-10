@@ -36,8 +36,25 @@ characters; literal legacy `§` formatting codes remain in the string, unlike th
 font's formatted rendering. Invalid components return the same boundary errors
 as the other text reads. Do not cache resolved strings across language changes.
 
+For vanilla `Component.getVisualOrderText()` behavior, use
+`ClientHost::text_visual_order(&Text) -> Result<Vec<VisualTextCharacter>, TextFormError>`.
+Each API-owned Wire record contains a Unicode scalar (`scalar`), its full
+resolved `TextStyle`, and the sink's `source_index`. Characters are already in
+visual order, including Arabic shaping and mirrored punctuation; do not apply
+bidi a second time. This read uses the engine's existing language and bidi
+pipeline, is available outside drawing including client setup, and is identical
+on native and wasm. It has no documented NeoForge hook counterpart.
+
+Sink indices are UTF-16 offsets local to a constant-style substring within a
+directional run, not global component positions. For example, `A😀B` yields
+indices `0, 1, 3`; Hebrew `שלום` yields `3, 2, 1, 0`. A style or bidi run boundary
+restarts the index. Shaping can shorten the string, so these are not guaranteed
+to identify original input scalars. Use the records to re-layout existing tooltip
+lines without losing click, hover, font or other style information. Like the
+other reads, invalid component input returns its boundary error.
+
 The shared decoder currently resolves action keybind IDs such as `key.jump` to
 translated action captions rather than the currently assigned key. Physical key
-names resolve normally. This existing limitation also affects measurements;
+names resolve normally. This existing limitation also affects measurements and visual-order reads;
 canonical action-binding parity is tracked in
 [#2718](https://github.com/arismoko/horizon/issues/2718).

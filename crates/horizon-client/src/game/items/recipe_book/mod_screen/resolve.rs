@@ -120,34 +120,7 @@ impl<'a, 'w> Resolver<'a, 'w> {
         }
     }
 
-    pub(super) fn craftable(&self, _recipe: &str, display: &Display) -> bool {
-        let slots: Vec<&Slot> = match display {
-            Display::Shaped { ingredients, .. } | Display::Shapeless { ingredients, .. } => {
-                ingredients
-                    .iter()
-                    .filter(|slot| !matches!(slot, Slot::Empty))
-                    .collect()
-            }
-            Display::Furnace { ingredient, .. } => vec![ingredient],
-            Display::Stonecutter { input, .. } => vec![input],
-            Display::Smithing {
-                template,
-                base,
-                addition,
-                ..
-            } => vec![template, base, addition],
-        };
-        let ingredients: Vec<_> = slots
-            .iter()
-            .map(|slot| {
-                Ingredient::of(
-                    self.resolve(slot)
-                        .into_iter()
-                        .map(|stack| stack.item.to_string())
-                        .collect(),
-                )
-            })
-            .collect();
+    pub(super) fn craftable(&self, ingredients: &[Ingredient]) -> bool {
         self.stocks
             .can_craft(&ingredients.iter().collect::<Vec<_>>())
     }
@@ -174,8 +147,8 @@ impl horizon_client::recipe_book::mod_presentation::DisplayResolver for Resolver
     fn resolve(&self, slot: &Slot) -> Vec<ItemStack> {
         Resolver::resolve(self, slot)
     }
-    fn craftable(&self, recipe: &str, display: &Display) -> bool {
-        Resolver::craftable(self, recipe, display)
+    fn craftable(&self, _: &str, _: &Display, ingredients: &[Ingredient]) -> bool {
+        Resolver::craftable(self, ingredients)
     }
     fn search_text(&self, results: &[ItemStack]) -> String {
         Resolver::search_text(self, results)

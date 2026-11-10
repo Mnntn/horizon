@@ -148,6 +148,7 @@ class ReleaseTrainTests(unittest.TestCase):
         self.assertFalse(train.decision("game", [], NOW, new_line="0.3", blockers=[7])[0])
         self.assertTrue(train.decision("game", [pr(1)], NOW, blockers=[])[0])
 
+    @mock.patch.object(train, "REPO", "horizon-rust/horizon")
     def test_game_releases_ship_only_what_parity_main_passed(self):
         def runs(parity, checks):
             def gh_json(*arguments):
@@ -179,6 +180,31 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertEqual(train.green_main_head(), "c")
         with runs([], [("c", "completed", "failure"), ("b", "completed", "success")]):
             self.assertIsNone(train.green_main_head(), "checks alone: main's newest finished checks must pass")
+
+    @mock.patch.object(train, "REPO", "arismoko/horizon")
+    def test_fork_base_uses_its_green_main_pushes_without_disabled_workflows(self):
+        records = [
+            ("pr-head", "main", "pull_request", "completed", "success"),
+            ("topic-head", "topic", "push", "completed", "success"),
+            ("broken-main", "main", "push", "completed", "failure"),
+            ("good-main", "main", "push", "completed", "success"),
+            ("older-main", "main", "push", "completed", "success"),
+        ]
+        def runs(*arguments):
+            workflow = arguments[arguments.index("--workflow") + 1]
+            self.assertEqual(workflow, "dyna-checks", "the fork has no checks/parity-main runs")
+            table = records
+            for option, column in [("--branch", 1), ("--event", 2), ("--status", 4)]:
+                if option in arguments:
+                    wanted = arguments[arguments.index(option) + 1]
+                    table = [entry for entry in table if entry[column] == wanted]
+            return [{"headSha": sha, "status": status, "conclusion": conclusion}
+                    for sha, _, _, status, conclusion in table]
+        with mock.patch.object(train, "gh_json", side_effect=runs):
+            self.assertEqual(train.green_main_head(parity=True), "good-main")
+            self.assertEqual(train.green_main_head(), "good-main")
+            records[:] = [entry for entry in records if entry[0] not in ("good-main", "older-main")]
+            self.assertIsNone(train.green_main_head(parity=True), "no unchecked fallback to main")
 
     def test_a_release_is_published_only_after_its_smoke_test_and_with_no_blocker(self):
         drew = {"error": None, "frames": 12710, "chunks": 81, "meshed_sections": 550, "player": [160.5, 71.0, 156.5]}

@@ -438,6 +438,7 @@ impl WasmMod {
     }
     pub(crate) fn instantiate(
         engine: &Engine,
+        manifests: &[(&str, &horizon_mod_package::Manifest)],
         members: &[Member<'_>],
     ) -> Result<Vec<Self>, Refusal> {
         let mut store = Store::new(engine, State::default());
@@ -505,6 +506,88 @@ impl WasmMod {
                 .get_typed_func(&mut group.store, "horizon_hook")
                 .map_err(load)?;
             exports.push((name, input, hook));
+        }
+        // Register through the library's exported bridge, then seal every member's private
+        // registry. No hook or mod initialization runs until the entire group is ready.
+        for (name, instance) in group.members.clone() {
+            if instance
+                .get_func(&mut group.store, "horizon_mod_points_register")
+                .is_some()
+            {
+                let refused = instance
+                    .get_typed_func::<(), u32>(&mut group.store, "horizon_mod_points_register")
+                    .and_then(|function| function.call(&mut group.store, ()))
+                    .map_err(|e| Refusal::Runtime(format!("mod point registration: {e:#}")))?;
+                if refused != 0 {
+                    let injection = manifests
+                        .iter()
+                        .find(|(member, _)| *member == name)
+                        .and_then(|(_, manifest)| {
+                            manifest
+                                .inject
+                                .iter()
+                                .filter(|injection| {
+                                    manifest.mod_point_dependency(&injection.at).is_some()
+                                })
+                                .nth((refused - 1) as usize)
+                                .map(|injection| format!("{}:{}", manifest.id, injection.id))
+                        })
+                        .ok_or_else(|| {
+                            Refusal::Runtime(format!(
+                                "{name}: invalid mod point registration refusal index {refused}"
+                            ))
+                        })?;
+                    return Err(Refusal::Runtime(format!(
+                        "{injection}: refused by library registry"
+                    )));
+                }
+            }
+        }
+        // A member whose manifest listens at a library's points was built with the bridge that
+        // registers them, and the library with the seal: a module missing either is refused, not
+        // left silently unregistered.
+        for (name, manifest) in manifests {
+            for injection in &manifest.inject {
+                let Some(library) = manifest.mod_point_dependency(&injection.at) else {
+                    continue;
+                };
+                let mut exports = |member: &str, export: &str| {
+                    let instance = group.members.iter().find(|(m, _)| m == member);
+                    instance
+                        .map(|(_, instance)| *instance)
+                        .is_some_and(|instance| {
+                            instance.get_func(&mut group.store, export).is_some()
+                        })
+                };
+                let id = format!("{}:{}", manifest.id, injection.id);
+                if !exports(name, "horizon_mod_points_register") {
+                    return Err(Refusal::Runtime(format!(
+                        "{id}: {name} has no mod point registration; rebuild it with `cargo \
+                         horizon-mod build --wasm`"
+                    )));
+                }
+                let sealed = manifests
+                    .iter()
+                    .find(|(_, other)| other.id == library)
+                    .is_some_and(|(member, _)| exports(member, "horizon_mod_points_seal"));
+                if !sealed {
+                    return Err(Refusal::Runtime(format!(
+                        "{id}: library {library} has no mod point seal in this group; rebuild it \
+                         with `cargo horizon-mod build --wasm`"
+                    )));
+                }
+            }
+        }
+        for (_, instance) in group.members.clone() {
+            if instance
+                .get_func(&mut group.store, "horizon_mod_points_seal")
+                .is_some()
+            {
+                instance
+                    .get_typed_func::<(), ()>(&mut group.store, "horizon_mod_points_seal")
+                    .and_then(|function| function.call(&mut group.store, ()))
+                    .map_err(|e| Refusal::Runtime(format!("mod point seal: {e:#}")))?;
+            }
         }
         let lending = group.store.data().lending.clone();
         let running = Arc::new(Running {

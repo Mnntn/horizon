@@ -4,7 +4,9 @@
 //! joined presentation forms (ICU's `ArabicShaping` with `LETTERS_SHAPE`), the
 //! text is reordered by the Unicode bidirectional algorithm, and characters in
 //! right-to-left runs are mirrored. Left-to-right text comes back unchanged.
+mod sequence;
 use crate::text::{Span, Text};
+pub use sequence::visual_characters;
 use std::borrow::Cow;
 use unicode_bidi::{
     BidiClass, Direction, Level, ParagraphBidiInfo, bidi_class, get_base_direction,
@@ -243,7 +245,7 @@ fn unchanged(mut chars: impl Iterator<Item = char>, default_rtl: bool) -> bool {
 /// character's position in the shaped text. A character's style is the one at
 /// its position in the shaped text, as `SubStringSource` takes it (the text
 /// shrinks at a lam-alef ligature).
-fn reorder(chars: &[char], default_rtl: bool) -> Vec<(char, usize)> {
+fn reorder(chars: &[char], default_rtl: bool) -> Vec<(char, usize, u8)> {
     let shaped = shape(chars);
     let plain: String = shaped.iter().collect();
     // DEFAULT_RTL only changes text without a strong character.
@@ -259,7 +261,7 @@ fn reorder(chars: &[char], default_rtl: bool) -> Vec<(char, usize)> {
             } else {
                 shaped[i]
             };
-            (c, i)
+            (c, i, levels[i].number())
         })
         .collect()
 }
@@ -278,7 +280,7 @@ pub fn visual(text: &Text) -> Cow<'_, Text> {
         .flat_map(|span| span.text.chars().map(move |_| span))
         .collect();
     let mut out: Vec<Span> = Vec::new();
-    for (c, at) in reorder(&chars, default_rtl) {
+    for (c, at, _) in reorder(&chars, default_rtl) {
         match out.last_mut() {
             Some(span) if span.style == spans[at].style && span.origin() == spans[at].origin() => {
                 span.text.push(c)
@@ -299,7 +301,7 @@ pub fn visual_str(s: &str) -> Cow<'_, str> {
     Cow::Owned(
         reorder(&chars, default_rtl)
             .into_iter()
-            .map(|(c, _)| c)
+            .map(|(c, _, _)| c)
             .collect(),
     )
 }

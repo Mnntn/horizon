@@ -796,6 +796,11 @@ pub struct Screen {
     /// target this menu; no panel is enabled until authoritative settings arrive.
     /// Leaving this unset keeps the screen without a recipe book.
     pub recipe_book: Option<crate::RecipeBookTypeKey>,
+    /// Optional 20 × 18 recipe-book toggle position relative to this menu.
+    /// The screen author reserves this area, as vanilla screen templates do.
+    /// Without an anchor the engine uses an external gutter; if none fits,
+    /// the book is refused with a diagnostic while the menu remains usable.
+    pub recipe_book_toggle: Option<[f32; 2]>,
 }
 
 /// An item the panel shows (`panel_items`): its id

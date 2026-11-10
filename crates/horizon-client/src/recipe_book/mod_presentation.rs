@@ -6,13 +6,20 @@ use crate::{
     recipe_book_screen::{ButtonView, OverlayRecipe, TabView},
 };
 use mod_api::{RecipeBookDisplay as Display, RecipeSlotDisplay as Slot};
+mod prepared;
+pub use prepared::PreparedBook;
 
 /// Resource and inventory boundary implemented by the screen owner. Slot
 /// resolution must preserve components and alternatives for every API slot form.
 pub trait DisplayResolver {
     fn resolve(&self, slot: &Slot) -> Vec<ItemStack>;
     /// Match the actual inventory against the recipe, not merely its icons.
-    fn craftable(&self, recipe: &str, display: &Display) -> bool;
+    fn craftable(
+        &self,
+        recipe: &str,
+        display: &Display,
+        ingredients: &[crate::crafting::Ingredient],
+    ) -> bool;
     /// Localized names and search terms of the resolved result stacks.
     fn search_text(&self, results: &[ItemStack]) -> String;
 }
@@ -30,83 +37,6 @@ pub struct ModPresentation {
     pub tab_ids: Vec<String>,
     pub tabs: Vec<TabView>,
     pub recipes: Vec<PresentedRecipe>,
-}
-
-impl ModBookPanel<'_> {
-    /// A stale category selects no recipes. Search always traverses only this
-    /// panel, even when a query or selection survived a different menu.
-    pub fn presentation(
-        &self,
-        category: Option<&str>,
-        query: &str,
-        filtering: bool,
-        resolver: &dyn DisplayResolver,
-    ) -> ModPresentation {
-        let mut view = ModPresentation {
-            tab_ids: vec![self.search_group().to_owned()],
-            tabs: vec![TabView {
-                icons: ("minecraft:compass".into(), None),
-                selected: category.is_none(),
-                anim: 0.0,
-            }],
-            recipes: Vec::new(),
-        };
-        let query = query.to_lowercase();
-        for cat in self.categories() {
-            view.tab_ids.push(cat.id.clone());
-            view.tabs.push(TabView {
-                icons: (cat.icon.clone(), None),
-                selected: category == Some(cat.id.as_str()),
-                anim: 0.0,
-            });
-            if category.is_some_and(|id| id != cat.id) {
-                continue;
-            }
-            for recipe in &cat.displays {
-                let mut alternatives = Vec::new();
-                for display in &recipe.displays {
-                    let craftable = resolver.craftable(&recipe.recipe, display);
-                    if filtering && !craftable {
-                        continue;
-                    }
-                    let results = resolver.resolve(result(display));
-                    // The painter cycles nonempty alternatives; unresolved dynamic
-                    // displays are not drawable until their resources exist.
-                    if results.is_empty()
-                        || !resolver
-                            .search_text(&results)
-                            .to_lowercase()
-                            .contains(&query)
-                    {
-                        continue;
-                    }
-                    alternatives.push((
-                        results,
-                        OverlayRecipe {
-                            craftable,
-                            cells: cells(display, resolver),
-                        },
-                    ));
-                }
-                alternatives.sort_by_key(|(_, overlay)| !overlay.craftable);
-                if alternatives.is_empty() {
-                    continue;
-                }
-                let has_craftable = alternatives.iter().any(|(_, overlay)| overlay.craftable);
-                let (entries, overlay) = alternatives.into_iter().unzip();
-                view.recipes.push(PresentedRecipe {
-                    recipe: recipe.recipe.clone(),
-                    button: ButtonView {
-                        has_craftable,
-                        entries,
-                        anim: 0.0,
-                    },
-                    overlay,
-                });
-            }
-        }
-        view
-    }
 }
 
 fn result(display: &Display) -> &Slot {

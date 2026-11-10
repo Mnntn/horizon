@@ -1,6 +1,8 @@
 //! A mod menu's book uses the shared painter, but never vanilla storage ordinals.
 use super::*;
 use horizon_client::recipe_book::mod_presentation::ModPresentation;
+#[path = "mod_screen/layout.rs"]
+mod layout;
 #[path = "mod_screen/resolve.rs"]
 mod resolve;
 
@@ -9,13 +11,16 @@ pub(super) struct ModRecipeUi {
     binding: Option<(String, String)>,
     selected: Option<String>,
     page: usize,
+    presented_page: usize,
     tab_page: usize,
     presentation: Option<ModPresentation>,
+    prepared: Option<horizon_client::recipe_book::mod_presentation::PreparedBook>,
     overlay: Option<OverlayView>,
     stocks: Vec<ItemStack>,
     inventory_len: usize,
     query: String,
     filtering: bool,
+    refused: bool,
 }
 
 impl ModRecipeUi {
@@ -99,8 +104,28 @@ impl Game<'_> {
             .ok()?
             .panel(menu, key)
     }
+    fn mod_book_layout(&self, width: f32, open: bool) -> Option<layout::BookLayout> {
+        let batch = self.batch_for_size()?;
+        layout::layout(
+            [width, batch.height],
+            [self.native_screen_width()?, self.native_screen_height()?],
+            self.native_screen_toggle(),
+            open,
+        )
+    }
+    pub(super) fn mod_book_shift(&self, width: f32) -> f32 {
+        self.mod_book_layout(width, true)
+            .map_or(0.0, |layout| layout.shift)
+    }
+    pub(super) fn mod_book_overlay(&self, width: f32) -> bool {
+        self.mod_book_layout(width, false)
+            .is_some_and(|layout| layout.overlay)
+    }
     pub(super) fn mod_book_flags(&self) -> Option<(bool, bool)> {
         self.mod_book_panel()?;
+        let batch = self.batch_for_size()?;
+        self.mod_book_layout(batch.width, false)?;
+        self.mod_book_layout(batch.width, true)?;
         let flags = self.custom_book_settings(self.native_screen_book()?)?;
         Some((flags.open, flags.filtering))
     }
@@ -108,6 +133,27 @@ impl Game<'_> {
         self.mod_book_flags().is_some_and(|flags| flags.0)
     }
     fn refresh_mod_book(&mut self) {
+        if self.mod_book_panel().is_some()
+            && self.batch_for_size().is_some_and(|batch| {
+                self.mod_book_layout(batch.width, false).is_none()
+                    || self.mod_book_layout(batch.width, true).is_none()
+            })
+        {
+            if !self.recipe_ui.custom.refused {
+                if let Some(block) = self.native_screen_block() {
+                    eprintln!(
+                        "{}",
+                        layout::refusal(
+                            block,
+                            self.native_screen_menu().unwrap_or_default(),
+                            self.native_screen_toggle().is_some()
+                        )
+                    );
+                }
+                self.recipe_ui.custom.refused = true;
+            }
+            return;
+        }
         let Some((open, filtering)) = self.mod_book_flags() else {
             return;
         };
@@ -145,6 +191,7 @@ impl Game<'_> {
         }
         let ui = &self.recipe_ui.custom;
         if ui.presentation.is_some()
+            && ui.presented_page == ui.page
             && ui.query == query
             && ui.filtering == filtering
             && ui.stocks == stocks
@@ -165,8 +212,26 @@ impl Game<'_> {
         let Some(panel) = self.mod_book_panel() else {
             return;
         };
-        let presentation = panel.presentation(ui.selected.as_deref(), &query, filtering, &resolver);
+        let prepared = ui.prepared.is_none().then(|| panel.prepare(&resolver));
+        let book = ui.prepared.as_ref().or(prepared.as_ref()).unwrap();
+        let mut presentation = book.presentation(
+            ui.selected.as_deref(),
+            &query,
+            filtering,
+            ui.page,
+            &resolver,
+        );
+        let page = ui
+            .page
+            .min(presentation.recipes.len().div_ceil(20).saturating_sub(1));
+        if page != ui.page {
+            presentation =
+                book.presentation(ui.selected.as_deref(), &query, filtering, page, &resolver);
+        }
         let ui = &mut self.recipe_ui.custom;
+        if let Some(prepared) = prepared {
+            ui.prepared = Some(prepared);
+        }
         ui.query = query;
         ui.filtering = filtering;
         ui.stocks = stocks;
@@ -174,15 +239,13 @@ impl Game<'_> {
         ui.page = ui
             .page
             .min(presentation.recipes.len().div_ceil(20).saturating_sub(1));
+        ui.presented_page = ui.page;
         ui.overlay = None;
         ui.presentation = Some(presentation);
     }
     fn mod_book_button(&self, batch: &HudBatch) -> (f32, f32) {
-        let (ox, oy) = self.inventory_origin(batch);
-        (
-            ox + self.native_screen_width().unwrap_or(176.0) + 4.0,
-            oy + 5.0,
-        )
+        self.mod_book_layout(batch.width, self.mod_book_open())
+            .map_or((0.0, 0.0), |layout| layout.toggle)
     }
     pub(super) fn draw_mod_book(&mut self, batch: &mut HudBatch) {
         self.refresh_mod_book();
@@ -245,7 +308,7 @@ impl Game<'_> {
             book: BookType::Crafting,
             width: batch.width as i32,
             height: batch.height as i32,
-            narrow: batch.width < NARROW,
+            narrow: self.mod_book_overlay(batch.width),
             mouse: (self.cursor.0 as i32, self.cursor.1 as i32),
             index: self.swap_index(),
             filtering,
@@ -314,7 +377,7 @@ impl Game<'_> {
         if !open {
             return false;
         }
-        let narrow = batch.width < NARROW;
+        let narrow = self.mod_book_overlay(batch.width);
         if self.spectator() {
             return narrow;
         }
