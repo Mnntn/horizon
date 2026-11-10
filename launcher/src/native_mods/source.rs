@@ -676,6 +676,16 @@ fn expression_source_stage_shares_one_site_and_adapts_each_listener() {
         "[package]\nname='horizon-mod-points'\n",
     )
     .unwrap();
+    std::fs::write(
+        root.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"horizon-client\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("crates/horizon-client/Cargo.toml"),
+        "[package]\nname='horizon-client'\nversion='0.1.0'\n",
+    )
+    .unwrap();
     let source = "fn reach() -> f64 { let far = 64.0; far * 2.0 }";
     let metadata = serde_json::json!([
         {"path":"horizon_client::game::reach", "kind":"fn", "signature":"fn reach() -> f64", "hash":"fingerprint"}
