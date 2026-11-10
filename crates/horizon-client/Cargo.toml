@@ -181,6 +181,10 @@ name = "launch_api"
 path = "tests/launch_api.rs"
 
 [[test]]
+name = "dedicated_walk"
+path = "tests/dedicated_walk.rs"
+
+[[test]]
 name = "mod_api_hooks"
 path = "tests/mod_api_hooks.rs"
 
