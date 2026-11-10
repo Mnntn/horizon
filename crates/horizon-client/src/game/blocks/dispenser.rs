@@ -163,6 +163,19 @@ impl Slot {
             _ => return None,
         })
     }
+    /// `EquipmentSlot.getName`: the inverse of [`Self::from_name`].
+    fn name(self) -> &'static str {
+        match self {
+            Self::MainHand => "mainhand",
+            Self::OffHand => "offhand",
+            Self::Feet => "feet",
+            Self::Legs => "legs",
+            Self::Chest => "chest",
+            Self::Head => "head",
+            Self::Body => "body",
+            Self::Saddle => "saddle",
+        }
+    }
     /// The player's armour array index (head, chest, legs, feet).
     fn armor_index(self) -> Option<usize> {
         match self {
@@ -872,27 +885,39 @@ impl Game<'_> {
             count: 1,
             ..stack.clone()
         };
-        let allows = |id: &str| allowed.as_ref().is_none_or(|a| a.contains(id));
+        // `Equippable.canBeEquippedBy`, then the item's parts (`canEquip`), for the dispensed
+        // stack and the entity in front.
+        let allows = |entity: u32, id: &str| {
+            horizon_client::mobs::equip::can_equip(
+                &self.loop_context,
+                stack,
+                slot.name(),
+                entity,
+                id,
+                allowed.as_ref().is_none_or(|a| a.contains(id)),
+            )
+        };
         // LivingEntity.canEquipWithDispenser: alive, the slot usable, the
         // item's allowed entities, the slot empty and the dispenser rule.
         let target = self.targets_at(front).into_iter().find(|t| match *t {
             // Player.canUseSlot: every slot; the armour and the off hand are
             // the ones an equippable item can reach.
             Target::Player => {
-                allows("minecraft:player")
+                allows(self.own_entity_id() as u32, "minecraft:player")
                     && match slot {
                         Slot::OffHand => self.offhand.is_none(),
                         _ => slot.armor_index().is_some_and(|i| self.armor[i].is_none()),
                     }
             }
             Target::Stand(i) => slot.stand_index().is_some_and(|s| {
-                allows("minecraft:armor_stand") && self.armor_stands[i].equipment[s].is_none()
+                allows(self.armor_stands[i].id, "minecraft:armor_stand")
+                    && self.armor_stands[i].equipment[s].is_none()
             }),
             Target::Mob(i) => {
                 let m = &self.mobs[i];
                 m.alive()
                     && mob_can_use_slot(m, slot)
-                    && allows(&m.kind.id)
+                    && allows(m.id, &m.kind.id)
                     && mob_slot_item(m, slot).is_none()
                     && mob_can_dispenser_equip(m, slot)
             }
@@ -2473,6 +2498,112 @@ mod tests {
                     game.audio.capture.as_ref().unwrap().last().unwrap().event,
                     "minecraft:block.dispenser.dispense"
                 );
+            });
+        });
+    }
+
+    /// Dresses only the entity type it is told to: what the part of an iron helmet answers to
+    /// `can_equip`, and what it was asked as `(slot, entity, kind)`.
+    #[derive(Clone)]
+    struct Fits {
+        accepts: std::sync::Arc<std::sync::Mutex<&'static str>>,
+        asked: std::sync::Arc<std::sync::Mutex<Vec<(String, u32, String)>>>,
+    }
+    #[mod_api::horizon_part]
+    impl mod_api::ItemPart for Fits {
+        fn can_equip(&self, _: &dyn mod_api::LoopContext, event: &mut mod_api::CanEquipEvent<'_>) {
+            self.asked.lock().unwrap().push((
+                event.slot.to_owned(),
+                event.entity,
+                event.kind.to_owned(),
+            ));
+            event.can_equip = event.kind == *self.accepts.lock().unwrap();
+        }
+    }
+    struct Tailor(Fits);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Tailor {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            let helmet = r.item_key("minecraft:iron_helmet");
+            r.item_part(helmet, self.0.clone());
+        }
+    }
+
+    /// `IItemExtension.canEquip` at the dispenser: a zombie that picks up loot and an armour stand
+    /// stand in front of it, the zombie first (the lower entity id). Vanilla dresses the zombie;
+    /// a part of the iron helmet that accepts only armour stands dresses the stand instead, and
+    /// one that accepts only players dresses neither. An item with no part is as vanilla.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_can_equip_part_decides_which_entity_a_dispenser_dresses() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::geometry::Vec3;
+        use std::sync::{Arc, Mutex};
+
+        let fits = Fits {
+            accepts: Arc::new(Mutex::new("minecraft:armor_stand")),
+            asked: Arc::default(),
+        };
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "tailor",
+            Box::new(Tailor(fits.clone())),
+        )]
+        .into();
+        crate::entry::install_client_hooks();
+        super::super::api_values::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let kind = game
+                    .res
+                    .mob_types()
+                    .get("minecraft:zombie")
+                    .unwrap()
+                    .clone();
+                // One scene per dispense, a row of the world apart: a dispenser at (5, 64, z)
+                // facing east, a zombie (id 10 + row) and a stand (id 20 + row) in front.
+                let mut dress = |row: u32, item: &str| {
+                    let z = 5 + 3 * row as i32;
+                    let at = Vec3::new(6.5, 64.0, f64::from(z) + 0.5);
+                    let mut zombie =
+                        horizon_client::mobs::Mob::new(10 + row, kind.clone(), at, 0.0);
+                    zombie.extra.pick_up_loot = true;
+                    game.mobs.push(zombie);
+                    game.armor_stands
+                        .push(horizon_client::entities::ArmorStand::new(20 + row, at, 0.0));
+                    game.dispense_item((5, 64, z), Direction::East, ItemStack::new(item, 1))
+                        .unwrap();
+                    let zombie = game.mobs.iter().find(|m| m.id == 10 + row).unwrap();
+                    let stand = game.armor_stands.iter().find(|s| s.id == 20 + row).unwrap();
+                    // `ArmorStand.equipment` is by ordinal: the head 5, the chest 4.
+                    let zombie_head = mob_slot_item(zombie, Slot::Head).is_some();
+                    let zombie_chest = mob_slot_item(zombie, Slot::Chest).is_some();
+                    (
+                        zombie_head || zombie_chest,
+                        stand.equipment[5].is_some() || stand.equipment[4].is_some(),
+                    )
+                };
+                let asked = |fits: &Fits| std::mem::take(&mut *fits.asked.lock().unwrap());
+
+                // No part answers for the chestplate: the component's answer stands.
+                assert_eq!(dress(0, "minecraft:iron_chestplate"), (true, false));
+                assert!(asked(&fits).is_empty());
+                // The helmet's part accepts only armour stands.
+                assert_eq!(dress(1, "minecraft:iron_helmet"), (false, true));
+                assert_eq!(
+                    asked(&fits),
+                    [
+                        ("head".to_owned(), 11, "minecraft:zombie".to_owned()),
+                        ("head".to_owned(), 21, "minecraft:armor_stand".to_owned()),
+                    ]
+                );
+                // Or only players: neither stands in front.
+                *fits.accepts.lock().unwrap() = "minecraft:player";
+                assert_eq!(dress(2, "minecraft:iron_helmet"), (false, false));
+                assert_eq!(asked(&fits).len(), 2);
             });
         });
     }

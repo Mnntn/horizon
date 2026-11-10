@@ -255,6 +255,7 @@ pub(crate) fn install_client_hooks() {
         item_stacked_on_other: |context, event, canceled| {
             game::api_values::stacked_on_other(context, event, canceled);
         },
+        can_equip: game::api_values::can_equip,
         living_heal: |context, entity, amount, cancel| {
             if !mod_api::__private::listened(mod_api::HookId::LivingHeal) {
                 return;
