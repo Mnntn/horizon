@@ -161,6 +161,13 @@ pub enum DatapackReadError {
     UnknownRegistry,
     /// The registry has no such entry (a reload removed it, or no pack defines it).
     MissingEntry,
+    /// The game has no world open to read from, or no host answered.
+    Unavailable,
+}
+impl crate::NoBackend for DatapackReadError {
+    fn no_backend() -> Self {
+        Self::Unavailable
+    }
 }
 
 /// A reference to one entry of a published set. It checks its session and generation on every
