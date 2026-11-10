@@ -55,12 +55,27 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
         r#"{"enabled":["vanilla","file/base","file/override"],"disabled":[]}"#,
     );
     let winning = root.join("datapacks/override/data/registry_test/registry_test/spell/fire.json");
+    let tag = root.join("datapacks/base/data/registry_test/tags/block/publication.json");
+    write(&tag, r#"{"values":["minecraft:stone"]}"#);
+    write(
+        &root.join("datapacks/base/data/registry_test/registry_test/spell/conditioned.json"),
+        r#"{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"missing_condition_fixture"}],"power":"invalid"}"#,
+    );
     mod_api::testing::with_mods(
         vec![ModEntry::new("registry_test", Box::new(RegistryMod))].into(),
         || {
             with_game(|game| {
                 game.load_world(request(root)).unwrap();
                 assert_eq!(power(game), DatapackValue::Int(7));
+                assert_eq!(
+                    game.mods
+                        .datapack_registries
+                        .as_ref()
+                        .unwrap()
+                        .entries("registry_test:spell")
+                        .unwrap(),
+                    ["registry_test:fire"]
+                );
                 let first = game
                     .mods
                     .datapack_registries
@@ -102,6 +117,7 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                     .as_ref()
                     .map(|tables| tables.files.clone());
                 write(&winning, r#"{"power":11}"#);
+                write(&tag, r#"{"values":["minecraft:dirt"]}"#);
                 assert!(
                     !game.run_command("reload"),
                     "generation exhaustion must refuse the whole publication"
@@ -113,6 +129,9 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                         .map(|tables| tables.files.clone()),
                     old_files
                 );
+                game.finish_close_world().unwrap();
+                game.options.execution_role =
+                    crate::game::execution_role::ExecutionRole::DedicatedServer;
                 game.load_world(request(root)).unwrap();
                 assert_eq!(
                     game.mods.datapack_registries.as_ref().unwrap().get(&first),
