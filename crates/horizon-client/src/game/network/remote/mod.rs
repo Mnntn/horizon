@@ -996,6 +996,11 @@ impl Game<'_> {
         lan: bool,
         realm: bool,
     ) -> Result<()> {
+        if local.is_none() && self.options.developer_single_player {
+            return Err(
+                horizon_client::lang::get("horizon.developer_offline.single_player").into(),
+            );
+        }
         self.realm_session = realm;
         self.reset_tutorial();
         self.perf.world_opening();

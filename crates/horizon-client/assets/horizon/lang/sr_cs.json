@@ -499,5 +499,6 @@
   "horizon.splitscreen.setup.window": "Prozor %s",
   "horizon.splitscreen.setup.window_empty": "Prozor %s: prazan",
   "horizon.splitscreen.setup.window_place": "Prozor %s (%s od %s)",
-  "horizon.title.not_affiliated": "Nije povezano sa Mojang-om ili Microsoft-om"
+  "horizon.title.not_affiliated": "Nije povezano sa Mojang-om ili Microsoft-om",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

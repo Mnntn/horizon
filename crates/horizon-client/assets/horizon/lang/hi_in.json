@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s %2$s के लिए, %3$s तक",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "Mojang या Microsoft से संबद्ध नहीं",
-  "key.emote": "इमोट व्हील"
+  "key.emote": "इमोट व्हील",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

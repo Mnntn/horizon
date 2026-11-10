@@ -228,6 +228,7 @@ pub(crate) struct Options {
     distance: i32,
     distance_override: Option<i32>,
     seed: i64,
+    developer_single_player: bool,
     creative: bool,
     test_terrain: bool,
     /// `--pregen`: enable the command even when the saved Extras switch is off.
@@ -324,7 +325,9 @@ impl Options {
         }
         // The launcher's account: online-mode servers need it. A bad file
         // only leaves the game offline.
-        let session = if o.session_stdin {
+        let session = if o.developer_single_player {
+            Ok(None)
+        } else if o.session_stdin {
             let mut text = String::new();
             std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)
                 .map_err(|e| e.to_string())
@@ -347,7 +350,9 @@ impl Options {
             Ok(None) => {}
             Err(e) => eprintln!("Horizon: not signed in: {e}"),
         }
-        split::launcher::read_now();
+        if !o.developer_single_player {
+            split::launcher::read_now();
+        }
         if let Some(dir) = o.game_dir.take() {
             std::fs::create_dir_all(&dir)
                 .and_then(|()| std::env::set_current_dir(&dir))
@@ -394,6 +399,7 @@ impl Options {
             distance: 12,
             distance_override: None,
             seed: 0,
+            developer_single_player: false,
             creative: false,
             test_terrain: false,
             pregen: false,
@@ -452,6 +458,7 @@ impl Options {
                     }
                     "--fullscreen" => o.fullscreen = true,
                     "--session-stdin" => o.session_stdin = true,
+                    "--developer-single-player" => o.developer_single_player = true,
                     "--creative" => o.creative = true,
                     "--test-terrain" => o.test_terrain = true,
                     "--no-pause" => o.no_pause = true,
@@ -568,6 +575,16 @@ impl Options {
                     read().map_err(|e| format!("{arg}: {e}"))?;
                 }
             }
+        }
+        if o.developer_single_player
+            && (o.server.is_some()
+                || o.session_stdin
+                || o.session_file.is_some()
+                || !o.execution_role.is_client())
+        {
+            return Err(
+                horizon_client::lang::get("horizon.developer_offline.single_player").into(),
+            );
         }
         Ok(Some(o))
     }

@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s na %2$s, do %3$s",
   "horizon.tempban.usage": "/tempban <hráč> <doba> [důvod]",
   "horizon.title.not_affiliated": "Není spojen s Mojang nebo Microsoft",
-  "key.emote": "Kolečko emotů"
+  "key.emote": "Kolečko emotů",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

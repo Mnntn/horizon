@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s %2$s-ով, մինչև %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "Կապված չէ Mojang-ի կամ Microsoft-ի հետ",
-  "key.emote": "Էմոտների անիվ"
+  "key.emote": "Էմոտների անիվ",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

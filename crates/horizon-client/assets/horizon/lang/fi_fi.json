@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s %2$s ajaksi, kunnes %3$s",
   "horizon.tempban.usage": "/tempban <pelaaja> <kesto> [syy]",
   "horizon.title.not_affiliated": "Ei sidoksissa Mojangiin tai Microsoftiin",
-  "key.emote": "Emotepyörä"
+  "key.emote": "Emotepyörä",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

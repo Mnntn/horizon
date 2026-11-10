@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s დაბლოკილია %2$s-ით, %3$s-მდე",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "არ არის დაკავშირებული Mojang-თან ან Microsoft-თან",
-  "key.emote": "ემოციების ბორბალი"
+  "key.emote": "ემოციების ბორბალი",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

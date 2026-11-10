@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s %2$s ваҡытҡа, %3$s тиклем",
   "horizon.tempban.usage": "/tempban <уйынсы> <оҙайлыҡ> [сәбәп]",
   "horizon.title.not_affiliated": "Mojang йәки Microsoft менән бәйле түгел",
-  "key.emote": "Эмот тәгәрмәсе"
+  "key.emote": "Эмот тәгәрмәсе",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

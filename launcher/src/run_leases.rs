@@ -225,7 +225,7 @@ pub(crate) fn spawn(command: &mut Command, piped: bool) -> std::io::Result<std::
                 environment.remove(std::ffi::OsStr::new(GAME));
                 let selection = LaunchArguments::for_command(&game)?;
                 let data = crate::backend::data_dir().canonicalize()?;
-                let trees = holder::lease_paths(&executable, &selection, &data, &cwd)?;
+                let trees = holder::managed_lease_paths(&executable, &selection, &data, &cwd)?;
                 let program = holder::Program {
                     executable: command.get_program().to_owned(),
                     arguments: command.get_args().map(std::ffi::OsStr::to_owned).collect(),

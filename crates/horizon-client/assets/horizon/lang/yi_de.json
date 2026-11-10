@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s פֿאַר %2$s, ביז %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "ניט אַפיליייטאַד מיט Mojang אָדער Microsoft",
-  "key.emote": "עמאָוט־ראָד"
+  "key.emote": "עמאָוט־ראָד",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

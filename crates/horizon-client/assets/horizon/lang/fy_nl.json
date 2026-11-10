@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s foar %2$s, oant %3$s",
   "horizon.tempban.usage": "/tempban <spiler> <doer> [reden]",
   "horizon.title.not_affiliated": "Net oansletten by Mojang of Microsoft",
-  "key.emote": "Emotesjil"
+  "key.emote": "Emotesjil",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "Zabranjen %1$s na %2$s, do %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "Nije povezan sa Mojangom ili Microsoftom",
-  "key.emote": "Točkić emotikona"
+  "key.emote": "Točkić emotikona",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

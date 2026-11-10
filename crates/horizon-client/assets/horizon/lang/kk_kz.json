@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s банге салынды: %2$s, %3$s дейін",
   "horizon.tempban.usage": "/tempban <ойыншы> <ұзақтық> [себеп]",
   "horizon.title.not_affiliated": "Mojang немесе Microsoft компанияларымен байланысты емес",
-  "key.emote": "Эмоция дөңгелегі"
+  "key.emote": "Эмоция дөңгелегі",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

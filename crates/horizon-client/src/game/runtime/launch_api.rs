@@ -3,7 +3,7 @@
 //! Update it with: `HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --lib launch_api`.
 
 /// The Launch API's version (docs/api/stability.md): an addition makes the next patch.
-pub const VERSION: &str = "0.1.0";
+pub const VERSION: &str = "0.1.1";
 
 /// One option of the contract: its name, its value's placeholder (none for a flag), what it does.
 pub struct LaunchOption {
@@ -25,6 +25,11 @@ const fn option(
 /// What a launcher may pass. The game takes more (`--help` lists them), but only these are
 /// promised: they keep their meaning within a line of this API.
 pub const OPTIONS: &[LaunchOption] = &[
+    option(
+        "--developer-single-player",
+        None,
+        "Restricts this run to account-free single-player: no session loading, external connections or LAN hosting. Not a sandbox for native mods.",
+    ),
     option(
         "--resources",
         Some("DIR"),
@@ -264,6 +269,64 @@ mod tests {
         assert_eq!(o.game_dir, Some(std::env::current_dir().unwrap().join("g")));
         assert!(parse(&["--launch-api"]).unwrap().is_none());
         assert!(parse(&["--no-such-option"]).is_err());
+    }
+
+    #[test]
+    fn developer_offline_never_consumes_inherited_sessions() {
+        if let Some(file) = std::env::var_os("OFFLINE_SESSION_TEST_FILE") {
+            assert!(parse(&["--developer-single-player"]).is_err());
+            assert_eq!(std::fs::read(file).unwrap(), b"unconsumed session sentinel");
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("session.json");
+        std::fs::write(&file, b"unconsumed session sentinel").unwrap();
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "game::launch_api::tests::developer_offline_never_consumes_inherited_sessions",
+                "--nocapture",
+            ])
+            .env("OFFLINE_SESSION_TEST_FILE", &file)
+            .env("HORIZON_SESSION_FILE", &file)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            b"unconsumed session sentinel"
+        );
+    }
+
+    #[test]
+    fn developer_single_player_rejects_network_and_account_intents() {
+        let game = parse(&["--developer-single-player", "--world", "DeveloperProof"])
+            .unwrap()
+            .unwrap();
+        assert!(game.developer_single_player);
+        assert!(game.execution_role.is_client());
+        for args in [
+            vec!["--developer-single-player", "--server", "localhost"],
+            vec![
+                "--developer-single-player",
+                "--quickPlayMultiplayer",
+                "localhost",
+            ],
+            vec![
+                "--developer-single-player",
+                "--session-file",
+                "account.json",
+            ],
+            vec!["--developer-single-player", "--session-stdin"],
+            vec!["--developer-single-player", "--dedicated"],
+        ] {
+            assert!(parse(&args).is_err(), "{args:?}");
+        }
+        assert!(parse(&["--server", "localhost"]).is_ok());
     }
 
     #[test]

@@ -1192,7 +1192,7 @@ impl Launcher {
                     self.load_auth_statuses(false);
                     if let Some(tag) = self.starting_client.take() {
                         let mut cmd = backend::client_command(&tag);
-                        let account::GameSession { file, offline, env } = match session {
+                        let pass = match session {
                             Ok(pass) => pass,
                             Err(refused) => {
                                 // A keyring that didn't answer isn't a missing owner (#12179).
@@ -1207,16 +1207,31 @@ impl Launcher {
                                 continue;
                             }
                         };
-                        self.owner = Some(true);
-                        if let Some(file) = file {
-                            cmd.arg("--session-file").arg(file);
-                        }
-                        cmd.envs(env);
-                        // Still play, offline, and say why.
-                        if let Some(e) = offline {
-                            self.client_error = Some(format!("Playing offline: {e}"));
-                        } else if let Some(e) = account::take_unsaved() {
-                            self.client_error = Some(e);
+                        if let Some(account::GameSession { file, offline, env }) = pass {
+                            self.owner = Some(true);
+                            if let Some(file) = file {
+                                cmd.arg("--session-file").arg(file);
+                            }
+                            cmd.envs(env);
+                            // Still play, offline, and say why.
+                            if let Some(e) = offline {
+                                self.client_error = Some(format!("Playing offline: {e}"));
+                            } else if let Some(e) = account::take_unsaved() {
+                                self.client_error = Some(e);
+                            }
+                        } else {
+                            if let Err(error) =
+                                horizon_launcher::developer_offline::require_capability(&tag)
+                            {
+                                self.client_error = Some(error);
+                                self.starting_pack = None;
+                                self.joining = None;
+                                self.quick_play = None;
+                                continue;
+                            }
+                            horizon_launcher::developer_offline::mark(&mut cmd);
+                            self.client_error =
+                                Some(tr(horizon_launcher::developer_offline::NOTICE).into());
                         }
                         self.accounts = Accounts::load();
                         // A pack's Play button plays that pack; Play plays the selected instance.
@@ -1889,7 +1904,11 @@ impl Launcher {
                 }
             }
             backend::play_step("reading the sign-in");
-            let session = account::session_for_game(&backend::game_home());
+            let session = if horizon_launcher::developer_offline::enabled(&tag) {
+                Ok(None)
+            } else {
+                account::session_for_game(&backend::game_home()).map(Some)
+            };
             backend::play_step("starting the game");
             let _ = tx.send(Msg::Session(session));
         });

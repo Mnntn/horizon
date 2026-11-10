@@ -2846,7 +2846,7 @@ pub fn client_command(tag: &str) -> Command {
 
 /// The game's program: on macOS the one inside the version's Horizon.app, so the Dock and Cmd+Tab
 /// show Horizon's name and icon (game_app.rs); the bare binary elsewhere, or if that fails.
-fn client_program(tag: &str) -> PathBuf {
+pub(crate) fn client_program(tag: &str) -> PathBuf {
     let dir = version_dir(tag);
     #[cfg(target_os = "macos")]
     match crate::game_app::ensure(&dir) {
@@ -3111,16 +3111,21 @@ pub fn client_as(tag: &str, who: Option<&str>) -> Result<Command, String> {
     }
     play_step("reading the sign-in");
     let hint = |refused: String| format!("{refused} {}", crate::i18n::tr(SIGN_IN_HINT));
-    let session = match who {
-        None => account::session_for_game(&game_home()).map_err(|refused| {
-            // A keyring that didn't answer isn't a missing sign-in (#12179).
-            match refused.keyring {
-                Some(why) => why,
-                None => hint(refused.to_string()),
-            }
-        }),
-        Some(who) => account::session_for_game_as(&game_home(), who).map_err(hint),
-    }?;
+    let session = if crate::developer_offline::enabled(tag) && who.is_none() {
+        crate::developer_offline::require_capability(tag)?;
+        None
+    } else {
+        Some(match who {
+            None => account::session_for_game(&game_home()).map_err(|refused| {
+                // A keyring that didn't answer isn't a missing sign-in (#12179).
+                match refused.keyring {
+                    Some(why) => why,
+                    None => hint(refused.to_string()),
+                }
+            }),
+            Some(who) => account::session_for_game_as(&game_home(), who).map_err(hint),
+        }?)
+    };
     if let Err(e) = need_prepared(tag) {
         account::discard_unread_sessions();
         return Err(e);
@@ -3129,15 +3134,20 @@ pub fn client_as(tag: &str, who: Option<&str>) -> Result<Command, String> {
     complete_assets(tag);
     crate::browser::horizon::before_play(&game_home());
     let mut cmd = client_command(tag);
-    if let Some(file) = session.file {
-        cmd.arg("--session-file").arg(file);
-    }
-    cmd.envs(session.env);
-    if let Some(e) = session.offline {
-        eprintln!("Playing offline: {e}");
-    }
-    if let Some(e) = account::take_unsaved() {
-        eprintln!("{e}");
+    if let Some(session) = session {
+        if let Some(file) = session.file {
+            cmd.arg("--session-file").arg(file);
+        }
+        cmd.envs(session.env);
+        if let Some(e) = session.offline {
+            eprintln!("Playing offline: {e}");
+        }
+        if let Some(e) = account::take_unsaved() {
+            eprintln!("{e}");
+        }
+    } else {
+        crate::developer_offline::mark(&mut cmd);
+        eprintln!("{}", crate::i18n::tr(crate::developer_offline::NOTICE));
     }
     append_game_args(&mut cmd);
     Ok(cmd)
@@ -4151,7 +4161,7 @@ pub enum Msg {
     AccountRemoved(String, u64, Result<bool, String>),
     /// The owner gate's answer for the game about to start: the selected account's session
     /// file (none = offline) and why it plays offline, if it does.
-    Session(Result<crate::account::GameSession, crate::account::NoOwner>),
+    Session(Result<Option<crate::account::GameSession>, crate::account::NoOwner>),
     JarConsent {
         jars: Vec<horizon_mod_package::manifest::JarRef>,
         reply: std::sync::mpsc::Sender<bool>,
@@ -4198,6 +4208,7 @@ pub struct RuntimeGuard {
 pub use crate::run_leases::control::startup_cleanup;
 
 pub fn prepare_command(cmd: Command) -> Result<(Command, RuntimeGuard), String> {
+    crate::developer_offline::validate(&cmd)?;
     let leases = crate::run_leases::shared(&cmd).map_err(crate::native_mods::cache_error)?;
     #[cfg(windows)]
     let cmd = crate::windows_runtime::redirect(cmd);

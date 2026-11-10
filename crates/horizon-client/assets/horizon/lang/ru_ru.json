@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "Игрок %1$s забанен на %2$s, до %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "Не связан с Mojang или Microsoft",
-  "key.emote": "Колесо эмоций"
+  "key.emote": "Колесо эмоций",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

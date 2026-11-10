@@ -45,8 +45,11 @@ pub fn instance_status(version: &str, prepared: bool) -> Option<String> {
 }
 
 pub fn revision(version: &str) -> Result<String, String> {
-    let record = fs::read_to_string(backend::version_dir(version).join("developer.json"))
-        .map_err(|e| e.to_string())?;
+    revision_in(&backend::version_dir(version))
+}
+
+pub(crate) fn revision_in(directory: &Path) -> Result<String, String> {
+    let record = fs::read_to_string(directory.join("developer.json")).map_err(|e| e.to_string())?;
     #[derive(serde::Deserialize)]
     struct Record {
         revision: String,

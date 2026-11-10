@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s í %2$s, þar til %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "Ekki tengt Mojang eða Microsoft",
-  "key.emote": "Tjáningahjól"
+  "key.emote": "Tjáningahjól",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }
