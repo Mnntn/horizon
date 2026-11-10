@@ -680,12 +680,26 @@ fn overlay(s: &Screen, o: &OverlayView, put: &mut impl FnMut(Call, [f32; 6])) {
         );
         put(sprite_call(&id, bx, by, 24, 24), IDENTITY);
         let (gx, gy) = ((bx + 2) as f32, (by + 2) as f32);
+        // Vanilla's three cells occupy 20 pixels (two 7-pixel steps and
+        // a 6-pixel item). Larger custom grids share those same inner bounds.
+        let (mut min_x, mut min_y, mut max_x, mut max_y) = (0.0_f32, 0.0_f32, 2.0_f32, 2.0_f32);
+        for (cx, cy, _) in &r.cells {
+            min_x = min_x.min(*cx as f32);
+            min_y = min_y.min(*cy as f32);
+            max_x = max_x.max(*cx as f32);
+            max_y = max_y.max(*cy as f32);
+        }
+        let fit = (20.0 / ((max_x - min_x) * 7.0 + 6.0)).min(20.0 / ((max_y - min_y) * 7.0 + 6.0));
         for (cx, cy, items) in &r.cells {
             let pose = translate(
                 scale(
-                    translate(IDENTITY, gx + (3 + cx * 7) as f32, gy + (3 + cy * 7) as f32),
-                    0.375,
-                    0.375,
+                    translate(
+                        IDENTITY,
+                        gx + (3.0 + (*cx as f32 - min_x) * 7.0) * fit,
+                        gy + (3.0 + (*cy as f32 - min_y) * 7.0) * fit,
+                    ),
+                    0.375 * fit,
+                    0.375 * fit,
                 ),
                 -8.0,
                 -8.0,
@@ -732,3 +746,7 @@ pub fn overlay_cells(book: &Book, entry: &Entry) -> Vec<(i32, i32, Vec<ItemStack
     out.retain(|c| !c.2.is_empty());
     out
 }
+
+#[cfg(test)]
+#[path = "recipe_book_screen/overlay_tests.rs"]
+mod overlay_tests;
