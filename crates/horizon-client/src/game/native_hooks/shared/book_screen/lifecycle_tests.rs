@@ -32,6 +32,83 @@ fn receive(game: &mut Game<'_>, message: Message) {
         &settings_codec::encode(&message).unwrap(),
     );
 }
+struct BoundBookMod;
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for BoundBookMod {
+    fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        let key = registrar.recipe_book_type("bound:book").unwrap();
+        registrar
+            .menu_recipe_book(
+                "bound:menu",
+                &key,
+                "bound:recipe",
+                mod_api::RecipeBookLayout::Crafting {
+                    width: 1,
+                    height: 1,
+                    slots: vec![0],
+                    result: 1,
+                },
+                mod_api::Screen {
+                    width: 176.0,
+                    height: 166.0,
+                    slots: vec![Some([8.0, 18.0]), Some([80.0, 18.0])],
+                    recipe_book: Some(key.clone()),
+                    recipe_book_toggle: Some([153.0, 60.0]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+}
+#[test]
+#[ignore = "needs prepared resources and isolated homes"]
+fn entering_inventory_requests_catalogue_for_preinstalled_bound_screen() {
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new("bound", Box::new(BoundBookMod))].into();
+    mod_api::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            mod_api::__private::resolve_menus(["bound:menu"]).unwrap();
+            let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
+            game.connect_local(pipe, "Bound").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            remote.mod_net = true;
+            remote.joined = true;
+            remote.menu.set(Some((1, "bound:menu".into())));
+            game.screen = Screen::Playing;
+            game.container = Some((i32::MIN, 0, 0));
+            game.mod_screen = Some(OpenNativeScreen {
+                layout_revision: 4,
+                key: (i32::MIN, 0, 0),
+                window: 1,
+                block: "bound:block".into(),
+                data: Vec::new(),
+                extra: None,
+                screen: mod_api::RecipeBookLayout::registered_screen("bound:menu").unwrap(),
+            });
+            // Negotiation completed before the user opened the machine. As in
+            // remote_open_screen, the declaration exists before Inventory is shown.
+            use horizon_client::recipe_book::placement_sync;
+            game.native_net.placement.client.hello(6);
+            assert!(
+                game.native_net
+                    .placement
+                    .client
+                    .ready(6, placement_sync::schema())
+            );
+            game.ensure_mod_book_catalog();
+            assert!(game.native_net.placement.client.window().is_none());
+            game.set_screen(Screen::Inventory);
+            let window = game
+                .native_net
+                .placement
+                .client
+                .window()
+                .expect("catalogue requested on opening");
+            assert_eq!(window.menu.as_str(), "bound:menu");
+            assert_eq!(window.nonce, 4);
+            assert!(game.native_net.placement.deadline.is_some());
+        });
+    });
+}
 fn geometry(game: &Game<'_>) -> ((f32, f32), Vec<(usize, [f32; 4])>) {
     let batch = horizon_client::hud::HudBatch::new([1280, 720], game.settings.gui_scale_inputs());
     let layout = game.built_container(&batch).expect("cached container");
