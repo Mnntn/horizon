@@ -419,6 +419,20 @@ pub(crate) fn listed(root: &Path) -> Result<Vec<(String, String)>, String> {
         .collect())
 }
 
+/// Why `target` has no replacement slot when it names a function below the game crate that the
+/// list leaves out; none for a game-crate target or a listed one.
+pub fn refusal(root: &Path, target: &str) -> Result<Option<String>, String> {
+    let target = source::plain_path(target);
+    if target.split("::").next() == Some("horizon_client")
+        || listed(root)?.iter().any(|(_, path)| *path == target)
+    {
+        return Ok(None);
+    }
+    Ok(Some(format!(
+        "a function below the game crate is replaceable only when {LIST} lists it; it is not listed"
+    )))
+}
+
 /// What [`stage`] did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Staged {
@@ -863,6 +877,20 @@ mod tests {
             "{out}"
         );
         syn::parse_file(&out).unwrap();
+    }
+
+    #[test]
+    fn an_unlisted_function_below_the_game_crate_is_refused_naming_the_list() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join(LIST).parent().unwrap()).unwrap();
+        fs::write(root.path().join(LIST), "horizon_low::Clock<'_>::advance\n").unwrap();
+        let refusal = |target| refusal(root.path(), target).unwrap();
+        assert_eq!(refusal("horizon_client::game::Game<'_>::tick"), None);
+        assert_eq!(refusal("horizon_low::Clock::advance"), None);
+        assert_eq!(
+            refusal("horizon_low::chunk::Chunk::get").unwrap(),
+            "a function below the game crate is replaceable only when crates/horizon-mod-api-gen/replaceable.txt lists it; it is not listed"
+        );
     }
 
     #[test]
