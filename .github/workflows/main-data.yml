@@ -1,0 +1,561 @@
+name: main-data
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  HORIZON_TELEMETRY_URL: "off"
+  CARGO_INCREMENTAL: 0
+jobs:
+  # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
+  # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
+  # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
+  # one that passes, and prints only test names and results: the data is Mojang's.
+  ignored-tests-shards:
+    needs: changes
+    # Skip an empty matrix instead of expanding to nothing, which GitHub refuses.
+    if: >-
+      needs.changes.outputs.self_hosted == 'true' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      fromJSON(needs.changes.outputs.ignored_matrix).shard[0] != null
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.ignored_matrix) }}
+    # Owner-approved stopgap: #2944 removes this when the legs run under 15 minutes.
+    runs-on: ${{ (matrix.shard == 'horizon-client#1of2' || matrix.shard == 'horizon-client#2of2') && 'dyna-xlarge' || 'dyna-large' }}
+    # Temporary: #2944 brings client data legs under 15 minutes and restores the 60-minute cap.
+    timeout-minutes: ${{ (matrix.shard == 'horizon-client#1of2' || matrix.shard == 'horizon-client#2of2') && 90 || 60 }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check Dyna dependencies (install fallback without root)
+        run: bash tools/ci/dyna_ci_deps.sh
+      - name: Install Rust toolchain
+        run: |
+          if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+          fi
+          bash tools/ci/rustup_install.sh stable --profile minimal
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Record data-leg start and compiler cache
+        run: |
+          date -u '+data-leg start utc=%Y-%m-%dT%H:%M:%SZ'
+          sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
+      # Missing data must fail on both main pushes and nightly dispatches.
+      - name: Prepare checkout-keyed vanilla data
+        id: data
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          for dir in minecraft datagen horizon-client tools; do
+            if [ ! -d "/cache/horizon-local/$dir" ]; then
+              echo "prepared data unavailable on this runner"
+              echo "Prepared data unavailable: $dir ($EVENT)" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          done
+          HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+      - name: Retain typed preparation diagnostics only
+        if: failure() && steps.data.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: preparation-diagnostic-${{ strategy.job-index }}
+          path: |
+            ${{ runner.temp }}/prepare-build.diagnostic.json
+            ${{ runner.temp }}/prepare.diagnostic.json
+            ${{ runner.temp }}/seed-extras.diagnostic.json
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Generate the fishing test's vanilla reference inputs
+        if: steps.data.outputs.present != 'false' && (matrix.shard == 'horizon-client' || startsWith(matrix.shard, 'horizon-client#'))
+        run: |
+          reference=$(mktemp -d "$RUNNER_TEMP/fishing-reference.XXXXXX")
+          python3 tools/test_fishing_rng_parity.py --prepare-reference "$reference" --env-file "$GITHUB_ENV"
+      - name: Run the ignored tests that need prepared data
+        if: steps.data.outputs.present != 'false'
+        env:
+          RUSTUP_TOOLCHAIN: stable
+          SHARD: ${{ matrix.shard }}
+          HORIZON_DATA_LEG_TIMING: '1'
+        run: |
+          export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
+          python3 tools/ci/with_xvfb.py python3 tools/ci/ignored_tests.py "$SHARD"
+      - name: Record data-leg end and compiler cache
+        if: always()
+        run: |
+          date -u '+data-leg end utc=%Y-%m-%dT%H:%M:%SZ'
+          # Whole-job cgroup high-water: compilation, tests and file cache, not per-test RSS
+          # or an isolated test-execution peak. Fixed kernel files only; telemetry is best effort.
+          echo 'data-leg memory_scope=whole_job_cgroup_including_compilation_tests_file_cache'
+          for metric in memory.peak memory.max memory.swap.peak memory.swap.max; do
+            field="${metric//./_}_bytes"
+            value=unavailable
+            if IFS= read -r sample 2>/dev/null < "/sys/fs/cgroup/$metric"; then
+              if [[ "$sample" =~ ^[0-9]+$ || "$sample" == max ]]; then
+                value="$sample"
+              fi
+            fi
+            echo "data-leg $field=$value"
+          done
+          sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
+  # Never turn missing prepared-data coverage into a green main/nightly run.
+  ignored-tests:
+    needs: [changes, ignored-tests-shards]
+    if: >-
+      always() && !cancelled() &&
+      !inputs.prepare-output-check &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require prepared-data coverage
+        env:
+          RESULT: ${{ needs.ignored-tests-shards.result }}
+          ROUTE: ${{ needs.changes.outputs.self_hosted }}
+          REASON: ${{ needs.changes.outputs.routing_reason }}
+          CHANGES: ${{ needs.changes.result }}
+          FORCED_GITHUB: ${{ needs.changes.outputs.forced_github }}
+        run: |
+          {
+            echo "## Prepared-data coverage"
+            echo "Shard result: $RESULT; changes: $CHANGES; self-hosted: $ROUTE; forced GitHub: $FORCED_GITHUB"
+            echo "Routing: $REASON"
+            if [ "$RESULT" = skipped ]; then
+              echo "Missing coverage: pool routing was disabled/unavailable or the shard matrix was empty. Restore the pool lease/switch if expired; do not treat this run as tested."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$RESULT" != success ]; then
+            echo "::error::Prepared-data coverage required; shard result: $RESULT; self-hosted: $ROUTE; $REASON"
+            exit 1
+          fi
+  # The fork's Dyna runners have the owner's prepared vanilla data in a read-only cache.
+  prepared-output-check:
+    if: github.event_name == 'workflow_dispatch' && inputs.prepare-output-check && github.repository == 'arismoko/horizon'
+    runs-on: dyna-large
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check Dyna dependencies (install fallback without root)
+        run: bash tools/ci/dyna_ci_deps.sh
+      - name: Install Rust toolchain
+        run: |
+          if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+          fi
+          bash tools/ci/rustup_install.sh stable --profile minimal
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Check prepared output digest
+        run: |
+          # Never reuse a completed preparation for this diagnostic, including a retry.
+          for attempt in 1 2; do
+            HORIZON_PREPARE_KEY="${GITHUB_SHA:0:16}-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$attempt" \
+              HORIZON_PREPARE_EXPORT_DIGEST="$RUNNER_TEMP/export.digest" \
+              HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+            exported=$(cat "$RUNNER_TEMP/export.digest")
+            actual=$(python3 tools/prepare_output.py digest 2>/dev/null) || { echo "::error::prepared output digest unavailable"; exit 1; }
+            { echo "fresh export $attempt: $exported"; echo "seeded export $attempt: $actual"; } | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+          set +e
+          python3 tools/prepare_output.py check > "$RUNNER_TEMP/output-check.log" 2>&1
+          result=$?
+          set -e
+          expected=$(awk '!/^#/ && NF == 2 { value=$2 } END { print value }' crates/horizon-prepare/output-versions.txt)
+          { echo "prepared output check: $([ "$result" -eq 0 ] && echo pass || echo fail)"; echo "actual: $actual"; echo "expected: $expected"; } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+  vanilla-parity:
+    if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch' && !inputs.prepare-output-check && !inputs.github-fallback
+    runs-on: dyna-large
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check Dyna dependencies (install fallback without root)
+        run: bash tools/ci/dyna_ci_deps.sh
+      - name: Use system Python for parity harnesses
+        run: |
+          mkdir -p "$DYNA_CI_BUILD/bin"
+          ln -sf "$GITHUB_WORKSPACE/tools/ci/dyna_parity_python.sh" "$DYNA_CI_BUILD/bin/python"
+          echo "$DYNA_CI_BUILD/bin" >> "$GITHUB_PATH"
+      - name: Install Rust toolchain
+        run: |
+          if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+          fi
+          bash tools/ci/rustup_install.sh stable --profile minimal
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Set up disk-backed parity scratch and prepared vanilla data
+        run: |
+          rm -rf "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
+          mkdir -p "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
+          ln -s "$DYNA_CI_BUILD/parity-out" .local
+          echo "TMPDIR=$DYNA_CI_BUILD/parity-tmp" >> "$GITHUB_ENV"
+          HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+      # Harness subprocess timeouts can be shorter than a cold release build. Match their build commands and target dir.
+      - name: Build parity probes
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: |
+          cargo build --release --bin horizon-parity
+          cargo build --release --bin horizon-tick-parity
+          cargo build --release --bin horizon-geometry-parity
+          cargo build --release --bin horizon-noise-parity
+          cargo build --release --bin horizon-density-parity
+          cargo build --release --bin horizon-worldgen-parity
+          cargo build --release --bin horizon-float-log-parity
+          cargo build --release -p horizon-core --example generation_tick_fixture
+          cargo build --release -p horizon-core --example biome_zoom_fixture
+          cargo build --release -p horizon-world --bin horizon-world --example world_probe
+          cargo build --release -p horizon-world --example world_probe
+      - name: Compare Rust foundations with pinned vanilla client and server bytecode
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_rust_parity.py
+      - name: Check Rust world-data interoperability with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_world_parity.py
+      - name: Compare scheduled ticks and saved tick data with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_tick_parity.py
+      - name: Compare simulation geometry and cached block collision shapes
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: |
+          python tools/test_geometry_parity.py
+          python tools/test_collision_parity.py
+      - name: Compare noise samplers and density kernels with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_noise_parity.py
+      - name: Compare compiled density samplers with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_density_parity.py
+      - name: Compare world-generation JSON codecs with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_worldgen_parity.py
+      - name: Compare heightmap predicates and chunk mutations with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_heightmap_parity.py
+      - name: Compare pre-light chunk status transitions and block writes
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_chunk_stage_parity.py
+      - name: Compare feature placement into resident neighboring chunks
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_feature_region_parity.py
+      - name: Compare nested feature selectors and sequences
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_feature_graph_parity.py
+      - name: Compare named feature holders and placed-feature tags
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_feature_catalog_parity.py
+      - name: Compare configured fill-layer block placement
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_fill_layer_parity.py
+      - name: Compare replacement-rule codecs and evaluation
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_rule_test_parity.py
+      - name: Compare simple-block placement and feature composition
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_simple_block_parity.py
+      - name: Compare block-column sampling and obstruction
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_block_column_parity.py
+      - name: Compare vertical pillars and cap feature placement
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_pillar_parity.py
+      - name: Compare exactly-one-neighbor feature spreading
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_neighbor_spread_parity.py
+      - name: Compare block-pile support and placement
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_block_pile_parity.py
+      - name: Compare disk replacement and postprocessing
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_disk_parity.py
+      - name: Compare block-blob support search and geometry
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_block_blob_parity.py
+      - name: Compare spring placement and fluid tick scheduling
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_spring_parity.py
+      - name: Compare vine attachment priority and placement
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_vines_parity.py
+      - name: Compare underwater magma floor scans and occlusion
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_underwater_magma_parity.py
+      - name: Compare blue-ice seeding and growth attempts
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_blue_ice_parity.py
+      - name: Compare spike geometry and discontinuous roots
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_spike_parity.py
+      - name: Compare End podium construction and destruction requests
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_end_podium_parity.py
+      - name: Rust End gateway parity
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_end_gateway_parity.py
+      - name: Compare bonus chest placement and conditional loot seeding
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_bonus_chest_parity.py
+      - name: Compare recursive chorus generation and connection refreshes
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_chorus_plant_parity.py
+      - name: Compare small speleothem patches and waterlogged points
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_speleothem_parity.py
+      - name: Compare replacement blob search and Manhattan shells
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_replace_blobs_parity.py
+      - name: Compare bamboo stalks, podzol patches and leafy caps
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_bamboo_parity.py
+      - name: Compare Nether delta rims and shifted contents
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_delta_parity.py
+      - name: Compare biome freezing and snow eligibility
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_weather_parity.py
+      - name: Compare frozen top layers and snowy ground updates
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_snow_freeze_parity.py
+      - name: Compare generation-stage tick storage and routing
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_generation_tick_parity.py
+      - name: Compare below-zero upgrade metadata codecs
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_retrogen_data_parity.py
+      - name: Compare below-zero upgrade lifecycle and block transformations
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_retrogen_chunk_parity.py
+      - name: Compare chunk-status metadata, ordering and codecs
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_chunk_status_parity.py
+      - name: Compare proto-chunk block-entity storage and coordinates
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_block_entity_storage_parity.py
+      - name: Compare ordered single-block replacement features
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_replace_block_parity.py
+      - name: Compare scattered ore placement and air-exposure checks
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_scattered_ore_parity.py
+      - name: Compare resident bulk-section access and raw writes
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_bulk_section_parity.py
+      - name: Compare biome feature ordering and cycle detection
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_feature_sort_parity.py
+      - name: Compare world-generation random wrappers and seeding
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_worldgen_random_parity.py
+      - name: Compare biome filtering and top-level feature context
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_placement_parity.py
+      - name: Compare biome decoration feature scheduling and seeding
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_decoration_parity.py
+      - name: Compare decoration against resident biome and terrain sections
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_decoration_region_parity.py
+      - name: Compare block-state provider choices and rotation
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_state_provider_parity.py
+      - name: Compare contained fluids and height queries with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_fluid_parity.py
+      - name: Compare entity obstruction with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_entity_obstruction_parity.py
+      - name: Compare block solidity and replaceability with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_block_properties_parity.py
+      - name: Compare face slicing and block support with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_face_support_parity.py
+      - name: Compare cached block support with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_block_support_parity.py
+      - name: Compare dynamic block support with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_dynamic_support_parity.py
+      - name: Compare moving-piston collision and interpolation with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_piston_shape_parity.py
+      - name: Compare supported block survival rules with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_block_survival_parity.py
+      - name: Compare noise-stage chunk filling with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_terrain_parity.py
+      - name: Compare structure terrain-adaptation density with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_structure_density_parity.py
+      - name: Compare seeded material bands and surface queries with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_material_surface_parity.py
+      - name: Compare material condition codecs and rule evaluation with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_material_condition_parity.py
+      - name: Compare biome temperatures and cache behavior with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_temperature_parity.py
+      - name: Compare badlands and frozen-ocean extensions with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_material_extension_parity.py
+      - name: Compare bundled material-rule libraries with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_material_rule_library_parity.py
+      - name: Compare fixed, checkerboard and End biome sources with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_source_parity.py
+      - name: Compare seeded cave paths and failure state with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_cave_carver_parity.py
+      - name: Compare seeded canyon paths and width factors with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_canyon_carver_parity.py
+      - name: Compare initial block-writing feature algorithms with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_basic_feature_parity.py
+      - name: Compare feature placement chains with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_feature_placement_parity.py
+      - name: Compare feature placement primitives with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_placement_parity.py
+      - name: Compare anchored height providers with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_height_provider_parity.py
+      - name: Compare scalar value providers with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_value_provider_parity.py
+      - name: Compare cave and canyon geometric primitives with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_carving_geometry_parity.py
+      - name: Compare carving-mask traversal and callback mutations with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_carving_mask_parity.py
+      - name: Compare registry-bound biome-source codecs with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_source_codec_parity.py
+      - name: Compare all four biome-source kinds in chunk generation with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_generation_parity.py
+      - name: Compare chunk biome filling and failure state with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_chunk_parity.py
+      - name: Compare biome zoom and seed obfuscation with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_zoom_parity.py
+      - name: Compare surface-stage chunks with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_material_stage_parity.py
+      - name: Compare block-state JSON codecs with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_block_state_codec_parity.py
+      - name: Compare vertical anchors with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_anchor_parity.py
+      - name: Compare float logarithms at domain and rounding boundaries
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_float_log_parity.py
