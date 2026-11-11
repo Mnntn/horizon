@@ -251,12 +251,7 @@ pub(crate) fn listed(root: &Path) -> Result<Vec<(String, String)>, String> {
         .enumerate()
         .filter_map(|(index, line)| {
             let path = line.split('#').next().unwrap_or_default().trim();
-            (!path.is_empty()).then(|| {
-                (
-                    format!("{LIST}:{}", index + 1),
-                    source::plain_path(path),
-                )
-            })
+            (!path.is_empty()).then(|| (format!("{LIST}:{}", index + 1), source::plain_path(path)))
         })
         .collect())
 }
@@ -318,8 +313,8 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
         for file in &krate.files {
             let text = fs::read_to_string(&file.path)
                 .map_err(|e| format!("{}: {e}", file.path.display()))?;
-            let parsed = syn::parse_file(&text)
-                .map_err(|e| format!("{}: {e}", file.path.display()))?;
+            let parsed =
+                syn::parse_file(&text).map_err(|e| format!("{}: {e}", file.path.display()))?;
             let mut found = Vec::new();
             functions(&file.module, &parsed.items, &mut found);
             if krate.listed_only {
@@ -504,7 +499,8 @@ fn rewrite(
     }
     // At one offset, a replacement of a range before an insertion there, each in pushed order.
     edits.sort_by_key(|(start, end, _)| (*start, *end == *start));
-    let mut out = String::with_capacity(text.len() + edits.iter().map(|e| e.2.len()).sum::<usize>());
+    let mut out =
+        String::with_capacity(text.len() + edits.iter().map(|e| e.2.len()).sum::<usize>());
     let mut from = 0;
     for (start, end, replacement) in edits {
         if start < from {
@@ -549,7 +545,9 @@ mod tests {
     #[test]
     fn hook_functions_are_replaceable_and_single_instance_rules_refuse() {
         assert!(eligible_fn("fn native_tick(&mut self) {}"));
-        assert!(eligible_fn("fn borrow<'a>(&'a self, key: &str) -> &'a str { key }"));
+        assert!(eligible_fn(
+            "fn borrow<'a>(&'a self, key: &str) -> &'a str { key }"
+        ));
         for refused in [
             "const fn f() {}",
             "async fn f() {}",
@@ -605,8 +603,10 @@ mod tests {
                 .unwrap();
         assert_eq!(
             pointer_type(&method.sig).to_string(),
-            quote!(for<'__fnr_l0, '__fnr_s> fn(&'__fnr_s Self, &'__fnr_l0 str, &Self) -> &'__fnr_s str)
-                .to_string()
+            quote!(
+                for<'__fnr_l0, '__fnr_s> fn(&'__fnr_s Self, &'__fnr_l0 str, &Self) -> &'__fnr_s str
+            )
+            .to_string()
         );
         let free: syn::ItemFn = syn::parse_str("fn interval(rate: f32) -> i64 { 0 }").unwrap();
         assert_eq!(
@@ -662,7 +662,10 @@ mod tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         };
-        write("crates/horizon-client/Cargo.toml", "[package]\nname = 'horizon-client'\n");
+        write(
+            "crates/horizon-client/Cargo.toml",
+            "[package]\nname = 'horizon-client'\n",
+        );
         write(
             "crates/horizon-client/src/lib.rs",
             "#![forbid(unsafe_code)]\nmod game;\n",
@@ -671,7 +674,10 @@ mod tests {
             "crates/horizon-client/src/game.rs",
             "impl Game<'_> { fn native_tick(&mut self) {} }\nfn free(a: u8) -> u8 { a }\n",
         );
-        write("crates/horizon-low/Cargo.toml", "[package]\nname = 'horizon-low'\n");
+        write(
+            "crates/horizon-low/Cargo.toml",
+            "[package]\nname = 'horizon-low'\n",
+        );
         write(
             "crates/horizon-low/src/lib.rs",
             "pub fn drawn() {}\npub fn unlisted() {}\n",
@@ -690,13 +696,19 @@ mod tests {
         assert!(lib.starts_with("#![deny(unsafe_code)]\n"), "{lib}");
         assert!(lib.contains("pub static __REPLACE: [::std::sync::atomic::AtomicPtr<()>; 2]"));
         let low = fs::read_to_string(root.path().join("crates/horizon-low/src/lib.rs")).unwrap();
-        assert!(low.contains("__fnr_drawn") && !low.contains("__fnr_unlisted"), "{low}");
+        assert!(
+            low.contains("__fnr_drawn") && !low.contains("__fnr_unlisted"),
+            "{low}"
+        );
         assert!(low.contains("pub static __REPLACE: [::std::sync::atomic::AtomicPtr<()>; 1]"));
         syn::parse_file(&low).unwrap();
 
         write(LIST, "horizon_low::missing\n");
         write("crates/horizon-low/src/lib.rs", "pub fn drawn() {}\n");
         let error = stage(root.path()).unwrap_err();
-        assert!(error.contains("replaceable.txt:1: horizon_low::missing"), "{error}");
+        assert!(
+            error.contains("replaceable.txt:1: horizon_low::missing"),
+            "{error}"
+        );
     }
 }

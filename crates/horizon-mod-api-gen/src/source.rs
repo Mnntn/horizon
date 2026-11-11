@@ -254,7 +254,6 @@ pub(crate) fn plain_path(path: &str) -> String {
     out
 }
 
-
 /// Whether `attrs` hold a `cfg` (or `cfg_attr`): the item is compiled only in some builds.
 pub(crate) fn gated(attrs: &[syn::Attribute]) -> bool {
     attrs
@@ -266,7 +265,6 @@ pub(crate) fn gated(attrs: &[syn::Attribute]) -> bool {
 pub(crate) fn unraw(ident: &syn::Ident) -> String {
     ident.to_string().trim_start_matches("r#").to_owned()
 }
-
 
 /// A type as a target names it: lifetimes as `'_`, no spaces.
 pub(crate) fn owner(ty: &Type) -> String {
@@ -299,7 +297,6 @@ pub(crate) fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn)
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     /// A module whose file each target names with `cfg_attr(…, path = …)` is read from each
     /// target's file under its condition; it has no default file, and none is needed.

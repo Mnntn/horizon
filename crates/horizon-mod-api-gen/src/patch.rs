@@ -330,7 +330,9 @@ fn replaceable(found: &Found, local_macros: &BTreeSet<String>) -> Result<(), Str
     if let Some(block) = &found.owner
         && !crate::replace::lifetimes_only(&block.generics)
     {
-        return Err("its `impl` is generic over types: one copy can't stand for every instance".into());
+        return Err(
+            "its `impl` is generic over types: one copy can't stand for every instance".into(),
+        );
     }
     if let Some(block) = &found.owner
         && block.attrs.iter().any(|attr| attr.path().is_ident("cfg"))
