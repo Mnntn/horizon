@@ -1,5 +1,8 @@
 //! NETWORK callbacks have no World borrow. Their replies and main work publish on success.
-use super::{Body, Endpoint, Incoming, Prepared, Side};
+use super::{
+    Body, Endpoint, Incoming, MainQueue, Prepared, Side,
+    main_queue::{FailedMain, PreparedMain},
+};
 use mod_api::{
     HandlerThread, IPayloadContext, PayloadAccepted, PayloadBytes, PayloadContextError,
     PayloadDirection, PayloadId, PayloadProtocol, PayloadSendError, PayloadWork, PayloadWorkStatus,
@@ -9,22 +12,36 @@ use std::sync::Arc;
 
 enum After {
     Reply(Prepared),
-    Work(Incoming),
+    Work(PreparedMain),
+}
+enum FailedPublication {
+    Reply(PayloadSendError),
+    Main(FailedMain),
 }
 const _: () = assert!(std::mem::size_of::<After>() <= 256);
 
 /// Called by the physical receiving executor. Main events use its ordinary ordered stream.
-pub fn dispatch(
-    mut incoming: Incoming,
-    endpoint: Endpoint,
-    mut main: impl FnMut(Incoming) -> Result<(), String>,
-) {
+pub fn dispatch(mut incoming: Incoming, endpoint: Endpoint, main: MainQueue) {
     if !incoming.epoch.active() {
         return;
     }
     if matches!(incoming.body, Body::Work(_)) || incoming.receiver.thread == HandlerThread::Main {
-        if let Err(error) = main(incoming) {
-            endpoint.disconnect(failure(&error));
+        let epoch = incoming.epoch.clone();
+        let prepared = match main.prepare(incoming) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                endpoint.disconnect(failure(&format!("payload main refused: {error:?}")));
+                return;
+            }
+        };
+        // The value stays outside the closure if invalidated before publication.
+        let mut prepared = Some(prepared);
+        let result = epoch.with_active(|| prepared.take().unwrap().publish());
+        drop(prepared);
+        if let Some(Err(error)) = result {
+            let reason = error.reason();
+            drop(error);
+            endpoint.disconnect(failure(&format!("payload main refused: {reason:?}")));
         }
         return;
     }
@@ -36,6 +53,7 @@ pub fn dispatch(
     let mut context = NetworkContext {
         incoming: &incoming,
         endpoint: &endpoint,
+        main: &main,
         after: Vec::new(),
         disconnect: None,
     };
@@ -50,22 +68,40 @@ pub fn dispatch(
         }
         Ok(()) => {
             let reason = context.disconnect.take();
-            let after = std::mem::take(&mut context.after);
+            let mut after = std::mem::take(&mut context.after);
+            drop(context);
             let result = incoming.epoch.with_active(|| {
-                for action in after {
-                    match action {
-                        After::Reply(reply) => reply.publish().map_err(|error| {
-                            format!("payload {} reply refused: {error:?}", incoming.id.0)
-                        })?,
-                        After::Work(work) => main(work)?,
+                // Never consume the container here: an early error must not drop
+                // remaining opaque Work captures while the epoch gate is held.
+                for action in &mut after {
+                    match action.take().unwrap() {
+                        After::Reply(reply) => reply.publish().map_err(FailedPublication::Reply)?,
+                        After::Work(work) => work.publish().map_err(FailedPublication::Main)?,
                     }
                 }
-                Ok::<(), String>(())
+                Ok::<(), FailedPublication>(())
             });
-            if let Some(Err(error)) = result {
-                endpoint.disconnect(failure(&error));
-            } else if let Some(reason) = reason {
-                endpoint.disconnect(reason);
+            drop(after);
+            match result {
+                Some(Err(error)) => {
+                    let message = match &error {
+                        FailedPublication::Reply(error) => {
+                            format!("payload {} reply refused: {error:?}", incoming.id.0)
+                        }
+                        FailedPublication::Main(error) => {
+                            format!("payload main refused: {:?}", error.reason())
+                        }
+                    };
+                    drop(error);
+                    endpoint.disconnect(failure(&message));
+                }
+                Some(Ok(())) => {
+                    if let Some(reason) = reason {
+                        endpoint.disconnect(reason);
+                    }
+                }
+                // Phase/connection cancellation cancels the staged disconnect too.
+                None => {}
             }
         }
     }
@@ -76,7 +112,8 @@ fn failure(message: &str) -> Text {
 struct NetworkContext<'a> {
     incoming: &'a Incoming,
     endpoint: &'a Endpoint,
-    after: Vec<After>,
+    main: &'a MainQueue,
+    after: Vec<Option<After>>,
     disconnect: Option<Text>,
 }
 impl IPayloadContext for NetworkContext<'_> {
@@ -134,7 +171,7 @@ impl IPayloadContext for NetworkContext<'_> {
             return Err(PayloadSendError::Disconnected);
         }
         let reply = self.endpoint.prepare(&self.incoming.epoch, id, bytes)?;
-        self.after.push(After::Reply(reply));
+        self.after.push(Some(After::Reply(reply)));
         Ok(PayloadAccepted::Queued)
     }
     fn disconnect(&mut self, reason: Text) {
@@ -148,7 +185,8 @@ impl IPayloadContext for NetworkContext<'_> {
             return Err(PayloadContextError::Disconnected);
         }
         let work = self.incoming.work(self.endpoint.transport(), work)?;
-        self.after.push(After::Work(work));
+        let prepared = self.main.prepare(work)?;
+        self.after.push(Some(After::Work(prepared)));
         Ok(PayloadWorkStatus::Queued)
     }
 }

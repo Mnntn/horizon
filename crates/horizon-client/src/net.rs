@@ -439,8 +439,8 @@ impl Session {
         }
     }
     /// Everything received since the last poll.
-    pub fn poll(&self) -> Vec<Event> {
-        self.events.try_iter().collect()
+    pub fn poll(&self) -> Vec<ingress::OwnedReceipt<Event>> {
+        self.events.take_turn()
     }
     /// Starts recording into `recorder`. `initialize` runs first, while the network thread
     /// can't record, so what it writes (a snapshot of the world) comes before any live packet.
@@ -1228,10 +1228,11 @@ fn receive_application(
     {
         crate::raw_payloads::Classified::Other(payload) => Ok(Some(payload)),
         crate::raw_payloads::Classified::Application(incoming) => {
-            crate::raw_payloads::dispatch(incoming, endpoint.clone(), |incoming| {
-                send.send(Event::RawPayload(Box::new(incoming)))
-                    .map_err(|_| "payload main receiver disconnected".to_owned())
-            });
+            crate::raw_payloads::dispatch(
+                incoming,
+                endpoint.clone(),
+                crate::raw_payloads::MainQueue::Client(send.clone()),
+            );
             Ok(None)
         }
     }

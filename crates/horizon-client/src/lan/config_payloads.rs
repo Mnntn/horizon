@@ -87,17 +87,15 @@ impl<'a> ConfigIo<'a> {
             crate::raw_payloads::Classified::Other(payload) => Ok(Some(payload)),
             crate::raw_payloads::Classified::Application(incoming) => {
                 let endpoint = crate::raw_payloads::Endpoint::configuration(sender.clone());
-                crate::raw_payloads::dispatch(incoming, endpoint.clone(), |incoming| {
-                    self.events
-                        .send(super::NetEvent::RawPayload(Box::new(
-                            crate::raw_payloads::Delivery {
-                                conn: None,
-                                endpoint: endpoint.clone(),
-                                incoming,
-                            },
-                        )))
-                        .map_err(|_| "payload main receiver disconnected".to_owned())
-                });
+                crate::raw_payloads::dispatch(
+                    incoming,
+                    endpoint.clone(),
+                    crate::raw_payloads::MainQueue::Server {
+                        events: self.events.clone(),
+                        endpoint,
+                        conn: None,
+                    },
+                );
                 Ok(None)
             }
         }

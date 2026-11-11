@@ -9,6 +9,10 @@ mod endpoint;
 pub use endpoint::{Endpoint, Prepared};
 mod executor;
 pub use executor::dispatch;
+mod main_queue;
+pub use main_queue::MainQueue;
+#[cfg(test)]
+pub(crate) mod test_support;
 /// Physical server ingress identity, moved unchanged from I/O through Hub to main.
 /// Boxed only on mod-bearing paths so ordinary event unions do not grow.
 pub struct Delivery {

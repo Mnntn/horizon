@@ -319,6 +319,16 @@ impl PlayerSender {
             payload_transport: Transport::empty(),
         }
     }
+    #[cfg(test)]
+    pub(crate) fn new_with_payload_transport(
+        tx: Sender<Out>,
+        pending: Arc<AtomicUsize>,
+        transport: Arc<Transport>,
+    ) -> Self {
+        let mut sender = Self::new(tx, pending);
+        sender.payload_transport = transport;
+        sender
+    }
     /// A connectionless actor has no writer, queue or packet delivery.
     pub fn disabled() -> Self {
         Self {
@@ -1941,19 +1951,10 @@ impl io_pool::Session for PlayConn {
                                 crate::raw_payloads::dispatch(
                                     incoming,
                                     endpoint.clone(),
-                                    |incoming| {
-                                        self.shared
-                                            .events
-                                            .send(NetEvent::RawPayload(Box::new(
-                                                crate::raw_payloads::Delivery {
-                                                    conn: Some(self.conn),
-                                                    endpoint: endpoint.clone(),
-                                                    incoming,
-                                                },
-                                            )))
-                                            .map_err(|_| {
-                                                "payload main receiver disconnected".to_owned()
-                                            })
+                                    crate::raw_payloads::MainQueue::Server {
+                                        events: self.shared.events.clone(),
+                                        endpoint,
+                                        conn: Some(self.conn),
                                     },
                                 );
                                 return Verdict::Go;
