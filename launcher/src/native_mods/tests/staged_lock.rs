@@ -17,20 +17,11 @@ fn generated_game_edges_are_frozen_before_mod_resolution() {
         "pub fn pressed() -> bool { true }",
     );
     put("crates/horizon-client-input/Cargo.toml", "[package]\nname = 'horizon-client-input'\nversion = '0.1.0'\n[dependencies]\nlog = '0.4'\n");
-    put(
-        "crates/horizon-mod-api-gen/slots/horizon.txt",
-        "horizon_client_input::pressed\n",
-    );
-    put(
-        "crates/horizon-mod-points/Cargo.toml",
-        "[package]\nname = 'horizon-mod-points'\n",
-    );
     let mut original = String::from("version = 4\n\n");
     for name in [
         "horizon-client-input",
         "horizon-mod-api",
         "horizon-mod-api-macros",
-        "horizon-mod-points",
     ] {
         original.push_str(&format!(
             "[[package]]\nname = \"{name}\"\nversion = \"0.1.0\"\n"

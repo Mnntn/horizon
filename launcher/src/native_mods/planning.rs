@@ -15,7 +15,7 @@ pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
 pub(super) fn classify(
     folder: &Path,
     base: Option<&str>,
-    lease: &crate::native_cache::Cache,
+    _lease: &crate::native_cache::Cache,
 ) -> Result<Routes, Failed> {
     let found = scan_bundles(folder)?;
     let mut result = Routes::default();
@@ -42,29 +42,6 @@ pub(super) fn classify(
     if let Some(list) = mismatch(&found, &revision) {
         return Err(mismatch_error(&list).into());
     }
-    // Trait mods need only the release listing; compiled slots need a checked SDK catalog.
-    if projects
-        .iter()
-        .all(|project| project.bundle.manifest.inject.is_empty())
-    {
-        result.unavailable = prebuilt::prebuilt_availability(&revision, Target::Client);
-    } else {
-        match prebuilt::planning_catalog(lease, &revision) {
-            Ok(catalog) => {
-                let catalog = catalog.with_mods(projects.iter().map(|project| project.bundle))?;
-                for (id, route) in prebuilt::slot_routes(&catalog, &projects) {
-                    if route != Route::Prebuilt {
-                        let entry = result
-                            .mods
-                            .iter_mut()
-                            .find(|(mod_id, _)| *mod_id == id)
-                            .expect("slot decisions cover the parsed projects");
-                        entry.1 = route;
-                    }
-                }
-            }
-            Err(reason) => result.unavailable = Some(reason),
-        }
-    }
+    result.unavailable = prebuilt::prebuilt_availability(&revision, Target::Client);
     Ok(result)
 }

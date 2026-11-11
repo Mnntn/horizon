@@ -213,32 +213,6 @@ mod tests {
         }
     }
     #[test]
-    fn source_refusals_leave_existing_lock_untouched() {
-        let input = tempfile::tempdir().unwrap();
-        let output = tempfile::tempdir().unwrap();
-        let bundle = fixture(input.path());
-        let original = fs::read_to_string(input.path().join("Cargo.toml")).unwrap();
-        fs::write(input.path().join("Cargo.lock"), "original pins").unwrap();
-        assert!(generate(&bundle, false)
-            .unwrap_err()
-            .contains("--update-lock"));
-        for extra in [
-            "[patch.crates-io]\nitoa={path='outside'}\n",
-            "[replace]\n'itoa:1.0.18'={path='outside'}\n",
-        ] {
-            fs::write(
-                input.path().join("Cargo.toml"),
-                format!("{original}\n{extra}"),
-            )
-            .unwrap();
-            assert!(stage(&bundle, output.path()).is_err());
-            assert_eq!(
-                fs::read_to_string(input.path().join("Cargo.lock")).unwrap(),
-                "original pins"
-            );
-        }
-    }
-    #[test]
     fn local_dependencies_are_traversed_but_cannot_escape() {
         let input = tempfile::tempdir().unwrap();
         let output = tempfile::tempdir().unwrap();

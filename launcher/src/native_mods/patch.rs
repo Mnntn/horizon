@@ -3,7 +3,7 @@
 //! crate (`horizon_mod_api_gen::patch`), horizon-mixins applies every mod's rows to those copies
 //! in one pass (one combined copy per function, in the tool's order), rustc compiles the crate
 //! against the prebuilt game and the mods, and the generated `main` installs each copy through
-//! its point's replacement slot. What can't take this route is refused by name; nothing here
+//! its typed installer. What can't take this route is refused by name; nothing here
 //! falls back to compiling the game.
 use super::{api, prebuilt::Identity, Bundle};
 use crate::i18n::trf;
@@ -89,28 +89,6 @@ pub(super) fn build(
         .iter()
         .flat_map(|bundle| bundle.manifest.mixin.iter().map(|row| row.target.clone()))
         .collect();
-    // Only a point with a raw form has a replacement slot in the prebuilt game.
-    let catalog = super::internals::Catalog::read(game)?;
-    let points: Vec<String> = catalog
-        .points
-        .iter()
-        .filter(|point| point.raw)
-        .map(|point| super::internals::plain_path(&point.target))
-        .collect();
-    let mut refusals = Vec::new();
-    for target in &targets {
-        if !points.contains(&super::internals::plain_path(target)) {
-            refusals.push(format!(
-                "E_MIXIN_NOT_REPLACEABLE: {target}: the prebuilt game has no replacement slot \
-                 there (not a point with a raw form: a hook function, a generic or cfg-gated \
-                 function, a trait method, or a function below the game crate that no slot list \
-                 names)"
-            ));
-        }
-    }
-    if !refusals.is_empty() {
-        return Err(refusals.join("\n"));
-    }
     let generated = api_gen::patch::generate(&source, CRATE, &targets).map_err(|refusals| {
         refusals
             .iter()
@@ -236,6 +214,10 @@ pub(super) fn build(
     ))?;
     Ok(Some(Patch {
         rlib,
-        installs: generated.patched.into_iter().map(|p| p.install).collect(),
+        installs: generated
+            .patched
+            .into_iter()
+            .map(|p| format!("({:?}, {})", p.target, p.install))
+            .collect(),
     }))
 }

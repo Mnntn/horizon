@@ -74,7 +74,7 @@ const MAIN_TEMPLATE: &str = "crates/horizon-client/src/native_main.rs.template";
 
 pub(super) fn template(path: &Path) -> Result<String, String> {
     fs::read_to_string(path).ok()
-        .filter(|template| ["/* MOD_ENTRIES */", "/* MOD_SLOTS */", "/* BUILT_MODS */"].iter()
+        .filter(|template| ["/* MOD_ENTRIES */", "/* BUILT_MODS */"].iter()
             .all(|marker| template.matches(marker).count() == 1))
         .ok_or_else(|| crate::i18n::tr("This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.").to_string())
 }
@@ -82,9 +82,8 @@ pub(super) fn template(path: &Path) -> Result<String, String> {
 pub(super) fn main_rs(
     template: &str,
     mods: &[&horizon_mod_package::Manifest],
-    catalog: &internals::Catalog,
+    _catalog: &internals::Catalog,
 ) -> String {
-    let (listed, sites) = (&catalog.points, &catalog.sites);
     let entries = mods
         .iter()
         .enumerate()
@@ -94,65 +93,7 @@ pub(super) fn main_rs(
         "    horizon_mod_package::runtime::BuiltMod {{ id: {:?}, version: {:?}, side: horizon_mod_package::Side::{:?} }},\n",
         m.id, m.version, m.side,
     )).collect::<String>();
-    let raw = mods.iter().enumerate().flat_map(|(i, manifest)| {
-        super::slots::points(listed, manifest).map(move |injection| {
-            let point = listed.iter().find(|point| internals::plain_path(&point.target) == internals::plain_path(&injection.target)).expect("raw target checked");
-            let place = point.place(injection.at_return);
-            let entry = manifest.inject.iter().find(|entry| entry.id == injection.id)
-                .expect("unified point entry");
-            if entry.kind == horizon_mod_package::manifest::inject::Kind::Replace {
-                let replace = horizon_mod_point_emit::internals_replace(entry, &manifest.id, &point.emitted(), &format!("mod_{i}_internals::raw::{place}"), &format!("mod_{i}::{}", entry.with))
-                    .expect("internals replace checked");
-                return format!("        {replace}, // injection {:?}\n", injection.id);
-            }
-            let order = format!(".ordered({}, {:?})", entry.priority, entry.id);
-            format!("        mod_{i}_internals::raw::{place}({:?}, mod_{i}::{}){order}, // injection {:?}\n", manifest.id, injection.method, injection.id)
-        })
-    }).collect::<String>();
-    // An addon's internals listeners at another mod's points (#2339).
-    let raw = raw
-        + &(0..mods.len())
-            .map(|i| super::mod_points::internals(catalog, mods, i))
-            .collect::<String>();
-    let api_points = listed
-        .iter()
-        .map(super::inject::ListedPoint::emitted)
-        .chain(super::mod_points::emitted(catalog, mods))
-        .collect::<Vec<_>>();
-    let raw = raw
-        + &mods
-            .iter()
-            .enumerate()
-            .flat_map(|(i, manifest)| {
-                horizon_mod_point_emit::api(manifest, &api_points, &format!("mod_{i}::"))
-                    .expect("API slots checked")
-                    .into_iter()
-                    .map(|expression| format!("        {expression},\n"))
-            })
-            .collect::<String>();
-    let raw = raw
-        + &mods
-            .iter()
-            .enumerate()
-            .flat_map(|(index, manifest)| {
-                super::slots::sites(sites, manifest).map(move |(entry, site)| {
-                    let adapter = super::sites::adapter(
-                        entry.kind,
-                        &format!("mod_{index}::{}", entry.with),
-                        site.once,
-                    );
-                    format!(
-                        "        mod_{index}_internals::raw::{}({:?}, {}, {:?}, {adapter}),\n",
-                        site.constructor(),
-                        manifest.id,
-                        entry.priority,
-                        entry.id
-                    )
-                })
-            })
-            .collect::<String>();
     let markers = [
-        ("/* MOD_SLOTS */", &raw),
         ("/* MOD_ENTRIES */", &entries),
         ("/* BUILT_MODS */", &inventory),
     ];
@@ -181,17 +122,12 @@ pub(super) struct Project<'a> {
 
 /// The mod API's package, the one crate every mod depends on.
 pub(super) const API_PACKAGE: &str = "horizon-mod-api";
-/// The injection points' package, which a mod that listens at points also depends on (#589).
-pub(super) const POINTS_PACKAGE: &str = "horizon-mod-points";
 
 /// The per-mod facade's package, rewritten to its generated crate.
 pub(super) const INTERNALS_PACKAGE: &str = "horizon-internals";
 /// Each game package a mod may depend on, with its library's name.
-pub(super) const PACKAGES: [(&str, &str); 3] = [
-    (API_PACKAGE, "mod_api"),
-    (POINTS_PACKAGE, "mod_points"),
-    (INTERNALS_PACKAGE, "internals"),
-];
+pub(super) const PACKAGES: [(&str, &str); 2] =
+    [(API_PACKAGE, "mod_api"), (INTERNALS_PACKAGE, "internals")];
 
 /// A dependency on one of [`PACKAGES`], under `[dependencies]` or a `[target.*]` table.
 struct ApiDependency {
@@ -406,7 +342,7 @@ impl<'a> Project<'a> {
         dependency_tables(&self.cargo)
     }
 
-    /// The names the mod's code calls the game's packages by (`mod_api`, `mod_points`, or a
+    /// The names the mod's code calls the game's packages by (`mod_api` or a
     /// renamed dependency's key), each with its package's library name.
     pub(super) fn api_dependencies(&self) -> std::collections::BTreeSet<(String, &'static str)> {
         self.api_deps
@@ -467,7 +403,6 @@ pub(super) fn stage(
     for name in [
         "horizon-client",
         "horizon-mod-api",
-        "horizon-mod-points",
         "horizon-threads",
         "horizon-mod-package",
     ] {
@@ -483,7 +418,7 @@ pub(super) fn stage(
         let relative = format!("native-api/{}", bundle.manifest.id);
         let dest = stage.join(&relative);
         super::copy_bundle(bundle, &dest)?;
-        super::mod_points::stage(&dest, &catalog.wire)?;
+
         let path = dest.join("Cargo.toml");
         let mut manifest = project.cargo.clone();
         let package = project.package.clone();
@@ -772,7 +707,7 @@ mod tests {
         let mods = [&base, &extra];
         for count in 0..=2 {
             let text = main_rs(template, &mods[..count], &internals::Catalog::default());
-            let padded = ["/* MOD_ENTRIES */", "/* MOD_SLOTS */", "/* BUILT_MODS */"]
+            let padded = ["/* MOD_ENTRIES */", "/* BUILT_MODS */"]
                 .into_iter()
                 .fold(template.to_owned(), |text, marker| {
                     text.replace(marker, &format!("    {marker}"))
@@ -804,65 +739,6 @@ mod tests {
                 ][..count]
             );
         }
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn shared_api_emitter_preserves_native_slot_bytes() {
-        use horizon_mod_package::manifest::inject::{Access, Inject, Kind};
-        let dir = fixture();
-        let mut manifest = horizon_mod_package::Package::read(&dir).unwrap().manifest;
-        manifest.id = "fixture".into();
-        manifest.inject = [Kind::Head, Kind::Return, Kind::Replace]
-            .into_iter()
-            .enumerate()
-            .map(|(index, kind)| Inject {
-                id: format!("listen_{index}"),
-                at: "game::Game<'_>::tick".into(),
-                kind,
-                with: format!("listen_{index}"),
-                access: Access::Api,
-                priority: 12,
-                hash: Some("pin".into()),
-                call: None,
-                nth: None,
-                ctx: None,
-            })
-            .collect();
-        let listed = [super::super::inject::ListedPoint {
-            name: "tick".into(),
-            record_name: None,
-            target: "game::Game::tick".into(),
-            raw: true,
-            at_return: true,
-            api_refusal: None,
-            returns: "cancel".into(),
-            host: "both".into(),
-            raw_shape: None,
-            return_ty: Some("()".into()),
-            listener: None,
-            return_listener: None,
-        }];
-        let output = main_rs(
-            "/* MOD_ENTRIES */START\n/* MOD_SLOTS */END/* BUILT_MODS */",
-            &[&manifest],
-            &internals::Catalog {
-                points: listed.to_vec(),
-                ..Default::default()
-            },
-        );
-        let slots = output
-            .split_once("START\n")
-            .unwrap()
-            .1
-            .split_once("END")
-            .unwrap()
-            .0;
-        assert_eq!(slots, concat!(
-            "        mod_points::listeners::tick(\"fixture\", 12, \"listen_0\", mod_0::listen_0),\n",
-            "        mod_points::listeners::tick_return(\"fixture\", 12, \"listen_1\", mod_0::listen_1),\n",
-            "        mod_points::replace!(mod_points::listeners::tick, cancel, host, \"fixture\", 12, \"listen_2\", mod_0::listen_2),\n",
-        ));
         fs::remove_dir_all(dir).unwrap();
     }
 

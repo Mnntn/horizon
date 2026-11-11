@@ -2816,7 +2816,6 @@ dependencies = [
  "horizon-friends",
  "horizon-mcp",
  "horizon-mod-package",
- "horizon-mod-point-emit",
  "horizon-platform",
  "horizon-port-pack",
  "horizon-prepare",
@@ -2923,14 +2922,6 @@ dependencies = [
  "wasmparser",
  "windows-sys 0.61.2",
  "zip",
-]
-
-[[package]]
-name = "horizon-mod-point-emit"
-version = "0.1.0"
-dependencies = [
- "horizon-mod-package",
- "serde",
 ]
 
 [[package]]

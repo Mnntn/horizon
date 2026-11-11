@@ -35,16 +35,11 @@ impl Fixture {
             ("crates/horizon-client/src/entry.rs", ""),
             ("crates/horizon-client/src/game.rs", ""),
             ("crates/horizon-mod-api-gen/internals.txt", ""),
-            (
-                "crates/horizon-mod-points/Cargo.toml",
-                "[package]\nname='horizon-mod-points'\n",
-            ),
         ] {
             let path = source.join(file);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        fs::create_dir_all(source.join("crates/horizon-mod-api-gen/slots")).unwrap();
         Self {
             root,
             folder,
@@ -102,13 +97,6 @@ fn pinned_module_catalog_uses_canonical_paths_and_fresh_source_twice() {
         }
         previous = Some(bytes);
         let bundle = super::super::bundle_in(&fixture.folder).unwrap().unwrap();
-        let projects = [api::Project::read(&bundle).unwrap()];
-        assert!(
-            super::super::prebuilt::source_refusal(&game, &projects)
-                .unwrap()
-                .is_none(),
-            "a module alone must not cause E_INTERNAL_SOURCE_INJECTION"
-        );
     }
     assert_eq!(calls.get(), 2);
     assert_eq!(
@@ -169,7 +157,6 @@ fn module_edit_regenerates_hash_and_apply_failure_names_the_mod() {
 
 #[test]
 fn discovery_error_text_is_unchanged() {
-    assert_eq!(Error::SourceInjection.to_string(), "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, slot listeners and supporting modules, not mixin helpers. Use cargo horizon-mod internals add for this mod.");
     assert_eq!(Error::SourceUnavailable { revision: "pinned".into(), reason: "offline".into() }.to_string(), "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for pinned. It is not cached and could not be downloaded: offline");
     assert_eq!(
         Error::Check("compiler failure".into()).to_string(),
