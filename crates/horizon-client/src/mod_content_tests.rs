@@ -2110,17 +2110,11 @@ fn content_root_carries_a_structure_mod() {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
-    // The template: vanilla's smallest plains house, as the mod's own file.
-    let house =
-        base.join("worldgen/structure/minecraft/village/plains/houses/plains_small_house_1.nbt");
+    // The vanilla house's bytes belong to the mod; prepared file permissions do not.
+    let houses = base.join("worldgen/structure/minecraft/village/plains/houses");
+    let template = fs::read(houses.join("plains_small_house_1.nbt")).unwrap();
     fs::create_dir_all(dir.join("data/huts/structure")).unwrap();
-    // Prepared resources may have installer-supplied executable mode bits. A
-    // content mod owns these bytes, not the source file's filesystem permissions.
-    fs::write(
-        dir.join("data/huts/structure/hut.nbt"),
-        fs::read(&house).unwrap(),
-    )
-    .unwrap();
+    fs::write(dir.join("data/huts/structure/hut.nbt"), template).unwrap();
     let package = horizon_mod_package::Package::read(&dir).unwrap();
     let m = ContentMod {
         id: "huts".into(),
