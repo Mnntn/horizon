@@ -3,7 +3,10 @@ use super::Game;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 use horizon_client::{items::Items, world::World};
 use horizon_core::{geometry::Direction, position::BlockPos};
-use horizon_world::{level::signal_access::SignalAccess, registry::BlockStateId};
+use horizon_world::{
+    level::signal_access::SignalAccess,
+    registry::{BlockRegistry, BlockStateId},
+};
 use mod_api::LevelHost;
 use std::collections::HashMap;
 
@@ -31,6 +34,8 @@ pub(super) fn adjust_signal(
 /// Block-entity-driven sources, shared by the read and write views.
 pub(super) fn block_entity_signal(
     world: &World,
+    registry: &BlockRegistry,
+    state: BlockStateId,
     items: &Items,
     lid_openers: &HashMap<(i32, i32, i32), i32>,
     pos: BlockPos,
@@ -38,7 +43,7 @@ pub(super) fn block_entity_signal(
     if let Some(horizon_client::containers::BlockEntity::TestBlock(block)) =
         world.block_entities.get(&(pos.x, pos.y, pos.z))
     {
-        return block.own_signal();
+        return super::test_blocks::own_signal(registry, state, block.powered);
     }
     if let Some(count) = lid_openers.get(&(pos.x, pos.y, pos.z)) {
         return (*count).clamp(0, 15);
@@ -158,9 +163,11 @@ impl SignalAccess for ReadLevel<'_, '_> {
             );
         })
     }
-    fn block_entity_signal(&self, pos: BlockPos, _: BlockStateId, _: Direction) -> i32 {
+    fn block_entity_signal(&self, pos: BlockPos, state: BlockStateId, _: Direction) -> i32 {
         block_entity_signal(
             &self.game.world,
+            self.game.pack.assets.registry,
+            state,
             self.game.items(),
             &self.game.lid_openers,
             pos,

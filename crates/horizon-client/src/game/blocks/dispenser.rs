@@ -2733,9 +2733,8 @@ mod tests {
 
     /// A server with no player of its own, an open hub and one guest (conn 2)
     /// standing at (8.5, 200, 8.5) on a stone floor.
-    fn server_with_guest() -> Game<'static> {
-        let mut resources = None;
-        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
+    fn server_with_guest(resources: &mut Option<Arc<crate::game::Resources>>) -> Game<'_> {
+        let mut game = crate::game::game_tests::tests::server_game(resources);
         game.build_registries();
         game.set_allow_commands(true);
         game.block_ticks
@@ -2805,7 +2804,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_dispenser_equips_a_server_player_in_front() {
-        let mut game = server_with_guest();
+        let mut resources = None;
+        let mut game = server_with_guest(&mut resources);
         assert!(game.player.is_none(), "the server thread has no player");
         // The guest's feet are in block (8, 200, 8): the dispenser at y 201
         // facing down targets the block under it.
@@ -2831,7 +2831,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_dispenser_skips_a_spectator_and_a_dead_player() {
-        let mut game = server_with_guest();
+        let mut resources = None;
+        let mut game = server_with_guest(&mut resources);
         for spectate in [true, false] {
             game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
                 g.game_mode = if spectate { 3 } else { 0 };
@@ -2850,7 +2851,8 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_dispenser_skips_an_armor_stand_whose_slot_is_locked() {
         use horizon_client::entities::ArmorStand;
-        let mut game = server_with_guest();
+        let mut resources = None;
+        let mut game = server_with_guest(&mut resources);
         game.lan.as_mut().unwrap().hub.guests.clear();
         let at = horizon_core::geometry::Vec3::new(8.5, 200.0, 8.5);
         let mut stands = [(1, 1u32 << 4), (2, 0)].map(|(id, locked)| {
@@ -2890,7 +2892,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_dispenser_equips_a_player_whose_client_is_still_loading() {
-        let mut game = server_with_guest();
+        let mut resources = None;
+        let mut game = server_with_guest(&mut resources);
         game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
             (g.loaded, g.loading) = (false, true);
         });
@@ -2908,7 +2911,8 @@ mod tests {
     fn a_player_and_a_stand_in_front_go_in_join_order() {
         // (stand id, guest id) -> who wears the helmet: the lower id joined first.
         for (stand_id, guest_id, guest_first) in [(7, 5, true), (3, 5, false)] {
-            let mut game = server_with_guest();
+            let mut resources = None;
+            let mut game = server_with_guest(&mut resources);
             game.lan
                 .as_mut()
                 .unwrap()
@@ -2934,7 +2938,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_dispenser_walks_entity_sections_before_ids() {
-        let mut game = server_with_guest();
+        let mut resources = None;
+        let mut game = server_with_guest(&mut resources);
         game.lan.as_mut().unwrap().hub.guests.clear();
         // Stand boxes are 0.5 wide: x 16.2 spans 15.95..16.45.
         game.armor_stands = [stand_at(1, 16.2, 8.5), stand_at(2, 15.5, 8.5)]

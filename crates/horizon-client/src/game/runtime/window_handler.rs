@@ -190,26 +190,13 @@ impl Game<'_> {
             self.pad_radial_cancel();
         }
         if let WindowEvent::Focused(false) = &event {
-            self.modifiers = winit::keyboard::ModifiersState::empty();
+            self.update_modifiers(winit::keyboard::ModifiersState::empty());
             self.physical_keys.clear();
             self.physical_buttons.clear();
             self.drag_button = None;
         }
         if let WindowEvent::ModifiersChanged(m) = &event {
-            self.modifiers = m.state();
-            horizon_client_input::modifiers::reconcile(
-                self.modifiers,
-                &mut self.physical_keys,
-                &self.settings.keys,
-                &mut self.toggles,
-                [self.settings.toggle_crouch, self.settings.toggle_sprint],
-                [
-                    self.pad.holds_action("key.sneak"),
-                    self.pad.holds_action("key.sprint"),
-                ],
-            );
-            self.sync_toggle(SNEAK);
-            self.sync_toggle(SPRINT);
+            self.update_modifiers(m.state());
         }
         // `PackSelectionScreen.onFilesDrop` on the Create New World screen.
         if let WindowEvent::DroppedFile(path) = &event

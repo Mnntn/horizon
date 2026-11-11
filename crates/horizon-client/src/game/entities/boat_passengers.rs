@@ -158,11 +158,6 @@ impl Game<'_> {
             .and_then(|(_, by_vehicle)| by_vehicle.get(&id));
         of.cloned().unwrap_or_default()
     }
-    /// Whether a mob (one not removed) rides vehicle `id`: `Entity.isVehicle` for a cart.
-    pub(super) fn mob_rides(&self, id: u32) -> bool {
-        let riders = self.vehicle_riders(id);
-        riders.iter().any(|&j| !self.mobs[j].removed)
-    }
     /// Whether what a stretch of vehicle ticks reads from the mob list may stand in for a walk
     /// over it: a stretch runs, and no native mod is loaded (a hook can move a mob unseen, as
     /// for the carts' `CartIndex`).
@@ -986,8 +981,16 @@ mod tests {
         for id in 1..=4 {
             game.mobs.push(Mob::new(id, pig.clone(), Vec3::ZERO, 0.0));
         }
-        let riders =
-            |game: &Game| [100, 101, 102].map(|id| (game.mob_rides(id), game.boat_mobs(id)));
+        let riders = |game: &Game| {
+            [100, 101, 102].map(|id| {
+                (
+                    game.vehicle_riders(id)
+                        .iter()
+                        .any(|&j| !game.mobs[j].removed),
+                    game.boat_mobs(id),
+                )
+            })
+        };
         game.mobs[0].extra.mount = Some(100);
         game.vehicles_ticking(true);
         let none = (false, vec![]);

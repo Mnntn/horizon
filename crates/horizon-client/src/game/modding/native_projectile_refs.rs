@@ -424,7 +424,7 @@ mod tests {
             let projectile = game.projectile(entity).unwrap();
             assert!(game.projectile_set_owner(projectile, Some(boat)));
             assert_eq!(game.projectile_owner(projectile), Some(boat));
-            let scene = Air(game.vehicle_targets());
+            let scene = Air(game.pickable_object_targets());
             let mut p = game.creatures.projectiles[0].clone();
             assert!(!p.left_owner);
             assert_eq!(p.owner, None, "a vehicle must not credit a living attacker");
