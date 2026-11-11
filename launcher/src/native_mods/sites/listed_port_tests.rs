@@ -2,8 +2,8 @@
 use super::*;
 use crate::native_mods::{api, internals::Catalog, slots};
 use horizon_mod_package::{
-    manifest::inject::{Access, Inject, Kind, SlotKind},
     Manifest,
+    manifest::inject::{Access, Inject, Kind, SlotKind},
 };
 use std::{fs, process::Command};
 
@@ -80,7 +80,9 @@ fn production_port_listeners_attach_and_invoke() {
                 ),
             )
         };
-        let callback = format!("use crate::mod_0_internals::raw::{{__{canonical}Args as Args, __{canonical}Receiver as Receiver}}; pub fn hook(_: Receiver<'_, '_>, args: &mut {args}) {{ crate::CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed); {callback} }}");
+        let callback = format!(
+            "use crate::mod_0_internals::raw::{{__{canonical}Args as Args, __{canonical}Receiver as Receiver}}; pub fn hook(_: Receiver<'_, '_>, args: &mut {args}) {{ crate::CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed); {callback} }}"
+        );
         let site = original.clone();
         let mut manifest = Manifest::parse(&base).unwrap();
         manifest.inject.push(Inject {
@@ -173,13 +175,13 @@ mod mod_0 {{ {callback} }}
 fn main() {{
 use std::sync::atomic::Ordering::Relaxed;
 let site = mod_points::SiteId::{name};
-assert!(!mod_points::__private::SITES[site as usize].load(Relaxed));
+assert!(!mod_points::__private::TABLE.active_site(site as usize));
 {invoke_path}::invoke(false); assert_eq!(CALLS.load(Relaxed), 0);
 let listeners = [{registration}];
 for listener in &listeners {{ mod_points::register(listener).unwrap(); }}
 mod_points::__private::seal();
-assert!(mod_points::__private::SITES[site as usize].load(Relaxed));
-assert!(!mod_points::__private::SITES[mod_points::SiteId::S7173cf1fd760a6e4 as usize].load(Relaxed));
+assert!(mod_points::__private::TABLE.active_site(site as usize));
+assert!(!mod_points::__private::TABLE.active_site(mod_points::SiteId::S7173cf1fd760a6e4 as usize));
 {invoke_path}::invoke(true); assert_eq!(CALLS.load(Relaxed), 1);
 }}
 "#,

@@ -260,11 +260,10 @@ pub fn world_view_drawn(view: &mut WorldViewDrawn<'_>) {
 /// Whether the world views place has an installed listener: while none has, the renderer does
 /// not ask.
 pub fn world_views_hooked() -> bool {
-    mod_points::__private::POINTS[mod_points::PointId::ModRenderRenderWorldViews as usize]
-        .load(std::sync::atomic::Ordering::Relaxed)
-        || mod_points::__private::POINTS
-            [mod_points::PointId::ModRenderRenderWorldViewsReturn as usize]
-            .load(std::sync::atomic::Ordering::Relaxed)
+    mod_points::__private::TABLE
+        .active_point(mod_points::PointId::ModRenderRenderWorldViews as usize)
+        || mod_points::__private::TABLE
+            .active_point(mod_points::PointId::ModRenderRenderWorldViewsReturn as usize)
 }
 
 /// The views of those asked for ([`world_views`]) that can be drawn on a device whose textures
