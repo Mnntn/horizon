@@ -5,7 +5,7 @@
 //! and wasm32-unknown-unknown installed:
 //! ```sh
 //! cargo build -p cargo-horizon-mod
-//! (cd crates/horizon-mod-wasm/tests/fixture && "$OLDPWD/target/debug/cargo-horizon-mod" horizon-mod build --wasm --catalog points.json && "$OLDPWD/target/debug/cargo-horizon-mod" horizon-mod wasm-std "$OLDPWD/target/horizon-wasm-std.wasm" --catalog points.json)
+//! (cd crates/horizon-mod-wasm/tests/fixture && "$OLDPWD/target/debug/cargo-horizon-mod" horizon-mod build --wasm && "$OLDPWD/target/debug/cargo-horizon-mod" horizon-mod wasm-std "$OLDPWD/target/horizon-wasm-std.wasm")
 //! HORIZON_WASM_STD="$PWD/target/horizon-wasm-std.wasm" HORIZON_WASM_FIXTURE="$PWD/crates/horizon-mod-wasm/tests/fixture/target/horizon-mod/wasm_fixture.hmod" cargo test --release -p horizon-mod-wasm --features listener-fixture --test bench empty_subscribed_listener -- --ignored --exact --nocapture
 //! ```
 //! Building the fixture rewrites its `horizon-mod.toml` with the generated wasm
@@ -48,7 +48,6 @@ fn init_log() {
     });
 }
 
-// Only the block entity parts are measured; the point listeners are tested elsewhere.
 #[allow(unused)]
 #[path = "fixture/src/lib.rs"]
 mod fixture;

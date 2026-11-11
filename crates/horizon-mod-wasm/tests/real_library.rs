@@ -1,5 +1,4 @@
 //! Independently built library, observer and dependent packages load through the production loader.
-//! Its own test binary: the game's points registry is process-global and sealed once.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
 #[path = "support/no_hooks.rs"]
@@ -84,11 +83,4 @@ fn real_library_dependency() {
             "one static, including its address"
         );
     });
-    mod_points::__private::seal();
-    let mut args = mod_points::TickArgs::__new();
-    mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
-    assert!(
-        args.cancel,
-        "only the dependent package owns the tick registration"
-    );
 }

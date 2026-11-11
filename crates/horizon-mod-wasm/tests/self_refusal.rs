@@ -1,4 +1,4 @@
-//! Self-refusal uses its own process because point initialization is once per process.
+//! Self-refusal uses its own process because mod initialization is once per process.
 use horizon_mod_package::manifest::Package;
 use horizon_mod_wasm::{WasmPackage, load};
 

@@ -2350,8 +2350,6 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-package",
- "horizon-mod-point-emit",
- "horizon-mod-points",
  "horizon-mod-runtime",
  "log",
  "rustix 1.1.5",
@@ -2368,7 +2366,6 @@ name = "horizon-modding-examples"
 version = "0.0.0"
 dependencies = [
  "horizon-mod-api",
- "horizon-mod-points",
 ]
 
 [[package]]
