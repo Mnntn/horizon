@@ -133,17 +133,13 @@ fn cache_with_limit(
                 file: CATALOG,
                 source,
             })?;
-        for (name, text) in [(CATALOG, catalogs.internals)] {
-            let partial = format!("{name}.{unique}.partial");
-            cache.write(&partial, text)?;
-            cache.rename(&partial, cache, name)?;
-        }
+        let partial = format!("{CATALOG}.{unique}.partial");
+        cache.write(&partial, catalogs.internals)?;
+        cache.rename(&partial, cache, CATALOG)?;
         Ok(entries)
     })();
     let _ = cache.remove_file(&archive);
-    for name in [CATALOG] {
-        let _ = cache.remove_file(format!("{name}.{unique}.partial"));
-    }
+    let _ = cache.remove_file(format!("{CATALOG}.{unique}.partial"));
     result
 }
 
