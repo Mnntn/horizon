@@ -1,5 +1,22 @@
 //! Actual compiled guest against the real bounded server provider and Outbox.
 use super::*;
+use mod_api::{Hooks, PayloadBytes, Registrar};
+struct Receipt;
+impl mod_api::IPayloadHandler for Receipt {
+    fn handle(&self, _: PayloadBytes, _: &mut dyn mod_api::IPayloadContext) -> Result<(), String> {
+        panic!("receipt must remain in the physical Outbox fixture")
+    }
+}
+struct Native;
+#[mod_api::__subscriptions]
+impl Hooks for Native {
+    fn register(&self, registrar: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+        registrar.payload_handlers().registrar("1").play_to_client(
+            PayloadId("raw_probe:receipt".into()),
+            Some(Arc::new(Receipt)),
+        );
+    }
+}
 use crate::lan::{NetEvent, PlayerSender};
 
 #[test]
@@ -27,7 +44,9 @@ fn compiled_guest_observes_physical_provider_pressure() {
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     loaded.initialize(&[info]).unwrap();
-    mod_api::testing::with_mods(loaded.mods.into(), || {
+    let mut mods = loaded.mods;
+    mods.push(mod_api::ModEntry::new("raw_probe", Box::new(Native)));
+    mod_api::testing::with_mods(mods.into(), || {
         mod_api::__private::part_tests::install_parts_fixture(mod_api::__private::mods()).unwrap();
         let transport = Transport::capture(Side::Server).unwrap();
         transport
@@ -114,6 +133,48 @@ fn compiled_guest_observes_physical_provider_pressure() {
         assert!(
             counts.large_calls > 0,
             "measurement must observe the actual wire body allocations"
+        );
+        // Run the poisoning case last. Keep the real provider receiver alive and
+        // undrained so epoch cancellation cannot hide incorrectly published work.
+        let (events, _receiver) = crate::lan::event_channel();
+        let (sender, out) = PlayerSender::payload_executor_test_sender(transport.clone());
+        let endpoint = Endpoint::server(sender);
+        let incoming = Incoming::new(
+            &transport,
+            negotiation::Phase::Play,
+            horizon_protocol::packets::custom_payload::CustomPayload {
+                channel: "wasm_fixture:network_trap".into(),
+                data: vec![1],
+            },
+        )
+        .unwrap();
+        let credit = Arc::downgrade(&incoming.lease);
+        dispatch(
+            incoming,
+            endpoint.clone(),
+            MainQueue::Server {
+                events: events.clone(),
+                endpoint,
+                conn: Some(1),
+            },
+        );
+        assert!(transport.closed(), "the actual guest handler must trap");
+        assert_eq!(
+            events.stats().queued_items,
+            0,
+            "no staged work may publish, even if its epoch is later cancelled"
+        );
+        assert_eq!(events.stats().reserved_bytes, 0);
+        assert!(credit.upgrade().is_none());
+        let leaked = encode(
+            negotiation::Phase::Play,
+            Side::Server,
+            &PayloadId("raw_probe:receipt".into()),
+            PayloadBytes(vec![0xde, 0xad]),
+        );
+        assert!(
+            !out().iter().any(|packet| packet == &leaked),
+            "physical Outbox must contain no application reply before disconnect"
         );
     });
 }

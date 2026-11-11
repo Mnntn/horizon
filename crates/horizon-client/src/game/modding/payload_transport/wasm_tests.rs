@@ -7,10 +7,16 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static PUBLICATIONS: AtomicUsize = AtomicUsize::new(0);
 static RECEIPTS: AtomicUsize = AtomicUsize::new(0);
 static ROOTS: Mutex<Vec<(f32, f32, bool)>> = Mutex::new(Vec::new());
 const TEST: &str = "game::payload_transport::wasm_tests::compiled_guest_runs_in_actual_game_roots";
 
+pub(super) fn publication(server_reply: bool) {
+    if server_reply && ACTIVE.load(Ordering::SeqCst) {
+        PUBLICATIONS.fetch_add(1, Ordering::SeqCst);
+    }
+}
 pub(super) fn health(game: &Game<'_>, endpoint: &Endpoint, id: &PayloadId) -> Option<f32> {
     if endpoint.side() != Side::Server
         || !matches!(
@@ -130,6 +136,7 @@ fn compiled_guest_runs_in_actual_game_roots() {
                 std::thread::yield_now();
             }
             ROOTS.lock().unwrap().clear();
+            PUBLICATIONS.store(0, Ordering::SeqCst);
             ACTIVE.store(true, Ordering::SeqCst);
             struct Scope;
             impl Drop for Scope {
@@ -170,6 +177,11 @@ fn compiled_guest_runs_in_actual_game_roots() {
                 );
                 std::thread::yield_now();
             }
+            assert_eq!(
+                PUBLICATIONS.load(Ordering::SeqCst),
+                usize::from(!trap),
+                "actual Game deferred publication must follow the root outcome, before teardown can suppress delivery"
+            );
             let roots = ROOTS.lock().unwrap();
             if case == "network_handler_trap" {
                 assert!(
