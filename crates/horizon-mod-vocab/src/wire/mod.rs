@@ -1150,6 +1150,20 @@ macro_rules! layout_fields {
 pub(crate) use layout_fields;
 
 #[cfg(test)]
+fn hook_id_runtime_reference() -> u64 {
+    let names: &[&str] = &include!(concat!(env!("OUT_DIR"), "/hook_id_variant_names.rs"));
+    let mut hash = layout_name("HookId");
+    // Keep the independent reference as a runtime loop even in optimized tests.
+    for name in std::hint::black_box(names) {
+        hash = layout_mix(hash, layout_name(name));
+    }
+    layout_mix(layout_name("enum"), hash)
+}
+
+#[cfg(test)]
+mod fieldless_enum_goldens;
+
+#[cfg(test)]
 mod tests {
     #[test]
     fn derive_shapes_roundtrip_with_golden_bytes() {
@@ -1199,6 +1213,13 @@ mod tests {
         );
         check(Tuple(7), &[7, 0, 0, 0]);
         check(Unit, &[]);
+        // Independent FNV-1a fixture: enum shape, Plain seed, First then Second.
+        // Explicit discriminants do not replace declaration-order wire tags.
+        assert_eq!(Plain::layout(&mut vec![]), 0xc2ea_ba70_1b5e_e4a0);
+        let mut visiting = vec![std::any::type_name::<Plain>()];
+        assert_eq!(Plain::layout(&mut visiting), 0x1923_c164_45af_9a57);
+        assert_eq!(visiting, [std::any::type_name::<Plain>()]);
+        check(Plain::First, &[0, 0, 0, 0]);
         check(Plain::Second, &[1, 0, 0, 0]);
         check(Payload::Tuple(5), &[1, 0, 0, 0, 5]);
         check(Payload::Named { value: 7 }, &[2, 0, 0, 0, 7, 0, 0, 0]);

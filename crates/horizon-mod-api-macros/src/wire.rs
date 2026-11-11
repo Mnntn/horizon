@@ -156,6 +156,11 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
         Data::Union(_) => return Err(syn::Error::new_spanned(name, "Wire cannot encode a union")),
     }
     layout = quote!(#w::layout_mix(#w::layout_name(#shape), #layout));
+    // Unit enum variants have no child layouts or recursion to evaluate. Fold
+    // their constant hash chain here rather than leaving its loops to LLVM.
+    if matches!(&input.data, Data::Enum(_)) && !nested {
+        layout = quote!(const { #layout });
+    }
     let take = if nested {
         quote!(input.nested(|input| Ok(#(#takes)*)))
     } else {

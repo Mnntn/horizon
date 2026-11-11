@@ -8,6 +8,11 @@ on:
       - 'crates/cargo-horizon-mod/**'
       - 'crates/horizon-mod-*/**'
       - '.github/workflows/wasm-mods.yml'
+      - 'tools/generate_wire_enum_goldens.py'
+      - 'tools/capture_wire_enum_layouts.py'
+      - 'tools/fixtures/wire_enum_layouts.json'
+      - 'tools/fixtures/wire_enum_baseline_identities.json'
+      - 'tests/test_wire_enum_goldens.py'
       - 'Cargo.lock'
   workflow_dispatch:
 permissions:
@@ -64,13 +69,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.99.1
-          components: rust-src
+          components: rust-src, rustfmt
           targets: wasm32-unknown-unknown
       - if: runner.environment == 'github-hosted'
         uses: Swatinem/rust-cache@v2
         with:
           # These custom-profile targets belong to staged, independent workspaces.
           cache-directories: .wasm-fixture-targets
+      - name: Check fieldless Wire layout coverage and hashes
+        shell: bash
+        run: |
+          python3 -m unittest tests.test_wire_enum_goldens
+          mkdir -p "$CARGO_TARGET_DIR/wire-goldens"
+          env -u RUSTC_WRAPPER RUSTC_BOOTSTRAP=1 cargo rustc --locked -p horizon-mod-vocab --lib -- \
+            -Zunpretty=expanded > "$CARGO_TARGET_DIR/wire-goldens/expanded.rs"
+          python3 tools/generate_wire_enum_goldens.py \
+            --expanded "$CARGO_TARGET_DIR/wire-goldens/expanded.rs" --check
+          cargo test --locked -p horizon-mod-vocab --lib existing_fieldless_enum_layouts_match_baseline
       - name: Build tool and shared member
         run: |
           cargo build -p cargo-horizon-mod
