@@ -260,7 +260,6 @@
   "Description": "Περιγραφή",
   "Desktop shortcut": "Συντόμευση επιφάνειας εργασίας",
   "Developer": "Προγραμματιστής",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Αναπτύσσετε ένα mod; Χρησιμοποιήστε native-build --profile developer. Η επιλογή αποθηκεύεται για αυτήν την εγκατάσταση.",
   "Difficulty": "Δυσκολία",
   "Dismiss": "Απόρριψη",
   "Documentation": "Documentation",

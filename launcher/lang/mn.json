@@ -260,7 +260,6 @@
   "Description": "Тодорхойлолт",
   "Desktop shortcut": "Ширээний товчлол",
   "Developer": "Хөгжүүлэгч",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Мод хөгжүүлж байна уу? native-build --profile developer ашиглана уу. Сонголтыг энэ хувилбарын орчинд хадгална.",
   "Difficulty": "Хэцүү байдал",
   "Dismiss": "Өгүүлэх",
   "Documentation": "Documentation",

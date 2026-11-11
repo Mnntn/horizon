@@ -260,7 +260,6 @@
   "Description": "Mô tả",
   "Desktop shortcut": "Phím tắt trên màn hình",
   "Developer": "Nhà phát triển",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Đang phát triển mod? Dùng native-build --profile developer. Lựa chọn được ghi nhớ cho phiên bản cài đặt này.",
   "Difficulty": "độ khó",
   "Dismiss": "Loại bỏ",
   "Documentation": "Documentation",

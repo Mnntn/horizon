@@ -260,7 +260,6 @@
   "Description": "Beschrijving",
   "Desktop shortcut": "Snelkoppeling op het bureaublad",
   "Developer": "Ontwikkelaar",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Een mod ontwikkelen? Gebruik native-build --profile developer. De keuze wordt voor deze instantie onthouden.",
   "Difficulty": "Moeilijkheidsgraad",
   "Dismiss": "Negeren",
   "Documentation": "Documentation",

@@ -260,7 +260,6 @@
   "Description": "აღწერა",
   "Desktop shortcut": "დესკტოპის მალსახმობი",
   "Developer": "დეველოპერი",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "მოდიფიკაციას ქმნით? გამოიყენეთ native-build --profile developer. არჩევანი ამ ეგზემპლარისთვის დამახსოვრდება.",
   "Difficulty": "სირთულე",
   "Dismiss": "გაუქმება",
   "Documentation": "Documentation",

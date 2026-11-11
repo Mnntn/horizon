@@ -260,7 +260,6 @@
   "Description": "Açıklama",
   "Desktop shortcut": "Masaüstü kısayolu",
   "Developer": "Geliştirici",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Mod mu geliştiriyorsunuz? native-build --profile developer kullanın. Seçim bu örnek için hatırlanır.",
   "Difficulty": "Zorluk",
   "Dismiss": "Kapat",
   "Documentation": "Documentation",

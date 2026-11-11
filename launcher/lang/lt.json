@@ -260,7 +260,6 @@
   "Description": "Aprašymas",
   "Desktop shortcut": "Darbalaukio spartusis klavišas",
   "Developer": "Kūrėjams",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Kuriate modifikaciją? Naudokite native-build --profile developer. Pasirinkimas įsimenamas šiam egzemplioriui.",
   "Difficulty": "Sunkumai",
   "Dismiss": "Atsisakyti",
   "Documentation": "Documentation",

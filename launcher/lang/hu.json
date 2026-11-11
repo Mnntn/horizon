@@ -260,7 +260,6 @@
   "Description": "Leírás",
   "Desktop shortcut": "Asztali parancsikon",
   "Developer": "Fejlesztői",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Modot fejleszt? Használja a native-build --profile developer parancsot. A választást megjegyezzük ehhez a példányhoz.",
   "Difficulty": "Nehézség",
   "Dismiss": "Elvetés",
   "Documentation": "Documentation",

@@ -260,7 +260,6 @@
   "Description": "คำอธิบาย",
   "Desktop shortcut": "ทางลัดบนเดสก์ท็อป",
   "Developer": "นักพัฒนา",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "กำลังพัฒนาม็อดใช่ไหม? ใช้ native-build --profile developer ระบบจะจำตัวเลือกนี้ไว้สำหรับอินสแตนซ์นี้",
   "Difficulty": "ความยาก",
   "Dismiss": "ปิด",
   "Documentation": "Documentation",

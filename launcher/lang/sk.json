@@ -260,7 +260,6 @@
   "Description": "Popis",
   "Desktop shortcut": "Skratka na pracovnej ploche",
   "Developer": "Vývojársky",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Vyvíjate mod? Použite native-build --profile developer. Voľba sa zapamätá pre túto inštanciu.",
   "Difficulty": "Náročnosť",
   "Dismiss": "Odmietnuť",
   "Documentation": "Documentation",

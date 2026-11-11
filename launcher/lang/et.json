@@ -260,7 +260,6 @@
   "Description": "Kirjeldus",
   "Desktop shortcut": "Töölaua otsetee",
   "Developer": "Arendaja",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Arendate modifikatsiooni? Kasutage native-build --profile developer. Valik jäetakse selle eksemplari jaoks meelde.",
   "Difficulty": "Raskus",
   "Dismiss": "Loobu",
   "Documentation": "Documentation",

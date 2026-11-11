@@ -260,7 +260,6 @@
   "Description": "Apraksts",
   "Desktop shortcut": "Darbvirsmas saīsne",
   "Developer": "Izstrādātājam",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Izstrādājat modu? Izmantojiet native-build --profile developer. Izvēle tiek saglabāta šai instancei.",
   "Difficulty": "Grūtības",
   "Dismiss": "Atlaist",
   "Documentation": "Documentation",

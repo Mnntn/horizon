@@ -260,7 +260,6 @@
   "Description": "Deskribapena",
   "Desktop shortcut": "Mahaigaineko lasterbidea",
   "Developer": "Garatzailea",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Mod bat garatzen ari zara? Erabili native-build --profile developer. Aukera instantzia honetarako gordeko da.",
   "Difficulty": "Zailtasuna",
   "Dismiss": "Baztertu",
   "Documentation": "Documentation",

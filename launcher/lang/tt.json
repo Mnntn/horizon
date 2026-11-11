@@ -260,7 +260,6 @@
   "Description": "Тасвирлау",
   "Desktop shortcut": "Эш өстәле кыска юл",
   "Developer": "Эшләүче өчен",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Мод эшлисезме? native-build --profile developer кулланыгыз. Сайлау бу нөсхә өчен истә кала.",
   "Difficulty": "Авырлык",
   "Dismiss": "Эштән чыгару",
   "Documentation": "Documentation",

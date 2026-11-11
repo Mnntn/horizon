@@ -260,7 +260,6 @@
   "Description": "Beskrivelse",
   "Desktop shortcut": "Skrivebordsgenvej",
   "Developer": "Udvikler",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Udvikler du en mod? Brug native-build --profile developer. Valget huskes for denne instans.",
   "Difficulty": "Sværhedsgrad",
   "Dismiss": "Afvis",
   "Documentation": "Documentation",

@@ -260,7 +260,6 @@
   "Description": "説明",
   "Desktop shortcut": "デスクトップショートカット",
   "Developer": "開発者",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Mod を開発していますか？ native-build --profile developer を使用してください。選択はこのインスタンスに保存されます。",
   "Difficulty": "難易度",
   "Dismiss": "閉じる",
   "Documentation": "Documentation",

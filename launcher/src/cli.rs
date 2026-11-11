@@ -846,15 +846,14 @@ enum Cmd {
         #[arg(long)]
         version: Option<String>,
         /// Move to the newest installed release or Nightly instead of the Horizon the instance
-        /// plays (a full rebuild)
+        /// plays (rebuilds the mods for that pinned SDK)
         #[arg(long, conflicts_with = "version")]
         update: bool,
         /// Allow native code for this install (remembered; revoke in Settings, Storage)
         #[arg(long)]
         trust_native_code: bool,
-        /// This instance's build mode: optimized, balanced or developer. Remembers an explicit
-        /// choice for this instance; otherwise uses its saved choice, starting at Balanced.
-        /// Without a picker reason or explicit choice, installed mods use the prebuilt route.
+        /// Native mods use the pinned SDK's optimized compilation settings.
+        /// The game is never rebuilt by a mod build.
         #[arg(long, value_enum)]
         profile: Option<native_mods::Profile>,
     },

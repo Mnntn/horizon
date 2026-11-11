@@ -260,7 +260,6 @@
   "Description": "Descripción",
   "Desktop shortcut": "Acceso directo en el escritorio",
   "Developer": "Desarrollador",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "¿Estás desarrollando un mod? Usa native-build --profile developer. La elección se recuerda para esta instancia.",
   "Difficulty": "Dificultad",
   "Dismiss": "Descartar",
   "Documentation": "Documentation",

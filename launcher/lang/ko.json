@@ -260,7 +260,6 @@
   "Description": "설명",
   "Desktop shortcut": "바탕 화면 바로 가기",
   "Developer": "개발자",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "모드를 개발하시나요? native-build --profile developer 명령을 사용하세요. 선택 사항은 이 인스턴스에 저장됩니다.",
   "Difficulty": "난이도",
   "Dismiss": "무시",
   "Documentation": "Documentation",

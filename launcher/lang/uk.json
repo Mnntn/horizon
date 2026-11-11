@@ -260,7 +260,6 @@
   "Description": "Опис",
   "Desktop shortcut": "Ярлик на робочому столі",
   "Developer": "Розробницький",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Розробляєте мод? Використовуйте native-build --profile developer. Вибір зберігається для цього екземпляра.",
   "Difficulty": "Складність",
   "Dismiss": "Закрити",
   "Documentation": "Documentation",

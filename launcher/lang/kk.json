@@ -260,7 +260,6 @@
   "Description": "Сипаттама",
   "Desktop shortcut": "Жұмыс үстелінің таңбашасы",
   "Developer": "Әзірлеуші",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Мод әзірлеп жатырсыз ба? native-build --profile developer қолданыңыз. Таңдау осы дана үшін сақталады.",
   "Difficulty": "Қиындық",
   "Dismiss": "Босату",
   "Documentation": "Documentation",

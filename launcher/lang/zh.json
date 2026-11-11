@@ -260,7 +260,6 @@
   "Description": "简介",
   "Desktop shortcut": "桌面快捷方式",
   "Developer": "开发者",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "正在开发模组？请使用 native-build --profile developer。此选择会为当前实例保存。",
   "Difficulty": "难度",
   "Dismiss": "关闭",
   "Documentation": "Documentation",

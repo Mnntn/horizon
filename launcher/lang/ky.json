@@ -260,7 +260,6 @@
   "Description": "Сүрөттөмө",
   "Desktop shortcut": "Иш тактасынын жарлыгы",
   "Developer": "Иштеп чыгуучу",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Мод иштеп чыгып жатасызбы? native-build --profile developer колдонуңуз. Тандоо ушул нуска үчүн сакталат.",
   "Difficulty": "Кыйынчылык",
   "Dismiss": "Иштен чыгаруу",
   "Documentation": "Documentation",

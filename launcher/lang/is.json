@@ -260,7 +260,6 @@
   "Description": "Lýsing",
   "Desktop shortcut": "Flýtileið á skjáborði",
   "Developer": "Þróun",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Ertu að þróa mod? Notaðu native-build --profile developer. Valið er vistað fyrir þetta tilvik.",
   "Difficulty": "Erfiðleikar",
   "Dismiss": "Segja frá",
   "Documentation": "Documentation",

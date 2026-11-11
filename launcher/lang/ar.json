@@ -260,7 +260,6 @@
   "Description": "الوصف",
   "Desktop shortcut": "اختصار سطح المكتب",
   "Developer": "المطوّر",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "تطوّر إضافة؟ استخدم native-build --profile developer. يُحفظ الاختيار لهذا المثيل.",
   "Difficulty": "الصعوبة",
   "Dismiss": "إخفاء",
   "Documentation": "Documentation",

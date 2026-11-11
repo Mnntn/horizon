@@ -260,7 +260,6 @@
   "Description": "Lýsing",
   "Desktop shortcut": "Snarvegur á skriviborðinum",
   "Developer": "Mennari",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Mennir tú eitt mod? Brúka native-build --profile developer. Valið verður goymt fyri hetta eintakið.",
   "Difficulty": "Torleiki",
   "Dismiss": "Loysa úr starvi",
   "Documentation": "Documentation",

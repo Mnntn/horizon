@@ -260,7 +260,6 @@
   "Description": "ລາຍລະອຽດ",
   "Desktop shortcut": "ທາງລັດເດັສທັອບ",
   "Developer": "ນັກພັດທະນາ",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "ກຳລັງພັດທະນາມັອດບໍ? ໃຊ້ native-build --profile developer. ຕົວເລືອກຈະຖືກຈື່ໄວ້ສຳລັບອິນສະແຕນນີ້.",
   "Difficulty": "ຄວາມຫຍຸ້ງຍາກ",
   "Dismiss": "ປິດ",
   "Documentation": "Documentation",

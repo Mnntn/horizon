@@ -260,7 +260,6 @@
   "Description": "Kuvaus",
   "Desktop shortcut": "Työpöydän pikakuvake",
   "Developer": "Kehittäjä",
-  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Kehitätkö modia? Käytä komentoa native-build --profile developer. Valinta muistetaan tälle instanssille.",
   "Difficulty": "Vaikeus",
   "Dismiss": "Hylkää",
   "Documentation": "Documentation",
