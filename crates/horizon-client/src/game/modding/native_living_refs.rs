@@ -1797,6 +1797,15 @@ mod tests {
             assert!(!game.mobs[0].needs_sync);
             assert!(!game.player.as_ref().unwrap().health.dead);
             assert!(!game.mobs[0].removed);
+            game.mobs[0].needs_sync = true;
+            let abort = game.transaction_open();
+            assert!(mob.set_health(game, 0.0));
+            game.transaction_close(&abort, false);
+            assert_eq!(mob.health(game), initial.1);
+            assert!(
+                game.mobs[0].needs_sync,
+                "abort preserves preexisting sync dirtiness"
+            );
             let commit = game.transaction_open();
             assert!(player.set_health(game, 0.0));
             assert!(mob.set_health(game, 0.0));
@@ -1818,8 +1827,15 @@ mod tests {
             let living = LivingRef::new(guest.entity());
             let before = living.health(game).unwrap();
             let tx = game.transaction_open();
+            assert!(living.set_health(game, before - 2.0));
+            let inner = game.transaction_open();
             assert!(living.set_health(game, 0.0));
             assert_eq!(living.health(game), Some(0.0));
+            game.transaction_close(&inner, false);
+            assert_eq!(living.health(game), Some(before - 2.0));
+            let inner = game.transaction_open();
+            assert!(living.set_health(game, 0.0));
+            game.transaction_close(&inner, true);
             game.transaction_close(&tx, false);
             assert_eq!(living.health(game), Some(before));
         });

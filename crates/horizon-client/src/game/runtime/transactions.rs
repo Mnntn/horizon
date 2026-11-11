@@ -21,6 +21,9 @@
 //! empty, until the root commit removes it. A guest's menu storage (ender chest, crafting grid,
 //! a mod's chest menu) is kept whole on its first write through a menu slot; a crafting grid
 //! changed by the transaction has its result made again at the root commit.
+//! `LivingRef::set_health` keeps the player's synced float storage and unpublished update
+//! events, or the mob's health and sync dirtiness. This does not journal other health,
+//! damage, death or attribute operations.
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use horizon_client::{items::ItemStack, world::BlockEntityExtras};
 use horizon_mod_runtime::attachments::{Attachments, Holder};
