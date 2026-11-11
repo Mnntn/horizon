@@ -4368,6 +4368,9 @@ impl Hub {
             let packet = match entry {
                 InboxItem::Raw(delivery, credit) => {
                     credits.push(credit);
+                    if !delivery.incoming.epoch.active() {
+                        continue;
+                    }
                     events.push(HostEvent::RawPayload(delivery));
                     events.push(HostEvent::InputCredits(credits));
                     return true;

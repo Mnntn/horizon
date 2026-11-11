@@ -101,3 +101,236 @@ fn derived_action_replies_wait_for_the_next_frozen_receiving_turn() {
         assert_eq!(provider.stats().reserved_bytes, 0);
     });
 }
+
+fn raw_hub(
+    transport: Arc<crate::raw_payloads::Transport>,
+) -> (Hub, std::sync::mpsc::Receiver<crate::lan::Out>) {
+    let (mut hub, _old_output) = hub_with_a_guest();
+    let (tx, out) = std::sync::mpsc::channel();
+    let sender =
+        crate::lan::PlayerSender::new_with_payload_transport(tx, Arc::default(), transport);
+    hub.guests.update(0, |g| {
+        g.sender = sender;
+    });
+    (hub, out)
+}
+
+fn publish_raw(hub: &Hub, bytes: Vec<u8>) {
+    let guest = &hub.guests[0];
+    let delivery =
+        crate::raw_payloads::test_support::delivery(guest.conn, guest.sender.clone(), bytes);
+    hub.lan
+        .shared
+        .events
+        .send(NetEvent::RawPayload(delivery))
+        .unwrap();
+}
+
+fn rotation(yaw: f32) -> S {
+    S::MovePlayerRot(play::MovePlayerRot {
+        yaw,
+        pitch: 0.0,
+        flags: 1,
+    })
+}
+
+#[test]
+fn raw_boundary_orders_earlier_actions_callback_effect_and_later_movement() {
+    crate::raw_payloads::test_support::with_peer(|transport| {
+        let (mut hub, _out) = raw_hub(transport.clone());
+        let provider = hub.lan.shared.events.clone();
+        publish_packet(&hub, rotation(10.0));
+        publish_packet(&hub, S::Punch(horizon_protocol::packets::Empty));
+        publish_raw(&hub, vec![7]);
+        publish_packet(&hub, rotation(30.0));
+        with_input_context(|ctx| {
+            drop(hub.poll(ctx));
+            let tick = hub.ticks;
+            let events = hub.drain_packets(ctx);
+            assert!(hub.packets_paused());
+            assert_eq!(
+                hub.guests[0].yaw, 10.0,
+                "later rotation must not apply before the callback"
+            );
+            let mut trace = Vec::new();
+            for event in events {
+                match event {
+                    HostEvent::Packet(_, packet) if matches!(&*packet, S::Punch(_)) => {
+                        trace.push("earlier action")
+                    }
+                    HostEvent::RawPayload(delivery) => {
+                        assert_eq!(delivery.conn, Some(hub.guests[0].conn));
+                        assert!(Arc::ptr_eq(delivery.endpoint.transport(), &transport));
+                        assert!(delivery.incoming.epoch.active());
+                        assert_eq!(
+                            delivery.incoming.id.0,
+                            crate::raw_payloads::test_support::CHANNEL
+                        );
+                        trace.push("raw boundary");
+                        // This is the Game-owned action-stream boundary, not an
+                        // invented IPayloadContext. The prepared-data Game test
+                        // exercises the registered handler/root transaction itself.
+                        hub.guests.update(0, |g| {
+                            g.yaw = 20.0;
+                        });
+                        assert_eq!(hub.guests[0].yaw, 20.0);
+                        trace.push("callback effect");
+                        // A reply arriving during the callback cannot be read by resume.
+                        publish_packet(&hub, rotation(99.0));
+                    }
+                    _ => {}
+                }
+            }
+            assert_eq!(trace, ["earlier action", "raw boundary", "callback effect"]);
+            drop(hub.drain_packets(ctx));
+            assert!(!hub.packets_paused());
+            assert_eq!(hub.guests[0].yaw, 30.0);
+            assert_eq!(hub.ticks, tick, "resume must not poll or run maintenance");
+            assert_eq!(provider.stats().queued_items, 1);
+            drop(hub.poll(ctx));
+            drop(hub.drain_packets(ctx));
+            assert_eq!(hub.guests[0].yaw, 99.0);
+            assert_eq!(provider.stats().reserved_bytes, 0);
+        });
+    });
+}
+
+#[test]
+fn raw_resume_initializes_guest_and_ticks_floating_only_once() {
+    crate::raw_payloads::test_support::with_peer(|transport| {
+        let (mut hub, _out) = raw_hub(transport);
+        hub.guests.update(0, |g| {
+            g.load_timeout = 7;
+            g.client_is_floating = true;
+            g.above_ground_ticks = 0;
+        });
+        publish_raw(&hub, vec![1]);
+        publish_raw(&hub, vec![2]);
+        with_input_context(|ctx| {
+            drop(hub.poll(ctx));
+            for expected_paused in [true, true, false] {
+                drop(hub.drain_packets(ctx));
+                assert_eq!(hub.packets_paused(), expected_paused);
+                assert_eq!(hub.guests[0].load_timeout, 6);
+                assert_eq!(
+                    hub.guests[0].above_ground_ticks,
+                    i32::from(!expected_paused)
+                );
+            }
+        });
+    });
+}
+
+#[test]
+fn frozen_movement_does_not_discard_registered_raw_or_consume_later_movement() {
+    crate::raw_payloads::test_support::with_peer(|transport| {
+        let (mut hub, _out) = raw_hub(transport);
+        hub.guests.update(0, |g| {
+            g.held = true;
+            g.placed = false;
+        });
+        publish_packet(&hub, rotation(10.0));
+        publish_raw(&hub, vec![1]);
+        publish_packet(&hub, rotation(30.0));
+        with_input_context(|ctx| {
+            let before = hub.guests[0].yaw;
+            drop(hub.poll(ctx));
+            let events = hub.drain_packets(ctx);
+            assert!(events.iter().any(|e| matches!(e, HostEvent::RawPayload(_))));
+            assert_eq!(hub.guests[0].yaw, before);
+            assert_eq!(
+                hub.guests[0].inbox.len(),
+                1,
+                "filter must not cross raw boundary"
+            );
+            drop(events);
+            drop(hub.drain_packets(ctx));
+            assert!(hub.guests[0].inbox.is_empty());
+            assert_eq!(hub.guests[0].yaw, before);
+        });
+    });
+}
+
+#[test]
+fn cancelled_epoch_and_left_physical_connection_never_yield_raw_callbacks() {
+    crate::raw_payloads::test_support::with_peer(|transport| {
+        let (mut hub, _out) = raw_hub(transport.clone());
+        let provider = hub.lan.shared.events.clone();
+        publish_raw(&hub, vec![1]);
+        transport.close();
+        with_input_context(|ctx| {
+            drop(hub.poll(ctx));
+            let events = hub.drain_packets(ctx);
+            assert!(!events.iter().any(|e| matches!(e, HostEvent::RawPayload(_))));
+            drop(events);
+            assert_eq!(provider.stats().reserved_bytes, 0);
+        });
+    });
+    crate::raw_payloads::test_support::with_peer(|transport| {
+        let (mut hub, _out) = raw_hub(transport);
+        let provider = hub.lan.shared.events.clone();
+        let conn = hub.guests[0].conn;
+        publish_raw(&hub, vec![1]);
+        provider
+            .send(NetEvent::Left(conn, "left physical incarnation".into()))
+            .unwrap();
+        with_input_context(|ctx| {
+            let events = hub.poll(ctx);
+            assert!(!events.iter().any(|e| matches!(e, HostEvent::RawPayload(_))));
+            drop(events);
+            assert_eq!(provider.stats().reserved_bytes, 0);
+            drop(hub.drain_packets(ctx));
+            assert!(!hub.packets_paused());
+        });
+    });
+}
+
+#[test]
+fn large_private_raw_and_thousands_of_tiny_records_use_byte_credit_not_wire_caps() {
+    crate::raw_payloads::test_support::with_peer(|transport| {
+        let (mut hub, _out) = raw_hub(transport.clone());
+        let provider = hub.lan.shared.events.clone();
+        publish_raw(&hub, vec![0; 9 << 20]);
+        for _ in 0..2000 {
+            publish_raw(&hub, vec![1]);
+        }
+        let reserved = provider.stats().reserved_bytes;
+        assert!(transport.reserve_ingress(8 << 20).is_err());
+        with_input_context(|ctx| {
+            drop(hub.poll(ctx));
+            assert_eq!(provider.stats().reserved_bytes, reserved);
+            assert_eq!(hub.guests[0].inbox.len(), 2001);
+            let first = hub.drain_packets(ctx);
+            assert_eq!(
+                provider.stats().reserved_bytes,
+                reserved,
+                "dequeue must not refund either credit"
+            );
+            assert!(transport.reserve_ingress(8 << 20).is_err());
+            assert_eq!(
+                first
+                    .iter()
+                    .filter(|e| matches!(e, HostEvent::RawPayload(_)))
+                    .count(),
+                1
+            );
+            drop(first);
+            let mut callbacks = 1;
+            while hub.packets_paused() {
+                let events = hub.drain_packets(ctx);
+                callbacks += events
+                    .iter()
+                    .filter(|e| matches!(e, HostEvent::RawPayload(_)))
+                    .count();
+                drop(events);
+            }
+            assert_eq!(callbacks, 2001);
+            assert_eq!(provider.stats().reserved_bytes, 0);
+            drop(
+                transport
+                    .reserve_ingress(9 << 20)
+                    .expect("physical credit refunded after consumption"),
+            );
+        });
+    });
+}
