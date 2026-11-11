@@ -6,7 +6,7 @@
 //! public, and repeats the module's own `use` items, so `self`, `super::` and `crate::` mean what
 //! they meant. A method moves into a one-method trait implemented for its own type, so `self`,
 //! `Self` and the helpers' bindings stay as written. horizon-mixins then patches the copies, and
-//! the game installs each through its point's replacement slot (`__fnr_<name>`).
+//! the game installs each through its function's replacement slot (`__fnr_<name>`).
 use quote::{ToTokens, format_ident, quote};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ pub struct Patched {
     pub target: String,
     /// The copy's id for horizon-mixins, in the patch crate.
     pub id: String,
-    /// The expression that builds the copy's `Redirect`, from the patch crate's root.
+    /// The expression that builds the copy's installation result, from the patch crate's root.
     pub install: String,
 }
 
@@ -436,7 +436,7 @@ fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, Strin
     }
 }
 
-/// Whether `function` can be copied and installed through its point's replacement slot.
+/// Whether `function` can be copied and installed through its function's replacement slot.
 fn replaceable(found: &Found, source: &mut Source) -> Result<(), String> {
     // A crate-local macro defined in a module on the function's path moves with the copy (the
     // mirror repeats it); one defined elsewhere would not resolve.
@@ -463,21 +463,35 @@ fn replaceable(found: &Found, source: &mut Source) -> Result<(), String> {
     {
         return Err("it is generic over types or takes `impl Trait`: one copy can't stand for every instance".into());
     }
-    if let Some(block) = &found.owner {
-        if block.trait_.is_some() {
-            let items = source.module(&found.module)?.items.clone();
-            let mut types = BTreeSet::new();
-            crate::replace::declared_types(&items, &mut types);
-            if crate::replace::replaceable_trait(
-                block,
-                &crate::replace::declared_traits(&source.root)?,
-                &types,
-                &crate::replace::foreign_imports(&items),
-            )
-            .is_none()
-            {
-                return Err("its trait implementation has no replacement installer".into());
+    if let Some(block) = &found.owner
+        && block.trait_.is_some()
+    {
+        struct Associated(bool);
+        impl<'ast> Visit<'ast> for Associated {
+            fn visit_path(&mut self, path: &'ast syn::Path) {
+                self.0 |= path.segments.len() > 1 && path.segments[0].ident == "Self";
+                syn::visit::visit_path(self, path);
             }
+        }
+        let mut associated = Associated(false);
+        associated.visit_signature(sig);
+        if associated.0 {
+            return Err(
+                "its signature names a trait-associated type or constant through Self".into(),
+            );
+        }
+        let items = source.module(&found.module)?.items.clone();
+        let mut types = BTreeSet::new();
+        crate::replace::declared_types(&items, &mut types);
+        if crate::replace::replaceable_trait(
+            block,
+            &crate::replace::declared_traits(&source.root)?,
+            &types,
+            &crate::replace::foreign_imports(&items),
+        )
+        .is_none()
+        {
+            return Err("its trait implementation has no replacement installer".into());
         }
     }
     if let Some(block) = &found.owner
@@ -1533,7 +1547,7 @@ mod census {
             walk(&items, module, &mut functions, &mut traits);
             total += traits;
             for _ in 0..traits {
-                note("refused: trait method (not a point)".into());
+                note("refused: trait method (not enumerated)".into());
             }
             for found in functions {
                 let attrs = &found.function.attrs;

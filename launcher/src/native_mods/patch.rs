@@ -3,7 +3,7 @@
 //! crate (`horizon_mod_api_gen::patch`), horizon-mixins applies every mod's rows to those copies
 //! in one pass (one combined copy per function, in the tool's order), rustc compiles the crate
 //! against the prebuilt game and the mods, and the generated `main` installs each copy through
-//! its point's replacement slot. What can't take this route is refused by name; nothing here
+//! its function's replacement slot. What can't take this route is refused by name; nothing here
 //! falls back to compiling the game.
 use super::{api, prebuilt::Identity, Bundle};
 use crate::i18n::trf;
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// The patch crate's name: the copies' ids and the executable's `--extern` use it.
 pub(super) const CRATE: &str = "horizon_patch";
 
-/// The compiled patch crates, `(crate name, rlib)`, and the `Redirect` expressions the
+/// The compiled patch crates, `(crate name, rlib)`, and the installation expressions the
 /// generated `main` installs.
 pub(super) struct Patch {
     pub rlibs: Vec<(String, PathBuf)>,
@@ -118,9 +118,7 @@ pub(super) fn build(
         .iter()
         .flat_map(|bundle| bundle.native().mixin.iter().map(|row| row.target.clone()))
         .collect();
-    // The generator's refusals first: they name why a function can't be copied at all (missing,
-    // below the game crate, a body that can't move). Then only a point with a raw form has a
-    // replacement slot in the prebuilt game.
+    // The generator owns named refusals for functions without a replacement installer.
     let extras = extras(&bundles)?;
     let generated = api_gen::patch::generate(&source, CRATE, &targets, &extras);
     let refusals: Vec<String> = match &generated {
