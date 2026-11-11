@@ -631,6 +631,17 @@ pub fn generate(
     let mut patched = Vec::new();
     let unique: BTreeSet<&String> = targets.iter().collect();
     for target in unique {
+        match crate::replace::refusal(root, target) {
+            Ok(None) => {}
+            Ok(Some(why)) => {
+                refusals.push(refuse(target, "E_MIXIN_NOT_REPLACEABLE", why));
+                continue;
+            }
+            Err(why) => {
+                refusals.push(refuse(target, "E_MIXIN_SOURCE", why));
+                continue;
+            }
+        }
         let found = match find(&mut source, target) {
             Ok(found) => found,
             Err((code, why)) => {
@@ -1250,7 +1261,14 @@ mod tests {
         )
         .unwrap_err();
         let codes: Vec<_> = error.iter().map(|r| r.code).collect();
-        assert_eq!(codes, ["E_MIXIN_TARGET_MISSING", "E_MIXIN_TARGET_MISSING"]);
+        assert_eq!(
+            codes,
+            [
+                "E_MIXIN_TARGET_MISSING",
+                "E_MIXIN_TARGET_MISSING",
+                "E_MIXIN_NOT_REPLACEABLE"
+            ]
+        );
     }
 
     #[test]
@@ -1298,10 +1316,20 @@ mod tests {
                     && f.sig.receiver().is_some_and(|r| r.reference.is_some())
                     && f.sig.generics.params.is_empty()
                 {
-                    return format!(
+                    let target = format!(
                         "{module}::<{} as {}>::{}",
                         ty.path.segments[0].ident, path.segments[0].ident, f.sig.ident
                     );
+                    if generate(
+                        &root(),
+                        "horizon_patch",
+                        std::slice::from_ref(&target),
+                        &Extras::default(),
+                    )
+                    .is_ok()
+                    {
+                        return target;
+                    }
                 }
             }
         }

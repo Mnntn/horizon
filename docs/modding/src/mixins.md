@@ -31,3 +31,5 @@ Prefer a hook request when the behaviour should also work on wasm. A native mixi
 ## Pinned tool documentation
 
 The vocabulary is horizon-mixins' pinned vocabulary. Read its [Mixin API](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/mixin-api.md), [advanced injections](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/advanced-injections.md), and [scopes and bridges](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/scopes-and-bridges.md) for selector and binding contracts.
+
+The launcher applies the carried `tools/mixins/narrow-reference-rule.patch` to the pinned tool, keyed by its hash and checked against the exact source text. If it cannot apply, the build refuses by name. It narrows reference handling for supported call expressions; unsupported control flow still refuses rather than choosing another call.

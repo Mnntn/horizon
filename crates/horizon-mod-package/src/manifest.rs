@@ -1430,7 +1430,7 @@ issues = \"http://example.org/issues\"
         assert!(
             Manifest::parse(&format!("{base}{missing_raw}"))
                 .unwrap_err()
-                .contains("unknown field `injection`")
+                .contains("a mod is [native] or [wasm], not both")
         );
         for unified in [""] {
             assert!(Manifest::parse(&format!("{base}{unified}")).is_ok());
@@ -1446,7 +1446,10 @@ issues = \"http://example.org/issues\"
             let error = Package::read_zip(&mut archive)
                 .err()
                 .expect("unknown native field refused before package classification");
-            assert!(error.contains("unknown field `injection`"), "{error}");
+            assert!(
+                error.contains("a mod is [native] or [wasm], not both"),
+                "{error}"
+            );
         }
     }
 
