@@ -1460,7 +1460,6 @@ impl Items {
         }
         self.get(&stack.item)?.tool_damage_per_block
     }
-    /// Mining wear on an already durable item prototype. Custom durability on
     /// `Weapon.itemDamagePerAttack`: the stack's `weapon` component, else the
     /// item's prototype. A removed component leaves no weapon.
     pub fn weapon_damage(&self, stack: &ItemStack) -> Option<u32> {
@@ -1481,44 +1480,7 @@ impl Items {
         }
         self.get(&stack.item)?.weapon_damage
     }
-    /// `ItemAttributeModifiers` from the stack's component, else the item's
-    /// prototype: (attribute, id, amount, operation, slot group).
-    pub fn attribute_modifiers(
-        &self,
-        stack: &ItemStack,
-    ) -> Vec<(String, String, f64, String, String)> {
-        if stack
-            .data()
-            .is_some_and(|d| d.other("!minecraft:attribute_modifiers").is_some())
-        {
-            return Vec::new();
-        }
-        if let Some(horizon_world::nbt::Tag::List(entries)) = stack
-            .data()
-            .and_then(|d| d.other("minecraft:attribute_modifiers"))
-        {
-            return entries
-                .iter()
-                .filter_map(|entry| {
-                    let string = |key: &str| match entry.get(key) {
-                        Some(horizon_world::nbt::Tag::String(s)) => Some(s.to_string_lossy()),
-                        _ => None,
-                    };
-                    Some((
-                        string("type")?,
-                        string("id")?,
-                        horizon_world::datafix::dynamic::as_number(entry.get("amount")?)?
-                            .double_value(),
-                        string("operation").unwrap_or_else(|| "add_value".into()),
-                        string("slot").unwrap_or_else(|| "any".into()),
-                    ))
-                })
-                .collect();
-        }
-        self.get(&stack.item)
-            .map(|i| i.modifiers.clone())
-            .unwrap_or_default()
-    }
+    /// Mining wear on an already durable item prototype. Custom durability on
     /// non-durable items needs item-aware DAMAGE-presence decoding first.
     pub fn mining_damage_capacity(&self, stack: &ItemStack) -> u32 {
         let prototype_max = self.get(&stack.item).map_or(0, |info| info.max_damage);
@@ -3172,25 +3134,23 @@ mod tests {
     use horizon_core::random::LegacyRandom;
     use serde_json::json;
 
-    /// The ids `/loot ... loot <id>` takes: a content mod's table in the
-    /// root and a world pack's table over it.
     #[test]
     fn weapon_damage_comes_from_the_stack() {
         let items = Items::for_tests(HashMap::new());
         let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
         sword.data_mut().set_other(
             "minecraft:weapon",
-            Some(horizon_world::nbt::Tag::compound([(
+            Some(horizon_core::nbt::Tag::compound([(
                 "item_damage_per_attack",
-                horizon_world::nbt::Tag::Int(3),
+                horizon_core::nbt::Tag::Int(3),
             )])),
         );
         assert_eq!(items.weapon_damage(&sword), Some(3));
         sword.data_mut().set_other(
             "!minecraft:weapon",
-            Some(horizon_world::nbt::Tag::compound(Vec::<(
+            Some(horizon_core::nbt::Tag::compound(Vec::<(
                 &str,
-                horizon_world::nbt::Tag,
+                horizon_core::nbt::Tag,
             )>::new())),
         );
         assert_eq!(items.weapon_damage(&sword), None);
