@@ -149,11 +149,32 @@ fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
 impl Game<'_> {
     /// Each frame: what the browser's worker finished.
     pub(super) fn drive_mod_browser(&mut self) {
+        // The Browse mods page's layout reads the browser: a worker's answer
+        // arriving makes the built page again at its next draw.
+        let browser = &self.ui.options.mod_browser;
+        let before = (
+            browser.status.clone(),
+            browser.listings.len(),
+            browser.installing.clone(),
+            browser.message.clone(),
+        );
         let installed = self.mod_jobs.poll(
             &mut self.ui.options.mod_browser,
             &mut self.settings.mods,
             self.player.is_some(),
         );
+        let browser = &self.ui.options.mod_browser;
+        if installed
+            || before
+                != (
+                    browser.status.clone(),
+                    browser.listings.len(),
+                    browser.installing.clone(),
+                    browser.message.clone(),
+                )
+        {
+            self.ui.options.layout_changed();
+        }
         if installed {
             self.settings.save(&Self::options_path());
             self.start_mods();

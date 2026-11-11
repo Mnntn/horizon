@@ -12,9 +12,12 @@ import net.minecraft.client.StringSplitter;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.InputType;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.AbstractButton;
+import net.minecraft.client.gui.components.SpriteIconButton;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.narration.NarratableEntry;
 import net.minecraft.client.gui.components.Renderable;
+import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.*;
 import net.minecraft.client.gui.screens.recipebook.RecipeBookComponent;
@@ -108,6 +111,27 @@ public final class VanillaScreenBuildOracle {
         return player;
     }
 
+    /** A pause screen on the client state `PauseScreen.init` reads. */
+    static PauseScreen pauseScreen() throws Exception {
+        var mc = minecraft();
+        // The level adds the Options and World Options row; the local server
+        // labels the disconnect button Return to Menu; the connection answers
+        // the custom additions lookup (no dialog tag, no server links).
+        put(mc, Minecraft.class, "level", alloc(ClientLevel.class));
+        put(mc, Minecraft.class, "isLocalServer", true);
+        // The friends button asks the social manager whether its list is on.
+        put(mc, Minecraft.class, "playerSocialManager", alloc(net.minecraft.client.gui.screens.social.PlayerSocialManager.class));
+        var player = player();
+        var connection = alloc(ClientPacketListener.class);
+        put(connection, ClientPacketListener.class, "registryAccess", ParityData.access);
+        put(connection, net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class, "serverLinks", net.minecraft.server.ServerLinks.EMPTY);
+        put(player, LocalPlayer.class, "connection", connection);
+        put(mc, Minecraft.class, "player", player);
+        var screen = new PauseScreen(true);
+        put(screen, Screen.class, "minecraft", mc);
+        return screen;
+    }
+
     static AbstractContainerScreen<?> screen(String kind, int rows, Inventory inventory, LocalPlayer player) throws Exception {
         return switch (kind) {
             case "inventory" -> new InventoryScreen(player);
@@ -172,6 +196,31 @@ public final class VanillaScreenBuildOracle {
                 g.add(height);
                 result.add("gui", g);
 
+                if (c.get("kind").getAsString().equals("pause")) {
+                    var pause = pauseScreen();
+                    pause.init(width, height);
+                    var buttons = new JsonArray();
+                    var icons = new JsonArray();
+                    for (var child : pause.children()) {
+                        if (!(child instanceof AbstractButton button)) continue;
+                        if (button instanceof SpriteIconButton) {
+                            icons.add(pair(button.getX(), button.getY()));
+                        } else {
+                            var rect = new JsonArray();
+                            rect.add(button.getX());
+                            rect.add(button.getY());
+                            rect.add(button.getWidth());
+                            rect.add(button.getMessage().getString());
+                            buttons.add(rect);
+                        }
+                    }
+                    var pauseJson = new JsonObject();
+                    pauseJson.add("buttons", buttons);
+                    pauseJson.add("icons", icons);
+                    result.add("pause", pauseJson);
+                    out.append(result).append('\n');
+                    continue;
+                }
                 var screen = screen(c.get("kind").getAsString(), c.has("rows") ? c.get("rows").getAsInt() : 3, inventory, player);
                 put(screen, Screen.class, "minecraft", mc);
                 screen.init(width, height);
