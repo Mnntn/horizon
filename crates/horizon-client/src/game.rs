@@ -17439,7 +17439,6 @@ pub(crate) fn run_with(
         let inventory: Vec<_> = context.mods().iter().cloned().collect();
         crate::entry::initialize_code(&inventory);
     }
-    mod_points::__private::seal();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
     crate::game::part_admission::admit_parts(mod_api::__private::mods())?;
     // The structure types those mods registered, handed to the engine before

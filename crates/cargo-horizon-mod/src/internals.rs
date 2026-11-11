@@ -205,12 +205,6 @@ fn sync(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Manifest edits follow a user-managed symlink.
-pub(crate) fn atomic_write_manifest(path: &Path, contents: String) -> Result<(), String> {
-    let referent = fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    atomic_write(&referent, contents)
-}
-
 /// Attempts at an unused temporary name before `atomic_write` gives up.
 const TEMPORARY_ATTEMPTS: u64 = 16;
 
