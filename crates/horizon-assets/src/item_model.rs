@@ -21,8 +21,8 @@ mod foreign;
 mod mod_properties;
 mod special;
 pub use mod_properties::{
-    is_item_model_type, is_range_property, is_select_property, is_tint_source, keep_mod_ids,
-    register_item_models, register_range_properties, register_select_properties,
+    is_item_model_type, is_mod_id, is_range_property, is_select_property, is_tint_source,
+    keep_mod_ids, register_item_models, register_range_properties, register_select_properties,
     register_tint_sources,
 };
 pub use special::{SpecialKind, SpecialModel};

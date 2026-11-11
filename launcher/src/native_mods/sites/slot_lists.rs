@@ -24,20 +24,11 @@ fn no_slot_suggestions_round_trip_through_the_slot_reader() {
     fs::write(root.join("crates/test-slots/Cargo.toml"), "").unwrap();
     fs::write(&source, "").unwrap();
     let mut declarations = String::new();
-    for kind in [Kind::Head, Kind::BeforeCall, Kind::Field] {
+    for kind in [Kind::Head, Kind::BeforeCall] {
         let is_call = kind == Kind::BeforeCall;
         let inject = Inject {
-            local: None,
-            local_type: None,
-            position: None,
-            expr: None,
             id: "test".into(),
-            at: if kind == Kind::Field {
-                "test_slots::Thing"
-            } else {
-                "test_slots::run"
-            }
-            .into(),
+            at: "test_slots::run".into(),
             kind,
             with: "on_slot".into(),
             access: Access::Api,

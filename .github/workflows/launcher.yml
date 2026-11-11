@@ -401,11 +401,6 @@ jobs:
         run: |
           python3 tools/release_train.py notes --kind launcher --tag "${{ needs.decide.outputs.tag }}" \
             --head "${{ needs.decide.outputs.head }}" --out notes > /dev/null
-          if [[ "$GITHUB_REPOSITORY" == arismoko/horizon ]]; then
-            printf 'Horizon Fork Launcher (arismoko) %s\n' "${{ needs.decide.outputs.tag }}" > notes/title.txt
-            printf '\n\n' >> notes/body.md
-            cat packaging/fork-launcher-release-notes.md >> notes/body.md
-          fi
           { echo "## $(cat notes/title.txt)"; echo; cat notes/body.md; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/download-artifact@v8
         with:

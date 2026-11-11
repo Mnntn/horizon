@@ -1562,7 +1562,6 @@ mod tests {
             "horizon_client::game",
             &entries,
             &declarations.calls,
-            false,
         )
         .unwrap();
         assert_eq!(sites.len(), 1);
@@ -2039,8 +2038,6 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
         fixture.put("crates/horizon-items/src/aliases.rs", "use super::ItemStack as StackItem; pub type Stack = StackItem; pub type Pos = (i32, i32, i32);");
         let entries = widen_with(&fixture.0, &[]).unwrap().entries;
         let request = crate::sites::Declaration {
-            expression: None,
-            local: None,
             target: "horizon_client::game::run".into(),
             selector: "horizon_client::game::take".into(),
             ordinal: Some(0),
@@ -2052,7 +2049,6 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             "horizon_client::game",
             &entries,
             &[request],
-            true,
         )
         .unwrap();
         assert!(sites[0].once);
@@ -2618,7 +2614,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
     }
 
     #[test]
-    fn slot_functions_and_calls_are_widened_but_types_are_only_carried() {
+    fn slot_functions_and_calls_are_widened() {
         for declaration in [
             "lower::hidden::inner::Thing::run",
             "lower::hidden::inner::Thing::run | helper | 0 |",
@@ -2627,7 +2623,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
             fixture.lower();
             fixture.put(
                 "crates/horizon-mod-api-gen/slots/test.txt",
-                &format!("{declaration}\ntype lower::FutureExtension\n"),
+                &format!("{declaration}\n"),
             );
             let result = widen_with(&fixture.0, &[]).unwrap();
             assert!(

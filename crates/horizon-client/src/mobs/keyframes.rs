@@ -71,7 +71,10 @@ impl Animation {
         }
         for (bone, channels) in &self.bones {
             for c in channels {
-                let v = c.sample(seconds, scale);
+                // `parse` above builds only built-in interpolations, which always sample.
+                let Some(v) = c.sample(seconds, scale) else {
+                    continue;
+                };
                 let p = poses.get(bone);
                 match c.target {
                     // ModelPart.offsetPos / offsetRotation / offsetScale.
@@ -90,6 +93,8 @@ impl Animation {
                         p[7] += v[1];
                         p[8] += v[2];
                     }
+                    // `parse` above builds only the three built-in targets.
+                    AnimationTarget::Registered(_) => {}
                 }
             }
         }

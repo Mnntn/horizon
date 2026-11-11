@@ -33,7 +33,7 @@ fn delegated_knockback_entries_apply_both_heads_but_only_one_push() {
                         } else {
                             name
                         };
-                        let attribute = quote!(name = #name, raw_only);
+                        let attribute = quote!(name = #name, raw);
                         let shape = point_shape::shape(attribute.clone(), &function.sig).unwrap();
                         records.extend(shape.raw_items(
                             &function.sig,

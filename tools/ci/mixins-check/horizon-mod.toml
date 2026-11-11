@@ -1,9 +1,10 @@
-# CI's slot/source check: tools/ci/mixins_check.sh pins the game and fills the
-# function hashes and the Game declaration, including an area-file method, from the generated catalog.
+# CI's inject and mixin check: tools/ci/mixins_check.sh pins the game and fills the function hashes and
+# the Game declaration, including an area-file method, from the generated catalog. The two `[[inject]]`
+# rows attach to compiled slots; the `[[native.mixin]]` row is compiled into the game by horizon-mixins.
 id = "mixins_check"
 name = "Mixins check"
 version = "0.1.0"
-description = "CI: unified API and area slots plus native internals source routing"
+description = "CI: API and area slots, and a mixin through horizon-mixins"
 authors = []
 api = "0.2"
 side = "both"
@@ -24,17 +25,16 @@ with = "tick"
 hash = "TICK_HASH"
 
 [[inject]]
-id = "count"
-at = "horizon_client::game::Game<'_>::tick_mobs"
-kind = "head"
-with = "count"
-access = "internals"
-hash = "COUNT_HASH"
-
-[[inject]]
 id = "area"
 at = "horizon_client::game::using_item::Game<'_>::start_eating"
 kind = "return"
 with = "area"
 access = "internals"
 hash = "AREA_HASH"
+
+[[native.mixin]]
+id = "count"
+target = "horizon_client::game::Game<'_>::tick_mobs"
+kind = "HEAD"
+helper = "src/count.rs"
+bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]

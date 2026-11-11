@@ -250,6 +250,7 @@ jobs:
           SOURCE_TAG: ${{ needs.pick.outputs.source_tag }}
         run: |
           set -euo pipefail
+          python3 tools/ci/nightly.py require-sdk "$SHA"
           python3 tools/ci/nightly.py rotate
           signature=(); [[ -f dist/SHA256SUMS.sig ]] && signature=(dist/SHA256SUMS.sig)
           [[ -f dist/SHA256SUMS.v2.sig ]] && signature+=(dist/SHA256SUMS.v2.sig)
@@ -274,6 +275,7 @@ jobs:
           fi
           # A pre-release, never GitHub's latest: the latest stays the last vX.Y.Z, which launchers and servers from
           # before the Nightly-only switch keep (they don't read Nightlies).
+          python3 tools/ci/nightly.py require-sdk "$SHA"
           gh release create nightly --prerelease --latest=false --target "$SHA" \
             --title "Nightly $DATE · ${SHA:0:7}" --notes-file dist/nightly-notes.md \
             "dist/horizon-linux-x86_64.tar.gz#Game files the launcher installs (Nightly): Linux (horizon-linux-x86_64.tar.gz)" \

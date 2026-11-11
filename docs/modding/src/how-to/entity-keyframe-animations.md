@@ -28,7 +28,8 @@ Put this file at `assets/demo/neoforge/animations/entity/arm/wave.json`. Its ani
 }
 ```
 
-`length` and `timestamp` are seconds. Keep keyframes in time order and use finite values.
+`length` and `timestamp` are seconds. Keep keyframes in time order. A number that isn't
+finite (as an f32), or a `length` of 0 or less, rejects the file with a named diagnostic.
 `loop` defaults to false. The built-in targets use vanilla's builder conventions:
 
 - `minecraft:position`: texels, with the JSON y value negated when loaded.
@@ -36,8 +37,9 @@ Put this file at `assets/demo/neoforge/animations/entity/arm/wave.json`. Its ani
 - `minecraft:scale`: scale factors in the file; `[1, 1, 1]` adds no scale offset.
 
 The built-in interpolations are `minecraft:linear` and `minecraft:catmullrom`. An identifier
-without a namespace uses `minecraft:`. An unknown target or interpolation rejects that file
-with a named diagnostic; other animation files still load. Lookup returns `None` when the ID
+without a namespace uses `minecraft:`. A target or interpolation that is neither built in nor
+registered by a mod ([below](#registered-targets-and-interpolations)) rejects that file with a
+named diagnostic; other animation files still load. Lookup returns `None` when the ID
 is absent or its file failed to load.
 
 ## Resolve and bake after resources are published
@@ -48,7 +50,7 @@ its model and baked animation together:
 
 ```rust
 use mod_api::{
-    AnimationState, Identifier, KeyframeAnimation, ModelPart, RenderAssets,
+    AnimationError, AnimationState, Identifier, KeyframeAnimation, ModelPart, RenderAssets,
 };
 
 struct AnimatedModel {
@@ -62,8 +64,17 @@ impl AnimatedModel {
         Self { root, animation: None, state: AnimationState::new() }
     }
 
-    fn reload(&mut self, assets: &dyn RenderAssets, id: &Identifier) {
-        self.animation = assets.animation(id).map(|holder| holder.bake(&self.root));
+    /// Fails, naming them, on an animation that names registered types: see below.
+    fn reload(
+        &mut self,
+        assets: &dyn RenderAssets,
+        id: &Identifier,
+    ) -> Result<(), AnimationError> {
+        self.animation = None;
+        if let Some(holder) = assets.animation(id) {
+            self.animation = Some(holder.bake(&self.root)?);
+        }
+        Ok(())
     }
 
     fn start(&mut self, tick_count: i32) {
@@ -79,10 +90,10 @@ impl AnimatedModel {
 }
 ```
 
-Call `reload` from those lifecycle hooks with the published assets and ID, and `start` when
-that entity begins the action. Keep a separate animation state for each animated entity.
-A new state is stopped; `start_if_stopped` does not restart an already playing animation,
-`animate_when` starts or stops with a condition, and `stop` ends playback.
+Call `reload` from those lifecycle hooks with the published assets and ID, reporting its
+error, and `start` when that entity begins the action. Keep a separate animation state for
+each animated entity. A new state is stopped; `start_if_stopped` does not restart an already
+playing animation, `animate_when` starts or stops with a condition, and `stop` ends playback.
 
 Baking follows vanilla 26.3's `ModelPart.createPartLookup`: the name `root` always means the
 actual root, even if a child is also named `root`. Other names select the first match,
@@ -105,3 +116,23 @@ Do not look up, clone or bake the animation every frame: those steps copy or all
 Playback uses the retained child-index paths and channels without allocating or searching
 bone names. Pose application alone does not draw anything; submit your model through its
 renderer, alongside the [resolved-model drawing](model-drawing.md) facilities.
+
+## Registered targets and interpolations
+
+A mod adds its own targets and interpolations with `register_json_animation_types` (NeoForge's
+`RegisterJsonAnimationTypesEvent`), once at start; files may then name them. What they do is an
+`AnimationTypes` the playing mod implements: `convert_target` turns a registered target's file
+values into its values once at bake (unchanged by default, where the built-in targets convert
+with `posVec`, `degreeVec` and `scaleVec`), `apply_target` puts a sampled value on the part, and
+`interpolate` answers a segment into a keyframe with a registered interpolation. They run in the
+playing mod, called directly: no hook is dispatched per sample.
+
+An animation that names registered types is baked with `holder.bake_with(&root, types)` into a
+`TypedKeyframeAnimation`, which keeps `types` and plays with the same `apply`, `apply_scaled`,
+`apply_walk` and `apply_static`. `bake` refuses such an animation, naming it and its types, so a
+registered channel is never skipped in silence. An id one mod registered loads in any mod's
+file, but plays only where an `AnimationTypes` provides it: the registering mod's own, or one a
+mod depending on it supplies. `bake_with` refuses an `AnimationTypes` that lacks one of the
+animation's types, once, and the error names the animation, that type and the mod that
+registered it.
+The [hook's notes](../reference/hook-notes.md#animation-types) show a complete example.

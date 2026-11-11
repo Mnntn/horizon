@@ -26,8 +26,8 @@ const UNPACKED_LIMIT: u64 = 8 << 30;
 /// Why a build compiles the game from source instead of using the prebuilt game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceReason {
-    /// A mod has a checked private source point, legacy helper, or module changing game code.
-    Injections { mod_id: String },
+    /// A mod has a `[[native.mixin]]`, bridge, state field or support module, which change game code.
+    Mixins { mod_id: String },
     /// A mod has a build script, which the prebuilt route doesn't run.
     BuildScript { mod_id: String },
     /// A mod declares Cargo features, or asks the mod API for features of its own.
@@ -43,10 +43,7 @@ pub enum SourceReason {
 impl std::fmt::Display for SourceReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = match self {
-            Self::Injections { mod_id } => trf(
-                "{mod} injects into the game's code, so the game builds from source",
-                &[("mod", mod_id)],
-            ),
+            Self::Mixins { mod_id } => trf("{mod}: mixins compile game code", &[("mod", mod_id)]),
             Self::BuildScript { mod_id } => trf(
                 "{mod} has a build script, so the game builds from source",
                 &[("mod", mod_id)],
@@ -82,7 +79,7 @@ pub(super) fn refusal(projects: &[api::Project<'_>]) -> Option<SourceReason> {
     projects.iter().find_map(project_refusal)
 }
 
-/// Checked private-source routes require an install-time game build, never a prebuilt retry.
+/// Refuse injections without compiled slots before selecting an artifact.
 pub(super) fn source_refusal(
     game: &Path,
     projects: &[api::Project<'_>],
@@ -99,7 +96,7 @@ pub(super) fn source_refusal(
     Ok(None)
 }
 
-/// One slot/source decision per project, including named refusals. Cargo restrictions are
+/// One slot attachment decision per project, including named refusals. Cargo restrictions are
 /// reported separately by `project_refusal`; both consumers use the same slot router here.
 pub(super) fn slot_routes(
     catalog: &internals::Catalog,
@@ -110,20 +107,6 @@ pub(super) fn slot_routes(
         .map(|project| {
             let manifest = &project.bundle.manifest;
             let route = match super::slots::routes(catalog, manifest) {
-                Ok(routes)
-                    if routes.iter().any(|route| {
-                        matches!(
-                            route,
-                            horizon_mod_package::manifest::inject::Route::Source(_)
-                        )
-                    }) =>
-                {
-                    super::Route::Game {
-                        reason: SourceReason::Injections {
-                            mod_id: manifest.id.clone(),
-                        },
-                    }
-                }
                 Ok(_) => super::Route::Prebuilt,
                 Err(error) => super::Route::Invalid {
                     reason: error.to_string(),
@@ -139,7 +122,7 @@ pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason
     {
         let mod_id = || project.bundle.manifest.id.clone();
         if project.bundle.needs_mixins() {
-            return Some(SourceReason::Injections { mod_id: mod_id() });
+            return Some(SourceReason::Mixins { mod_id: mod_id() });
         }
         let cargo = &project.cargo;
         let package = cargo.get("package");
@@ -821,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn plans_all_private_sources_and_keeps_named_refusals_invalid() {
+    fn injects_without_slots_are_invalid_and_never_plan_source() {
         use serde_json::json;
         let root = super::super::tests::dir("slot-planning");
         let mut bundles = Vec::new();
@@ -841,10 +824,6 @@ mod tests {
             (
                 "api_refusal",
                 json!({"at":"Example::private","kind":"head","access":"api"}),
-            ),
-            (
-                "expression",
-                json!({"at":"Example::calls","kind":"expression","access":"internals","expr":"64.0","type":"f64","nth":0,"ctx":"context"}),
             ),
         ] {
             let dir = root.join(id);
@@ -879,16 +858,13 @@ mod tests {
                 super::super::Route::Invalid { .. } => "invalid",
             })
             .collect();
-        assert_eq!(
-            classes,
-            ["prebuilt", "source", "source", "invalid", "source"]
-        );
+        assert_eq!(classes, ["prebuilt", "invalid", "invalid", "invalid"]);
         let causes: Vec<_> = routes
             .iter()
             .filter(|(_, route)| matches!(route, super::super::Route::Game { .. }))
             .map(|(id, _)| id.as_str())
             .collect();
-        assert_eq!(causes, ["private_head", "unlisted_call", "expression"]);
+        assert!(causes.is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 

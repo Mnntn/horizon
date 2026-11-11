@@ -43,10 +43,6 @@ fn inject(at: &str, kind: Kind, access: Access, hash: &str) -> Inject {
         call: None,
         nth: None,
         ctx: None,
-        local: None,
-        local_type: None,
-        position: None,
-        expr: None,
     }
 }
 

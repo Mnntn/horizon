@@ -17,8 +17,6 @@ pub(super) struct PointInjection {
 pub(super) struct ListedPoint {
     pub(super) name: String,
     #[serde(default)]
-    pub(super) private: bool,
-    #[serde(default)]
     pub(super) record_name: Option<String>,
     pub(super) target: String,
     pub(super) raw: bool,
@@ -48,7 +46,6 @@ impl ListedPoint {
         horizon_mod_point_emit::Point {
             name: self.name.clone(),
             target: self.target.clone(),
-            private: self.private,
             at_return: self.at_return,
             api_refusal: self.api_refusal.clone(),
             returns: self.returns.clone(),

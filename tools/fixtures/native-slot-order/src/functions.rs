@@ -1,4 +1,4 @@
-// One unchanged callback source compiled against both listed slots and private source points.
+// Callbacks for listed function slots and listed call sites, in registration order.
 use internals::{game::Game, raw::*};
 use std::sync::atomic::{AtomicBool, Ordering};
 static HIGH: AtomicBool = AtomicBool::new(false);

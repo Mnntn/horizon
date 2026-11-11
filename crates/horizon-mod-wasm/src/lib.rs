@@ -614,6 +614,26 @@ fn load_with_cache(
 mod tests {
     use super::*;
 
+    #[test]
+    fn installed_wasm_mixin_refuses_by_name() {
+        let root = std::env::temp_dir().join(format!("wasm-mixin-{}", std::process::id()));
+        let package = root.join("bad_mixin");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("horizon-mod.toml"), format!(
+            "id = 'bad_mixin'\nname = 'Bad mixin'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n[[native.mixin]]\nid = 'patch'\ntarget = 'game::tick'\nkind = 'HEAD'\nhelper = 'src/patch.rs'\n", "a".repeat(128)
+        )).unwrap();
+        let loaded = load_installed(&root, &[package]);
+        assert!(
+            loaded.refused.iter().any(|(id, reason)| id == "bad_mixin"
+                && reason
+                    .to_string()
+                    .contains("only [native] tables compile game code")),
+            "{:?}",
+            loaded.refused
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     fn package(
         id: &str,
         version: &str,

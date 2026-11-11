@@ -45,26 +45,12 @@ fn production_listed_records() {
             .find(|d| d.target.ends_with(suffix) && d.ordinal == Some(ordinal))
             .unwrap();
         let source = std::fs::read_to_string(root.join(file)).unwrap();
-        let (listed, metadata) = sites::rewrite::rewrite(
-            &source,
-            module,
-            &entries,
-            std::slice::from_ref(declaration),
-            false,
-        )
-        .unwrap();
+        let (listed, metadata) =
+            sites::rewrite::rewrite(&source, module, &entries, std::slice::from_ref(declaration))
+                .unwrap();
         assert_eq!(metadata.len(), 1);
         assert_eq!(metadata[0].once, once);
         assert_eq!(metadata[0].ctx, declaration.ctx);
-        let (rebuilt, _) = sites::rewrite::rewrite(
-            &source,
-            module,
-            &entries,
-            std::slice::from_ref(declaration),
-            true,
-        )
-        .unwrap();
-        assert_eq!(listed, rebuilt, "same listener and record on both routes");
         println!("{}", serde_json::to_string_pretty(&metadata).unwrap());
         use quote::ToTokens;
         let name = &metadata[0].name;

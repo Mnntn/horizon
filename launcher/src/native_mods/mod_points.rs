@@ -105,7 +105,6 @@ pub(super) fn emitted(catalog: &Catalog, mods: &[&Manifest]) -> Vec<horizon_mod_
                 .map(move |point| horizon_mod_point_emit::Point {
                     name: point.name.clone(),
                     target: point.target.clone(),
-                    private: false,
                     at_return: point.at_return,
                     api_refusal: point.api_refusal.clone(),
                     returns: point.returns.clone(),

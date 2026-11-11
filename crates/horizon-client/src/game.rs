@@ -7578,7 +7578,7 @@ impl Game<'_> {
         if let Some(hit) = block_hit
             && self.shears_crop(hit.pos, &stack)?
         {
-            return Ok(true);
+            return self.finish_item_block_use(block_hit, &stack);
         }
         // A guest's UseItemOn stops at ItemStack.useOn: what Item.use does
         // (throw, drink, eat, raise, equip) waits for its UseItem.
@@ -7590,7 +7590,7 @@ impl Game<'_> {
                 if (UseResult::Success { swing }).should_swing(swings, self.swings_started) {
                     self.swing_arm();
                 }
-                return Ok(true);
+                return self.finish_item_block_use(block_hit, &stack);
             }
             UseResult::Fail => {
                 self.use_failed = true;

@@ -50,7 +50,6 @@ mod picker;
 mod prebuilt;
 mod sites;
 mod slots;
-mod source;
 #[cfg(all(test, target_os = "linux"))]
 mod source_server;
 
@@ -649,10 +648,12 @@ impl Bundle {
             .expect("validated code package")
     }
 
-    /// Whether horizon-mixins adds supporting modules to the game's source.
-    /// Unified injects are routed separately by the launcher.
+    /// Whether horizon-mixins reads source to transform the game.
     fn needs_mixins(&self) -> bool {
-        !self.native().module.is_empty()
+        !self.native().mixin.is_empty()
+            || !self.native().module.is_empty()
+            || !self.native().bridge.is_empty()
+            || !self.native().state.is_empty()
     }
 }
 
@@ -1038,7 +1039,6 @@ pub fn version_for(
         hash.update(target.name().as_bytes());
         hash.update([0]);
     }
-    // Private rows derive from the pinned SDK and inject declarations, all salted/hashed here.
     // bundles() reads folders in path order, which with their manifests decides trait dispatch
     // order: hashed in that order, a different order is another build.
     for b in bundles {
@@ -1794,7 +1794,7 @@ impl std::fmt::Display for Failed {
         match self {
             Self::Mods { error, .. } | Self::Other(error) => f.write_str(error),
             Self::Nothing => Ok(()),
-            Self::NoConsent => f.write_str(tr("Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.")),
+            Self::NoConsent => f.write_str(tr("Native mods run inside your game with your rights; mixins compile code into the game. Allow native mods in Settings, Storage, or pass --trust-native-code.")),
         }
     }
 }
@@ -2182,48 +2182,62 @@ fn pipeline(
         let _ = fs::remove_dir_all(&catalog_dir);
         fs::create_dir_all(&catalog_dir).map_err(|e| e.to_string())?;
         sync(&fresh, &pending)?;
-        let mut pass = cargo(&rust, &pending, "run");
-        pass.args([
-            "--locked",
-            "--release",
-            "-q",
-            "-p",
-            "horizon-mod-api-gen",
-            "--bin",
-            "horizon-stage",
-            "--",
-        ])
-        .arg(&pending)
-        .arg(catalog_dir.join(inject::POINTS))
-        .arg(catalog_dir.join(internals::INTERNALS))
-        .arg(horizon_mod_package::manifest::API)
-        .env("CARGO_TARGET_DIR", real.join("target"));
-        fn discard(pending: &Path, catalog: &Path, error: impl std::fmt::Display) -> String {
-            let _ = fs::remove_dir_all(pending);
-            let _ = fs::remove_dir_all(catalog);
-            error.to_string()
+        let mark = |tree: &Path, catalog: &Path| {
+            let mut pass = cargo(&rust, tree, "run");
+            pass.args([
+                "--locked",
+                "--release",
+                "-q",
+                "-p",
+                "horizon-mod-api-gen",
+                "--bin",
+                "horizon-stage",
+                "--",
+            ])
+            .arg(tree)
+            .arg(catalog.join(inject::POINTS))
+            .arg(catalog.join(internals::INTERNALS))
+            .arg(horizon_mod_package::manifest::API)
+            .env("CARGO_TARGET_DIR", real.join("target"));
+            run(pass, "Marking the game's injection points", |_| {})?;
+            internals::Catalog::read(catalog).and_then(|catalog| catalog.with_mods(mods.iter()))
+        };
+        // A mod pins the game as its revision ships it. horizon-mixins reprints each file it
+        // edits and may add fields, which moves fingerprints, so a mixin build's catalog keeps
+        // the unpatched source's fingerprint for every declaration that source has.
+        let pristine = real.join("stage.pinned");
+        let pinned_catalog = real.join("catalog.pinned");
+        let discard = |error: String| {
+            for dir in [&pending, &catalog_dir, &pristine, &pinned_catalog] {
+                let _ = fs::remove_dir_all(dir);
+            }
+            error
+        };
+        let mut catalog = mark(&pending, &catalog_dir).map_err(discard)?;
+        if needs_mixins {
+            let _ = fs::remove_dir_all(&pinned_catalog);
+            fs::create_dir_all(&pinned_catalog).map_err(|e| discard(e.to_string()))?;
+            sync(&source, &pristine).map_err(discard)?;
+            mark(&pristine, &pinned_catalog).map_err(discard)?;
+            internals::keep_pins(&catalog_dir, &pinned_catalog).map_err(discard)?;
+            let _ = fs::remove_dir_all(&pristine);
+            let _ = fs::remove_dir_all(&pinned_catalog);
+            catalog = internals::Catalog::read(&catalog_dir)
+                .and_then(|catalog| catalog.with_mods(mods.iter()))
+                .map_err(discard)?;
         }
-        run(pass, "Marking the game's injection points", |_| {})
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        source::stage(&pending, &catalog_dir, &ordered)
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        let catalog = internals::Catalog::read(&catalog_dir)
-            .and_then(|catalog| catalog.with_mods(mods.iter()))
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
         mods.iter()
             .try_for_each(|bundle| catalog.check(&bundle.manifest))
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+            .map_err(|error| discard(error.to_string()))?;
         let _ = fs::remove_dir_all(&fresh);
-        fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
+        fs::rename(&pending, &fresh).map_err(|error| discard(error.to_string()))?;
         for name in [
             inject::POINTS,
             horizon_mod_package::SDK_CATALOG_FILE,
             internals::INTERNALS,
-            horizon_platform::mod_build::api_gen::points::source::FILE,
-            horizon_platform::mod_build::api_gen::sites::source::FILE,
         ] {
             fs::rename(catalog_dir.join(name), real.join(name))
-                .map_err(|error| discard(&pending, &catalog_dir, error))?;
+                .map_err(|error| discard(error.to_string()))?;
         }
         let _ = fs::remove_dir_all(&catalog_dir);
         if !mods.is_empty() {
@@ -2296,12 +2310,7 @@ fn pipeline(
             .map_err(|error| Failed::Other(cache_error(error)))?;
         crate::run_leases::publish(&profile_dir).map_err(cache_error)?;
         let (mut crates, mut total, mut name) = (0, None, String::new());
-        let mut declared_injections = diagnostics::Declared::expressions(
-            &horizon_platform::mod_build::api_gen::sites::source::read(&real)?,
-        );
-        declared_injections.extend(diagnostics::Declared::fields(
-            mods.iter().map(|bundle| &bundle.manifest),
-        ));
+        let declared_injections = Vec::new();
         let identities: Vec<_> = mods
             .iter()
             .map(|m| (m.manifest.id.clone(), m.manifest.version.clone()))
@@ -3609,23 +3618,20 @@ mod tests {
         );
         let path = d.join("horizon-mod.toml");
         let original = fs::read_to_string(&path).unwrap();
-        let declaration = "\n[[inject]]\nid='source'\nat='horizon_client::game::Game::unlisted'\nkind='head'\naccess='internals'\nwith='hook'\nhash='0000000000000000'\n";
+        let declaration = "\n[[inject]]\nid='listener'\nat='horizon_client::game::Game::tick'\nkind='head'\naccess='internals'\nwith='hook'\nhash='0000000000000000'\n";
         fs::write(&path, format!("{original}{declaration}")).unwrap();
-        let source = key(A);
-        assert_ne!(
-            first, source,
-            "source adapters require another game artifact"
-        );
-        assert_eq!(source, key(A), "unchanged private rows reuse the artifact");
+        let declared = key(A);
+        assert_ne!(first, declared, "a declaration is part of the build");
+        assert_eq!(declared, key(A), "an unchanged manifest reuses the build");
         fs::write(
             &path,
             format!(
                 "{original}{}",
-                declaration.replace("id='source'", "id='changed'")
+                declaration.replace("id='listener'", "id='changed'")
             ),
         )
         .unwrap();
-        assert_ne!(source, key(A), "private point identity is part of the key");
+        assert_ne!(declared, key(A), "an inject's id is part of the key");
         fs::write(path, original).unwrap();
         assert_ne!(first, key(B));
         assert_ne!(

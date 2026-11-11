@@ -47,7 +47,10 @@ pub enum ProfessionState {
     None,
     Vanilla(u8),
     Unresolved(String),
-    Registered(std::sync::Arc<str>),
+    Registered {
+        id: std::sync::Arc<str>,
+        slot: u16,
+    },
 }
 
 impl ProfessionState {
@@ -72,7 +75,7 @@ impl ProfessionState {
         match self {
             Self::None => Some(NONE),
             Self::Vanilla(index) => Some(*index),
-            Self::Unresolved(_) | Self::Registered(_) => None,
+            Self::Unresolved(_) | Self::Registered { .. } => None,
         }
     }
 
@@ -81,7 +84,7 @@ impl ProfessionState {
             Self::None => "minecraft:none".into(),
             Self::Vanilla(index) => format!("minecraft:{}", profession(*index).id.as_str()),
             Self::Unresolved(id) => id.clone(),
-            Self::Registered(id) => id.to_string(),
+            Self::Registered { id, .. } => id.to_string(),
         }
     }
 }

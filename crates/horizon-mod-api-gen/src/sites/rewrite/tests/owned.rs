@@ -54,7 +54,6 @@ fn owned_records_forward_cancel_unwind_and_reject_escapes() {
         "horizon_client::game",
         &catalog,
         std::slice::from_ref(&request),
-        true,
     )
     .unwrap();
     let site = &sites[0];

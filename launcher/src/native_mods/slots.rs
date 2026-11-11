@@ -2,8 +2,8 @@
 use super::{inject::PointInjection, internals::Catalog, sites::Site};
 use horizon_mod_package::{
     manifest::inject::{
-        route, Access, CallPlace, Entry, Inject, InjectError, Kind, NoSlotReason, Place, Route,
-        SlotKind, Target,
+        route, Access, CallPlace, Entry, Inject, InjectError, Kind, NoSlotReason, Place, SlotKind,
+        Target,
     },
     Manifest,
 };
@@ -16,8 +16,7 @@ pub(super) fn points<'a>(
         .inject
         .iter()
         .filter(|entry| {
-            entry.kind != Kind::Field
-                && entry.access == Access::Internals
+            entry.access == Access::Internals
                 && entry.call.is_none()
                 && listed.iter().any(|point| {
                     super::internals::plain_path(&point.target)
@@ -40,37 +39,16 @@ pub(super) fn sites<'a>(
     manifest
         .inject
         .iter()
-        .filter(|entry| entry.call.is_some() || entry.expr.is_some())
+        .filter(|entry| entry.call.is_some())
         .map(|entry| (entry, selected(sites, entry).expect("slot route checked")))
 }
 
 fn selected<'a>(sites: &'a [Site], entry: &Inject) -> Option<&'a Site> {
     sites.iter().find(|site| {
         super::internals::plain_path(&site.target) == super::internals::plain_path(&entry.at)
-            && Some(&site.call)
-                == entry
-                    .call
-                    .clone()
-                    .or_else(|| {
-                        horizon_platform::mod_build::api_gen::sites::expression::spelling(
-                            entry.expr.as_ref()?,
-                        )
-                        .ok()
-                    })
-                    .as_ref()
-            && site.expression.as_ref().map(|e| &e.ty)
-                == entry.local_type.as_ref().filter(|_| entry.expr.is_some())
+            && Some(&site.call) == entry.call.as_ref()
             && Some(&site.ctx) == entry.ctx.as_ref()
             && Some(site.ordinal) == entry.nth
-            && site.local.as_ref().map(|l| (&l.binding, &l.ty, l.after))
-                == entry.local.as_ref().map(|name| {
-                    (
-                        name,
-                        entry.local_type.as_ref().expect("validated type"),
-                        entry.position
-                            == Some(horizon_mod_package::manifest::inject::Position::After),
-                    )
-                })
     })
 }
 
@@ -86,7 +64,7 @@ pub(super) fn check(catalog: &Catalog, manifest: &Manifest) -> Result<(), Inject
     routes(catalog, manifest).map(|_| ())
 }
 
-pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route>, InjectError> {
+pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<SlotKind>, InjectError> {
     let plain = super::internals::plain_path;
     let places = manifest
         .inject
@@ -96,7 +74,7 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
             let point = catalog
                 .points
                 .iter()
-                .find(|point| !point.private && plain(&point.target) == plain(&item.path));
+                .find(|point| plain(&point.target) == plain(&item.path));
             Some(Place {
                 at: entry.at.clone(),
                 hash: item.hash.clone(),
@@ -120,7 +98,7 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
                 calls: catalog
                     .sites
                     .iter()
-                    .filter(|site| !site.private && plain(&site.target) == plain(&item.path))
+                    .filter(|site| plain(&site.target) == plain(&item.path))
                     .map(|site| CallPlace {
                         call: site.call.clone(),
                         nth: site.ordinal,
@@ -157,35 +135,11 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
             },
             &places,
         )?;
-        let pending = match (route, inject.kind, inject.access) {
-            (Route::Source(reason), _, Access::Api) => Some(reason),
-            (Route::Slot(SlotKind::Site), _, Access::Api) => {
-                Some(NoSlotReason::ApiSitesUnsupported)
-            }
-            // An internals replace is built from the listed point's raw shape: an unlisted
-            // function needs its slot row first, which the declaration names.
-            (Route::Source(reason), Kind::Replace, Access::Internals) => Some(reason),
-            (
-                Route::Source(_),
-                Kind::Field
-                | Kind::Head
-                | Kind::Return
-                | Kind::BeforeCall
-                | Kind::ModifyLocal
-                | Kind::Expression
-                | Kind::AfterCall
-                | Kind::ModifyValue
-                | Kind::WrapCall
-                | Kind::WrapIf,
-                Access::Internals,
-            ) => None,
-            _ => None,
-        };
-        if let Some(reason) = pending {
+        if route == SlotKind::Site && inject.access == Access::Api {
             return Err(InjectError::NoSlot {
                 id: format!("{}:{}", manifest.id, inject.id),
-                reason,
-                declaration: format!("slots/{}.txt: {} ({route:?})", manifest.id, inject.at),
+                reason: NoSlotReason::ApiSitesUnsupported,
+                declaration: format!("slots/{}.txt: {}", manifest.id, inject.at),
             });
         }
         // A replace produces the outcome: the same check the shared emitter makes, at load.
@@ -235,13 +189,7 @@ pub(super) fn report<'a>(
 ) -> impl Iterator<Item = String> + 'a {
     engine(catalog, manifest)
         .zip(routes(catalog, manifest).expect("checked routes"))
-        .map(|(entry, route)| {
-            if let Route::Source(reason) = route {
-                return format!(
-                    "{}:{}: {} -> source (private slot, {reason})",
-                    manifest.id, entry.id, entry.at
-                );
-            }
+        .map(|(entry, _route)| {
             let form = if entry.call.is_some() {
                 "site"
             } else if entry.kind == Kind::Return {

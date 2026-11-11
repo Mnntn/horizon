@@ -817,10 +817,6 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(index, kind)| Inject {
-                local: None,
-                local_type: None,
-                position: None,
-                expr: None,
                 id: format!("listen_{index}"),
                 at: "game::Game<'_>::tick".into(),
                 kind,
@@ -835,7 +831,6 @@ mod tests {
             .collect();
         let listed = [super::super::inject::ListedPoint {
             name: "tick".into(),
-            private: false,
             record_name: None,
             target: "game::Game::tick".into(),
             raw: true,

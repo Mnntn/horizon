@@ -5,7 +5,7 @@
 //! against another signature. The native launcher and the wasm loader route through this one
 //! function, and an edge across targets is refused by [`cross_target`] where it names a reason more
 //! precise than the mixed-target refusal.
-use super::{Entry, Inject, InjectError, NoSlotReason, Place, Route, SlotKind, Target};
+use super::{Entry, Inject, InjectError, NoSlotReason, Place, SlotKind, Target};
 use point_shape::catalog::{Catalog, Point};
 use std::{fmt, io::Read};
 
@@ -267,21 +267,16 @@ pub fn route<'a>(
     )
     .map_err(Refusal::Inject)?
     {
-        Route::Slot(SlotKind::Head) => Ok(Routed {
+        SlotKind::Head => Ok(Routed {
             point,
             place: point.name.clone(),
             access: inject.access,
         }),
-        Route::Slot(_) => Ok(Routed {
+        _ => Ok(Routed {
             point,
             place: format!("{}_return", point.name),
             access: inject.access,
         }),
-        Route::Source(reason) => Err(Refusal::Inject(InjectError::NoSlot {
-            id,
-            reason,
-            declaration: inject.at.clone(),
-        })),
     }
 }
 

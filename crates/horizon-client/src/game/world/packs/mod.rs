@@ -536,6 +536,7 @@ impl Game<'_> {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             horizon_client::mobs::villager_hats::VillagerHats::load(&self.pack.source);
+        self.client_professions()?;
         *self
             .res
             .mob_data()

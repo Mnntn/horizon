@@ -45,7 +45,11 @@ impl Fixture {
         fs::write(catalog.join("internals.json"), serde_json::json!([{
             "path": METHOD, "kind": "method", "signature": "impl PortedGame { fn tick(&mut self) -> u32 }", "hash": HASH,
         }]).to_string()).unwrap();
-        fs::write(catalog.join("points.json"), r#"{"points":[],"sites":[]}"#).unwrap();
+        fs::write(
+            catalog.join("points.json"),
+            serde_json::json!({"points": [{"target": METHOD}], "sites": []}).to_string(),
+        )
+        .unwrap();
         let launcher = root.join("launcher-stub");
         // Verify the real command contract and emit a path without shell-interpolating it.
         fs::write(&launcher, "#!/bin/sh\n[ \"$1\" = native-build ] && [ \"$2\" = --catalog ] && [ \"$3\" = --trust-native-code ] && [ \"$6\" = \"$PWD\" ] || exit 19\nmkdir \"$5\"; cp \"$PWD/module-catalog/\"*.json \"$5/\"; printf '%s\\n' \"$5\"\nprintf invoked > \"$PWD/launcher-called\"\n").unwrap();

@@ -62,7 +62,7 @@ impl SourceReason {
     /// Short per-mod warning text. Global limitations and retryable failures get no row warning.
     pub fn mod_warning(&self) -> Option<String> {
         Some(match self {
-            Self::Injections { .. } => tr("Injects outside the slots").to_string(),
+            Self::Mixins { .. } => tr("Mixins compile game code").to_string(),
             Self::BuildScript { .. } => tr("Has a build script").to_string(),
             Self::Features { .. } => tr("Uses Cargo features").to_string(),
             Self::Host | Self::NoRelease { .. } | Self::Download { .. } => return None,
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn every_structural_mod_reason_exposes_the_picker_and_a_row_warning() {
         for reason in [
-            SourceReason::Injections { mod_id: "a".into() },
+            SourceReason::Mixins { mod_id: "a".into() },
             SourceReason::BuildScript { mod_id: "a".into() },
             SourceReason::Features { mod_id: "a".into() },
         ] {

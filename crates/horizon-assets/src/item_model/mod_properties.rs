@@ -38,8 +38,7 @@ pub fn keep_mod_ids(table: &RwLock<BTreeSet<String>>, kind: &str, ids: Vec<Strin
     let mut kept = Vec::new();
     let mut set = table.write().unwrap_or_else(|e| e.into_inner());
     for id in ids {
-        let own = identifier(&id).is_ok_and(|parsed| parsed == id) && !id.starts_with("minecraft:");
-        if !own {
+        if !is_mod_id(&id) {
             log::warn!("{kind} {id:?} is not <namespace>:<path> in a mod's namespace");
         } else if !set.insert(id.clone()) {
             log::warn!("{kind} {id} is registered twice");
@@ -48,6 +47,12 @@ pub fn keep_mod_ids(table: &RwLock<BTreeSet<String>>, kind: &str, ids: Vec<Strin
         }
     }
     kept
+}
+
+/// Whether `id` is `<namespace>:<path>`, written in full, in a namespace other than vanilla's: an
+/// id a mod may register.
+pub fn is_mod_id(id: &str) -> bool {
+    identifier(id).is_ok_and(|parsed| parsed == id) && !id.starts_with("minecraft:")
 }
 
 /// Whether a native mod registered `id` as a numeric `range_dispatch` property.

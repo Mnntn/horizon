@@ -1,10 +1,9 @@
 //! Injection points (#589): every function of the game module that [`point_shape::eligible`]
 //! admits is a point, and so is each function `slots/*.txt` lists in the crates below it. The staging
 //! pass ([`stage`]) puts `#[point]` on each in a staged copy of the game's source, the copy the
-//! prebuilt game and the launcher's source builds compile, with each raw form's types beside it;
+//! prebuilt game builds compile, with each raw form's types beside it;
 //! the generator lists the same points from any copy, staged or not, as `mod_points` (each point's
-//! record, typed function slots, `PointId`) and as `points.json`, the list the launcher routes
-//! injections by. All of them are build outputs, never committed.
+//! record, typed function slots, `PointId`) and as `points.json`, the compiled slot catalog. All of them are build outputs, never committed.
 
 use quote::{ToTokens, quote};
 use std::{
@@ -14,7 +13,7 @@ use std::{
 use syn::{ImplItem, Item, Type};
 
 pub mod mod_crate;
-pub mod source;
+
 #[cfg(test)]
 mod target_tests;
 
@@ -919,24 +918,18 @@ fn all_points<'a>(
 }
 
 /// The game's points, by name: every point function of the game module, and the listed ones of
-/// the crates below it. Staged private source targets are never part of this public list.
+/// the crates below it. Unlisted targets have no compiled slot.
 pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
     points_with(root, &crate::build::wire_types(root)?)
 }
 
 /// [`game_points`] with the `mod_api` types a record may hold.
 pub(crate) fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
-    let private = source::read(root)?
-        .into_iter()
-        .map(|point| plain_path(&point.target))
-        .collect::<std::collections::BTreeSet<_>>();
     let (scanned, list) = scan(root)?;
     let mut points = Vec::new();
     for (_, found) in all_points(&scanned, &list, wire)? {
         let target = found.target();
-        if private.contains(&plain_path(&target)) {
-            continue;
-        }
+
         let shape = found.shape()?;
         points.push(GamePoint::new(shape, &found, target));
     }
@@ -1160,13 +1153,12 @@ fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<String> {
 
 /// `mod_points`: records, typed function constructors, dispatchers and place ids.
 #[cfg(test)]
-pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String {
-    records_selected(points, sources, None)
+pub(crate) fn records(points: &[GamePoint]) -> String {
+    records_selected(points, None)
 }
 
 pub(crate) fn records_selected(
     points: &[GamePoint],
-    sources: &[source::Point],
     selected: Option<&std::collections::BTreeSet<String>>,
 ) -> String {
     let enabled = |point: &GamePoint| {
@@ -1268,16 +1260,8 @@ pub(crate) fn records_selected(
             });
         }
     }
-    let private_variants: Vec<_> = sources
-        .iter()
-        .map(|point| {
-            let head = quote::format_ident!("{}", point_shape::camel(&point.name));
-            let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
-            quote!(#head, #back,)
-        })
-        .collect();
     let ids: syn::ItemEnum = syn::parse2(quote! {
-        enum PointId { #(#variants)* #(#private_variants)* __Count }
+        enum PointId { #(#variants)* __Count }
     })
     .expect("point variants");
     let debug_names = ids.variants.iter().map(|variant| variant.ident.to_string());
@@ -1316,7 +1300,7 @@ pub(crate) fn records_selected(
         #[repr(usize)]
         #[derive(Clone, Copy, PartialEq, Eq)]
         #[non_exhaustive]
-        pub enum PointId { #(#variants)* #(#private_variants)* __Count }
+        pub enum PointId { #(#variants)* __Count }
         // Deriving Debug creates an enormous match for this enum. Keep the exact
         // unit-variant names without its compiler-memory cost.
         impl ::std::fmt::Debug for PointId {
@@ -1374,8 +1358,8 @@ mod tests {
         };
         let points = [make("first"), make("second")];
         let selected = std::collections::BTreeSet::from(["first_return".to_string()]);
-        let all = records(&points, &[]);
-        let selected = records_selected(&points, &[], Some(&selected));
+        let all = records(&points);
+        let selected = records_selected(&points, Some(&selected));
         let layout = |source: &str| {
             syn::parse_file(source)
                 .unwrap()
@@ -1402,10 +1386,7 @@ mod tests {
     #[test]
     fn point_id_debug_preserves_every_declared_variant() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let source = records(
-            &game_points(&root).unwrap(),
-            &source::build_input(&root).unwrap(),
-        );
+        let source = records(&game_points(&root).unwrap());
         let file = syn::parse_file(&source).unwrap();
         let ids = file
             .items
@@ -1918,7 +1899,7 @@ name = 'horizon-mod-api-gen'
                 ("tick", "horizon_client::game::Game<'_>::tick", "both", true),
             ]
         );
-        let api = records(&points, &[]);
+        let api = records(&points);
         assert!(
             api.contains("fn tick_return")
                 // A borrowed return has a raw return place only.

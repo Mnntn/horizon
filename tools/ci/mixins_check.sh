@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Build API and area-file slots plus a unified internals source listener at this exact head.
-# Force the latter off the compiled slot list in the disposable source copy, as the
-# native source regression does; assert the logged route after the real build.
+# Build API and area-file slot listeners plus a `[[native.mixin]]` row at this exact head: the two
+# injects attach to compiled slots, and horizon-mixins compiles the mixin's helper into the game.
 # Compile-only: no game runs and no vanilla data is read.
 #   tools/ci/mixins_check.sh LAUNCHER SCRATCH
 set -euo pipefail
@@ -42,17 +41,6 @@ cp -r "$root/tools/ci/mixins-check" "$mod"
 sed -i "s/^horizon = \"HEAD\"$/horizon = \"$revision\"/" "$mod/horizon-mod.toml"
 sed -i "s/rev = \"HEAD\"/rev = \"$revision\"/" "$mod/Cargo.toml"
 
-# inline(always) excludes this function from compiled slots, but native source lowering
-# can still wrap it. Never change the real checkout or rely on an accidentally missing slot.
-python3 - "$source/crates/horizon-client/src/game.rs" <<'PY'
-from pathlib import Path
-import sys
-p = Path(sys.argv[1])
-text = p.read_text()
-needle = '    fn tick_mobs(&mut self) -> Result<()> {'
-assert text.count(needle) == 1
-p.write_text(text.replace(needle, '    #[inline(always)]\n' + needle))
-PY
 cp -a "$source" "$scratch/catalog-source"
 CARGO_TARGET_DIR=$scratch/sdk-target cargo run --quiet --manifest-path "$source/Cargo.toml" \
   -p horizon-mod-api-gen --bin horizon-stage -- "$scratch/catalog-source" \
@@ -64,16 +52,13 @@ import sys
 scratch, manifest = map(Path, sys.argv[1:])
 rows = json.loads((scratch/'internals.json').read_text())
 points = json.loads((scratch/'points.json').read_text())['points']
-target = "horizon_client::game::Game<'_>::tick_mobs"
 area = "horizon_client::game::using_item::Game<'_>::start_eating"
-assert not any(row['target'] == target for row in points)
 # at_return describes API listeners only. This internals injection instead
 # requires the typed raw return listener (start_eating takes engine ItemInfo).
 assert any(row['target'] == area and row['raw'] and row.get('return_listener') for row in points)
 text = manifest.read_text()
 for token, path, kind in [('GAME_HASH', 'horizon_client::game::Game', 'struct'),
                           ('TICK_HASH', "horizon_client::game::Game<'_>::tick", 'method'),
-                          ('COUNT_HASH', target, 'method'),
                           ('AREA_HASH', area, 'method')]:
     matches = [row for row in rows if row['path'] == path and row['kind'] == kind]
     assert len(matches) == 1
@@ -89,6 +74,10 @@ HORIZON_HOME=$scratch/home HORIZON_LAUNCHER_HOME=$data XDG_DATA_HOME=$scratch/da
   "$launcher" native-build "$mod" --server-output "$scratch/engine" --version native-ci \
   --profile developer --trust-native-code
 test -x "$scratch/engine/horizon-engine"
-grep -F 'mixins_check:count:' "$data/native/build.log" | grep -F -- '-> source (private slot,'
+grep -F 'mixins_check: mixins compile game code' "$data/native/build.log"
+# The helper is in the game the build compiled, and no inject was given a source route.
+grep -rqF "fn count(game: &mut crate::game::Game<'_>)" "$data/native/stage/crates/horizon-client/src"
+! grep -F 'mixins_check:' "$data/native/build.log" | grep -F -- '-> source'
+grep -F 'mixins_check:tick:' "$data/native/build.log" | grep -F -- '-> slot (head, api)'
 grep -F 'mixins_check:area:' "$data/native/build.log" | grep -F -- '-> slot (return, internals)'
 grep -F 'mod_0::area).ordered(0, "area")' "$data/native/stage/crates/native-game/src/main.rs"

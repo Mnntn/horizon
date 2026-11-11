@@ -437,6 +437,13 @@ jobs:
         if: needs.changes.outputs.rust_required != 'false'
         run: |
           cargo +stable test $JOBS --workspace --lib --bins --tests mod_content::tests:: -- --ignored
+      # Derive caller inputs from slot rows on the checked-out PR merge result.
+      # Keep this before doc tests so their failures cannot hide stale slots.
+      - name: Validate prebuilt source stage and listed slots
+        if: needs.changes.outputs.rust_required != 'false'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 tools/ci/stage_slots.py --base "${BASE_SHA:-HEAD^}"
       - name: Test Rust documentation examples
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable test $JOBS --workspace --doc

@@ -187,7 +187,7 @@ fn save_cycle(species: crate::mobs::Species, id: &str, missing: bool) {
     modded.resolve_loaded(&mut mob);
     assert!(matches!(
         mob.extra.profession,
-        ProfessionState::Registered(_)
+        ProfessionState::Registered { .. }
     ));
     let expected_offers = mob.extra.trade.as_ref().unwrap().offers.clone();
     let first = mob_to_nbt(&mob, [7, 8, 9, 10], None, None, |_| None);
@@ -224,7 +224,7 @@ fn save_cycle(species: crate::mobs::Species, id: &str, missing: bool) {
     modded.resolve_loaded(&mut restored);
     assert!(matches!(
         restored.extra.profession,
-        ProfessionState::Registered(_)
+        ProfessionState::Registered { .. }
     ));
     assert_eq!(modded.state_index(&restored.extra.profession), Some(15));
     assert_eq!(
@@ -327,7 +327,10 @@ fn villager_reports_registered_and_unresolved_names() {
     };
     let (mut mob, _) = saved_mob(Species::Villager, "minecraft:villager");
     for state in [
-        ProfessionState::Registered("test:engineer".into()),
+        ProfessionState::Registered {
+            id: "test:engineer".into(),
+            slot: 15,
+        },
         ProfessionState::Unresolved("test:engineer".into()),
     ] {
         mob.extra.profession = state;

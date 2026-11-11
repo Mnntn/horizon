@@ -226,16 +226,15 @@ rests on the one before:
 
 1. **The prebuilt game.** The game as a dylib with its metadata, built daily and published as prerelease
    builds, so a native mod compiles against it instead of rebuilding the game.
-2. **Slots.** Injection targets compiled into the prebuilt game, so a mixin does not force a rebuild. The
-   generated slot points exist; filling them from a mod follows.
+2. **Slots.** `[[inject]]` listeners fill compiled points without compiling game code.
+   A missing slot is refused, including on native.
 3. **The internals tier.** A per-mod declared list of game internals the prebuilt game exposes. It is native
    only and logged, and each internal a mod needs is a request for an API.
-4. **The blend.** A wasm mod that also carries slot mixins. An API-typed mixin is filled by the `mod.wasm`
-   itself, with no native code. A mixin that needs internals ships as source, compiles on install, and marks
-   the package as including native code. The native and wasm parts talk only through interfaces the mod
-   declares, with plain data or resources crossing, so raw internals never reach the wasm side.
+4. **Wasm points.** API `[[inject]]` listeners use the same records on native and wasm.
+   Engine internals and listed call sites are native only.
 
-A mod that needs a change to a non-slot part of the game still rebuilds the game.
+A native mod that needs a supported source edit uses [mixins](../mixins.md),
+which compile game code. An inject never falls back to one.
 
 ## No telemetry
 

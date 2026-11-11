@@ -21,7 +21,7 @@ pub(super) fn key(
     let mut hash = Sha256::new();
     for part in [
         // Bump when launcher generation or validation changes the snapshot's contents.
-        "flat-trait-injection-v1",
+        "inject-mixin-split-v2",
         super::STAGING,
         revision,
         mixins,
@@ -36,7 +36,7 @@ pub(super) fn key(
         field(&mut hash, bundle.manifest.id.as_bytes());
         // API-only edits do not change patched source. Supporting modules may
         // include other crate files, so hash their source conservatively.
-        let reads_source = !bundle.native().module.is_empty();
+        let reads_source = bundle.needs_mixins();
         for (name, path) in super::bundle_files(bundle)? {
             if !reads_source
                 && (name == "Cargo.toml" || name == "build.rs" || name.starts_with("src/"))

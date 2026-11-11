@@ -1356,16 +1356,7 @@ pub(super) fn mob_meta(
 
 /// AbstractVillager.DATA_UNHAPPY_COUNTER (after AgeableMob's two): the head
 /// shake of a villager saying no counts it down from 40.
-fn unhappy_counter(
-    m: &Mob,
-    meta: &mut Vec<(u8, i32, Value)>,
-    defaults: &mut Vec<(u8, i32, Value)>,
-) {
-    if m.extra.ints[0] > 0 {
-        meta.push((18, serializer::INT, Value::Int(m.extra.ints[0])));
-    }
-    defaults.push((18, serializer::INT, Value::Int(0)));
-}
+use super::villager_client::unhappy_counter;
 
 /// A mob's effects as its swirls are computed from.
 fn mob_effects(m: &Mob) -> impl Iterator<Item = ShownEffect> + '_ {
@@ -2272,13 +2263,14 @@ impl Game<'_> {
             if bare {
                 continue;
             }
-            mob_meta(
+            super::villager_client::server_meta(
                 m,
                 hub,
                 player_entity(),
                 self.world.game_time,
                 &mut e.meta,
                 &mut e.defaults,
+                &self.stations().professions,
             );
             // HappyGhast.aiStep: requiresPrecisePosition while on a still timeout.
             e.precise = m.species() == horizon_client::mobs::Species::HappyGhast
@@ -5020,56 +5012,7 @@ mod tests {
         }
     }
 
-    /// A hub with no players and empty registries, for `mob_meta`.
-    pub(super) fn meta_hub(name: &str) -> horizon_client::lan::hub::Hub {
-        use horizon_client::lan::{Lan, NetConfig, chunks::ChunkEncoder, data, hub};
-        let mut sync = data::SyncData::empty();
-        for (registry, id) in [
-            ("minecraft:villager_type", "minecraft:plains"),
-            ("minecraft:villager_profession", "minecraft:none"),
-        ] {
-            sync.builtin.registries.insert(
-                registry.into(),
-                horizon_protocol::registry::Ids::from_names(vec![id.into()]),
-            );
-        }
-        let sync = std::sync::Arc::new(sync);
-        let config = NetConfig {
-            announce: false,
-            ..NetConfig::loopback(0, name.into(), 2)
-        };
-        let lan = Lan::start_with(sync.clone(), config).unwrap();
-        let encoder = ChunkEncoder::new(
-            [] as [(std::sync::Arc<str>, bool); 0],
-            &horizon_protocol::registry::Builtin::default(),
-            &[],
-            &[],
-        );
-        let hub_config = hub::HubConfig {
-            default_game_mode: 0,
-            guest_commands: false,
-            force_game_mode: false,
-            hardcore: false,
-            view_distance: 10,
-            simulation_distance: 10,
-            dimension: "minecraft:overworld".into(),
-            allow_flight: false,
-            seed: 0,
-            max_players: 20,
-            integrated: false,
-            levels: Default::default(),
-        };
-        hub::Hub::new(
-            lan,
-            sync,
-            encoder,
-            hub_config,
-            std::sync::Arc::new(
-                crate::game::test_server_load()
-                    .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
-            ),
-        )
-    }
+    pub(super) use crate::game::villager_client::tests::meta_hub;
 
     /// `LivingEntity.startUsingItem` sets flag 1 for the use and flag 2 for
     /// the off hand, so an off-hand use is 3, not 2. A reader takes bit 0 as

@@ -30,7 +30,7 @@ pub(super) fn inject_error(error: &InjectError) -> String {
             reason,
             declaration,
         } => trf(
-            "E_INJECT_NO_SLOT: {id}: {reason}; slot declaration {declaration}; access = \"api\" never rebuilds the game; use access = \"internals\" where supported or request a hook",
+            "E_INJECT_NO_SLOT: {id}: {reason}; slot declaration {declaration}; [[inject]] never compiles game code: use [[native.mixin]] in a native mod, or request the slot",
             &[
                 ("id", id),
                 ("reason", no_slot_reason(*reason)),
@@ -48,11 +48,7 @@ fn no_slot_reason(reason: NoSlotReason) -> &'static str {
         NoSlotReason::WasmSitesUnsupported => {
             tr("wasm does not support internals or call-site injections; use a hook")
         }
-        NoSlotReason::ExpressionSourceOnly => tr("expression requires native internals source rebuilding; use internals, or request a hook"),
-        NoSlotReason::LocalSourceOnly => tr("modify_local requires native internals source rebuilding; use internals, or request a hook"),
-        NoSlotReason::FieldRequiresSource => tr("field requires native internals source rebuild; use attachments for API, wasm, persistence or sync"),
         NoSlotReason::ApiSitesUnsupported => tr("API call-site injections require internals"),
-        NoSlotReason::SourcePending => tr("source injects pending (U5)"),
         NoSlotReason::NoApiRecord => tr("no API record: a parameter has no API type yet"),
         NoSlotReason::ReplaceWithoutValue => tr("replace needs a return its record carries"),
     }
@@ -69,11 +65,7 @@ mod tests {
             NoSlotReason::KindHasNoSlot,
             NoSlotReason::NativeOnly,
             NoSlotReason::WasmSitesUnsupported,
-            NoSlotReason::LocalSourceOnly,
-            NoSlotReason::FieldRequiresSource,
-            NoSlotReason::ExpressionSourceOnly,
             NoSlotReason::ApiSitesUnsupported,
-            NoSlotReason::SourcePending,
             NoSlotReason::NoApiRecord,
             NoSlotReason::ReplaceWithoutValue,
         ];

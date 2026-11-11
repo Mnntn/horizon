@@ -113,7 +113,7 @@ fn unchanged_callback_compiles_against_both_canonical_facades() {
         std::process::id()
     ));
     fs::create_dir_all(&dir).unwrap();
-    let canonical = horizon_platform::mod_build::api_gen::sites::source::facade_name(
+    let canonical = horizon_platform::mod_build::api_gen::sites::facade_name(
         "horizon_client::game::Game::run",
         "horizon_client::game::Game::step",
         0,
@@ -255,87 +255,6 @@ fn site_routes_validate_freshness_and_execute_every_kind_adapter() {
         }
         assert!(Manifest::parse(&text.replace(&format!("kind='{kind}'"), "kind='head'")).is_err());
         assert!(Manifest::parse(&(text + "cancellable=true\n")).is_err());
-    }
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn source_call_identity_does_not_require_a_legacy_selector() {
-    use super::super::{internals::Catalog, slots};
-    use horizon_mod_package::manifest::inject::{InjectError, Route};
-    let manifest = Manifest::parse("id='example'\nname='Example'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\n[native]\ngame='26.3'\nhorizon='0123456789012345678901234567890123456789'\nmixins='0123456789012345678901234567890123456789'\n[[inject]]\nid='condition'\nat='game::run'\nkind='wrap_if'\nwith='hook'\naccess='internals'\nhash='signature'\ncall='game::step'\nnth=0\nctx='statement'\n").unwrap();
-    // Staged source sites use resolved call identity, not legacy self.step selectors.
-    let site: Site = serde_json::from_value(serde_json::json!({
-        "name":"Sprivate", "target":"game::run", "ordinal":0,
-        "call":"game::step", "ctx":"statement", "hash":"place", "private":true,
-        "once":false, "listener":"game::__SprivateListener", "record":"game::__SprivateArgs", "output":"()"
-    }))
-    .unwrap();
-    let mut catalog = Catalog {
-        internals: serde_json::from_value(serde_json::json!([{
-            "path":"game::run", "kind":"fn", "signature":"fn run()", "hash":"signature"
-        }]))
-        .unwrap(),
-        sites: vec![site],
-        ..Catalog::default()
-    };
-    assert!(matches!(
-        slots::routes(&catalog, &manifest).unwrap().as_slice(),
-        [Route::Source(_)]
-    ));
-    catalog.sites[0].output = "u32".into();
-    assert!(matches!(
-        slots::check(&catalog, &manifest),
-        Err(InjectError::Invalid { field: "kind", .. })
-    ));
-}
-
-#[test]
-fn private_wrap_adapters_repeat_suppress_and_condition_the_original() {
-    use super::super::{api, internals::Catalog, slots};
-    use horizon_mod_package::manifest::inject::{Access, Inject, Kind, Route};
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../target/private-wraps-{}", std::process::id()));
-    crate::native_mods::tests::write_bundle(&dir, "example", "");
-    let base = fs::read_to_string(dir.join(horizon_mod_package::manifest::MANIFEST)).unwrap();
-    let site: Site = serde_json::from_value(serde_json::json!({
-        "name":"Sprivate", "target":"game::run", "selector":"game::step", "ordinal":0,
-        "call":"game::step", "ctx":"statement", "hash":"place", "private":true,
-        "once":false, "listener":"game::__SprivateListener", "record":"game::__SprivateArgs", "output":"u32"
-    }))
-    .unwrap();
-    let mut catalog = Catalog {
-        internals: serde_json::from_value(serde_json::json!([{
-            "path":"game::run", "kind":"fn", "signature":"fn run()", "hash":"signature", "cfg":"", "shape_only":false
-        }])).unwrap(),
-        points: vec![], sites: vec![], discovery: false,
-        wire: Default::default(), mods: Vec::new(),
-    };
-    for (kind, case) in [
-        (Kind::WrapCall, Case { kind: "wrap_call", body: "pub fn hook(receiver: &mut u32, args: &mut Args, original: &mut dyn FnMut(&mut u32, &mut Args) -> u32) -> u32 { let first = original(receiver, args); args.value += 1; first + original(receiver, args) }", output: "u32", initial: 2, expected: "50", state: 2 }),
-        (Kind::WrapCall, Case { kind: "wrap_call", body: "pub fn hook(receiver: &mut u32, _: &mut Args, _: &mut dyn FnMut(&mut u32, &mut Args) -> u32) -> u32 { *receiver += 10; 99 }", output: "u32", initial: 2, expected: "99", state: 10 }),
-        (Kind::WrapIf, Case { kind: "wrap_if", body: "pub fn hook(receiver: &mut u32, args: &Args) -> bool { *receiver += 10; args.value == 0 }", output: "()", initial: 2, expected: "()", state: 10 }),
-        (Kind::WrapIf, Case { kind: "wrap_if", body: "pub fn hook(receiver: &mut u32, args: &Args) -> bool { *receiver += 10; args.value == 0 }", output: "()", initial: 0, expected: "()", state: 11 }),
-    ] {
-        let mut manifest = Manifest::parse(&base).unwrap();
-        manifest.inject.push(Inject {
-            local: None, local_type: None, position: None, expr: None,
-            id: "wrap".into(), at: "game::run".into(), kind, with: "hook".into(),
-            access: Access::Internals, priority: 7, hash: Some("signature".into()),
-            call: Some("game::step".into()), nth: Some(0), ctx: Some("statement".into()),
-        });
-        catalog.sites.clear();
-        assert!(matches!(slots::routes(&catalog, &manifest).unwrap().as_slice(), [Route::Source(_)]));
-        let mut private = site.clone();
-        private.output = case.output.into();
-        catalog.sites.push(private);
-        assert!(matches!(slots::routes(&catalog, &manifest).unwrap().as_slice(), [Route::Source(_)]));
-        let registration = api::main_rs("/* MOD_SLOTS */", &[&manifest], &catalog);
-        exercise(&dir, &registration, &site.constructor(), &case);
-        if kind == Kind::WrapIf {
-            catalog.sites[0].output = "u32".into();
-            assert!(matches!(slots::check(&catalog, &manifest), Err(horizon_mod_package::manifest::inject::InjectError::Invalid { field: "kind", .. })));
-        }
     }
     fs::remove_dir_all(dir).unwrap();
 }

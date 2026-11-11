@@ -54,18 +54,12 @@ fn inject_sync_sorted_union_and_idempotence() {
             "wrap_call",
             "call = 'lower::callee'\nnth = 2\nctx = 'context-two'\n",
         )
-        + &entry(
-            "type",
-            "lower::Thing",
-            "field",
-            "type = 'u32'\naccess = 'internals'\n",
-        )
         + &entry("shared", "lower::shared", "return", "");
     let f = Fixture::new("union", "example", &declarations);
     fs::write(f.file("other.txt"), "lower::shared\n").unwrap();
     fs::write(f.file("example.txt"), "z::old\na::old\n").unwrap();
     f.run().unwrap();
-    let expected = "# example: written by cargo horizon-mod inject sync\na::old\nlower::run\nlower::run | lower::callee | 2 | context-two\ntype lower::Thing\nz::old\n";
+    let expected = "# example: written by cargo horizon-mod inject sync\na::old\nlower::run\nlower::run | lower::callee | 2 | context-two\nz::old\n";
     assert_eq!(fs::read_to_string(f.file("example.txt")).unwrap(), expected);
     f.run().unwrap();
     assert_eq!(fs::read_to_string(f.file("example.txt")).unwrap(), expected);

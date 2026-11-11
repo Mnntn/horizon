@@ -61,10 +61,6 @@ fn inject(id: &str, at: &str, kind: Kind, access: Access, with: &str, hash: &str
         call: None,
         nth: None,
         ctx: None,
-        local: None,
-        local_type: None,
-        position: None,
-        expr: None,
     }
 }
 
@@ -296,7 +292,6 @@ fn an_addon_patches_a_library_through_its_mod_points() {
                 let emitted = horizon_mod_point_emit::Point {
                     name: point.name.clone(),
                     target: point.target.clone(),
-                    private: false,
                     at_return: point.at_return,
                     api_refusal: point.api_refusal.clone(),
                     returns: point.returns.clone(),

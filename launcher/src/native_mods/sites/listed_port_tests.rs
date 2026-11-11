@@ -2,14 +2,14 @@
 use super::*;
 use crate::native_mods::{api, internals::Catalog, slots};
 use horizon_mod_package::{
-    manifest::inject::{Access, Inject, Kind, Route},
+    manifest::inject::{Access, Inject, Kind, SlotKind},
     Manifest,
 };
 use std::{fs, process::Command};
 
 #[test]
 #[ignore = "run tools/ci/listed_calls.py to export production records first"]
-fn production_port_listeners_attach_and_invoke_on_both_routes() {
+fn production_port_listeners_attach_and_invoke() {
     let input = std::env::var_os("HORIZON_LISTED_PROOF_OUT").expect("run tools/ci/listed_calls.py");
     let rows: Vec<serde_json::Value> = serde_json::from_slice(&fs::read(input).unwrap()).unwrap();
     assert_eq!(rows.len(), 4);
@@ -80,112 +80,87 @@ fn production_port_listeners_attach_and_invoke_on_both_routes() {
                 ),
             )
         };
-        // Identical callback text is compiled unchanged against both route catalogs.
         let callback = format!("use crate::mod_0_internals::raw::{{__{canonical}Args as Args, __{canonical}Receiver as Receiver}}; pub fn hook(_: Receiver<'_, '_>, args: &mut {args}) {{ crate::CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed); {callback} }}");
-        for private in [false, true] {
-            let mut site = original.clone();
-            site.private = private;
-            let mut manifest = Manifest::parse(&base).unwrap();
-            manifest.inject.push(Inject {
-                local: None,
-                local_type: None,
-                position: None,
-                expr: None,
-                id: "port".into(),
-                at: site.target.clone(),
-                kind: Kind::BeforeCall,
-                with: "hook".into(),
-                access: Access::Internals,
-                priority: 0,
-                hash: Some(enclosing["hash"].as_str().unwrap().into()),
-                call: Some(site.call.clone()),
-                nth: Some(site.ordinal),
-                ctx: Some(site.ctx.clone()),
-            });
-            fs::write(
-                dir.join("internals.json"),
-                serde_json::to_vec(&serde_json::json!([enclosing])).unwrap(),
+        let site = original.clone();
+        let mut manifest = Manifest::parse(&base).unwrap();
+        manifest.inject.push(Inject {
+            id: "port".into(),
+            at: site.target.clone(),
+            kind: Kind::BeforeCall,
+            with: "hook".into(),
+            access: Access::Internals,
+            priority: 0,
+            hash: Some(enclosing["hash"].as_str().unwrap().into()),
+            call: Some(site.call.clone()),
+            nth: Some(site.ordinal),
+            ctx: Some(site.ctx.clone()),
+        });
+        fs::write(
+            dir.join("internals.json"),
+            serde_json::to_vec(&serde_json::json!([enclosing])).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("points.json"),
+            serde_json::to_vec(&serde_json::json!({"points": [], "sites": [row["site"]]})).unwrap(),
+        )
+        .unwrap();
+        let catalog = Catalog::read(&dir).unwrap();
+        assert_eq!(
+            slots::routes(&catalog, &manifest).unwrap(),
+            [SlotKind::Site]
+        );
+        if site.target.contains("::game::") {
+            let mut nominal = manifest.clone();
+            nominal.inject[0].at = site
+                .target
+                .replace("::sign_edit", "")
+                .replace("::machines", "");
+            assert!(matches!(
+                slots::routes(&catalog, &nominal),
+                Err(horizon_mod_package::manifest::inject::InjectError::Missing { .. })
+            ));
+        }
+        let registration = api::main_rs("/* MOD_SLOTS */", &[&manifest], &catalog);
+        let (mut exports, mut constructors, mut crates) = (
+            std::collections::BTreeSet::new(),
+            std::collections::BTreeSet::new(),
+            std::collections::BTreeSet::new(),
+        );
+        site.facade(&mut exports, &mut constructors, &mut crates);
+        let mut module = format!("{}\n{driver}", row["raw"].as_str().unwrap());
+        for segment in site
+            .listener
+            .rsplit_once("::")
+            .unwrap()
+            .0
+            .split("::")
+            .skip(1)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+        {
+            module = format!("pub mod {segment} {{ {module} }}");
+        }
+        // Only engine values/callees are stand-ins. Records, actual generated caller,
+        // facade, adapter, registry, subscription flag and dispatch macro are real.
+        let module = module
+            .replace(
+                "pub mod game {",
+                "pub mod game { pub struct Game<'g>(pub &'g mut usize);",
             )
-            .unwrap();
-            let selected = if private {
-                serde_json::json!([])
-            } else {
-                serde_json::json!([row["site"]])
-            };
-            fs::write(
-                dir.join("points.json"),
-                serde_json::to_vec(&serde_json::json!({"points": [], "sites": selected})).unwrap(),
-            )
-            .unwrap();
-            let source = if private {
-                serde_json::json!([row["site"]])
-            } else {
-                serde_json::json!([])
-            };
-            fs::write(
-                dir.join("source-sites.json"),
-                serde_json::to_vec(&source).unwrap(),
-            )
-            .unwrap();
-            let catalog = Catalog::read(&dir).unwrap();
-            assert_eq!(catalog.sites[0].private, private);
-            let routes = slots::routes(&catalog, &manifest).unwrap();
-            assert!(if private {
-                matches!(routes.as_slice(), [Route::Source(_)])
-            } else {
-                matches!(routes.as_slice(), [Route::Slot(_)])
-            });
-            if site.target.contains("::game::") {
-                let mut nominal = manifest.clone();
-                nominal.inject[0].at = site
-                    .target
-                    .replace("::sign_edit", "")
-                    .replace("::machines", "");
-                assert!(matches!(
-                    slots::routes(&catalog, &nominal),
-                    Err(horizon_mod_package::manifest::inject::InjectError::Missing { .. })
-                ));
-            }
-            let registration = api::main_rs("/* MOD_SLOTS */", &[&manifest], &catalog);
-            let (mut exports, mut constructors, mut crates) = (
-                std::collections::BTreeSet::new(),
-                std::collections::BTreeSet::new(),
-                std::collections::BTreeSet::new(),
+            .replace(
+                "pub mod mobs {",
+                "pub mod mobs { pub struct MobWorld<'g> { pub value: &'g usize }",
             );
-            site.facade(&mut exports, &mut constructors, &mut crates);
-            let mut module = format!("{}\n{driver}", row["raw"].as_str().unwrap());
-            for segment in site
-                .listener
-                .rsplit_once("::")
-                .unwrap()
-                .0
-                .split("::")
-                .skip(1)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-            {
-                module = format!("pub mod {segment} {{ {module} }}");
-            }
-            // Only engine values/callees are stand-ins. Records, actual generated caller,
-            // facade, adapter, registry, subscription flag and dispatch macro are real.
-            let module = module
-                .replace(
-                    "pub mod game {",
-                    "pub mod game { pub struct Game<'g>(pub &'g mut usize);",
-                )
-                .replace(
-                    "pub mod mobs {",
-                    "pub mod mobs { pub struct MobWorld<'g> { pub value: &'g usize }",
-                );
-            let aliases = if site.call.ends_with("farmland") {
-                "pub mod game { pub struct Game<'g>(pub &'g mut usize); }"
-            } else {
-                "pub mod mobs {}"
-            };
-            let invoke_path = site.listener.rsplit_once("::").unwrap().0;
-            let program = format!(
-                r#"
+        let aliases = if site.call.ends_with("farmland") {
+            "pub mod game { pub struct Game<'g>(pub &'g mut usize); }"
+        } else {
+            "pub mod mobs {}"
+        };
+        let invoke_path = site.listener.rsplit_once("::").unwrap().0;
+        let program = format!(
+            r#"
 extern crate self as horizon_client; extern crate self as horizon_client_lib;
 extern crate self as horizon_client_render; extern crate self as horizon_core;
 extern crate self as horizon_items;
@@ -196,42 +171,41 @@ static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::n
 mod mod_0_internals {{ pub mod raw {{ {exports} {constructors} }} }}
 mod mod_0 {{ {callback} }}
 fn main() {{
-    use std::sync::atomic::Ordering::Relaxed;
-    let site = mod_points::SiteId::{name};
-    assert!(!mod_points::__private::SITES[site as usize].load(Relaxed));
-    {invoke_path}::invoke(false); assert_eq!(CALLS.load(Relaxed), 0);
-    let listeners = [{registration}];
-    for listener in &listeners {{ mod_points::register(listener).unwrap(); }}
-    mod_points::__private::seal();
-    assert!(mod_points::__private::SITES[site as usize].load(Relaxed));
-    assert!(!mod_points::__private::SITES[mod_points::SiteId::S7173cf1fd760a6e4 as usize].load(Relaxed));
-    {invoke_path}::invoke(true); assert_eq!(CALLS.load(Relaxed), 1);
+use std::sync::atomic::Ordering::Relaxed;
+let site = mod_points::SiteId::{name};
+assert!(!mod_points::__private::SITES[site as usize].load(Relaxed));
+{invoke_path}::invoke(false); assert_eq!(CALLS.load(Relaxed), 0);
+let listeners = [{registration}];
+for listener in &listeners {{ mod_points::register(listener).unwrap(); }}
+mod_points::__private::seal();
+assert!(mod_points::__private::SITES[site as usize].load(Relaxed));
+assert!(!mod_points::__private::SITES[mod_points::SiteId::S7173cf1fd760a6e4 as usize].load(Relaxed));
+{invoke_path}::invoke(true); assert_eq!(CALLS.load(Relaxed), 1);
 }}
 "#,
-                exports = exports.into_iter().collect::<String>(),
-                constructors = constructors.into_iter().collect::<String>()
-            );
-            fs::write(dir.join("src/main.rs"), program).unwrap();
-            let output = Command::new("cargo")
-                .args(["run", "--offline", "--quiet", "--manifest-path"])
-                .arg(dir.join("Cargo.toml"))
-                .env(
-                    "CARGO_TARGET_DIR",
-                    root.join("target/listed-port-loader-target"),
-                )
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}: {}",
-                site.call,
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let mut stale = manifest.clone();
-            stale.inject[0].hash = Some("stale".into());
-            let error = slots::routes(&catalog, &stale).unwrap_err().to_string();
-            assert!(error.contains(&site.target), "{error}");
-        }
+            exports = exports.into_iter().collect::<String>(),
+            constructors = constructors.into_iter().collect::<String>()
+        );
+        fs::write(dir.join("src/main.rs"), program).unwrap();
+        let output = Command::new("cargo")
+            .args(["run", "--offline", "--quiet", "--manifest-path"])
+            .arg(dir.join("Cargo.toml"))
+            .env(
+                "CARGO_TARGET_DIR",
+                root.join("target/listed-port-loader-target"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}: {}",
+            site.call,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut stale = manifest.clone();
+        stale.inject[0].hash = Some("stale".into());
+        let error = slots::routes(&catalog, &stale).unwrap_err().to_string();
+        assert!(error.contains(&site.target), "{error}");
     }
     fs::remove_dir_all(dir).unwrap();
 }

@@ -37,7 +37,7 @@ def main():
     start = time.monotonic()
     for command in [
         ["cargo", "test", "--locked", "-p", "horizon-mod-api-gen", "--lib", "production_listed_records", "--", "--ignored"],
-        ["cargo", "test", "--locked", "--manifest-path", "launcher/Cargo.toml", "--lib", "production_port_listeners_attach_and_invoke_on_both_routes", "--", "--ignored"],
+        ["cargo", "test", "--locked", "--manifest-path", "launcher/Cargo.toml", "--lib", "production_port_listeners_attach_and_invoke", "--", "--ignored"],
     ]:
         subprocess.run(command, cwd=ROOT, env=environment, check=True)
     print(f"Listed call production export and real-registry proof: {time.monotonic() - start:.2f} seconds", flush=True)

@@ -1,8 +1,7 @@
-//! API and area slots and the internals source callback share one unified manifest.
+//! API and area slot listeners. `src/count.rs` is the mixin's helper: horizon-mixins compiles it
+//! inside the game function, so it is not a module of this crate.
 mod area;
 pub use area::area;
-mod count;
-pub use count::count;
 #[derive(Default)]
 struct Check;
 

@@ -43,8 +43,11 @@ impl super::ResolvedProfessions {
                     mob.extra.profession = state;
                 }
             }
-            ProfessionState::Registered(name) if self.resolve(name).is_none() => {
-                mob.extra.profession = ProfessionState::Unresolved(name.to_string());
+            ProfessionState::Registered { id: name, .. } => {
+                mob.extra.profession = self
+                    .resolve(name)
+                    .and_then(|slot| self.state(slot))
+                    .unwrap_or_else(|| ProfessionState::Unresolved(name.to_string()));
             }
             _ => {}
         }
