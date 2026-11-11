@@ -6,6 +6,7 @@ import subprocess
 import unittest
 
 from test_ci_concurrency import yaml
+from tools.ci import ignored_shards
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,7 +43,9 @@ class NightlyCatalogRouting(unittest.TestCase):
         self.assertLess(steps.index(integration), steps.index(preparation))
         propagate = next(step for step in steps if step.get("name") == "Require successful Nightly catalog integration")
         self.assertLess(steps.index(preparation), steps.index(propagate))
-        for shard in ("horizon-items", "horizon-world", "horizon-client#1of2"):
+        shards = ignored_shards.expand(ignored_shards.SHARDS)
+        self.assertEqual(shards.count("horizon-items"), 1)
+        for shard in shards:
             for outcome in ("success", "failure", "skipped"):
                 for cancelled in (False, True):
                     values = {"matrix.shard": shard, "steps.catalog.outcome": outcome}
