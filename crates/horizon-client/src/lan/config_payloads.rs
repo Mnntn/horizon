@@ -126,12 +126,12 @@ impl std::ops::DerefMut for ConfigIo<'_> {
 }
 impl Drop for ConfigIo<'_> {
     fn drop(&mut self) {
-        if !self.handed_off {
-            if let Some(sender) = &self.sender {
-                sender.transport.close();
-                if !sender.writer.is_terminal() {
-                    sender.writer.shutdown();
-                }
+        if !self.handed_off
+            && let Some(sender) = &self.sender
+        {
+            sender.transport.close();
+            if !sender.writer.is_terminal() {
+                sender.writer.shutdown();
             }
         }
     }
