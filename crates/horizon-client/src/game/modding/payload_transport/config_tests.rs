@@ -210,12 +210,19 @@ fn tcp_configuration_reply_precedes_finish() {
                 assert!(Instant::now() < deadline);
                 std::thread::yield_now();
             }
+            // Publication belongs to the serving Game, not the window's client Game.
             let port = game
-                .publish(super::super::lan::LanSettings {
-                    port: 0,
-                    guest_commands: false,
-                    force_game_mode: false,
+                .integrated
+                .as_ref()
+                .unwrap()
+                .call(|server| {
+                    server.publish(super::super::lan::LanSettings {
+                        port: 0,
+                        guest_commands: false,
+                        force_game_mode: false,
+                    })
                 })
+                .expect("integrated server answered publication request")
                 .unwrap();
             controlled_peer(port, &expected, game, network);
             assert_eq!(hits.load(Ordering::SeqCst), 1);
