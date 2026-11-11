@@ -69,6 +69,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+      - name: Record the source actually tested by this gate
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.before || github.sha }}
+        run: python3 tools/ci/gate_source.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gate-source-${{ github.run_attempt }}
+          path: gate-source.json
+          if-no-files-found: error
+          retention-days: 2
       - name: Fetch this commit's history for selection
         if: github.event_name == 'pull_request'
         run: git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"
