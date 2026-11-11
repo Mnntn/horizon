@@ -237,8 +237,6 @@ pub(crate) fn crate_files(root: &Path, krate: &str) -> Result<Vec<GameFile>, Str
     module_files(krate.to_owned(), lib, dir, true)
 }
 
-/// The crates the points' own crate is built on (`horizon-mod-points` and everything under it), by
-
 /// A path without generic arguments or spaces, as listed paths and found ones are compared.
 pub(crate) fn plain_path(path: &str) -> String {
     let mut out = String::new();
@@ -279,9 +277,6 @@ pub(crate) fn owner(ty: &Type) -> String {
     ty.to_token_stream().to_string().replace(' ', "")
 }
 
-/// The point functions of one parsed file, with their module paths: in the game module, every
-/// eligible function of its inherent `impl`s (a `Game` method only with a `&self`/`&mut self`
-
 /// The byte offset of `at` in `source`, whose line starts are `lines`.
 pub(crate) fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn) -> usize {
     let line = lines[at.line - 1];
@@ -290,9 +285,6 @@ pub(crate) fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn)
         .nth(at.column)
         .map_or(source.len(), |(i, _)| line + i)
 }
-
-/// The staging pass: puts `#[point]` on every point function of the staged copy at `root`, in
-/// place, declares each raw form's record and listener types after the item that holds the
 
 #[cfg(test)]
 mod tests {
