@@ -68,7 +68,7 @@ impl Title {
                     .does(crate::widgets::Action::Exit),
                 ];
                 // CommonButtons' icon buttons; Horizon's Join a Friend (an
-                // invite code) sits behind vanilla's Friends button.
+                // invite code) sits behind vanilla's Friends button, inactive without a resolver.
                 for (i, (key, plain, id, icon)) in [
                     ("horizon.mods.screen.title", "Mods", 9, "icon/mods"),
                     ("gui.friends.open", "Friends", 5, "friends/friends"),
@@ -88,7 +88,7 @@ impl Title {
                         y + 72.0,
                         20.0,
                         &lang::get_or(key, plain),
-                        true,
+                        id != 5 || crate::net::joins_friends(),
                         id,
                     );
                     button.icon = Some((icon, 15.0));
