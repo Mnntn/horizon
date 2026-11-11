@@ -30,3 +30,7 @@ for path in (root / 'launcher/lang').glob('*.json'):
                 continue
         kept.append(row)
     path.write_text(''.join(kept))
+# The point generator's Cargo path edges no longer exist.
+(base / 'tests/staged_lock.rs').unlink(missing_ok=True)
+p = root / 'launcher/src/native_mods.rs'
+p.write_text(p.read_text().replace('#[cfg(test)]\n#[path = "native_mods/tests/staged_lock.rs"]\nmod staged_lock_tests;', ''))
