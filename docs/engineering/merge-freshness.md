@@ -24,8 +24,8 @@ PR, run, attempt, and current head. No older attempt's artifact is borrowed.
 When current main equals the recorded base, valid green evidence is FRESH even
 for a PR editing shared contracts. Otherwise main must descend from that base.
 The command compares the intervening main files with the PR files. Either side
-touching a `slots/` component, Cargo.lock, or the explicit Wire layout fixtures,
-capture/generator scripts, and generated layout pin files makes it STALE.
+touching a `slots/` component, Cargo.lock, or the explicit Wire layout fixtures
+and generated layout pin files makes it STALE.
 Shared files or a shared `crates/<name>/` or `launcher/` scope also make it STALE.
 Workflow and CI tooling paths are file-scoped, not directory-wide contracts:
 `tools/ci/ignored_tests.py` versus `tools/ci/nightly.py` (#3051 versus #3043)
