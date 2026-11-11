@@ -31,7 +31,7 @@ on what the stock client renders, never on a client mod.
 |---|---|---|
 | Server hook points | this repository, `crates/horizon-client/src/game/native_hooks/` ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md)) | compiled against the installed game's exact source revision, empty when no mod hooks them |
 | The `smp` mod | [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods), `native/smp/` | a horizon-mixins bundle: `smp_store.rs`, `smp_economy.rs`, `smp_market.rs`... hold the rules and data (also the mod's own crate, with its tests, no game types), `glue.rs` and small helpers hook the points |
-| The official server's engine | built from a Horizon release's commit with the bundle applied | `horizon-server`'s `[engine] path` points at it; the rest of the server is unchanged |
+| The official server's engine | linked from a Horizon release's prebuilt SDK and the compiled mod | `horizon-server`'s `[engine] path` points at it; the rest of the server is unchanged |
 
 Why a native mod: it is the mod system Horizon has now, it runs on the server
 that simulates the world, and it keeps the SMP out of everyone else's game. Why hook points rather than reaching into
