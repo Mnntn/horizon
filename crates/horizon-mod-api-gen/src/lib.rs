@@ -6,6 +6,8 @@ mod game_modules;
 mod interface_cache;
 #[cfg(test)]
 mod interface_cache_tests;
+#[cfg(test)]
+mod fnr_scan;
 pub mod sdk_catalog;
 #[doc(hidden)]
 pub use dispatch_fixtures::layout as dispatch_fixture_layout;
