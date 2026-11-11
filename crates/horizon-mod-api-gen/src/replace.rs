@@ -155,8 +155,31 @@ pub fn declared_types(items: &[Item], out: &mut BTreeSet<String>) {
     }
 }
 
-/// Whether `sig` names something through `Self::` (an associated type or constant of the trait):
-/// its pointer type is written outside the trait's `impl`, where that path doesn't resolve.
+/// `sig` with each type it names through `Self::` (an associated type of the trait) written
+/// `<Self as Trait>::`: the method's pointer type is written outside the trait's `impl`, where
+/// the short form doesn't resolve.
+pub fn qualified(sig: &syn::Signature, trait_path: &syn::Path) -> syn::Signature {
+    struct Qualify<'a>(&'a syn::Path);
+    impl syn::visit_mut::VisitMut for Qualify<'_> {
+        fn visit_type_path_mut(&mut self, ty: &mut syn::TypePath) {
+            if ty.qself.is_none()
+                && ty.path.segments.len() > 1
+                && ty.path.segments[0].ident == "Self"
+            {
+                let rest = ty.path.segments.iter().skip(1);
+                let trait_path = self.0;
+                *ty = syn::parse_quote!(<Self as #trait_path>::#(#rest)::*);
+            }
+            syn::visit_mut::visit_type_path_mut(self, ty);
+        }
+    }
+    let mut sig = sig.clone();
+    syn::visit_mut::VisitMut::visit_signature_mut(&mut Qualify(trait_path), &mut sig);
+    sig
+}
+
+/// Whether `sig` still names something through `Self::` (an associated constant of the trait, in
+/// an array length): that has no form outside the trait's `impl`.
 fn names_associated(sig: &syn::Signature) -> bool {
     struct Find(bool);
     impl<'ast> syn::visit::Visit<'ast> for Find {
@@ -383,7 +406,9 @@ fn functions<'a>(
                 for member in &block.items {
                     if let ImplItem::Fn(method) = member
                         && eligible(&method.attrs, &method.sig)
-                        && !(trait_name.is_some() && names_associated(&method.sig))
+                        && !block.trait_.as_ref().is_some_and(|(_, path, _)| {
+                            names_associated(&qualified(&method.sig, path))
+                        })
                     {
                         out.push(Found {
                             module: module.to_owned(),
@@ -625,7 +650,12 @@ fn rewrite(
                 arguments.join(", ")
             ),
         ));
-        let ty = pointer_type(function.sig);
+        let ty = match function.owner.and_then(|block| block.trait_.as_ref()) {
+            Some((_, path, _)) if function.trait_name.is_some() => {
+                pointer_type(&qualified(function.sig, path))
+            }
+            _ => pointer_type(function.sig),
+        };
         let items = quote! {
             #[doc(hidden)]
             #[inline(always)]
@@ -928,17 +958,17 @@ mod tests {
 
     #[test]
     fn a_method_of_the_games_own_trait_gets_a_slot_on_its_type() {
-        let source = "use engine::Style; struct Wander; struct Raw; mod other { struct Style; }\nimpl Goal for Style { fn start(&mut self) {} } impl Goal for engine::Raw { fn start(&mut self) {} } impl Goal for Wander { fn start(&mut self, mob: &Mob) -> bool { true } fn kind(&self) -> Self::Kind { Kind } }\nimpl Goal<u8> for Wander { fn start(&mut self) {} }\nunsafe impl Goal for Raw { fn start(&mut self) {} }\nimpl Goal for Vec3 { fn start(&mut self) {} }\n";
+        let source = "use engine::Style; struct Wander; struct Raw; mod other { struct Style; }\nimpl Goal for Style { fn start(&mut self) {} } impl Goal for engine::Raw { fn start(&mut self) {} } impl Goal for Wander { fn start(&mut self, mob: &Mob) -> bool { true } fn kind(&self) -> Self::Kind { Kind } fn sized(&self) -> [u8; Self::N] { [0; Self::N] } }\nimpl Goal<u8> for Wander { fn start(&mut self) {} }\nunsafe impl Goal for Raw { fn start(&mut self) {} }\nimpl Goal for Vec3 { fn start(&mut self) {} }\n";
         let traits = BTreeSet::from(["Goal".to_owned()]);
         let file = syn::parse_file(source).unwrap();
         let mut types = BTreeSet::new();
         declared_types(&file.items, &mut types);
-        // A signature naming the trait's associated type, a trait written with arguments, an
+        // A signature naming the trait's associated constant, a trait written with arguments, an
         // unsafe impl and another crate's type (imported under a name the crate also declares,
         // written by path, or not declared here at all) are left as the game wrote them.
         assert_eq!(
             targets("k", &file, &traits, &types),
-            ["k::<Wander as Goal>::start"]
+            ["k::<Wander as Goal>::start", "k::<Wander as Goal>::kind"]
         );
         let mut found = Vec::new();
         functions("k", &file.items, &traits, &types, &mut found);
@@ -955,6 +985,8 @@ mod tests {
         };
         assert!(added.trait_.is_none());
         assert!(out.contains("pub fn __fnr_as_Goal_start"), "{out}");
+        // The trait's associated type is named through the trait outside its `impl`.
+        assert!(out.contains("-> < Self as Goal > :: Kind"), "{out}");
     }
 
     #[test]
