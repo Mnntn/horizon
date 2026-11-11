@@ -3,7 +3,7 @@
 //! while sneaking with something in hand and then triggers
 //! ITEM_USED_ON_BLOCK for the use it consumed.
 use super::*;
-use crate::game::{Hit, native_machines::tests::server_game};
+use crate::game::{Hit, game_tests::tests::server_game};
 use horizon_client::{
     advancements::{Advancement, Criterion, Rewards, Tree},
     held::Source,
@@ -17,8 +17,8 @@ use winit::keyboard::KeyCode;
 
 /// A server game with a campfire at `pos` (its block entity too) and beef in
 /// the main hand, the click forced onto that block.
-fn campfire_game(pos: [i32; 3]) -> Game<'static> {
-    let mut game = server_game();
+fn campfire_game(resources: &mut Option<Arc<crate::game::Resources>>, pos: [i32; 3]) -> Game<'_> {
+    let mut game = server_game(resources);
     // A local player, not a dedicated server's silent world: criteria and
     // statistics apply to them.
     game.options.dedicated = None;
@@ -76,7 +76,8 @@ fn slots(game: &Game<'_>, pos: [i32; 3]) -> usize {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_sneak_keeps_the_food_and_placing_it_fires_item_used_on_block() {
     const POS: [i32; 3] = [2, 4, 3];
-    let mut game = campfire_game(POS);
+    let mut resources = None;
+    let mut game = campfire_game(&mut resources, POS);
     // The tree a data pack with one `item_used_on_block` criterion on this
     // campfire would be indexed into.
     let mut tree = Tree::default();

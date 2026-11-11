@@ -7,8 +7,7 @@ use std::sync::OnceLock;
 
 /// Client-library hooks, installed before any menu, entity or recipe is used.
 pub struct NativeClientHooks {
-    pub living_death_message:
-        fn(&LoopContext, u32, &str, &mut Option<horizon_client_core::text::Text>),
+    pub living_death_message: fn(&LoopContext, u32, &str, &mut Option<crate::text::Text>),
     pub menu_slot_rules: fn(&LoopContext, &str, usize, &ItemStack, &mut bool, &mut u32),
     pub item_stacked_on_other: fn(&LoopContext, &mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub living_heal: fn(&LoopContext, u32, &mut f32, &mut bool),
@@ -71,7 +70,7 @@ pub(crate) fn living_death_message(
     context: &LoopContext,
     entity: u32,
     kind: &str,
-    message: &mut Option<horizon_client_core::text::Text>,
+    message: &mut Option<crate::text::Text>,
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_death_message)(context, entity, kind, message);

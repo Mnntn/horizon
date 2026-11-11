@@ -4754,6 +4754,10 @@ impl Game<'_> {
     ) -> [f64; 3] {
         self.add_item_entity(stack, position, None, pickup_delay)
     }
+    fn spawn_item_thrown(&mut self, stack: ItemStack, position: [f64; 3], velocity: [f64; 3]) {
+        let random = spill::prepare_item_random(None);
+        self.add_item_entity_prepared(stack, position, Some(velocity), 0, Some(random));
+    }
     fn add_item_entity(
         &mut self,
         stack: ItemStack,
@@ -5368,13 +5372,7 @@ impl Game<'_> {
     /// y, z, stack)`), nudged by 0.2 less 0.1 per axis and pickable at once.
     fn spawn_destroyed_contents(&mut self, destroyed: Vec<(ItemStack, Vec3)>) {
         for (stack, at) in destroyed {
-            let r = &mut self.world.random;
-            let motion = [
-                r.next_double() * 0.2 - 0.1,
-                r.next_double() * 0.2 - 0.1,
-                r.next_double() * 0.2 - 0.1,
-            ];
-            self.spawn_item(stack, [at.x, at.y, at.z], motion, 0);
+            self.spawn_item_own(stack, [at.x, at.y, at.z], 0);
         }
     }
     /// Run vanilla block behaviour against the world through `LevelAccess`.
@@ -6686,6 +6684,13 @@ impl Game<'_> {
         }
         if on_ground {
             self.falling_block_impact(f);
+            if f.fall_distance > 0.0 {
+                self.post_landing_event(
+                    f.position,
+                    horizon_client::falling_block::bounds(f.position),
+                    false,
+                );
+            }
             f.fall_distance = 0.0;
         }
         // applyEffectsFromBlocks: WebBlock.entityInside makes it stuck
@@ -7287,24 +7292,7 @@ impl Game<'_> {
                 // underside passes, so the next sign chains below instead of
                 // opening the editor, unless the side has click commands to run
                 // (`shouldTryToChainAnotherHangingSign`).
-                chains_sign = hit.face == [0, -1, 0]
-                // `instanceof HangingSignItem`, independent of the item's name.
-                && held.as_ref().is_some_and(|s| {
-                    self.res.behaviours().item_binding(&s.item)
-                        .is_some_and(|i| i.kind == horizon_world::level::ItemKind::HangingSign)
-                })
-                && self
-                    .res
-                    .facts()
-                    .get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
-                    .has_class("CeilingHangingSignBlock")
-                && matches!(
-                    self.world
-                        .block_entities
-                        .get(&(hit.pos[0], hit.pos[1], hit.pos[2])),
-                    Some(BlockEntity::Sign(_))
-                )
-                && !self.sign_can_execute_click_commands((hit.pos[0], hit.pos[1], hit.pos[2]));
+                chains_sign = self.chains_hanging_sign(hit.pos, hit.face, held.as_ref());
             }
             if block_answer.is_none() {
                 use horizon_world::level::UseBranch::ItemOn;
@@ -18110,5 +18098,82 @@ impl Game<'_> {
         } else {
             PresenceStatus::Online
         }
+    }
+}
+
+impl Game<'_> {
+    pub(super) fn falling_model_vertices(
+        &self,
+        state: BlockStateId,
+        start_pos: BlockPos,
+        origin: glam::Vec3,
+        light: u32,
+        out: &mut Vec<Vertex>,
+    ) {
+        // `FallingBlockRenderer`: the model is picked by the block's starting position.
+        let seed = horizon_core::random::position_seed(start_pos);
+        let Ok(models) = self.pack.render.model_catalog.collect_seeded(state, seed) else {
+            return;
+        };
+        // Baked models live at stable addresses until the pack is replaced.
+        // Keep multipart order and duplicates: both affect the emitted vertices.
+        let mut cache = self.falling_vertices.borrow_mut();
+        let entries = cache.entry(state).or_default();
+        let index = entries.iter().position(|(ptrs, _)| {
+            ptrs.iter()
+                .copied()
+                .eq(models.iter().map(|(_, m)| *m as *const _ as usize))
+        });
+        let index = index.unwrap_or_else(|| {
+            let mut vertices = Vec::new();
+            self.block_model_vertices(state, seed, glam::Mat4::IDENTITY, 0, false, &mut vertices);
+            // Preserve the original coordinates, including signed zero, rather
+            // than composing an identity transform with the frame's translation.
+            let positions = models.iter().flat_map(|(_, model)| {
+                model
+                    .faces
+                    .iter()
+                    .filter(|face| {
+                        self.pack
+                            .layer_names
+                            .get(&face.layer)
+                            .is_some_and(|name| self.gui.atlas.sprites.contains_key(name))
+                    })
+                    .flat_map(|face| face.quad.positions)
+            });
+            for (vertex, pos) in vertices.iter_mut().zip(positions) {
+                vertex.pos = pos;
+            }
+            let ptrs = models
+                .iter()
+                .map(|(_, m)| *m as *const _ as usize)
+                .collect();
+            entries.push((ptrs, vertices));
+            entries.len() - 1
+        });
+        let start = out.len();
+        out.extend_from_slice(&entries[index].1);
+        let matrix = glam::Mat4::from_translation(origin);
+        for vertex in &mut out[start..] {
+            vertex.pos = matrix
+                .transform_point3(glam::Vec3::from_array(vertex.pos))
+                .to_array();
+            vertex.light = light;
+        }
+    }
+    pub(super) fn finish_falling_piston_move(&mut self, i: usize, moved: Vec3) {
+        let mut f = self.falling.extract(self.falling[i].join).unwrap();
+        if moved.y < 0.0 {
+            f.fall_distance -= f64::from(moved.y as f32);
+        }
+        if f.on_ground {
+            self.falling_block_impact(&mut f);
+            if f.fall_distance > 0.0 {
+                let bounds = horizon_client::falling_block::bounds(f.position);
+                self.post_landing_event(f.position, bounds, false);
+            }
+            f.fall_distance = 0.0;
+        }
+        self.falling.put_back(i.min(self.falling.len()), f);
     }
 }

@@ -6,7 +6,7 @@ use crate::game::{Game, Hit};
 use horizon_client::signs::SignData;
 use horizon_client::{containers::BlockEntity, items::ItemStack, mobs::Who};
 use horizon_core::geometry::Vec3;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 type Posted = (&'static str, [f64; 3], Option<Who>);
 const FAIL_SOUND: &str = "minecraft:block.hanging_sign.waxed_interact_fail";
@@ -37,7 +37,8 @@ fn click_sign(
 ) -> Option<Click> {
     // The prepared resources, or nothing where CI has no vanilla data.
     std::env::var_os("HORIZON_TEST_RESOURCES")?;
-    let mut game = crate::game::native_machines::tests::server_game();
+    let mut resources = None;
+    let mut game = crate::game::game_tests::tests::server_game(&mut resources);
     // A sign's click command needs the command tree's registries (`setblock`'s
     // block types).
     game.build_registries();

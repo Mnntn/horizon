@@ -60,7 +60,9 @@ fn clone_item<'a>(name: &str, block_item: &'a str) -> &'a str {
         "minecraft:twisting_vines_plant" => "minecraft:twisting_vines",
         "minecraft:weeping_vines_plant" => "minecraft:weeping_vines",
         // CandleCakeBlock: new ItemStack(Blocks.CAKE), for every colour.
-        _ if name.ends_with("_candle_cake") => "minecraft:cake",
+        _ if (name == "minecraft:candle_cake" || name.ends_with("_candle_cake")) => {
+            "minecraft:cake"
+        }
         _ => block_item,
     }
 }
@@ -436,6 +438,7 @@ mod tests {
             ("minecraft:kelp_plant", "minecraft:kelp"),
             ("minecraft:twisting_vines_plant", "minecraft:twisting_vines"),
             ("minecraft:weeping_vines_plant", "minecraft:weeping_vines"),
+            ("minecraft:candle_cake", "minecraft:cake"),
             ("minecraft:white_candle_cake", "minecraft:cake"),
             ("minecraft:light_blue_candle_cake", "minecraft:cake"),
         ] {

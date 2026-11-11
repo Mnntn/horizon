@@ -3736,3 +3736,7 @@ fn fall_reset_hit(w: &MobWorld, from: Vec3, moved: Vec3) -> bool {
         moved,
     )
 }
+
+#[cfg(test)]
+#[path = "living_climbable_tests.rs"]
+mod living_climbable_tests;

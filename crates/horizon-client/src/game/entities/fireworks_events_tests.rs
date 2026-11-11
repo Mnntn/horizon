@@ -1,7 +1,6 @@
 //! `FireworkRocketEntity.explode`'s game event and sound gate, and the
 //! `ITEM_USED` an `useOn` counts. Prepared resources only.
 use super::Game;
-use crate::game::{Audio, Options, Progress, Settings, load_resources};
 use horizon_client::{
     chunk::Chunk,
     items::ItemStack,
@@ -12,33 +11,8 @@ use horizon_core::{geometry::Vec3, position::ChunkPos, random::LegacyRandom};
 use std::sync::Arc;
 
 fn with_game(test: impl FnOnce(&mut Game<'_>)) {
-    let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-    let settings = Settings::default();
-    let loaded = load_resources(
-        root.clone(),
-        None,
-        &root,
-        &settings,
-        std::time::Instant::now(),
-        false,
-        true,
-        &Progress::new(),
-        &mut |_, _| unreachable!(),
-    )
-    .unwrap();
-    let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-    options.resources = root.clone();
-    options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-    let mut game = Game::new(
-        &loaded.resources,
-        loaded.pack,
-        loaded.gui.unwrap(),
-        options,
-        settings,
-        Audio::silent(&root),
-        None,
-    )
-    .unwrap();
+    let mut resources = None;
+    let mut game = crate::game::game_tests::tests::server_game(&mut resources);
     game.world
         .chunks
         .insert((0, 0), Arc::new(Chunk::empty(0, 0)));

@@ -4396,6 +4396,13 @@ impl Game<'_> {
                     );
                     child.extra.color = mixed;
                 }
+                let voices = horizon_client::mobs::finalize::sound_variants(Species::Wolf);
+                child.extra.sound_variant = self
+                    .mobs
+                    .iter_mut()
+                    .find(|m| m.id == parent)
+                    .and_then(|m| m.random.next_int_bound(voices.len() as i32).ok())
+                    .map(|i| i as u8);
                 break 'offspring;
             }
             // Panda.getBreedOffspring: genes from both parents.

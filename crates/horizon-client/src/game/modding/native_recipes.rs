@@ -41,6 +41,7 @@ pub(super) struct RecipeTables {
     /// recipe_content`) over the window's own: what `Game::recipes` reads on
     /// a client once they came.
     synced: Option<horizon_client::crafting::Recipes>,
+    synced_index: Option<horizon_client::recipe_book::RecipeIndex>,
     /// The recipe content's parts so far, until its last.
     incoming: Vec<(String, serde_json::Value)>,
     /// The types that came before the player did: the mods hear of them
@@ -510,9 +511,17 @@ impl Game<'_> {
     pub(super) fn synced_recipes(&self) -> Option<&horizon_client::crafting::Recipes> {
         self.recipe_tables.synced.as_ref()
     }
+    /// Display numbers use the server recipe set once it has arrived.
+    pub(super) fn display_index(&self) -> &horizon_client::recipe_book::RecipeIndex {
+        match &self.recipe_tables.synced_index {
+            Some(index) => index,
+            None => &self.stations().recipe_index,
+        }
+    }
     /// A new play session (`Login`): what the last server sent is gone.
     pub(super) fn forget_synced_recipes(&mut self) {
         self.recipe_tables.synced = None;
+        self.recipe_tables.synced_index = None;
         self.recipe_tables.incoming.clear();
         self.recipe_tables.received = None;
         self.recipe_tables.tables = None;
@@ -579,6 +588,7 @@ impl Game<'_> {
         let received = std::mem::take(&mut self.recipe_tables.incoming);
         // No type any more: back on the window's own recipes.
         if types.is_empty() {
+            self.recipe_tables.synced_index = None;
             if self.recipe_tables.synced.take().is_some() {
                 self.recipe_tables.tables = None;
                 self.forget_book();
@@ -593,6 +603,7 @@ impl Game<'_> {
             let of = |v: &serde_json::Value| types.iter().any(|t| v["type"].as_str() == Some(t));
             let mut all: Vec<_> = own.into_iter().filter(|(_, v)| !of(v)).collect();
             all.extend(received);
+            let index = horizon_client::recipe_book::RecipeIndex::load_from_sources(&all);
             horizon_client::crafting::Recipes::from_sources(
                 root,
                 self.items(),
@@ -600,10 +611,12 @@ impl Game<'_> {
                 all,
                 self.res.core.item_data.context(),
             )
+            .map(|recipes| (recipes, index))
         });
         match built {
-            Ok(recipes) => {
+            Ok((recipes, index)) => {
                 self.recipe_tables.synced = Some(recipes);
+                self.recipe_tables.synced_index = Some(index);
                 // What was made of the window's own recipes is made again.
                 self.recipe_tables.tables = None;
                 self.forget_book();
