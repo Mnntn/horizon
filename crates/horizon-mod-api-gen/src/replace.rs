@@ -2,7 +2,7 @@
 //! original, with the game prebuilt. The staging pass ([`stage`]) writes one check at the head of
 //! every replaceable function of a staged source copy: a load of the function's slot in its
 //! crate's `__REPLACE` array and, when a copy is installed there, a direct call of it. Beside the
-//! function it writes the slot's typed reader (`__fnr_get_<name>`) and installer
+//! function it writes the slot's typed reader (`__fnr_read_slot_<index>`) and installer
 //! (`__fnr_<name>`), which a mixin build's patch crate calls with its copy
 //! ([`crate::patch`]). A function's check is part of its body, so every inlined copy of the
 //! function carries it.
@@ -525,15 +525,16 @@ fn rewrite(
     // Replacements of byte ranges (an insertion is an empty range), applied in order.
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
     let mut names = BTreeSet::new();
+    let mut free = BTreeMap::new();
     for function in found {
         let slot = *count;
         *count += 1;
         let name = source::unraw(&function.sig.ident);
         let installer = installer(function.trait_name, &function.sig.ident);
-        let reader = quote::format_ident!(
-            "__fnr_get_{}",
-            installer.to_string().trim_start_matches("__fnr_")
-        );
+        let reader = quote::format_ident!("__fnr_read_slot_{slot}");
+        if function.owner.is_none() {
+            free.insert(name.clone(), reader.to_string());
+        }
         let scope = match function.owner {
             Some(block) => format!("{}::{installer}", source::owner(&block.self_ty)),
             None => name.clone(),
@@ -640,11 +641,6 @@ fn rewrite(
         }
     }
     // `replaced!(f)`: whether a copy of the free function `f` of this module is installed.
-    let free: BTreeSet<String> = found
-        .iter()
-        .filter(|function| function.owner.is_none())
-        .map(|function| source::unraw(&function.sig.ident))
-        .collect();
     let mut from = 0;
     while let Some(start) = text[from..].find("replaced!(").map(|i| i + from) {
         let inner = start + "replaced!(".len();
@@ -653,13 +649,13 @@ fn rewrite(
         };
         from = close;
         let name = text[inner..close].trim();
-        if !free.contains(name) {
+        let Some(reader) = free.get(name) else {
             return Err(format!(
                 "{}: replaced!({name}): no replaceable free function of that name in this file",
                 path.display()
             ));
-        }
-        edits.push((start, close + 1, format!("__fnr_get_{name}().is_some()")));
+        };
+        edits.push((start, close + 1, format!("{reader}().is_some()")));
     }
     // At one offset, a replacement of a range before an insertion there, each in pushed order.
     edits.sort_by_key(|(start, end, _)| (*start, *end == *start));
@@ -749,7 +745,7 @@ mod tests {
         );
         assert!(
             out.contains(
-                "fn next(&mut self, __fnr_p1: (u32, u32), mut c: u8, __fnr_p3: bool) -> u32 { if let ::std::option::Option::Some(__fnr) = Self::__fnr_get_next() { return __fnr(self, __fnr_p1, c, __fnr_p3); } let (a, b) = __fnr_p1;\n"
+                "fn next(&mut self, __fnr_p1: (u32, u32), mut c: u8, __fnr_p3: bool) -> u32 { if let ::std::option::Option::Some(__fnr) = Self::__fnr_read_slot_0() { return __fnr(self, __fnr_p1, c, __fnr_p3); } let (a, b) = __fnr_p1;\n"
             ),
             "{out}"
         );
@@ -767,7 +763,7 @@ mod tests {
                 _ => panic!("{out}"),
             })
             .collect();
-        assert_eq!(names, ["__fnr_get_next", "__fnr_next"]);
+        assert_eq!(names, ["__fnr_read_slot_0", "__fnr_next"]);
         assert_eq!(out.lines().count(), 5);
     }
 
@@ -788,6 +784,30 @@ mod tests {
             pointer_type(&free.sig).to_string(),
             quote!(fn(f32) -> i64).to_string()
         );
+    }
+
+    #[test]
+    fn reader_names_do_not_collide_with_get_function_installers() {
+        let out = staged(
+            "struct Game; impl Game { fn projectile(&self) {} fn get_projectile(&self) {} }",
+        );
+        let file = syn::parse_file(&out).unwrap();
+        let mut names = BTreeSet::new();
+        for item in file.items {
+            if let Item::Impl(block) = item {
+                for item in block.items {
+                    if let ImplItem::Fn(method) = item {
+                        assert!(
+                            names.insert(method.sig.ident.to_string()),
+                            "duplicate method: {}",
+                            method.sig.ident
+                        );
+                    }
+                }
+            }
+        }
+        assert!(names.contains("__fnr_get_projectile"));
+        assert!(names.contains("__fnr_read_slot_0"));
     }
 
     #[test]
@@ -812,7 +832,7 @@ mod tests {
         assert!(out.contains("crate :: __REPLACE [7usize]"), "{out}");
         assert!(out.contains("crate :: __REPLACE [8usize]"), "{out}");
         assert!(
-            out.contains("{ if let ::std::option::Option::Some(__fnr) = __fnr_get_hooked() { return __fnr(); } __fnr_get_world_drawn().is_some() }"),
+            out.contains("{ if let ::std::option::Option::Some(__fnr) = __fnr_read_slot_8() { return __fnr(); } __fnr_read_slot_7().is_some() }"),
             "{out}"
         );
         syn::parse_file(&out).unwrap();
@@ -870,7 +890,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(
-            out.contains("{ if let ::std::option::Option::Some(__fnr) = Self::__fnr_get_as_Goal_start() { return __fnr(self, mob); } true }"),
+            out.contains("{ if let ::std::option::Option::Some(__fnr) = Self::__fnr_read_slot_0() { return __fnr(self, mob); } true }"),
             "{out}"
         );
         let staged = syn::parse_file(&out).unwrap();
