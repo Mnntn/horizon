@@ -592,7 +592,6 @@ pub(super) fn compile(
         .arg("--extern")
         .arg(format!("mod_api={}", api_library.display()))
         .arg("--extern")
-        .arg("--extern")
         .arg(format!(
             "horizon_mod_package={}",
             library(&deps, "horizon_mod_package")?.display()
