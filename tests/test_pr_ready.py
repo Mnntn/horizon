@@ -212,6 +212,30 @@ class PrReadyTests(unittest.TestCase):
                                  "cargo test --locked --workspace" + MODS + " --tests")
                 self.assertEqual(by_name["doc tests"].command, "cargo test --locked --workspace --doc")
 
+    def test_holder_actor_is_built_before_applicable_tests(self):
+        packages = {**PACKAGES, "horizon-mod-package": "crates/horizon-mod-package"}
+        for path in ("Cargo.lock", "crates/unknown/src/lib.rs",
+                     "crates/horizon-mod-package/src/holder.rs", "launcher/src/main.rs"):
+            with self.subTest(path=path), mock.patch.object(pr_ready, "affected_here", return_value=[]):
+                steps = pr_ready.plan(args(quick=True), "origin/main", {path}, packages,
+                                      LIBRARIES, DEPENDENCIES)
+                by_name = {step.name: step for step in steps}
+                actor = by_name["holder actor"]
+                self.assertIsNone(actor.skip)
+                self.assertEqual(actor.command, "cargo build --locked -p horizon-mod-package "
+                                 "--features runtime-process --example holder_actor")
+                # No cd, target-dir or profile override: actor() finds the sibling
+                # examples directory in the root test target, including CARGO_TARGET_DIR.
+                self.assertLess(steps.index(actor), next(i for i, step in enumerate(steps)
+                                if step.name.startswith("tests")))
+                self.assertLess(steps.index(actor), steps.index(by_name["launcher tests"]))
+        for path in ("README.md", "crates/horizon-core/src/lib.rs"):
+            with self.subTest(path=path), mock.patch.object(pr_ready, "affected_here", return_value=[]):
+                steps = pr_ready.plan(args(quick=True), "origin/main", {path}, packages,
+                                      LIBRARIES, DEPENDENCIES)
+                self.assertEqual(next(step for step in steps if step.name == "holder actor").skip,
+                                 "holder tests untouched")
+
     def test_tests_get_the_features_ci_s_workspace_run_gives_them(self):
         self.assertEqual(pr_ready.mod_features(["horizon-world"]), "")
         self.assertEqual(pr_ready.mod_features(["horizon-client"]), "")

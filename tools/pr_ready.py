@@ -345,6 +345,10 @@ CONTENT_ROOT = ("crates/horizon-client/src/mod_content", "crates/horizon-client-
                 "crates/horizon-mod-package/", "crates/horizon-assets/")
 CONTENT_ROOT_TESTS = "cargo test --locked -p horizon-client-lib --lib mod_content::tests:: -- --ignored"
 
+# holder::tests spawns target/<profile>/examples/holder_actor beside its test binary.
+# --tests does not build that executable; use the same explicit prerequisite as CI.
+HOLDER_ACTOR = "cargo build --locked -p horizon-mod-package --features runtime-process --example holder_actor"
+
 
 def plan(args, base, changed, crates_of, libraries, dependencies):
     """The checks for these changed files, in the order they run."""
@@ -378,6 +382,9 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
         Step("Python tests", "python3 -m unittest discover -s tests", where="here", summary=unittest_passed),
         Step("rustfmt", "cargo fmt --all -- --check", skip=None if rust else no_rust),
         Step("clippy", clippy, skip=None if rust else no_rust),
+        Step("holder actor", HOLDER_ACTOR,
+             skip=None if crates is None or "horizon-mod-package" in crates or launcher
+             else "holder tests untouched"),
         Step("tests" + (": workspace" if crates is None else f": {', '.join(crates)}" if crates else ""),
              f"cargo test --locked {selection}{mod_features(crates)} --tests",
              skip=test_skip, summary=tests_passed),
