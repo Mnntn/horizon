@@ -269,7 +269,7 @@ impl Manifest {
             ));
         }
         mixin::Mixin::check_all(
-            &m.native
+            m.native
                 .as_ref()
                 .map(|n| n.mixin.as_slice())
                 .unwrap_or_default(),
