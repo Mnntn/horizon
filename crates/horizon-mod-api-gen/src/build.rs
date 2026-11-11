@@ -20,6 +20,12 @@ pub fn write_if_changed(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> std:
 /// `root` is supplied at run time by the consuming crate's build script.
 pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), String> {
     track(root, !matches!(&target, Target::Vocab))?;
+    if matches!(&target, Target::Client) {
+        println!(
+            "cargo:rerun-if-changed={}",
+            root.join(".horizon-source-staged").display()
+        );
+    }
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
         Target::Client => vec![
@@ -85,10 +91,67 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         }
     };
     for (name, code) in outputs {
+        let code = generated_source(root, &target, name, code)?;
         write_if_changed(out_dir.join(name), &code).map_err(|e| e.to_string())?;
         syn::parse_file(&code).map_err(|e| format!("generated Rust: {name}: {e}"))?;
     }
     Ok(())
+}
+
+fn generated_source(
+    root: &Path,
+    target: &Target,
+    name: &str,
+    code: String,
+) -> Result<String, String> {
+    if matches!(target, Target::Client)
+        && matches!(
+            name,
+            "mod_api_fire_generated.rs" | "mod_api_goal_view_generated.rs"
+        )
+        && root.join(".horizon-source-staged").is_file()
+    {
+        super::internals::widen_generated(Path::new(name), code)
+    } else {
+        Ok(code)
+    }
+}
+
+#[cfg(test)]
+mod generated_visibility_tests {
+    use super::*;
+
+    #[test]
+    fn staged_game_helpers_are_widened_but_source_helpers_are_unchanged() {
+        let root =
+            std::env::temp_dir().join(format!("fnr-generated-visibility-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let input = "impl Game<'_> { pub(super) fn fire(&mut self) {} }";
+        for name in [
+            "mod_api_fire_generated.rs",
+            "mod_api_goal_view_generated.rs",
+        ] {
+            assert_eq!(
+                generated_source(&root, &Target::Client, name, input.into()).unwrap(),
+                input
+            );
+        }
+        fs::write(root.join(".horizon-source-staged"), "").unwrap();
+        for name in [
+            "mod_api_fire_generated.rs",
+            "mod_api_goal_view_generated.rs",
+        ] {
+            assert_eq!(
+                generated_source(&root, &Target::Client, name, input.into()).unwrap(),
+                "impl Game<'_> { pub fn fire(&mut self) {} }"
+            );
+            assert_eq!(
+                generated_source(&root, &Target::Vocab, name, input.into()).unwrap(),
+                input
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 pub(crate) fn native_hook_modules(root: &Path) -> Result<String, String> {

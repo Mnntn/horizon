@@ -50,6 +50,26 @@ struct Source {
 }
 
 impl Source {
+    fn rendered(mut self) -> String {
+        let mut edits = Vec::new();
+        for (start, (end, _)) in self.edits {
+            edits.push((
+                start,
+                1,
+                end,
+                if start == end { "pub " } else { "pub" }.to_owned(),
+            ));
+        }
+        for (start, (end, text)) in self.annotations {
+            edits.push((start, 0, end, text));
+        }
+        edits.sort_by_key(|(start, order, _, _)| (*start, *order));
+        for (start, _, end, text) in edits.into_iter().rev() {
+            self.text.replace_range(start..end, &text);
+        }
+        self.text
+    }
+
     fn offset(&self, position: proc_macro2::LineColumn) -> usize {
         crate::source::offset(&self.text, &self.lines, position)
     }
@@ -1325,33 +1345,38 @@ impl Pass {
             entries: self.entries.into_values().collect(),
             ..Widened::default()
         };
-        for mut source in self.sources {
+        for source in self.sources {
             if source.edits.is_empty() && source.annotations.is_empty() {
                 continue;
             }
-            let mut edits = Vec::new();
-            for (start, (end, kind)) in source.edits {
-                edits.push((
-                    start,
-                    1,
-                    end,
-                    if start == end { "pub " } else { "pub" }.to_owned(),
-                ));
-                *widened.changed.entry(kind).or_default() += 1;
+            for (_, kind) in source.edits.values() {
+                *widened.changed.entry(*kind).or_default() += 1;
             }
-            for (start, (end, text)) in source.annotations {
-                edits.push((start, 0, end, text));
-            }
-            edits.sort_by_key(|(start, order, _, _)| (*start, *order));
-            for (start, _, end, text) in edits.into_iter().rev() {
-                source.text.replace_range(start..end, &text);
-            }
-            fs::write(&source.path, source.text)
-                .map_err(|e| format!("{}: {e}", source.path.display()))?;
+            let path = source.path.clone();
+            fs::write(&path, source.rendered()).map_err(|e| format!("{}: {e}", path.display()))?;
             widened.files += 1;
         }
         Ok(widened)
     }
+}
+
+/// Apply the same internals visibility edits to a build-generated game source unit.
+pub(crate) fn widen_generated(path: &Path, text: String) -> Result<String, String> {
+    let parsed = syn::parse_file(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let lines = std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+        .collect();
+    let mut pass = Pass::default();
+    pass.sources.push(Source {
+        path: path.to_owned(),
+        text,
+        lines,
+        parsed: parsed.clone(),
+        edits: BTreeMap::new(),
+        annotations: BTreeMap::new(),
+    });
+    pass.items(0, "horizon_client::game", &parsed.items);
+    Ok(pass.sources.remove(0).rendered())
 }
 
 /// Widen game internals and the declared lower-crate items in a staged source copy.
