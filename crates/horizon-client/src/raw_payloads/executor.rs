@@ -172,6 +172,8 @@ impl IPayloadContext for NetworkContext<'_> {
         }
         let reply = self.endpoint.prepare(&self.incoming.epoch, id, bytes)?;
         self.after.push(Some(After::Reply(reply)));
+        #[cfg(any(test, feature = "test-payload-probe"))]
+        super::staging_probe::prepared(&self.incoming.id.0, false);
         Ok(PayloadAccepted::Queued)
     }
     fn disconnect(&mut self, reason: Text) {
@@ -187,6 +189,8 @@ impl IPayloadContext for NetworkContext<'_> {
         let work = self.incoming.work(self.endpoint.transport(), work)?;
         let prepared = self.main.prepare(work)?;
         self.after.push(Some(After::Work(prepared)));
+        #[cfg(any(test, feature = "test-payload-probe"))]
+        super::staging_probe::prepared(&self.incoming.id.0, true);
         Ok(PayloadWorkStatus::Queued)
     }
 }

@@ -77,6 +77,8 @@ impl Game<'_> {
             #[cfg(test)]
             probe_server_reply: endpoint.side() == Side::Server && id.0 == "raw_probe:receipt",
         }));
+        #[cfg(test)]
+        wasm_tests::staged_reply(endpoint.side() == Side::Server && id.0 == "raw_probe:receipt");
         Ok(PayloadAccepted::Queued)
     }
     pub(super) fn receive_client_payload(

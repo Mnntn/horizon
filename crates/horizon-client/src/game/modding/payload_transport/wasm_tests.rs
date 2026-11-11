@@ -7,11 +7,17 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static STAGED_REPLIES: AtomicUsize = AtomicUsize::new(0);
 static PUBLICATIONS: AtomicUsize = AtomicUsize::new(0);
 static RECEIPTS: AtomicUsize = AtomicUsize::new(0);
 static ROOTS: Mutex<Vec<(f32, f32, bool)>> = Mutex::new(Vec::new());
 const TEST: &str = "game::payload_transport::wasm_tests::compiled_guest_runs_in_actual_game_roots";
 
+pub(super) fn staged_reply(server_reply: bool) {
+    if server_reply && ACTIVE.load(Ordering::SeqCst) {
+        STAGED_REPLIES.fetch_add(1, Ordering::SeqCst);
+    }
+}
 pub(super) fn publication(server_reply: bool) {
     if server_reply && ACTIVE.load(Ordering::SeqCst) {
         PUBLICATIONS.fetch_add(1, Ordering::SeqCst);
@@ -137,6 +143,7 @@ fn compiled_guest_runs_in_actual_game_roots() {
             }
             ROOTS.lock().unwrap().clear();
             PUBLICATIONS.store(0, Ordering::SeqCst);
+            STAGED_REPLIES.store(0, Ordering::SeqCst);
             ACTIVE.store(true, Ordering::SeqCst);
             struct Scope;
             impl Drop for Scope {
@@ -153,6 +160,7 @@ fn compiled_guest_runs_in_actual_game_roots() {
             } else {
                 "wasm_fixture:game_main"
             };
+            let staging = horizon_client::raw_payloads::staging_probe::Watch::begin(channel);
             let bytes = if trap {
                 vec![1]
             } else {
@@ -177,6 +185,21 @@ fn compiled_guest_runs_in_actual_game_roots() {
                 );
                 std::thread::yield_now();
             }
+            let prepared = staging.snapshot();
+            assert_eq!(
+                prepared.work,
+                usize::from(network || case == "network_handler_trap"),
+                "the guest must successfully prepare work before its intentional trap"
+            );
+            assert_eq!(
+                prepared.replies,
+                usize::from(case == "network_handler_trap")
+            );
+            assert_eq!(
+                STAGED_REPLIES.load(Ordering::SeqCst),
+                usize::from(case != "network_handler_trap"),
+                "the actual Game root must successfully stage its reply before failure"
+            );
             assert_eq!(
                 PUBLICATIONS.load(Ordering::SeqCst),
                 usize::from(!trap),

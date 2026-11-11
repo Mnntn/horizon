@@ -10,6 +10,8 @@ pub use endpoint::{Endpoint, Prepared};
 mod executor;
 #[cfg(test)]
 mod executor_tests;
+#[cfg(any(test, feature = "test-payload-probe"))]
+pub mod staging_probe;
 #[cfg(test)]
 mod wasm_tests;
 pub use executor::dispatch;

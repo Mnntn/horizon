@@ -166,6 +166,7 @@ path = "tests/mod_api_hooks.rs"
 workspace = true
 
 [dev-dependencies]
+horizon-client-lib = { path = "../horizon-client-lib", default-features = false, features = ["test-payload-probe"] }
 horizon-mod-wasm = { path = "../horizon-mod-wasm", features = ["listener-fixture", "test-copy-probe"] }
 tempfile = "3"
 horizon-mod-runtime = { path = "../horizon-mod-runtime", features = ["test-work-count"] }

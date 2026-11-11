@@ -139,6 +139,7 @@ fn compiled_guest_observes_physical_provider_pressure() {
         let (events, _receiver) = crate::lan::event_channel();
         let (sender, out) = PlayerSender::payload_executor_test_sender(transport.clone());
         let endpoint = Endpoint::server(sender);
+        let staging = staging_probe::Watch::begin("wasm_fixture:network_trap");
         let incoming = Incoming::new(
             &transport,
             negotiation::Phase::Play,
@@ -157,6 +158,14 @@ fn compiled_guest_observes_physical_provider_pressure() {
                 endpoint,
                 conn: Some(1),
             },
+        );
+        assert_eq!(
+            staging.snapshot(),
+            staging_probe::Counts {
+                work: 1,
+                replies: 1
+            },
+            "both physical preparations must succeed before the intentional trap"
         );
         assert!(transport.closed(), "the actual guest handler must trap");
         assert_eq!(
