@@ -413,6 +413,26 @@ mod tests {
     }
 
     #[test]
+    fn reads_and_pins_only_declared_internals() {
+        let (dir, bundle, catalog) = fixture("pins");
+        fs::write(dir.join(INTERNALS), serde_json::to_string(&catalog.internals).unwrap()).unwrap();
+        let read = Catalog::read(&dir).unwrap();
+        let mut manifest = bundle.manifest.clone();
+        manifest.internals[0].hash = None;
+        manifest.internals[1].hash = Some("explicit".into());
+        let pinned = read.pinned(&manifest);
+        assert_eq!(pinned.internals[0].hash.as_deref(), Some("1234"));
+        assert_eq!(pinned.internals[1].hash.as_deref(), Some("explicit"));
+        let mut valid = pinned;
+        valid.internals[1].hash = Some("5678".into());
+        read.check(&valid).unwrap();
+        let source = read.facade(&valid).unwrap().source;
+        assert!(source.contains("pub use horizon_client::game::Game;"));
+        assert!(source.contains("pub use horizon_client::game::maps::dimension_id;"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_mixin_builds_catalog_keeps_the_unpatched_fingerprints() {
         let root = super::super::tests::dir("keep-pins");
         let (staged, pinned) = (root.join("staged"), root.join("pinned"));
