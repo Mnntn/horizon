@@ -108,7 +108,7 @@ pub(super) fn build(
     sdk: &Identity,
     rustc: impl Fn(&str) -> std::process::Command,
 ) -> Result<Option<Patch>, String> {
-    let Some(prepared) = prepare(rust, game, out, projects, sdk)? else {
+    let Some(prepared) = prepare(rust, out, projects, sdk)? else {
         return Ok(None);
     };
     // The patched crates, against the prebuilt game and the mods.
@@ -188,7 +188,6 @@ impl Prepared<'_> {
 /// compiling them; `None` when no mod has a mixin, module or bridge.
 pub(super) fn prepare<'a>(
     rust: &Toolchain,
-    game: &Path,
     out: &Path,
     projects: &[api::Project<'a>],
     sdk: &Identity,
@@ -334,7 +333,7 @@ pub(super) fn prepare<'a>(
         installs: generated
             .patched
             .iter()
-            .map(|p| p.install.clone())
+            .map(|p| format!("({:?}, {})", p.target, p.install))
             .collect(),
         bundles,
         count: generated.patched.len(),

@@ -186,7 +186,7 @@ pub(super) fn compile(
     }
     // `[[native.mixin]]` rows: the patched crates join the workspace beside the mods, whose
     // crates their helpers call, and compile against the SDK like a mod.
-    let patch = super::patch::prepare(rust, game, &out.join("fnr"), projects, &sdk)?;
+    let patch = super::patch::prepare(rust, &out.join("fnr"), projects, &sdk)?;
     if let Some(patch) = &patch {
         for name in &patch.names {
             let dir = patch.dir.join(name);
