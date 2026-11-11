@@ -13,7 +13,7 @@ horizon = "HEAD"
 mixins = "MIXINS"
 
 [[native.mixin]]
-id = "advance"
-target = "horizon_client_lib::clock::FixedStep::advance"
+id = "worldgen"
+target = "horizon_client_lib::vanillagen::shared_data_with"
 kind = "HEAD"
-helper = "src/mixins/advance.rs"
+helper = "src/mixins/worldgen.rs"

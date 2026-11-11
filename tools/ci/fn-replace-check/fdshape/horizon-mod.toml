@@ -56,3 +56,9 @@ bindings = [{ name = "dedicated", ty = "bool", value = "dedicated" }]
 
 # Farmer's Delight's sign-editor shape: a call directly beneath `&`, which the pinned tool refuses
 # for every call-site kind and the carried narrowing admits for a hook that wraps the value.
+
+[[native.mixin]]
+id = "trait_block_state"
+kind = "HEAD"
+target = "horizon_client::game::<GameLevel<'_> as LevelAccess>::block_state"
+helper = "src/mixins/trait.rs"
