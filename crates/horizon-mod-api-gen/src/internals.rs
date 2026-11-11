@@ -1071,7 +1071,7 @@ impl Pass {
         }
     }
 
-    fn lower(&mut self, root: &Path, path: &str) -> Result<(), String> {
+    fn lower(&mut self, root: &Path, path: &str, whole_module: bool) -> Result<(), String> {
         self.cfg.clear();
         let parsed: syn::Path = syn::parse_str(path).map_err(|e| format!("invalid path: {e}"))?;
         let mut segments = parsed.segments.iter();
@@ -1154,7 +1154,11 @@ impl Pass {
                         _ => false,
                     })
                     .ok_or("item not found")?;
-                self.item(file, &module, selected, false);
+                if whole_module {
+                    self.items(file, &module, &items);
+                } else {
+                    self.item(file, &module, selected, false);
+                }
                 return Ok(());
             }
             if rest.len() == 2 {
@@ -1198,6 +1202,9 @@ impl Pass {
                     }
                 }
                 if found {
+                    if whole_module {
+                        self.items(file, &module, &items);
+                    }
                     for item in &items {
                         if matches!(item, Item::Struct(value) if value.ident == *ident)
                             || matches!(item, Item::Enum(value) if value.ident == *ident)
@@ -1323,7 +1330,7 @@ impl Pass {
             let krate = path.split("::").next().expect("shape path");
             let reason = if !dependencies.contains(krate) {
                 Some("not an unconditional game dependency")
-            } else if self.lower(root, &path).is_err() {
+            } else if self.lower(root, &path, false).is_err() {
                 // A declaration can be discovered through a re-export that lower() cannot
                 // walk. Keep its metadata, but never emit code against an unproven layout.
                 Some("shape module walk failed")
@@ -1456,13 +1463,13 @@ fn collect(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<Pas
         for (line, declaration) in list.lines().enumerate() {
             let path = declaration.split('#').next().unwrap_or_default().trim();
             if !path.is_empty() {
-                pass.lower(root, path)
+                pass.lower(root, path, false)
                     .map_err(|e| format!("{name}:{}: {path}: {e}", line + 1))?;
             }
         }
     }
     for (origin, path) in crate::replace::listed(root)? {
-        pass.lower(root, &path)
+        pass.lower(root, &path, true)
             .map_err(|e| format!("{origin}: {path}: {e}"))?;
     }
     pass.shapes(root)?;
@@ -2449,6 +2456,57 @@ const LABEL: &str = "é"; struct AfterUnicode;
                 .entries
                 .iter()
                 .any(|entry| entry.path.contains("unrelated") || entry.path.contains("sibling"))
+        );
+    }
+
+    #[test]
+    fn listed_function_module_helpers_compile_from_outside() {
+        let fixture = Fixture::new("struct Game;\n");
+        fixture.lower();
+        fixture.put("crates/lower/src/hidden.rs", "const VALUE: u32 = 5; fn helper() -> u32 { 7 } fn listed() -> u32 { VALUE + helper() }\n");
+        fixture.put(crate::replace::LIST, "lower::hidden::listed\n");
+        widen_with(&fixture.0, &[]).unwrap();
+        let out = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target")
+            .join(format!("fnr-lower-external-{}", std::process::id()));
+        fs::create_dir_all(&out).unwrap();
+        let result = std::process::Command::new("rustc")
+            .args(["--edition=2024", "--crate-type=rlib", "--crate-name=lower"])
+            .arg(fixture.0.join("crates/lower/src/lib.rs"))
+            .arg("--out-dir")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let copied = out.join("copied.rs");
+        fs::write(
+            &copied,
+            "pub fn copied() -> u32 { lower::hidden::VALUE + lower::hidden::helper() }",
+        )
+        .unwrap();
+        let result = std::process::Command::new("rustc")
+            .args([
+                "--edition=2024",
+                "--crate-type=lib",
+                "--emit=metadata",
+                "-Dwarnings",
+                "--extern",
+            ])
+            .arg(format!("lower={}", out.join("liblower.rlib").display()))
+            .arg(&copied)
+            .arg("--out-dir")
+            .arg(&out)
+            .output()
+            .unwrap();
+        fs::remove_dir_all(out).unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
         );
     }
 
