@@ -103,7 +103,7 @@ struct Source {
     root: PathBuf,
     /// The crates whose modules are in `files`.
     loaded: BTreeSet<String>,
-    files: BTreeMap<String, PathBuf>,
+    files: BTreeMap<String, Vec<PathBuf>>,
     parsed: BTreeMap<String, Module>,
     /// `macro_rules!` names the crate defines without `#[macro_export]`: a body using one can't
     /// leave the crate.
@@ -114,9 +114,12 @@ impl Source {
     fn new(root: &Path) -> Result<Self, String> {
         let src = root.join("crates/horizon-client/src");
         let mut files = BTreeMap::new();
-        files.insert("horizon_client".to_owned(), src.join("lib.rs"));
+        files.insert("horizon_client".to_owned(), vec![src.join("lib.rs")]);
         for file in crate::source::game_files(&src, false)? {
-            files.insert(file.module, file.path);
+            files
+                .entry(file.module)
+                .or_insert_with(Vec::new)
+                .push(file.path);
         }
         let mut local_macros = BTreeSet::new();
         let mut exported = BTreeSet::new();
@@ -148,13 +151,12 @@ impl Source {
         else {
             return false;
         };
-        self.files.insert(krate.to_owned(), lib);
         let mut exported = BTreeSet::new();
         let mut local = BTreeSet::new();
         for file in files {
             let text = std::fs::read_to_string(&file.path).unwrap_or_default();
             macro_names(&text, &mut local, &mut exported);
-            self.files.insert(file.module, file.path);
+            self.files.entry(file.module).or_default().push(file.path);
         }
         self.local_macros
             .extend(local.into_iter().filter(|name| !exported.contains(name)));
@@ -165,12 +167,18 @@ impl Source {
     /// Module `path`'s items: its file's, or an inline module's inside its parent's.
     fn module(&mut self, path: &str) -> Result<&Module, String> {
         if !self.parsed.contains_key(path) {
-            let items = if let Some(file) = self.files.get(path) {
-                let text = std::fs::read_to_string(file)
-                    .map_err(|e| format!("{}: {e}", file.display()))?;
-                syn::parse_file(&text)
-                    .map_err(|e| format!("{}: {e}", file.display()))?
-                    .items
+            let items = if let Some(files) = self.files.get(path) {
+                let mut items = Vec::new();
+                for file in files {
+                    let text = std::fs::read_to_string(file)
+                        .map_err(|e| format!("{}: {e}", file.display()))?;
+                    items.extend(
+                        syn::parse_file(&text)
+                            .map_err(|e| format!("{}: {e}", file.display()))?
+                            .items,
+                    );
+                }
+                items
             } else {
                 let (parent, name) = path
                     .rsplit_once("::")
@@ -1061,7 +1069,7 @@ fn support_module(
     let path = source
         .files
         .iter()
-        .find(|(_, path)| path.ends_with(&module.file))
+        .find(|(_, paths)| paths.iter().any(|path| path.ends_with(&module.file)))
         .map(|(name, _)| name.clone())
         .ok_or((
             "E_MIXIN_MODULE_DESTINATION",
@@ -1364,6 +1372,31 @@ mod tests {
         assert!(crate_.patched.iter().any(|p| {
             p.id.starts_with("horizon_patch_client_lib::clock::<FixedStep as")
         }));
+    }
+
+    #[test]
+    fn included_files_keep_both_sets_of_module_imports() {
+        let dir = std::env::temp_dir().join(format!("fnr-included-imports-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let outer = dir.join("mod.rs");
+        let included = dir.join("shared.rs");
+        std::fs::write(&outer, "use std::sync::Arc;").unwrap();
+        std::fs::write(&included, "use std::rc::Rc;").unwrap();
+        let mut source = Source {
+            root: dir.clone(),
+            loaded: BTreeSet::new(),
+            files: BTreeMap::from([("fixture".to_owned(), vec![outer, included])]),
+            parsed: BTreeMap::new(),
+            local_macros: BTreeSet::new(),
+        };
+        let out = mirror(&mut source, "fixture", &Tree::default(), false).unwrap();
+        let parsed: syn::File = syn::parse2(out).unwrap();
+        let imports: Vec<String> = uses(&parsed.items)
+            .iter()
+            .map(|item| item.tree.to_token_stream().to_string())
+            .collect();
+        assert_eq!(imports, ["std :: sync :: Arc", "std :: rc :: Rc"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
