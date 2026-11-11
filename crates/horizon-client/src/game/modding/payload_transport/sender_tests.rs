@@ -36,7 +36,7 @@ impl IPayloadHandler for Probe {
         );
         let host = context.server_host().unwrap();
         assert_eq!(
-            host.players().player_selected_slot(player),
+            player.selected_slot(host),
             Some(usize::from(slot)),
             "the handler must observe the preceding slot action, not a later action"
         );
