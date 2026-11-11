@@ -1825,6 +1825,24 @@ issues = \"http://example.org/issues\"
     }
 
     #[test]
+    fn structure_nbt_is_data_but_not_an_executable_exception() {
+        let name = "data/ruby/structure/hut.nbt";
+        // An uncompressed, named NBT root containing an empty compound.
+        let nbt = [10u8, 0, 0, 0];
+        assert!(check_file(name, 0o100644, || Ok(std::io::Cursor::new(nbt))).is_ok());
+        assert!(matches!(
+            check_file(name, 0o100755, || Ok(std::io::Cursor::new(nbt))),
+            Err(ContentFileError::Executable(_))
+        ));
+        for header in [b"\x7fELF", b"MZ!!", b"\0asm"] {
+            assert!(matches!(
+                check_file(name, 0o100644, || Ok(std::io::Cursor::new(header))),
+                Err(ContentFileError::Executable(_))
+            ));
+        }
+    }
+
+    #[test]
     fn archive_links_and_executable_modes_are_refused() {
         use std::io::Write;
         let root = std::env::temp_dir().join(format!("horizon-mods-kinds-{}", std::process::id()));

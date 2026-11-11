@@ -2114,7 +2114,13 @@ fn content_root_carries_a_structure_mod() {
     let house =
         base.join("worldgen/structure/minecraft/village/plains/houses/plains_small_house_1.nbt");
     fs::create_dir_all(dir.join("data/huts/structure")).unwrap();
-    fs::copy(&house, dir.join("data/huts/structure/hut.nbt")).unwrap();
+    // Prepared resources may have installer-supplied executable mode bits. A
+    // content mod owns these bytes, not the source file's filesystem permissions.
+    fs::write(
+        dir.join("data/huts/structure/hut.nbt"),
+        fs::read(&house).unwrap(),
+    )
+    .unwrap();
     let package = horizon_mod_package::Package::read(&dir).unwrap();
     let m = ContentMod {
         id: "huts".into(),
