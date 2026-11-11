@@ -268,7 +268,7 @@ class DynaRoutingTests(unittest.TestCase):
         gate, data, wasm = (workflows[name]["jobs"] for name in workflows)
         from test_ci_runners import triggers
         self.assertEqual(triggers((ROOT / ".github/workflows/dyna-ci.yml").read_text()),
-                         {"push", "pull_request", "workflow_dispatch"})
+                         {"push", "pull_request", "workflow_dispatch", "schedule"})
         for name in ("dyna-ci", "main-data"):
             route = next(step for step in workflows[name]["jobs"]["changes"]["steps"]
                          if step.get("id") == "runner")
@@ -316,16 +316,27 @@ class DynaRoutingTests(unittest.TestCase):
                         self.assertEqual(actual, expected, (name, event, prepare, fallback))
 
     def test_schedule_only_dispatches_and_parity_only_runs_on_dispatch(self):
-        from test_ci_runners import jobs, triggers
-        workflow = (ROOT / ".github/workflows/main-data.yml").read_text()
-        self.assertEqual(triggers(workflow), {"push", "workflow_dispatch", "schedule"})
-        blocks = dict(jobs(workflow))
-        dispatcher = blocks["nightly-dispatch"]
-        self.assertIn("github.event_name == 'schedule'", dispatcher)
-        self.assertIn("runs-on: ubuntu-latest", dispatcher)
-        self.assertIn('gh workflow run main-data.yml --repo "$GITHUB_REPOSITORY" --ref main', dispatcher)
-        self.assertIn("if: github.event_name != 'schedule'", blocks["changes"])
-        parity = blocks["vanilla-parity"]
+        from test_ci_runners import triggers
+        from test_ci_concurrency import yaml
+        for name in ("dyna-ci", "main-data"):
+            workflow = (ROOT / f".github/workflows/{name}.yml").read_text()
+            expected = {"push", "workflow_dispatch", "schedule"}
+            if name == "dyna-ci":
+                expected.add("pull_request")
+            self.assertEqual(triggers(workflow), expected)
+            blocks = yaml.safe_load(workflow)["jobs"]
+            dispatcher = blocks["nightly-dispatch"]
+            self.assertEqual(dispatcher["if"],
+                             "github.repository == 'arismoko/horizon' && github.event_name == 'schedule'")
+            self.assertEqual(dispatcher["runs-on"], "ubuntu-latest")
+            self.assertEqual(dispatcher["permissions"], {"actions": "write"})
+            self.assertEqual(dispatcher["steps"], [{
+                "env": {"GH_TOKEN": "${{ github.token }}"},
+                "run": f'gh workflow run {name}.yml --repo "$GITHUB_REPOSITORY" --ref main',
+            }])
+            self.assertIn("github.event_name != 'schedule'", blocks["changes"]["if"])
+        from test_ci_runners import jobs
+        parity = dict(jobs(workflow))["vanilla-parity"]
         self.assertIn("github.event_name == 'workflow_dispatch'", parity)
         self.assertIn("github.repository == 'arismoko/horizon'", parity)
         self.assertIn("runs-on: dyna-large", parity)
