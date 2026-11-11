@@ -1529,11 +1529,11 @@ mod tests {
         for name in ["placeholder.png", "named.png", "again.png"] {
             write(name);
         }
-        let mut sprites = Sprites::default();
+        let mut sprites = Sprites::new(ResourceSource::directory(root.clone()));
         sprites.keep_apart(["a:block/named".to_owned()]);
-        let placeholder = sprites.insert(&root, "a:block/placeholder").unwrap();
-        let named = sprites.insert(&root, "a:block/named").unwrap();
-        let again = sprites.insert(&root, "a:block/again").unwrap();
+        let placeholder = sprites.insert("a:block/placeholder").unwrap();
+        let named = sprites.insert("a:block/named").unwrap();
+        let again = sprites.insert("a:block/again").unwrap();
         fs::remove_dir_all(&root).unwrap();
         // The named one alone; the others still share.
         assert_ne!(named, placeholder);

@@ -2305,7 +2305,7 @@ mod shulker_lock_drop_tests {
     use super::*;
     use crate::game::game_tests::tests::server_game;
     use horizon_client::{containers::BlockEntity, save};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]

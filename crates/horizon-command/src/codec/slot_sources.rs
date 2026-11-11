@@ -148,7 +148,7 @@ mod tests {
             r##"{type:"group",terms:"#complete:selection"}"##,
             r#"{type:"slot_range",source:"this",slots:"weapon.mainhand"}"#,
         ] {
-            let (tag, _) = horizon_world::nbt::parse_snbt(input).unwrap();
+            let (tag, _) = horizon_core::nbt::parse_snbt(input).unwrap();
             assert!(decode(&tag, &reg).is_ok(), "{input}");
         }
         for input in [
@@ -156,7 +156,7 @@ mod tests {
             r##""#complete:missing""##,
             r#"{type:"slot_range",source:"not_a_context",slots:"container.*"}"#,
         ] {
-            let (tag, _) = horizon_world::nbt::parse_snbt(input).unwrap();
+            let (tag, _) = horizon_core::nbt::parse_snbt(input).unwrap();
             assert!(decode(&tag, &reg).is_err(), "{input}");
         }
     }

@@ -2509,7 +2509,11 @@ mod tests {
             player: None,
             cached_chunk: std::cell::Cell::new(None),
         };
-        let mut engine = engine(Registry::read(&root, Default::default(), blocks));
+        let mut engine = engine(Registry::read(
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks,
+        ));
         // The solid block is at (1, 64, 1): its bottom face is y 64.
         // Spawns one particle, lets the engine take it in and tick it: whether it joined, and
         // how many particles it emitted.

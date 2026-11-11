@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn only_a_finalized_save_without_villager_data_redraws_the_profession() {
         let load = |m: &mut Mob, snbt: &str| {
-            let tag = horizon_world::nbt::parse_snbt(snbt).unwrap().0;
+            let tag = horizon_core::nbt::parse_snbt(snbt).unwrap().0;
             read_nbt(m, &tag);
         };
         // Seed 42: the constructor's draw is 5, its second draw 3.

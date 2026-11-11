@@ -2310,7 +2310,7 @@ impl Game<'_> {
         stack: &ItemStack,
         by_player: bool,
     ) {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let name = stack.data().and_then(|d| d.custom_name.clone());
         let custom = stack
             .data()

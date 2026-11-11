@@ -1402,7 +1402,7 @@ mod tests {
     /// an int is narrowed (`(byte)(value & 255)`), so 300 is 44 and 200 -56.
     #[test]
     fn a_villagers_food_level_is_narrowed_to_a_byte() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         for (saved, expected) in [
             (Tag::Int(300), 44),
             (Tag::Int(200), -56),

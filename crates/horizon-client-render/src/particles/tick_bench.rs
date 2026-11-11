@@ -9,6 +9,7 @@
 //!   and the engine tick apart, once the engine holds as many particles as it will.
 use super::*;
 use crate::{blocks::BlockFacts, chunk::Chunk, collisions, world::World};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

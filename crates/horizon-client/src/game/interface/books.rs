@@ -15,10 +15,10 @@ use horizon_client::{
     ui,
     widgets::{self, Narratable, ScreenInfo},
 };
+use horizon_core::nbt::Tag;
 use horizon_core::position::BlockPos;
 use horizon_protocol::packets::play::{self, Clientbound as C, Serverbound as S};
 use horizon_world::level::flags as level_flags;
-use horizon_world::nbt::Tag;
 use winit::{
     event::{ElementState, KeyEvent},
     keyboard::{KeyCode, PhysicalKey},

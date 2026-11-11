@@ -87,7 +87,7 @@ pub fn contents_effects(stack: &ItemStack) -> Vec<(&'static str, i32, i32)> {
 /// `PotionContents.getAllEffects`, retaining each custom instance's flags.
 pub fn contents_instances(stack: &ItemStack) -> Vec<crate::effects::EffectInstance> {
     use horizon_client_core::nbt_value::{number, text};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     let mut effects: Vec<_> = stack
         .potion()
         .and_then(potion)
@@ -137,7 +137,7 @@ pub fn contents_color(stack: &ItemStack) -> u32 {
 /// `PotionContents.equals(EMPTY)`: colour and custom name also make contents
 /// nonempty, even when there is no registered potion or custom effect.
 pub fn contents_empty(stack: &ItemStack) -> bool {
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     stack.potion().is_none()
         && stack.data().is_none_or(|d| {
             d.potion_extra
@@ -977,7 +977,7 @@ mod tests {
     }
     #[test]
     fn custom_contents_color_and_empty_semantics() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let mut stack = ItemStack::new("minecraft:tipped_arrow", 1);
         assert!(contents_empty(&stack));
         stack

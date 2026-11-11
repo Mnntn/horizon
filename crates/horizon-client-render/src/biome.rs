@@ -900,6 +900,7 @@ mod blend_tests {
         use std::sync::Arc;
 
         let empty = Biomes {
+            files: Arc::default(),
             builtin: Arc::new(Vec::new()),
             index: HashMap::new(),
             list: Vec::new(),

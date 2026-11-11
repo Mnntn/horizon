@@ -4917,6 +4917,7 @@ fn a_shulker_lid_updates_the_shapes_and_redstone_of_its_neighbours() {
         }
         fn observe_neighbor_changed(
             &self,
+            _ticks: &mut Ticks,
             pos: BlockPos,
             state: BlockStateId,
             changed: BlockId,
