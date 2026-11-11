@@ -6,7 +6,8 @@
 //! public, and repeats the module's own `use` items, so `self`, `super::` and `crate::` mean what
 //! they meant. A method moves into a one-method trait implemented for its own type, so `self`,
 //! `Self` and the helpers' bindings stay as written. horizon-mixins then patches the copies, and
-//! the game installs each through its point's replacement slot (`__fnr_<name>`).
+//! the game installs each through its function's replacement slot (`__fnr_<name>`,
+//! [`crate::replace`]).
 use quote::{ToTokens, format_ident, quote};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -20,7 +21,8 @@ pub struct Patched {
     pub target: String,
     /// The copy's id for horizon-mixins, in the patch crate.
     pub id: String,
-    /// The expression that builds the copy's `Redirect`, from the patch crate's root.
+    /// The expression that installs the copy and says whether it did, from the patch crate's
+    /// root.
     pub install: String,
 }
 
@@ -77,7 +79,7 @@ impl Source {
         let src = root.join("crates/horizon-client/src");
         let mut files = BTreeMap::new();
         files.insert("horizon_client".to_owned(), src.join("lib.rs"));
-        for file in crate::points::game_files(&src, false)? {
+        for file in crate::source::game_files(&src, false)? {
             files.insert(file.module, file.path);
         }
         let mut local_macros = BTreeSet::new();
@@ -317,16 +319,20 @@ fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, Strin
 /// Whether `function` can be copied and installed through its point's replacement slot.
 fn replaceable(found: &Found, local_macros: &BTreeSet<String>) -> Result<(), String> {
     let sig = &found.function.sig;
-    if !point_shape::eligible(&found.function.attrs, sig) {
+    if !crate::replace::eligible(&found.function.attrs, sig) {
         return Err(
-            "it is not a point: a hook function (`native_*`), `const`, `async`, `unsafe`, \
-             `self` by value, `impl Trait` or `!` in its signature, `#[inline(always)]`, or \
-             compiled only under a `cfg`"
+            "it has no replacement slot: `const`, `async`, `unsafe`, a receiver other than \
+             `&self` or `&mut self`, type or const generics, `impl Trait` or `!` in its \
+             signature, `#[inline(always)]`, `#[track_caller]`, or compiled only under a `cfg`"
                 .into(),
         );
     }
-    if !point_shape::raw_able(sig, found.owner.as_ref().map(|block| &block.generics)) {
-        return Err("it is generic over types or takes `impl Trait`: one copy can't stand for every instance".into());
+    if let Some(block) = &found.owner
+        && !crate::replace::lifetimes_only(&block.generics)
+    {
+        return Err(
+            "its `impl` is generic over types: one copy can't stand for every instance".into(),
+        );
     }
     if let Some(block) = &found.owner
         && block.attrs.iter().any(|attr| attr.path().is_ident("cfg"))
@@ -490,7 +496,7 @@ pub fn generate(root: &Path, krate: &str, targets: &[String]) -> Result<PatchCra
                         pub #sig #block
 
                         #[doc(hidden)]
-                        pub fn #install() -> ::horizon_client::entry::Redirect {
+                        pub fn #install() -> bool {
                             #original::#constructor(#name)
                         }
                     },
@@ -554,7 +560,7 @@ pub fn generate(root: &Path, krate: &str, targets: &[String]) -> Result<PatchCra
                         }
 
                         #[doc(hidden)]
-                        pub fn #install() -> ::horizon_client::entry::Redirect {
+                        pub fn #install() -> bool {
                             <#elided>::#constructor(<#elided as #trait_ref>::#name)
                         }
                     },

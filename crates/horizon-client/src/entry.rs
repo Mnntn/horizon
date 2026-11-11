@@ -45,28 +45,15 @@ pub fn prepare() -> Startup {
     }
 }
 
-/// A native function slot, checked against its place's exact type before erasure.
-pub use mod_points::__private::SlotListener as NativeSlot;
-
-/// A `[[mixin]]` build's replacement of one game function's body, from the function's own
-/// `__fnr_<name>` constructor.
-pub use mod_points::__private::Redirect;
-
-/// Installs a `[[mixin]]` build's patched functions (function replacement), before the mods load:
-/// each point then runs its patched copy in place of its body, between its head and return
-/// listeners. The launcher writes one copy per function, so a second install of a function is a
-/// build defect: it is reported and the first copy stays.
-pub fn install_redirects(redirects: &[Redirect]) {
-    for redirect in redirects {
-        if let Err(error) = redirect.install() {
-            eprintln!("Horizon: a patched function was not installed: {error}");
-        }
+/// Reports a mixin build's patched functions (function replacement) that were not installed,
+/// before the mods load. Each entry is a target function and what its installer answered: the
+/// launcher writes one copy per function, so a refused install is a build defect, and the
+/// function then runs as the game wrote it.
+pub fn installed(patched: &[(&str, bool)]) {
+    for (target, _) in patched.iter().filter(|(_, installed)| !installed) {
+        eprintln!("Horizon: {target}: a patched copy was already installed; this one was not");
     }
 }
-
-/// The places raw listeners register at, named by the generated `main`.
-#[doc(hidden)]
-pub use mod_points::PointId;
 
 /// Code-runtime services supplied by the platform at startup.
 pub struct CodeRuntime {
@@ -90,7 +77,7 @@ pub(crate) fn code_refusal(id: &str) -> Option<String> {
     CODE_RUNTIME.get().and_then(|runtime| (runtime.refusal)(id))
 }
 
-/// Start with named mods and their function slots in installed dependency order.
+/// Start with named mods in installed dependency order.
 pub fn start<G>(
     native: horizon_mod_package::runtime::Runtime,
     load: impl FnOnce(
@@ -98,7 +85,6 @@ pub fn start<G>(
         &LaunchArguments,
     ) -> (Vec<&'static str>, G),
     code: CodeRuntime,
-    slots: &[NativeSlot],
     startup: Startup,
 ) {
     let _ = CODE_RUNTIME.set(code);
@@ -125,15 +111,7 @@ pub fn start<G>(
     horizon_hooks::engine::seal();
     horizon_client::spans::startup::init(std::time::Instant::now());
     horizon_client::spans::trace::start_from_env();
-    let (ids, _loaded_code) = load(&native, &launch);
-    for id in ids {
-        for slot in slots.iter().filter(|slot| slot.id() == id) {
-            if let Err(error) = mod_points::register(slot) {
-                eprintln!("Horizon: {id}: {error}");
-                std::process::exit(game::exit_code::ERROR);
-            }
-        }
-    }
+    let (_ids, _loaded_code) = load(&native, &launch);
     logging::set_game_home(launch.context.home.clone());
     // The dedicated server logs in its own folder, as vanilla's does; the game in its home.
     let (home, side, thread) = if launch

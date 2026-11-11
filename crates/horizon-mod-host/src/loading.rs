@@ -4,7 +4,6 @@ use mod_api::__private::game::Fields;
 /// and start the engine. Keep the validated startup lease alive for the whole run.
 pub fn main_with(
     mods: Vec<mod_api::ModEntry>,
-    slots: &[horizon_client::entry::NativeSlot],
     built: &'static [horizon_mod_package::runtime::BuiltMod],
     startup: horizon_client::entry::Startup,
 ) {
@@ -93,7 +92,6 @@ pub fn main_with(
                     .any(|(owner, _)| owner == id)
             },
         },
-        slots,
         startup,
     );
 }

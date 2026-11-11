@@ -17,11 +17,9 @@ prepare = ["dep:horizon-prepare"]
 # A server's own files: server.properties, the op, white and ban lists, the user cache.
 server-files = ["dep:horizon-server-files"]
 
-mod-build = ["dep:horizon-mod-api-gen", "dep:horizon-mod-point-shape"]
 
 [dependencies]
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen", optional = true }
-horizon-mod-point-shape = { path = "../horizon-mod-point-shape", optional = true }
 horizon-core = { path = "../horizon-core" }
 horizon-system = { path = "../horizon-system" }
 horizon-world = { path = "../horizon-world", optional = true }

@@ -1,5 +1,4 @@
 //! Derive hook subscriptions from a trait implementation.
-mod point;
 mod wire;
 
 /// Derive the shared native/wasm owned-value encoding.
@@ -19,102 +18,6 @@ use syn::{
     ImplItem, ImplItemFn, ItemImpl, Meta, Token, parse::Parser, parse_macro_input,
     punctuated::Punctuated,
 };
-
-/// The staged call site's typed boundary. Only generated source invokes this macro.
-/// A borrowing record is passed as `Args::<'a>`; the generated dispatch function
-/// binds that call lifetime and preserves it through every continuation.
-#[proc_macro]
-pub fn site(input: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(input with Punctuated::<syn::Expr, Token![,]>::parse_terminated);
-    let args: Vec<_> = args.iter().collect();
-    let [
-        wrap,
-        place,
-        listener,
-        recv_ty,
-        record,
-        output,
-        receiver,
-        args,
-        original,
-    ] = args.as_slice()
-    else {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "expected fresh wrap name, site types, receiver, args and original",
-        )
-        .to_compile_error()
-        .into();
-    };
-    let borrow_lifetime = match record {
-        syn::Expr::Path(path) if path.path.segments.iter().any(|s| !s.arguments.is_empty()) => {
-            quote!(, 'a)
-        }
-        _ => quote!(),
-    };
-    quote! {{
-        fn #wrap<'g #borrow_lifetime>(__at: usize, __receiver: #recv_ty<'g, '_>, __args: &mut #record,
-            __original: &mut dyn FnMut(#recv_ty<'g, '_>, &mut #record) -> #output) -> #output {
-            ::mod_points::__private::wrap(::mod_points::SiteId::#place, __at, |__entry| {
-                match __entry {
-                    Some((__pointer, __next)) => {
-                        // SAFETY: registration checks this exact site's listener type.
-                        let __listener: #listener = unsafe { ::std::mem::transmute(__pointer) };
-                        __listener(__receiver, __args, &mut |__recv, __args| #wrap(__next, __recv, __args, __original))
-                    }
-                    None => __original(__receiver, __args),
-                }
-            })
-        }
-        #wrap(0, #receiver, &mut #args, &mut #original)
-    }}.into()
-}
-
-/// The consuming boundary for a native source call with owned arguments.
-/// Only generated source invokes it. Each listener gets a private, stack-borrowed
-/// forwarding capability whose `call(self, receiver, args)` consumes both values.
-#[proc_macro]
-pub fn site_once(input: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(input with Punctuated::<syn::Expr, Token![,]>::parse_terminated);
-    let args: Vec<_> = args.iter().collect();
-    let [
-        wrap,
-        place,
-        listener,
-        recv_ty,
-        record,
-        output,
-        capability,
-        receiver,
-        args,
-        original,
-    ] = args.as_slice()
-    else {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "expected consuming site types, capability, receiver, args and original",
-        )
-        .to_compile_error()
-        .into();
-    };
-    quote! {{
-        fn #wrap<'g, 'a>(__at: usize, __receiver: #recv_ty<'g, '_>, __args: #record,
-            __original: &mut dyn FnMut(#recv_ty<'g, '_>, #record) -> #output) -> #output {
-            ::mod_points::__private::wrap(::mod_points::SiteId::#place, __at, |__entry| {
-                match __entry {
-                    Some((__pointer, __next)) => {
-                        // SAFETY: registration checks this exact site's consuming listener type.
-                        let __listener: #listener = unsafe { ::std::mem::transmute(__pointer) };
-                        let mut __forward = |__recv: #recv_ty<'g, '_>, __args: #record| #wrap(__next, __recv, __args, __original);
-                        __listener(__receiver, __args, #capability::new(&mut __forward))
-                    }
-                    None => __original(__receiver, __args),
-                }
-            })
-        }
-        #wrap(0, #receiver, #args, &mut #original)
-    }}.into()
-}
 
 /// Keep only attributes that can gate a method, including nested `cfg_attr`s.
 fn cfg_meta(meta: &Meta) -> Option<Meta> {
@@ -409,45 +312,6 @@ pub fn horizon_mod(_attribute: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn horizon_part(_attribute: TokenStream, input: TokenStream) -> TokenStream {
     expand(parse_macro_input!(input as ItemImpl), false)
-}
-
-/// `#[no_point]` (as `mod_api::no_point`) on a function of a mod crate: `cargo horizon-mod build`
-/// gives it no injection point, so no addon can listen at it (#2339). It changes nothing else: the
-/// function compiles as written. An addon declaring a listener there is refused at load, the
-/// function named as opted out.
-#[proc_macro_attribute]
-pub fn no_point(attribute: TokenStream, input: TokenStream) -> TokenStream {
-    if !attribute.is_empty() {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "#[no_point] takes no arguments",
-        )
-        .to_compile_error()
-        .into();
-    }
-    let function = parse_macro_input!(input as ImplItemFn);
-    quote::quote!(#function).into()
-}
-
-/// `#[point(side = "server" | "client" | "both", name = "…", table = "…", raw, free, mirror(…))]` on a
-/// function: an injection point (#589), a slot the launcher fills at load for the mods that listen
-/// there. The staging pass that builds the prebuilt game (and the launcher's source builds) puts it
-/// on every function [`point_shape::eligible`] admits; the source tree carries none. Its head checks
-/// the slot (one atomic load and a branch while nothing listens). An API listener, native or wasm,
-/// gets the side's host (on a `Game` method) and a record holding a copy of every parameter as an
-/// API value (an engine type `mirror(…)` names as its `mod_api` mirror): the function runs with the
-/// record's by-value and `&T` values, and a `&mut T` parameter's place gets the record's value back.
-/// A raw listener (`raw`, native only) gets the receiver and a `&mut` to every parameter itself. Its
-/// return does the same with the value returned; a value that borrows reaches only raw listeners,
-/// as itself. `free` marks a free function, whose body moves to a sibling function. `table` names
-/// the slot table the point is in: the game's `mod_points` by default, or a mod crate's own
-/// generated table for a mod point (#2339). A `replace`
-/// listener (`mod_points::replace!`) owns the head's outcome: it runs after the other API
-/// listeners, and on a point with both forms the head keeps its value and cancel through the raw
-/// listeners after it.
-#[proc_macro_attribute]
-pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
-    point::expand(attribute.into(), parse_macro_input!(input as ImplItemFn)).into()
 }
 
 /// Derive subscriptions for internal test fixtures that construct their own mods.

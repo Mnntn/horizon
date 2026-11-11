@@ -1,6 +1,6 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
 use super::{Catalog, Target, free_function_source, host, native_hook_files, sources};
-use quote::ToTokens;
+
 use std::{fs, path::Path};
 
 /// Preserve output timestamps when generation produces identical bytes.
@@ -187,72 +187,6 @@ fn render_records_need_no_game_sources() {
         5
     );
     fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
-fn listed_render_slots_have_eligible_points() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    super::points::game_points(&root).unwrap();
-}
-
-/// The `mod_api` types with a `Wire` layout ([`super::wire`]), for point records.
-/// A source tree without the mod API (a generator fixture's) has none.
-pub(crate) fn wire_types(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
-    if !root.join("crates/horizon-mod-vocab/src/hooks").is_dir() {
-        return Ok(Default::default());
-    }
-    let generated = sources(root, super::FillMode::Require)?;
-    let included = [
-        (host::AREAS_OUTPUT, generated.areas.as_str()),
-        ("mod_api_generated.rs", generated.hooks.as_str()),
-        ("mod_api_generated_host.rs", generated.host.as_str()),
-    ];
-    // The resolver recurses through the API's types: give it a deep stack.
-    std::thread::scope(|scope| {
-        std::thread::Builder::new()
-            .stack_size(64 << 20)
-            .spawn_scoped(scope, || super::wire::owned_types(root, &included))
-            .map_err(|e| e.to_string())?
-            .join()
-            .map_err(|_| "reading the wire types panicked".to_string())?
-    })
-}
-
-/// `horizon-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
-/// from the game's source, tracking the game module's files.
-pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
-    crate::interface_cache::with_cache(out_dir, || generate_points_inner(root, out_dir))
-}
-
-pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), String> {
-    let src = root.join("crates/horizon-client/src");
-    crate::rerun_if_changed(&src.join("game.rs").display());
-    crate::rerun_if_changed(&src.join("game").display());
-    for path in super::points::tracked(root)?
-        .into_iter()
-        .chain(super::sites::tracked(root).map_err(|e| e.to_string())?)
-    {
-        crate::rerun_if_changed(&path.display());
-    }
-    println!("cargo:rerun-if-env-changed=HORIZON_POINT_NAMES");
-    let selected = std::env::var("HORIZON_POINT_NAMES")
-        .ok()
-        .map(|json| {
-            serde_json::from_str::<std::collections::BTreeSet<String>>(&json)
-                .map_err(|error| format!("HORIZON_POINT_NAMES: {error}"))
-        })
-        .transpose()?;
-    let code =
-        super::points::records_selected(&super::points::game_points(root)?, selected.as_ref())
-            + &super::sites::ids(root).map_err(|e| e.to_string())?;
-    let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
-    // A single multi-megabyte line makes Clippy's source lookups prohibitively slow.
-    let mut code = String::new();
-    for item in generated.items {
-        code.push_str(&item.to_token_stream().to_string());
-        code.push('\n');
-    }
-    write_if_changed(out_dir.join("points_generated.rs"), code).map_err(|e| e.to_string())
 }
 
 pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {

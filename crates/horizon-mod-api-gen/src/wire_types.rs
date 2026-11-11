@@ -30,7 +30,7 @@ struct Scan {
 /// explicit module paths.
 pub fn public_types(krate: &str, lib: &Path) -> Result<Vec<String>, String> {
     let dir = lib.parent().ok_or("library has no source directory")?;
-    let files = crate::points::module_files(krate.into(), lib.into(), dir.into(), true)?;
+    let files = crate::source::module_files(krate.into(), lib.into(), dir.into(), true)?;
     let mut parsed = Vec::new();
     for file in files {
         let source = fs::read_to_string(file.path).map_err(|e| e.to_string())?;

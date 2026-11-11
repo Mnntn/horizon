@@ -4,7 +4,7 @@ use quote::ToTokens;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path};
 
-/// Serialize the same API event types and point shapes used by code generation.
+/// Serialize the same API event types used by code generation.
 pub fn sdk_catalog(root: &Path, api_version: &str) -> Result<String, String> {
     let catalog = Catalog::load(root)?;
     let mut code = crate::sources(root, FillMode::Ignore)?.hooks;
@@ -50,34 +50,13 @@ pub fn sdk_catalog(root: &Path, api_version: &str) -> Result<String, String> {
             "scope": hook.scope.map(|scope| json!({"kind": match scope.kind { crate::catalog::PartKind::Block => "block", crate::catalog::PartKind::BlockEntity => "blockentity", crate::catalog::PartKind::Item => "item", crate::catalog::PartKind::Menu => "menu", crate::catalog::PartKind::Fluid => "fluid" }, "key": scope.key})),
             "contract": match hook.contract { crate::Contract::Listen => "listen", crate::Contract::Cancel => "cancel", crate::Contract::Collect => "collect", crate::Contract::Replace => "replace" }, "arguments": arguments, "output": output}));
     }
-    let points = crate::points::game_points(root)?
-        .into_iter()
-        .map(|point| {
-            let access = match (point.api_refusal.is_none(), point.raw) {
-                (true, true) => vec!["api", "internals"],
-                (true, false) => vec!["api"],
-                (false, true) => vec!["internals"],
-                (false, false) => vec![],
-            };
-            let mut value = serde_json::to_value(point).map_err(|e| e.to_string())?;
-            value["access"] = json!(access);
-            Ok(value)
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    serialize(api_version, hooks, points)
+    serialize(api_version, hooks)
 }
 
-fn serialize(
-    api_version: &str,
-    mut hooks: Vec<Value>,
-    mut points: Vec<Value>,
-) -> Result<String, String> {
+fn serialize(api_version: &str, mut hooks: Vec<Value>) -> Result<String, String> {
     hooks.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
-    points.sort_by(|a, b| {
-        (a["name"].as_str(), a["target"].as_str()).cmp(&(b["name"].as_str(), b["target"].as_str()))
-    });
     serde_json::to_string_pretty(
-        &json!({"schema_version": 1, "api_version": api_version, "hooks": hooks, "points": points}),
+        &json!({"schema_version": 2, "api_version": api_version, "hooks": hooks}),
     )
     .map(|s| s + "\n")
     .map_err(|e| e.to_string())

@@ -7,5 +7,4 @@ publish = false
 [dependencies]
 # The launcher stages both at the game's own paths; the revision is never fetched.
 horizon-mod-api = { git = "https://github.com/arismoko/horizon", rev = "HEAD" }
-horizon-mod-points = { git = "https://github.com/arismoko/horizon", rev = "HEAD" }
 horizon-internals = { git = "https://github.com/arismoko/horizon", rev = "HEAD" }

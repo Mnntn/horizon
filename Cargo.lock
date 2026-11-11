@@ -506,8 +506,6 @@ dependencies = [
  "dunce",
  "horizon-mod-api-gen",
  "horizon-mod-package",
- "horizon-mod-point-emit",
- "horizon-mod-point-shape",
  "horizon-mod-wasm",
  "horizon-port-pack",
  "libc",
@@ -1821,7 +1819,6 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-package",
- "horizon-mod-points",
  "horizon-mod-render",
  "horizon-mod-runtime",
  "horizon-mod-wasm",
@@ -2164,7 +2161,6 @@ version = "0.1.0"
 dependencies = [
  "heck",
  "horizon-game-discovery",
- "horizon-mod-point-shape",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -2193,7 +2189,6 @@ dependencies = [
 name = "horizon-mod-api-macros"
 version = "0.1.0"
 dependencies = [
- "horizon-mod-point-shape",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -2248,7 +2243,6 @@ dependencies = [
  "horizon-core",
  "horizon-mod-api",
  "horizon-mod-api-macros",
- "horizon-mod-point-shape",
  "horizon-mod-vocab",
  "horizon-shader-api",
  "libc",
@@ -2273,38 +2267,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-mod-point-emit"
-version = "0.1.0"
-dependencies = [
- "horizon-mod-package",
- "serde",
-]
-
-[[package]]
-name = "horizon-mod-point-shape"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "horizon-mod-points"
-version = "0.1.0"
-dependencies = [
- "horizon-mod-api",
- "horizon-mod-api-gen",
- "horizon-mod-api-macros",
- "horizon-mod-point-shape",
- "quote",
- "serde_json",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "horizon-mod-render"
 version = "0.1.0"
 dependencies = [
@@ -2312,7 +2274,6 @@ dependencies = [
  "glam",
  "horizon-mod-api",
  "horizon-mod-api-gen",
- "horizon-mod-points",
  "wgpu",
 ]
 
@@ -2350,8 +2311,6 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-package",
- "horizon-mod-point-emit",
- "horizon-mod-points",
  "horizon-mod-runtime",
  "log",
  "rustix 1.1.5",
@@ -2368,7 +2327,6 @@ name = "horizon-modding-examples"
 version = "0.0.0"
 dependencies = [
  "horizon-mod-api",
- "horizon-mod-points",
 ]
 
 [[package]]
@@ -2425,7 +2383,6 @@ dependencies = [
  "horizon-core",
  "horizon-hooks",
  "horizon-mod-api-gen",
- "horizon-mod-point-shape",
  "horizon-prepare",
  "horizon-protocol",
  "horizon-server-files",

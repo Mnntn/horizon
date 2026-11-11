@@ -86,11 +86,9 @@ pub mod servers {
     };
 }
 
-/// Build-time mod source generation and point signature inspection.
+/// Build-time mod source generation.
 #[cfg(feature = "mod-build")]
 pub mod mod_build {
     /// The shared mod API and source generator.
     pub use horizon_mod_api_gen as api_gen;
-    /// Parsing and validation of injection point signatures.
-    pub use point_shape;
 }

@@ -7,13 +7,8 @@ license.workspace = true
 publish = false
 description = "Build-time typed native mod API generation"
 
-[features]
-# Shared listener integration fixture only; never enabled by gameplay crates.
-listener-fixture = []
-
 [dependencies]
 horizon-game-discovery = { path = "../horizon-game-discovery" }
-horizon-mod-point-shape = { path = "../horizon-mod-point-shape" }
 heck = "0.5"
 syn = { version = "2", features = ["full", "visit", "visit-mut"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
@@ -34,8 +29,3 @@ tempfile = "3.27.0"
 
 [lints]
 workspace = true
-
-[[example]]
-name = "listener-fixture-catalog"
-path = "../horizon-mod-wasm/tests/support/catalog.rs"
-required-features = ["listener-fixture"]
