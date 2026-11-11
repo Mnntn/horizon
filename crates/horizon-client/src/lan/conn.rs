@@ -329,6 +329,31 @@ impl PlayerSender {
         sender.payload_transport = transport;
         sender
     }
+    /// Real bounded output queue without socket adoption, for executor tests.
+    #[cfg(test)]
+    pub(crate) fn payload_executor_test_sender(
+        transport: Arc<Transport>,
+    ) -> (Self, impl Fn() -> Vec<Vec<u8>>) {
+        let pending = Arc::default();
+        let outbox = io_pool::Outbox::new(Arc::clone(&pending)).unwrap();
+        let inspect = outbox.clone();
+        let sender = Self {
+            payload_transport: transport,
+            undrained: Arc::default(),
+            pending,
+            held: Arc::default(),
+            framing: horizon_protocol::connection::Framing::Memory,
+            to: To::Pool(
+                outbox,
+                Arc::new(KeepAliveWatch {
+                    start: Instant::now(),
+                    alive: Arc::new(AtomicI64::new(-1)),
+                }),
+            ),
+            wire: None,
+        };
+        (sender, move || inspect.queued_contents())
+    }
     /// A connectionless actor has no writer, queue or packet delivery.
     pub fn disabled() -> Self {
         Self {

@@ -103,6 +103,16 @@ pub(crate) fn event_channel() -> (
     crate::net::ingress::channel(96 << 20, NetEvent::ingress_charge)
         .expect("positive incoming byte budget")
 }
+#[cfg(test)]
+pub(crate) fn event_channel_with_capacity(
+    capacity: usize,
+) -> (
+    crate::net::ingress::Producer<NetEvent>,
+    crate::net::ingress::Consumer<NetEvent>,
+) {
+    crate::net::ingress::channel(capacity, NetEvent::ingress_charge)
+        .expect("positive test incoming byte budget")
+}
 impl NetEvent {
     fn ingress_charge(&self) -> usize {
         use horizon_protocol::retained::OwnedHeap;
