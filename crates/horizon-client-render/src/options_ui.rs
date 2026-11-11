@@ -4477,6 +4477,7 @@ impl OptionsUi {
         }
         if self.page() == Page::Language {
             if self.language_search.shortcut(shortcut, clipboard) {
+                self.relayout();
                 self.scroll = 0.0;
             }
             return true;
@@ -4492,6 +4493,7 @@ impl OptionsUi {
         }
         if self.settings_search_active() {
             if self.settings_search.shortcut(shortcut, clipboard) {
+                self.relayout();
                 self.scroll = 0.0;
             }
             return true;
@@ -5065,6 +5067,27 @@ mod tests {
 
     /// The page layout is made once per size and revision, not per frame,
     /// draw, hit test or scroll that changed nothing it reads.
+    #[test]
+    fn clipboard_paste_invalidates_cached_search_results() {
+        let s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.show(Page::Video);
+        ui.settings_search.focused = true;
+        let before = ui.built_layout(&s, 427.0, 240.0);
+        let mut clipboard = crate::clipboard::MemoryClipboard("zzzznotanoption".into());
+        assert!(ui.shortcut(
+            &atlas(),
+            crate::clipboard::EditShortcut::Paste,
+            &mut clipboard
+        ));
+        let after = ui.built_layout(&s, 427.0, 240.0);
+        assert!(before.parts().0.iter().any(|w| w.list));
+        assert!(
+            !after.parts().0.iter().any(|w| w.list),
+            "nonsense search must hide all option rows"
+        );
+    }
+
     #[test]
     fn the_page_layout_is_built_once_per_size_and_revision() {
         let mut s = Settings::default();
