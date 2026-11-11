@@ -6,6 +6,7 @@ mod event_timings;
 #[cfg(test)]
 mod level_event_targets;
 mod mob_metadata;
+mod raw_inbox;
 mod residency;
 
 use super::{
@@ -2933,39 +2934,10 @@ impl Game<'_> {
             }));
             events
         };
-        let mut events = events;
-        loop {
-            let Some(back) = horizon_client::spans::time("lan_events", || {
-                self.lan_process_events(host, events, entities.as_slice(), spawn)
-            }) else {
-                return;
-            };
-            host = back;
-            if !host.hub.packets_paused() {
-                break;
-            }
-            // Raw transactions finished above. Reborrow current world state only
-            // now; no callback captures a TickCtx or an as_guest world swap.
-            let clock_rate = self.network_clock_rate();
-            let mut ctx = TickCtx {
-                sea_level: self.end.locator().map_or(63, |terrain| terrain.sea_level()),
-                world: &mut self.world,
-                entities: entities.as_slice(),
-                next_entity: &mut self.next_entity,
-                spawn,
-                spawn_angle: self.level.world_spawn_angle,
-                difficulty: i32::from(self.ui.difficulty),
-                difficulty_locked: self.level.difficulty_locked,
-                clock_rate,
-                tick_rate: self.clock.rate(),
-                tick_frozen: self.clock.frozen(),
-                tick_steps: self.clock.step_state(),
-                collision: Some(self.collision),
-                border: &self.border,
-                streaming: Some(&self.streaming),
-            };
-            events = host.hub.drain_packets(&mut ctx);
-        }
+        let Some(back) = self.drain_raw_turns(host, events, entities.as_slice(), spawn) else {
+            return;
+        };
+        host = back;
         if !host.quiet.is_empty() {
             self.lan = Some(host);
             horizon_client::spans::time("lan_quiet_commands", || self.run_quiet_commands());

@@ -46,8 +46,10 @@ pub mod advancements;
 pub mod chat;
 pub mod chat_filter;
 mod item_particles;
+mod raw_inbox;
 mod spawn_info;
 use advancements::AdvancementOwners;
+use raw_inbox::{PacketDrain, yield_raw};
 pub mod game_event {
     pub const NO_RESPAWN_BLOCK_AVAILABLE: u8 = 0;
     pub const START_RAINING: u8 = 1;
@@ -314,14 +316,6 @@ fn take_tracking(
             events,
         });
     }
-}
-
-struct PacketDrain {
-    conns: Vec<u32>,
-    next: usize,
-    started: bool,
-    // Ordinary action deferral survives raw yields until this guest turn ends.
-    movement_held: bool,
 }
 
 pub struct Hub {
@@ -1445,15 +1439,7 @@ impl Hub {
         let entity_id = *ctx.next_entity as i32;
         let conn = j.conn;
         let mut guest = Guest::new(j, entity_id, ctx.spawn, self.config.view_distance);
-        if let Some(epoch) = self.payload_player_epoch {
-            guest
-                .sender
-                .payload_transport()
-                .bind_player(mod_api::__private::game::player_ref(
-                    mod_api::EntityRef::new(epoch, entity_id as u32),
-                    guest.uuid,
-                ));
-        }
+        self.bind_raw_player(&guest, entity_id);
         guest.last_action_tick = self.ticks;
         guest.game_mode = self.config.default_game_mode;
         guest.abilities.update_for_mode(guest.game_mode);
@@ -2350,16 +2336,7 @@ impl Hub {
             let (event, credit) = receipt.into_parts();
             match event {
                 NetEvent::RawPayload(delivery) => {
-                    if let Some(conn) = delivery.conn {
-                        self.update_guest(conn, |g| {
-                            if g.left_reason.is_empty() {
-                                g.inbox.push_back(InboxItem::Raw(delivery, credit));
-                            }
-                        });
-                    } else {
-                        events.push(HostEvent::RawPayload(delivery));
-                        credits.push(credit);
-                    }
+                    self.poll_raw_payload(delivery, credit, &mut events, &mut credits);
                 }
                 NetEvent::Joined(j) => {
                     credits.push(credit);
@@ -2474,77 +2451,6 @@ impl Hub {
             credits.extend(credit);
         }
         events.push(HostEvent::InputCredits(credits));
-    }
-
-    /// Handle the players in this level's packets (`ServerGamePacketListenerImpl`
-    /// for each), before the level's scheduled block ticks so a place landed in
-    /// the same tick as a falling block's schedule still sees the support
-    /// (#4510). `tick_level` then syncs what those packets (and the block ticks)
-    /// changed.
-    pub fn drain_packets(&mut self, ctx: &mut TickCtx) -> Vec<HostEvent> {
-        let mut events = Vec::new();
-        let mut pass = self.packet_drain.take().unwrap_or_else(|| PacketDrain {
-            conns: self
-                .guests
-                .iter()
-                .filter(|g| self.here(g) || (g.held && self.watches(g)))
-                .map(|g| g.conn)
-                .collect(),
-            next: 0,
-            started: false,
-            movement_held: false,
-        });
-        while let Some(&conn) = pass.conns.get(pass.next) {
-            let Some(i) = self.guests.iter().position(|g| g.conn == conn) else {
-                pass.next += 1;
-                pass.started = false;
-                pass.movement_held = false;
-                continue;
-            };
-            // A raw root may close the physical endpoint before its Left event
-            // reaches the next frozen poll. Do not acknowledge or apply later
-            // input in this incarnation while waiting for that notification.
-            if !self.guests[i].left_reason.is_empty()
-                || self.guests[i].sender.payload_transport().closed()
-            {
-                let discarded = self.guests.update(i, |g| std::mem::take(&mut g.inbox));
-                drop(discarded);
-                pass.next += 1;
-                pass.started = false;
-                pass.movement_held = false;
-                continue;
-            }
-            if !self.here(&self.guests[i])
-                && !(self.guests[i].held && self.watches(&self.guests[i]))
-            {
-                pass.next += 1;
-                pass.started = false;
-                pass.movement_held = false;
-                continue;
-            }
-            let frozen = self.guests[i].handover.is_some() || self.guests[i].held;
-            if frozen {
-                self.keep_acknowledgements(i, &mut events);
-            }
-            if self.process_inbox(i, ctx, &mut events, !pass.started, &mut pass.movement_held) {
-                pass.started = true;
-                self.packet_drain = Some(pass);
-                return events;
-            }
-            if !frozen && self.here(&self.guests[i]) {
-                self.tick_floating(i, &mut events);
-            }
-            pass.next += 1;
-            pass.started = false;
-            pass.movement_held = false;
-        }
-        events
-    }
-
-    /// A raw boundary must finish in Game before continuing this same level pass.
-    /// Resuming drains only the frozen inbox turn: no poll, maintenance or world tick.
-    pub fn packets_paused(&self) -> bool {
-        self.packet_drain.is_some()
     }
 
     /// The level in place's part of the tick (`ServerLevel.tick`'s chunk
@@ -4374,12 +4280,7 @@ impl Hub {
         // the action is still handled with it, as vanilla handles both in this tick
         // (the swing starts the attack strength again, #7817).
         loop {
-            // The I/O owner can also close concurrently between packets.
-            if !self.guests[i].left_reason.is_empty()
-                || self.guests[i].sender.payload_transport().closed()
-            {
-                let discarded = self.guests.update(i, |g| std::mem::take(&mut g.inbox));
-                drop(discarded);
+            if self.discard_closed_input(i) {
                 break;
             }
             if *held
@@ -4395,13 +4296,10 @@ impl Hub {
             };
             let packet = match entry {
                 InboxItem::Raw(delivery, credit) => {
-                    credits.push(credit);
-                    if !delivery.incoming.epoch.active() {
-                        continue;
+                    if yield_raw(delivery, credit, events, &mut credits) {
+                        return true;
                     }
-                    events.push(HostEvent::RawPayload(delivery));
-                    events.push(HostEvent::InputCredits(credits));
-                    return true;
+                    continue;
                 }
                 InboxItem::Packet(packet, credit) => {
                     credits.extend(credit);

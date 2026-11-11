@@ -8,6 +8,7 @@
 //! everything else.
 mod attack_target;
 mod recipe_properties;
+use super::raw_backlog::Received;
 
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
 use super::render_tick::{mob_tracking_body, player_tracking_body};
@@ -487,28 +488,6 @@ fn stepped_move(
         Start::Interpolating | Start::Unchanged => None,
     }
 }
-
-/// What the network thread delivered, in order: an event, or a chunk packet
-/// handed to the decoder (with the format it decodes with), whose column
-/// comes back from `ChunkDecoder::next`.
-enum Received {
-    Event(Event, horizon_client::net::ingress::ReceiveLease<Event>),
-    Chunk(
-        Arc<ChunkFormat>,
-        horizon_client::net::ingress::ReceiveLease<Event>,
-    ),
-}
-
-// Keep net::Event's transport-owned staging slot bound honest as the actor evolves.
-const _: () = assert!(
-    std::mem::size_of::<Received>()
-        <= std::mem::size_of::<(
-            Event,
-            horizon_client::net::ingress::ReceiveLease<Event>,
-            usize,
-            usize,
-        )>()
-);
 
 /// `Minecraft.services().profileKeySignatureValidator()`: the services' profile-key keys, which a
 /// player's chat key must be signed by. Asked for once per connection to a server, off the game
@@ -2307,10 +2286,7 @@ impl Game<'_> {
             {
                 self.observe_client_packet(packet);
                 forgotten.insert((p.pos[0], p.pos[1]));
-                let Received::Event(_, credit) = item else {
-                    unreachable!()
-                };
-                forgotten_credits.push(credit);
+                forgotten_credits.push(item.into_event_credit());
                 continue;
             }
             self.forget_remote_columns(&mut forgotten, true);
