@@ -320,6 +320,8 @@ struct PacketDrain {
     conns: Vec<u32>,
     next: usize,
     started: bool,
+    // Ordinary action deferral survives raw yields until this guest turn ends.
+    movement_held: bool,
 }
 
 pub struct Hub {
@@ -2490,11 +2492,13 @@ impl Hub {
                 .collect(),
             next: 0,
             started: false,
+            movement_held: false,
         });
         while let Some(&conn) = pass.conns.get(pass.next) {
             let Some(i) = self.guests.iter().position(|g| g.conn == conn) else {
                 pass.next += 1;
                 pass.started = false;
+                pass.movement_held = false;
                 continue;
             };
             // A raw root may close the physical endpoint before its Left event
@@ -2507,6 +2511,7 @@ impl Hub {
                 drop(discarded);
                 pass.next += 1;
                 pass.started = false;
+                pass.movement_held = false;
                 continue;
             }
             if !self.here(&self.guests[i])
@@ -2514,13 +2519,14 @@ impl Hub {
             {
                 pass.next += 1;
                 pass.started = false;
+                pass.movement_held = false;
                 continue;
             }
             let frozen = self.guests[i].handover.is_some() || self.guests[i].held;
             if frozen {
                 self.keep_acknowledgements(i, &mut events);
             }
-            if self.process_inbox(i, ctx, &mut events, !pass.started) {
+            if self.process_inbox(i, ctx, &mut events, !pass.started, &mut pass.movement_held) {
                 pass.started = true;
                 self.packet_drain = Some(pass);
                 return events;
@@ -2530,6 +2536,7 @@ impl Hub {
             }
             pass.next += 1;
             pass.started = false;
+            pass.movement_held = false;
         }
         events
     }
@@ -4349,6 +4356,7 @@ impl Hub {
         ctx: &mut TickCtx,
         events: &mut Vec<HostEvent>,
         begin: bool,
+        held: &mut bool,
     ) -> bool {
         let mut credits = Vec::new();
         // ServerGamePacketListenerImpl.tickPlayer ran between the last
@@ -4365,7 +4373,6 @@ impl Hub {
         // move waits for the next tick, but the arm swing the client sent right after
         // the action is still handled with it, as vanilla handles both in this tick
         // (the swing starts the attack strength again, #7817).
-        let mut held = false;
         loop {
             // The I/O owner can also close concurrently between packets.
             if !self.guests[i].left_reason.is_empty()
@@ -4375,7 +4382,7 @@ impl Hub {
                 drop(discarded);
                 break;
             }
-            if held
+            if *held
                 && !matches!(
                     self.guests[i].inbox.front(),
                     Some(InboxItem::Packet(S::Punch(_), _) | InboxItem::Raw(_, _))
@@ -4532,7 +4539,7 @@ impl Hub {
                 S::Attack(p) => {
                     if !self.anticheat_attack(i, p.id, events) {
                         events.push(HostEvent::Packet(conn, Box::new(S::Attack(p))));
-                        held = self.move_queued(i);
+                        *held = self.move_queued(i);
                     }
                 }
                 S::Punch(p) => {
@@ -4705,13 +4712,13 @@ impl Hub {
                 S::PlayerAction(p) => {
                     let stab = p.action == 8;
                     events.push(HostEvent::Packet(conn, Box::new(S::PlayerAction(p))));
-                    held = !stab && self.move_queued(i);
+                    *held = !stab && self.move_queued(i);
                 }
                 // handleUseItem uses the player's position and known movement now:
                 // a later move must not overtake a throw before the game runs it.
                 S::UseItem(p) => {
                     events.push(HostEvent::Packet(conn, Box::new(S::UseItem(p))));
-                    held = self.move_queued(i);
+                    *held = self.move_queued(i);
                 }
                 // handleUseItemOn is the game's too, and BlockItem.canPlace checks
                 // the player's box where they clicked from (Level.isUnobstructed), as
@@ -4721,13 +4728,13 @@ impl Hub {
                 // placer's client plays (BlockItem.place's playSound(player, ...)).
                 S::UseItemOn(p) => {
                     events.push(HostEvent::Packet(conn, Box::new(S::UseItemOn(p))));
-                    held = self.move_queued(i);
+                    *held = self.move_queued(i);
                 }
                 // handleInteract is the game's too, like handleAttack above: a move queued
                 // behind it waits for the next tick.
                 S::Interact(p) => {
                     events.push(HostEvent::Packet(conn, Box::new(S::Interact(p))));
-                    held = self.move_queued(i);
+                    *held = self.move_queued(i);
                 }
                 // ContainerInput's codec (ByIdMap, OutOfBoundsStrategy.ZERO) reads an
                 // unknown click type as PICKUP.

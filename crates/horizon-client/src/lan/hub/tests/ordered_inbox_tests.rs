@@ -111,6 +111,8 @@ fn raw_hub(
         crate::lan::PlayerSender::new_with_payload_transport(tx, Arc::default(), transport);
     hub.guests.update(0, |g| {
         g.sender = sender;
+        g.loaded = true;
+        g.load_timeout = 0;
     });
     (hub, out)
 }
@@ -385,4 +387,69 @@ fn raw_disconnect_rejects_later_input_before_left_notification_is_polled() {
             );
         });
     });
+}
+
+#[test]
+fn raw_never_overtakes_deferred_movement_and_cannot_reset_its_next_tick_deferral() {
+    for raw_before_move in [false, true] {
+        crate::raw_payloads::test_support::with_peer(|transport| {
+            let (mut hub, _out) = raw_hub(transport);
+            publish_packet(&hub, S::Attack(play::Attack { id: 7 }));
+            publish_packet(&hub, S::Punch(horizon_protocol::packets::Empty));
+            if raw_before_move {
+                publish_raw(&hub, vec![1]);
+            }
+            publish_packet(&hub, rotation(10.0));
+            if !raw_before_move {
+                publish_raw(&hub, vec![1]);
+            }
+            with_input_context(|ctx| {
+                drop(hub.poll(ctx));
+                let first = hub.drain_packets(ctx);
+                assert_eq!(
+                    hub.guests[0].yaw, 0.0,
+                    "action must defer subsequent movement"
+                );
+                assert!(first.iter().any(|e| matches!(e, HostEvent::Packet(_, packet) if matches!(&**packet, S::Attack(_)))));
+                let raw_count = first
+                    .iter()
+                    .filter(|e| matches!(e, HostEvent::RawPayload(_)))
+                    .count();
+                assert_eq!(
+                    raw_count,
+                    usize::from(raw_before_move),
+                    "raw cannot overtake a prior deferred move"
+                );
+                drop(first);
+                if raw_before_move {
+                    assert!(hub.packets_paused());
+                    drop(hub.drain_packets(ctx));
+                    assert_eq!(
+                        hub.guests[0].yaw, 0.0,
+                        "raw resume must retain the action's next-tick movement hold"
+                    );
+                }
+                assert!(!hub.packets_paused());
+                assert!(!hub.guests[0].inbox.is_empty());
+                // Only the next receiving/tick turn may apply the deferred move.
+                drop(hub.poll(ctx));
+                let second = hub.drain_packets(ctx);
+                assert_eq!(hub.guests[0].yaw, 10.0);
+                assert_eq!(
+                    second
+                        .iter()
+                        .filter(|e| matches!(e, HostEvent::RawPayload(_)))
+                        .count(),
+                    usize::from(!raw_before_move)
+                );
+                drop(second);
+                if hub.packets_paused() {
+                    drop(hub.drain_packets(ctx));
+                }
+                assert!(!hub.packets_paused());
+                assert!(hub.guests[0].inbox.is_empty());
+                assert_eq!(hub.lan.shared.events.stats().reserved_bytes, 0);
+            });
+        });
+    }
 }
