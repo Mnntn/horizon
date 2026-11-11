@@ -45,6 +45,30 @@ fn table_refusals(bundle: &Bundle) -> Vec<String> {
 /// The support modules and bridges `bundles` add to the patch crate.
 fn extras(bundles: &[&Bundle]) -> Result<api_gen::patch::Extras, String> {
     let mut extras = api_gen::patch::Extras::default();
+    // The names the helpers and bindings use, which a lower crate's mirror keeps imports for.
+    for bundle in bundles {
+        for row in &bundle.native().mixin {
+            let mut texts =
+                vec![fs::read_to_string(bundle.dir.join(&row.helper)).unwrap_or_default()];
+            // `bindings` and every other forwarded key: their strings name types and values.
+            fn strings(value: &toml::Value, out: &mut Vec<String>) {
+                match value {
+                    toml::Value::String(text) => out.push(text.replace('$', " ")),
+                    toml::Value::Array(items) => items.iter().for_each(|v| strings(v, out)),
+                    toml::Value::Table(table) => table.values().for_each(|v| strings(v, out)),
+                    _ => {}
+                }
+            }
+            for value in row.options.values() {
+                strings(value, &mut texts);
+            }
+            for text in texts {
+                if let Ok(tokens) = text.parse::<proc_macro2::TokenStream>() {
+                    api_gen::patch::idents_in(&tokens, &mut extras.idents);
+                }
+            }
+        }
+    }
     let normalize = |s: &str| s.replace('-', "_").to_ascii_lowercase();
     for bundle in bundles {
         let id = &bundle.manifest.id;
