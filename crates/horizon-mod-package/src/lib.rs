@@ -39,4 +39,5 @@ pub use content::Content;
 pub use manifest::{Capability, Manifest, Package, Side, find};
 
 /// Filename of the versioned SDK tool catalog.
-pub use point_shape::SDK_CATALOG_FILE;
+/// Filename of the staged SDK catalog.
+pub const SDK_CATALOG_FILE: &str = "mod-catalog.json";
