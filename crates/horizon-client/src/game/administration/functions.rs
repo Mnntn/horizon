@@ -212,6 +212,16 @@ impl Game<'_> {
         }
         let _ = self.reload_datapacks(false, &self.level.enabled_features.clone());
     }
+    pub(super) fn open_world_datapacks(
+        &mut self,
+        enabled_features: &[String],
+    ) -> Result<PackStack, ReloadStageError> {
+        // Function admission parses commands immediately, including block arguments.
+        // Populate static registries on first open; admission synchronizes pack IDs.
+        self.build_registries();
+        self.reload_datapacks(false, enabled_features)
+    }
+
     pub(super) fn reload_datapacks(
         &mut self,
         run_load: bool,
@@ -1402,6 +1412,61 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources and scratch homes/cwd"]
+    fn first_world_open_admits_block_function() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let folder = "first-open-block-function";
+            let world = std::env::current_dir().unwrap().join("saves").join(folder);
+            let pack = world.join("datapacks/first_open");
+            let functions = pack.join("data/first_open/function");
+            std::fs::create_dir_all(&functions).unwrap();
+            let f = horizon_core::version::DATA_PACK_FORMAT;
+            std::fs::write(
+                pack.join("pack.mcmeta"),
+                serde_json::json!({"pack":{
+                    "description":"First open regression", "pack_format":f.0,
+                    "min_format":[f.0,f.1], "max_format":[f.0,f.1]
+                }})
+                .to_string(),
+            )
+            .unwrap();
+            std::fs::write(
+                functions.join("block.mcfunction"),
+                "execute if block 0 64 0 minecraft:repeater[delay=2] run return 1\n",
+            )
+            .unwrap();
+            std::fs::write(
+                functions.join("invalid.mcfunction"),
+                "setblock 0 64 0 first_open:missing_block\n",
+            )
+            .unwrap();
+            let request = crate::game::world_loading::WorldRequest::new(
+                folder,
+                None,
+                Some(3042),
+                true,
+                None,
+                game.level.rule_registry.clone(),
+            )
+            .unwrap();
+            game.load_world(request).unwrap();
+            assert!(
+                game.fns.store.functions.contains_key("first_open:block"),
+                "first-open admission errors: {:?}",
+                game.fns.store.errors
+            );
+            assert!(!game.fns.store.functions.contains_key("first_open:invalid"));
+            assert!(
+                game.fns
+                    .store
+                    .errors
+                    .iter()
+                    .any(|(id, _)| id == "first_open:invalid")
+            );
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]

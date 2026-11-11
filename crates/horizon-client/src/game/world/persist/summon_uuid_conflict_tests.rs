@@ -3,6 +3,64 @@ use super::*;
 use crate::game::commands::Target;
 use horizon_client::motion::PlayerMotion;
 
+#[test]
+#[ignore = "needs prepared resources, a scratch HORIZON_HOME and HORIZON_TEST_SEEDS=1"]
+fn constructed_and_saved_mob_uuids_survive_repeated_reconstruction() {
+    use horizon_core::random::RandomSource;
+
+    // Independent Java 48-bit LCG calculation: uniquifier 12345 multiplied
+    // (wrapping i64) by 1181783497276652981 seeds Entity.random with
+    // -2257288423974277811. Two nextLongs with UUID version/variant masks
+    // yield these words; nextFloat consumes the yaw, then nextInt is below.
+    // A pig reconstructed without finalization consumes no further own draws.
+    const CONSTRUCTOR_UUID: [i32; 4] = [1462068314, 225001827, -1901508738, 42864579];
+    const NEXT_DRAW: i32 = -742666194;
+    with_game(|game, _| {
+        for saved_uuid in [None, Some([160, 0, 0, 987])] {
+            let mut tag = Tag::compound([("id", Tag::String("minecraft:pig".into()))]);
+            if let Some(uuid) = saved_uuid
+                && let Tag::Compound(fields) = &mut tag
+            {
+                fields.insert("UUID".into(), Tag::IntArray(uuid.to_vec()));
+            }
+            // Reset only this test thread, after resource/game setup has drawn.
+            horizon_client::random_source::set_thread_uniquifier(12345).unwrap();
+            let mut id = game.load_mob(tag, None).unwrap();
+            let uuid = saved_uuid.unwrap_or(CONSTRUCTOR_UUID);
+            assert_eq!(game.persist.uuid_of(id), Some(uuid));
+            assert_eq!(
+                game.mobs
+                    .iter()
+                    .find(|mob| mob.id == id)
+                    .unwrap()
+                    .random
+                    .clone()
+                    .next_int(),
+                NEXT_DRAW
+            );
+            for _ in 0..3 {
+                let tag = game.command_target_nbt(Target::Mob(id)).unwrap();
+                assert_eq!(entity_nbt::uuid(&tag), Some(uuid));
+                game.forget_entity(id);
+                game.mobs.retain(|mob| mob.id != id);
+                horizon_client::random_source::set_thread_uniquifier(12345).unwrap();
+                id = game.load_mob(tag, None).unwrap();
+                assert_eq!(game.persist.uuid_of(id), Some(uuid));
+                assert_eq!(
+                    game.mobs
+                        .iter()
+                        .find(|mob| mob.id == id)
+                        .unwrap()
+                        .random
+                        .clone()
+                        .next_int(),
+                    NEXT_DRAW
+                );
+            }
+        }
+    });
+}
+
 const PIG: &str = "NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Silent:1b";
 
 fn pig(tag: &str, n: i32, riders: &str) -> String {
