@@ -22,8 +22,6 @@
 use horizon_mod_package::{Content, Manifest, Package, index::native, manifest::MANIFEST};
 mod bounded;
 mod check;
-mod inject;
-mod inject_sync;
 mod internals;
 mod jar;
 mod layouts;
