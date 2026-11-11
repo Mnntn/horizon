@@ -24,7 +24,7 @@ def main():
     args = parser.parse_args()
     if args.select:
         paths = subprocess.check_output(
-            ["git", "diff", "--name-only", "-z", *args.select], cwd=ROOT,
+            ["git", "diff", "--no-renames", "--name-only", "-z", *args.select], cwd=ROOT,
         ).decode().split("\0")
         print(f"required={str(applies(paths)).lower()}")
         return
