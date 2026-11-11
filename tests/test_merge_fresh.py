@@ -168,6 +168,12 @@ class Freshness(unittest.TestCase):
         with self.assertRaisesRegex(m.Unavailable, 'fork PR'):
             m.check(api, 7)
 
+    def test_unavailable_cli_text_and_exit_code(self):
+        output = io.StringIO()
+        with patch.object(m, 'check', side_effect=m.Unavailable('gate pending or unsuccessful: verify')), patch('sys.argv', ['merge_fresh.py', '7']), patch('sys.stdout', output):
+            self.assertEqual(m.main(), 2)
+        self.assertEqual(output.getvalue(), 'UNAVAILABLE (treat as STALE): gate pending or unsuccessful: verify\n')
+
     def test_bad_evidence(self):
         good = self.history('crates/a/src/a.rs', 'crates/b/src/b.rs')
         mutations = [lambda a: a.record.update(head='0'*40), lambda a: a.record.update(attempt=1),

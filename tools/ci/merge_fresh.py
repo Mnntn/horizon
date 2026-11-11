@@ -195,7 +195,7 @@ def main():
         reason = check(GitHub(args.repo), args.pr)
     except (KeyError, IndexError, AttributeError, TypeError, ValueError, OSError,
             subprocess.CalledProcessError, zipfile.BadZipFile) as error:
-        print(f'STALE: evidence unavailable: {error}')
+        print(f'UNAVAILABLE (treat as STALE): {error}')
         return 2
     print('STALE: ' + reason if reason else 'FRESH: current-head gate passes; no intervening conflict')
     return 1 if reason else 0
