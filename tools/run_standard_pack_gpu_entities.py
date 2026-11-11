@@ -13,7 +13,6 @@ import lab
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--raw-slots-only", action="store_true", help="test raw dispatch without shader-pack rendering")
     args = parser.parse_args()
     target = prebuilt_game.ROOT / "target" / "standard-pack-gpu-entities"
     staged = prebuilt_game.stage(target)
@@ -31,8 +30,7 @@ def main():
             homes[name] = str(path)
         env = lab.game_env(CARGO_TARGET_DIR=target / "build", **homes)
         subprocess.run(["cargo", "run", "--profile", "dev", "-p", "horizon-client-render",
-                        "--example", "standard_pack_gpu_entities", "--", str(output),
-                        *(["--raw-slots-only"] if args.raw_slots_only else [])],
+                        "--example", "standard_pack_gpu_entities", "--", str(output)],
                        cwd=staged, env=env, check=True)
 
 
