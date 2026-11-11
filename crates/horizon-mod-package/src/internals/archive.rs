@@ -226,18 +226,14 @@ mod tests {
         oversized.remove(1);
         let bytes = archive(CATALOG, tar::EntryType::Regular, &oversized);
         assert!(catalogs_from_archive(bytes.as_slice()).is_ok());
-        for (bytes, expected) in [(
-            archive(CATALOG, tar::EntryType::Symlink, JSON),
-            "not a file",
-        )] {
-            assert!(
-                catalogs_from_archive(bytes.as_slice())
-                    .err()
-                    .unwrap()
-                    .to_string()
-                    .contains(expected)
-            );
-        }
+        let bytes = archive(CATALOG, tar::EntryType::Symlink, JSON);
+        assert!(
+            catalogs_from_archive(bytes.as_slice())
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("not a file")
+        );
     }
 
     #[test]
