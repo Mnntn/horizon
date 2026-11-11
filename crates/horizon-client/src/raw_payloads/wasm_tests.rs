@@ -74,25 +74,27 @@ fn compiled_guest_observes_physical_provider_pressure() {
         let endpoint = Endpoint::server(sender);
         let body: Vec<u8> = (0..1 << 20).map(|i| (i % 251) as u8).collect();
         let expected = body.clone();
-        let (_, counts) = horizon_threads::allocation_probe::measure(|| {
-            let incoming = Incoming::new(
-                &transport,
-                negotiation::Phase::Play,
-                horizon_protocol::packets::custom_payload::CustomPayload {
-                    channel: "wasm_fixture:measure".into(),
-                    data: body,
-                },
-            )
-            .unwrap();
-            dispatch(
-                incoming,
-                endpoint.clone(),
-                MainQueue::Server {
-                    events,
-                    endpoint,
-                    conn: Some(1),
-                },
-            );
+        let ((_, copies), counts) = horizon_threads::allocation_probe::measure(|| {
+            horizon_mod_wasm::copy_probe::measure(|| {
+                let incoming = Incoming::new(
+                    &transport,
+                    negotiation::Phase::Play,
+                    horizon_protocol::packets::custom_payload::CustomPayload {
+                        channel: "wasm_fixture:measure".into(),
+                        data: body,
+                    },
+                )
+                .unwrap();
+                dispatch(
+                    incoming,
+                    endpoint.clone(),
+                    MainQueue::Server {
+                        events,
+                        endpoint,
+                        conn: Some(1),
+                    },
+                );
+            })
         });
         let expected_packet = encode(
             negotiation::Phase::Play,
@@ -105,6 +107,10 @@ fn compiled_guest_observes_physical_provider_pressure() {
         eprintln!(
             "1 MiB actual guest ingress -> NETWORK callback -> physical Outbox allocation requests: {counts:?}; includes realloc requests, excludes input construction and output snapshot"
         );
+        eprintln!(
+            "Actual shared-memory runtime copy bytes: {copies:?}; excludes guest-internal encode/decode and physical packet encoding copies"
+        );
+        assert!(copies.to_guest_bytes >= 1 << 20 && copies.from_guest_bytes >= 1 << 20);
         assert!(
             counts.large_calls > 0,
             "measurement must observe the actual wire body allocations"

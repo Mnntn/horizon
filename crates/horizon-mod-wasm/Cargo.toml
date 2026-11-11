@@ -40,6 +40,8 @@ workspace = true
 # Synthetic points are opt-in for the listener matrix only. Dev-dependencies
 # would unify them into every integration test's game layout.
 [features]
+# Test instrumentation only; does not alter Wire layout.
+test-copy-probe = []
 listener-fixture = ["mod_points/listener-fixture", "horizon-mod-api-gen/listener-fixture"]
 
 [[test]]

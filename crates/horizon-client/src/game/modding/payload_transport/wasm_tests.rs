@@ -11,28 +11,40 @@ static RECEIPTS: AtomicUsize = AtomicUsize::new(0);
 static ROOTS: Mutex<Vec<(f32, f32, bool)>> = Mutex::new(Vec::new());
 const TEST: &str = "game::payload_transport::wasm_tests::compiled_guest_runs_in_actual_game_roots";
 
-pub(super) fn health(game: &Game<'_>, endpoint: &Endpoint) -> Option<f32> {
-    if !ACTIVE.load(Ordering::SeqCst) {
+pub(super) fn health(game: &Game<'_>, endpoint: &Endpoint, id: &PayloadId) -> Option<f32> {
+    if endpoint.side() != Side::Server
+        || !matches!(
+            id.0.as_str(),
+            "wasm_fixture:game_main" | "wasm_fixture:game_network"
+        )
+        || !ACTIVE.load(Ordering::SeqCst)
+    {
         return None;
     }
     let player = endpoint.transport().player()?;
     let host: &dyn mod_api::ServerHost = game;
-    host.living_health(mod_api::LivingRef::new(player.entity()))
+    mod_api::LivingRef::new(player.entity()).health(host)
 }
-pub(super) fn observe(before: Option<f32>, game: &Game<'_>, endpoint: &Endpoint, commit: bool) {
-    if let (Some(before), Some(after)) = (before, health(game, endpoint)) {
+pub(super) fn observe(
+    before: Option<f32>,
+    game: &Game<'_>,
+    endpoint: &Endpoint,
+    id: &PayloadId,
+    commit: bool,
+) {
+    if let (Some(before), Some(after)) = (before, health(game, endpoint, id)) {
         ROOTS.lock().unwrap().push((before, after, commit));
     }
 }
 struct Receipt;
 impl mod_api::IPayloadHandler for Receipt {
     fn handle(&self, bytes: PayloadBytes, context: &mut dyn IPayloadContext) -> Result<(), String> {
+        RECEIPTS.fetch_add(1, Ordering::SeqCst);
         assert_eq!(context.flow(), PayloadDirection::ToClient);
         assert_eq!(bytes.0.len(), 1 << 20);
         for (i, byte) in bytes.0.iter().enumerate() {
             assert_eq!(*byte, ((i * 31 + 7) % 251) as u8);
         }
-        RECEIPTS.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 }
@@ -52,14 +64,23 @@ fn compiled_guest_runs_in_actual_game_roots() {
     if super::super::native_entity_refs::tests::run_fresh_cases(
         TEST,
         "HORIZON_WASM_GAME_CASE",
-        &["main", "network", "handler_trap", "work_trap"],
+        &[
+            "main",
+            "network",
+            "handler_trap",
+            "work_trap",
+            "network_handler_trap",
+        ],
     ) {
         return;
     }
     use horizon_mod_package::manifest::Package;
     let case = std::env::var("HORIZON_WASM_GAME_CASE").unwrap();
     let network = matches!(case.as_str(), "network" | "work_trap");
-    let trap = matches!(case.as_str(), "handler_trap" | "work_trap");
+    let trap = matches!(
+        case.as_str(),
+        "handler_trap" | "work_trap" | "network_handler_trap"
+    );
     let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
     let path = std::path::Path::new(&path);
     let manifest = Package::read(path).unwrap().manifest;
@@ -118,7 +139,9 @@ fn compiled_guest_runs_in_actual_game_roots() {
                 }
             }
             let _scope = Scope;
-            let channel = if network {
+            let channel = if case == "network_handler_trap" {
+                "wasm_fixture:network_trap"
+            } else if network {
                 "wasm_fixture:game_network"
             } else {
                 "wasm_fixture:game_main"
@@ -136,7 +159,9 @@ fn compiled_guest_runs_in_actual_game_roots() {
             loop {
                 game.poll_remote().unwrap();
                 let observed = !ROOTS.lock().unwrap().is_empty();
-                if observed && (trap || RECEIPTS.load(Ordering::SeqCst) == 1) {
+                if (trap && game.remote.is_none())
+                    || (!trap && observed && RECEIPTS.load(Ordering::SeqCst) == 1)
+                {
                     break;
                 }
                 assert!(
@@ -146,7 +171,20 @@ fn compiled_guest_runs_in_actual_game_roots() {
                 std::thread::yield_now();
             }
             let roots = ROOTS.lock().unwrap();
-            let &(before, after, commit) = roots.last().unwrap();
+            if case == "network_handler_trap" {
+                assert!(
+                    roots.is_empty(),
+                    "NETWORK handler trap must cancel staged main work before Game dispatch"
+                );
+                assert_eq!(RECEIPTS.load(Ordering::SeqCst), 0);
+                return;
+            }
+            assert_eq!(
+                roots.len(),
+                1,
+                "only the authoritative request/work root is observed"
+            );
+            let &(before, after, commit) = &roots[0];
             assert_eq!(commit, !trap);
             assert_eq!(
                 after,
@@ -155,7 +193,9 @@ fn compiled_guest_runs_in_actual_game_roots() {
             );
             assert_eq!(RECEIPTS.load(Ordering::SeqCst), usize::from(!trap));
             drop(roots);
-            game.leave_server(None).unwrap();
+            if game.remote.is_some() {
+                game.leave_server(None).unwrap();
+            }
         });
     });
 }

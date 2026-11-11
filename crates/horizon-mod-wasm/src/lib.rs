@@ -2,6 +2,8 @@
 //! (the same model as native mods: required and optional, semver on `horizon-mod.toml`
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
 //! Mods page.
+#[cfg(feature = "test-copy-probe")]
+pub mod copy_probe;
 pub mod link;
 mod module_cache;
 #[cfg(test)]

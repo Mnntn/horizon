@@ -102,7 +102,7 @@ impl Game<'_> {
             work_lease,
         } = incoming;
         #[cfg(test)]
-        let wasm_health_before = wasm_tests::health(self, &endpoint);
+        let wasm_health_before = wasm_tests::health(self, &endpoint, &id);
         let seal = self.transaction_open();
         let mut context = MainContext {
             game: self,
@@ -129,6 +129,7 @@ impl Game<'_> {
             wasm_health_before,
             context.game,
             &endpoint,
+            &id,
             failure.is_none(),
         );
         if let Some(error) = failure {

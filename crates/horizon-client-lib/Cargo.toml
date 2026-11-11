@@ -129,7 +129,7 @@ workspace = true
 
 [dev-dependencies]
 horizon-threads = { path = "../horizon-threads", features = ["test-allocation-probe"] }
-horizon-mod-wasm = { path = "../horizon-mod-wasm", features = ["listener-fixture"] }
+horizon-mod-wasm = { path = "../horizon-mod-wasm", features = ["listener-fixture", "test-copy-probe"] }
 horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }
 # ui_theme's unit tests draw text in the design system's fonts.
 horizon-theme = { path = "../horizon-theme" }

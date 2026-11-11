@@ -7,6 +7,14 @@ pub fn register(registrar: &mut dyn Registrar) {
         .payload_handlers()
         .registrar("1")
         .executes_on(HandlerThread::Network)
+        .play_to_server(
+            PayloadId("wasm_fixture:network_trap".into()),
+            Arc::new(NetworkTrap),
+        );
+    registrar
+        .payload_handlers()
+        .registrar("1")
+        .executes_on(HandlerThread::Network)
         .play_bidirectional(
             PayloadId("wasm_fixture:measure".into()),
             Arc::new(Echo),
@@ -29,6 +37,18 @@ pub fn register(registrar: &mut dyn Registrar) {
             .registrar("1")
             .executes_on(thread)
             .play_to_server(PayloadId(channel.into()), Arc::new(Handler(thread)));
+    }
+}
+struct NetworkTrap;
+impl IPayloadHandler for NetworkTrap {
+    fn handle(&self, _: PayloadBytes, cx: &mut dyn IPayloadContext) -> Result<(), String> {
+        cx.enqueue_work(Arc::new(Noop)).unwrap();
+        cx.reply(
+            &PayloadId("raw_probe:receipt".into()),
+            PayloadBytes(vec![0xde, 0xad]),
+        )
+        .unwrap();
+        panic!("NETWORK handler trap after staged work and reply");
     }
 }
 struct Echo;
@@ -97,9 +117,9 @@ fn finish(bytes: PayloadBytes, cx: &mut dyn IPayloadContext) -> Result<(), Strin
             .is_some()
     );
     let living = LivingRef::new(player.entity());
-    let before = host.living_health(living).unwrap();
+    let before = living.health(host).unwrap();
     assert!(before > 3.0);
-    assert!(host.living_set_health(living, before - 1.0));
+    assert!(living.set_health(host, before - 1.0));
     // The parent test observes this actual root-owned write, not a substitute Host.
     // A one-byte request stages a receipt and then traps. Both the receipt and
     // health write must be rolled back by the real executor/Game root.
