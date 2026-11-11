@@ -73,10 +73,120 @@ pub fn lifetimes_only(generics: &syn::Generics) -> bool {
         .all(|param| matches!(param, syn::GenericParam::Lifetime(_)))
 }
 
-/// The installer of the function `name` (of the inherent `impl` of a type, when it is a method):
-/// `__fnr_<name>`, in the function's module or on its type.
-pub fn installer(name: &syn::Ident) -> syn::Ident {
-    quote::format_ident!("__fnr_{}", source::unraw(name))
+/// The installer of the function `name`: `__fnr_<name>`, in a free function's module or on an
+/// inherent method's type; `__fnr_as_<Trait>_<name>` on the type for a method of its
+/// `impl Trait`.
+pub fn installer(trait_name: Option<&syn::Ident>, name: &syn::Ident) -> syn::Ident {
+    match trait_name {
+        Some(trait_name) => {
+            quote::format_ident!("__fnr_as_{trait_name}_{}", source::unraw(name))
+        }
+        None => quote::format_ident!("__fnr_{}", source::unraw(name)),
+    }
+}
+
+/// The trait of `block` when its methods can be replaced: a trait one of the game's own crates
+/// declares (`traits`, by name), written without generic arguments, implemented safely for a
+/// type its own crate declares (`types`, by name: the installer is an inherent function of the
+/// type). Another crate's trait (`Ord`, `Iterator`, `Drop`) is the caller's contract with that
+/// crate, and often a hot path.
+pub fn replaceable_trait<'a>(
+    block: &'a syn::ItemImpl,
+    traits: &BTreeSet<String>,
+    types: &BTreeSet<String>,
+) -> Option<&'a syn::Ident> {
+    let (negative, path, _) = block.trait_.as_ref()?;
+    let last = path.segments.last()?;
+    let Type::Path(owner) = &*block.self_ty else {
+        return None;
+    };
+    (negative.is_none()
+        && block.unsafety.is_none()
+        && last.arguments.is_none()
+        && traits.contains(&last.ident.to_string())
+        && owner
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| types.contains(&segment.ident.to_string())))
+    .then_some(&last.ident)
+}
+
+/// The names of the types `items` declare, inline modules included.
+pub fn declared_types(items: &[Item], out: &mut BTreeSet<String>) {
+    for item in items {
+        match item {
+            Item::Struct(item) => drop(out.insert(item.ident.to_string())),
+            Item::Enum(item) => drop(out.insert(item.ident.to_string())),
+            Item::Union(item) => drop(out.insert(item.ident.to_string())),
+            Item::Mod(item) => {
+                if let Some((_, inner)) = &item.content {
+                    declared_types(inner, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Whether `sig` names something through `Self::` (an associated type or constant of the trait):
+/// its pointer type is written outside the trait's `impl`, where that path doesn't resolve.
+fn names_associated(sig: &syn::Signature) -> bool {
+    struct Find(bool);
+    impl<'ast> syn::visit::Visit<'ast> for Find {
+        fn visit_path(&mut self, path: &'ast syn::Path) {
+            self.0 |= path.segments.len() > 1 && path.segments[0].ident == "Self";
+            syn::visit::visit_path(self, path);
+        }
+    }
+    let mut find = Find(false);
+    syn::visit::Visit::visit_signature(&mut find, sig);
+    find.0
+}
+
+/// The names of the traits the game's own crates declare: every `trait` item under `crates/`.
+pub fn declared_traits(root: &Path) -> Result<BTreeSet<String>, String> {
+    fn walk(dir: &Path, out: &mut BTreeSet<String>) -> Result<(), String> {
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(format!("{}: {error}", dir.display())),
+        };
+        for entry in entries {
+            let path = entry.map_err(|e| format!("{}: {e}", dir.display()))?.path();
+            if path.is_dir() {
+                walk(&path, out)?;
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                let text =
+                    fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                for (at, _) in text.match_indices("trait ") {
+                    // An item keyword, not the end of a longer word or a doc sentence's.
+                    let before = text[..at].lines().next_back().unwrap_or_default().trim();
+                    if !matches!(
+                        before,
+                        "" | "pub" | "unsafe" | "pub unsafe" | "pub(crate)" | "pub(super)"
+                    ) {
+                        continue;
+                    }
+                    let name: String = text[at + "trait ".len()..]
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    if !name.is_empty() {
+                        out.insert(name);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut traits = BTreeSet::new();
+    let crates = root.join("crates");
+    for entry in fs::read_dir(&crates).map_err(|e| format!("{}: {e}", crates.display()))? {
+        let package = entry.map_err(|e| e.to_string())?.path();
+        walk(&package.join("src"), &mut traits)?;
+    }
+    Ok(traits)
 }
 
 /// Elided lifetimes of a method's return borrow from its receiver: named.
@@ -169,8 +279,10 @@ struct Found<'a> {
     module: String,
     sig: &'a syn::Signature,
     body: &'a syn::Block,
-    /// The inherent `impl` it is a method of.
+    /// The `impl` it is a method of.
     owner: Option<&'a syn::ItemImpl>,
+    /// That `impl`'s trait, when it is one's.
+    trait_name: Option<&'a syn::Ident>,
     /// Where the item that holds it ends: the `impl` block, or the function.
     end: proc_macro2::LineColumn,
 }
@@ -178,28 +290,46 @@ struct Found<'a> {
 impl Found<'_> {
     /// Its path, as a mixin's `target` names it.
     fn target(&self) -> String {
-        match self.owner {
-            Some(block) => format!(
+        match (self.owner, self.trait_name) {
+            (Some(block), Some(trait_name)) => format!(
+                "{}::<{} as {trait_name}>::{}",
+                self.module,
+                source::owner(&block.self_ty),
+                self.sig.ident
+            ),
+            (Some(block), None) => format!(
                 "{}::{}::{}",
                 self.module,
                 source::owner(&block.self_ty),
                 self.sig.ident
             ),
-            None => format!("{}::{}", self.module, self.sig.ident),
+            (None, _) => format!("{}::{}", self.module, self.sig.ident),
         }
     }
 }
 
-/// The replaceable functions among `items`: free functions and inherent methods every build
-/// compiles, inline modules included.
-fn functions<'a>(module: &str, items: &'a [Item], out: &mut Vec<Found<'a>>) {
+/// The replaceable functions among `items`: free functions, inherent methods and methods of the
+/// game's own traits (`traits`) that every build compiles, inline modules included.
+fn functions<'a>(
+    module: &str,
+    items: &'a [Item],
+    traits: &BTreeSet<String>,
+    types: &BTreeSet<String>,
+    out: &mut Vec<Found<'a>>,
+) {
     for item in items {
         match item {
             Item::Mod(inline) if !source::gated(&inline.attrs) => {
                 if let Some((_, inner)) = &inline.content
                     && !source::test_only(&inline.attrs)
                 {
-                    functions(&format!("{module}::{}", inline.ident), inner, out);
+                    functions(
+                        &format!("{module}::{}", inline.ident),
+                        inner,
+                        traits,
+                        types,
+                        out,
+                    );
                 }
             }
             Item::Fn(function)
@@ -210,24 +340,30 @@ fn functions<'a>(module: &str, items: &'a [Item], out: &mut Vec<Found<'a>>) {
                     sig: &function.sig,
                     body: &function.block,
                     owner: None,
+                    trait_name: None,
                     end: function.block.brace_token.span.close().end(),
                 });
             }
             Item::Impl(block)
-                if block.trait_.is_none()
-                    && !source::gated(&block.attrs)
+                if !source::gated(&block.attrs)
                     && lifetimes_only(&block.generics)
                     && matches!(&*block.self_ty, Type::Path(ty) if ty.qself.is_none()) =>
             {
+                let trait_name = replaceable_trait(block, traits, types);
+                if block.trait_.is_some() && trait_name.is_none() {
+                    continue;
+                }
                 for member in &block.items {
                     if let ImplItem::Fn(method) = member
                         && eligible(&method.attrs, &method.sig)
+                        && !(trait_name.is_some() && names_associated(&method.sig))
                     {
                         out.push(Found {
                             module: module.to_owned(),
                             sig: &method.sig,
                             body: &method.block,
                             owner: Some(block),
+                            trait_name,
                             end: block.brace_token.span.close().end(),
                         });
                     }
@@ -280,6 +416,7 @@ struct Crate {
 /// head check, reader and installer, and each crate that has one its slot array. Run on a copy,
 /// never on a working tree.
 pub fn stage(root: &Path) -> Result<Staged, String> {
+    let traits = declared_traits(root)?;
     let list = listed(root)?;
     let mut used = vec![false; list.len()];
     let client = root.join("crates/horizon-client/src");
@@ -310,13 +447,20 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
         let mut count = 0;
         // Each file's text as the pass leaves it, the crate root's included.
         let mut texts: BTreeMap<&Path, String> = BTreeMap::new();
+        let mut parsed = Vec::new();
+        let mut types = BTreeSet::new();
         for file in &krate.files {
             let text = fs::read_to_string(&file.path)
                 .map_err(|e| format!("{}: {e}", file.path.display()))?;
-            let parsed =
-                syn::parse_file(&text).map_err(|e| format!("{}: {e}", file.path.display()))?;
+            let items = syn::parse_file(&text)
+                .map_err(|e| format!("{}: {e}", file.path.display()))?
+                .items;
+            declared_types(&items, &mut types);
+            parsed.push((file, text, items));
+        }
+        for (file, text, items) in &parsed {
             let mut found = Vec::new();
-            functions(&file.module, &parsed.items, &mut found);
+            functions(&file.module, items, &traits, &types, &mut found);
             if krate.listed_only {
                 found.retain(|found| {
                     let target = source::plain_path(&found.target());
@@ -326,7 +470,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
                         .is_some()
                 });
             }
-            let Some(text) = rewrite(&file.path, &text, &found, &mut count)? else {
+            let Some(text) = rewrite(&file.path, text, &found, &mut count)? else {
                 continue;
             };
             staged.files += 1;
@@ -385,10 +529,13 @@ fn rewrite(
         let slot = *count;
         *count += 1;
         let name = source::unraw(&function.sig.ident);
-        let reader = quote::format_ident!("__fnr_get_{name}");
-        let installer = installer(&function.sig.ident);
+        let installer = installer(function.trait_name, &function.sig.ident);
+        let reader = quote::format_ident!(
+            "__fnr_get_{}",
+            installer.to_string().trim_start_matches("__fnr_")
+        );
         let scope = match function.owner {
-            Some(block) => format!("{}::{name}", source::owner(&block.self_ty)),
+            Some(block) => format!("{}::{installer}", source::owner(&block.self_ty)),
             None => name.clone(),
         };
         if !names.insert((function.module.clone(), scope)) {
@@ -517,9 +664,14 @@ fn rewrite(
 
 /// The names of a file's replaceable functions, as targets: what the patch generator and tests
 /// compare against.
-pub fn targets(module: &str, file: &syn::File) -> Vec<String> {
+pub fn targets(
+    module: &str,
+    file: &syn::File,
+    traits: &BTreeSet<String>,
+    types: &BTreeSet<String>,
+) -> Vec<String> {
     let mut found = Vec::new();
-    functions(module, &file.items, &mut found);
+    functions(module, &file.items, traits, types, &mut found);
     found.iter().map(Found::target).collect()
 }
 
@@ -530,7 +682,13 @@ mod tests {
     fn staged(source: &str) -> String {
         let file = syn::parse_file(source).unwrap();
         let mut found = Vec::new();
-        functions("k", &file.items, &mut found);
+        functions(
+            "k",
+            &file.items,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &mut found,
+        );
         let mut count = 0;
         rewrite(Path::new("k.rs"), source, &found, &mut count)
             .unwrap()
@@ -620,7 +778,13 @@ mod tests {
         let source = "pub fn world_drawn(view: &mut View) { let _ = view; }\npub fn hooked() -> bool { replaced!(world_drawn) }\n";
         let file = syn::parse_file(source).unwrap();
         let mut found = Vec::new();
-        functions("k", &file.items, &mut found);
+        functions(
+            "k",
+            &file.items,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &mut found,
+        );
         let mut count = 7;
         let out = rewrite(Path::new("k.rs"), source, &found, &mut count)
             .unwrap()
@@ -640,18 +804,78 @@ mod tests {
         let source = "pub fn hooked() -> bool { replaced!(elsewhere) }\n";
         let file = syn::parse_file(source).unwrap();
         let mut found = Vec::new();
-        functions("k", &file.items, &mut found);
+        functions(
+            "k",
+            &file.items,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &mut found,
+        );
         let error = rewrite(Path::new("k.rs"), source, &found, &mut 0).unwrap_err();
         assert!(error.contains("replaced!(elsewhere)"), "{error}");
     }
 
     #[test]
-    fn trait_methods_generic_impls_and_test_modules_get_no_slot() {
+    fn other_crates_traits_generic_impls_and_test_modules_get_no_slot() {
         let file = syn::parse_file(
             "impl Clone for A { fn clone(&self) -> Self { A } }\nimpl<T> B<T> { fn f(&self) {} }\n#[cfg(test)] mod tests { fn t() {} }\nmod inner { fn kept() {} }\nfn free() {}\n",
         )
         .unwrap();
-        assert_eq!(targets("k", &file), ["k::inner::kept", "k::free"]);
+        assert_eq!(
+            targets(
+                "k",
+                &file,
+                &BTreeSet::from(["Goal".to_owned()]),
+                &BTreeSet::new()
+            ),
+            ["k::inner::kept", "k::free"]
+        );
+    }
+
+    #[test]
+    fn a_method_of_the_games_own_trait_gets_a_slot_on_its_type() {
+        let source = "struct Wander; struct Raw;\nimpl Goal for Wander { fn start(&mut self, mob: &Mob) -> bool { true } fn kind(&self) -> Self::Kind { Kind } }\nimpl Goal<u8> for Wander { fn start(&mut self) {} }\nunsafe impl Goal for Raw { fn start(&mut self) {} }\nimpl Goal for Vec3 { fn start(&mut self) {} }\n";
+        let traits = BTreeSet::from(["Goal".to_owned()]);
+        let file = syn::parse_file(source).unwrap();
+        let mut types = BTreeSet::new();
+        declared_types(&file.items, &mut types);
+        // A signature naming the trait's associated type, a trait written with arguments, an
+        // unsafe impl and another crate's type are left as the game wrote them.
+        assert_eq!(
+            targets("k", &file, &traits, &types),
+            ["k::<Wander as Goal>::start"]
+        );
+        let mut found = Vec::new();
+        functions("k", &file.items, &traits, &types, &mut found);
+        let out = rewrite(Path::new("k.rs"), source, &found, &mut 0)
+            .unwrap()
+            .unwrap();
+        assert!(
+            out.contains("{ if let ::std::option::Option::Some(__fnr) = Self::__fnr_get_as_Goal_start() { return __fnr(self, mob); } true }"),
+            "{out}"
+        );
+        let staged = syn::parse_file(&out).unwrap();
+        let Item::Impl(added) = &staged.items[3] else {
+            panic!("{out}")
+        };
+        assert!(added.trait_.is_none());
+        assert!(out.contains("pub fn __fnr_as_Goal_start"), "{out}");
+    }
+
+    #[test]
+    fn declared_traits_are_the_trait_items_of_the_crates() {
+        let root = tempfile::tempdir().unwrap();
+        let src = root.path().join("crates/horizon-low/src/deep");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("a.rs"),
+            "/// Not a trait Item, only words.\npub trait Goal {}\n    pub(crate) trait Inner: Goal {}\nunsafe trait Raw {}\nfn f(x: &dyn Portrait) {}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            declared_traits(root.path()).unwrap(),
+            BTreeSet::from(["Goal".to_owned(), "Inner".to_owned(), "Raw".to_owned()])
+        );
     }
 
     #[test]
