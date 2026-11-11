@@ -126,6 +126,15 @@ jobs:
         run: |
           date -u '+data-leg start utc=%Y-%m-%dT%H:%M:%SZ'
           sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
+      # A real release build/export is integration coverage, not a Python unit test.
+      # Reuse one existing shard: no extra job, runner, or test-machine budget.
+      - name: Test the real pinned Nightly catalog export
+        id: catalog
+        if: matrix.shard == 'horizon-items'
+        continue-on-error: true
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python3 tools/ci/nightly_catalog_integration.py -v
       # Missing data must fail on both main pushes and nightly dispatches.
       - name: Prepare checkout-keyed vanilla data
         id: data
@@ -165,13 +174,23 @@ jobs:
         run: |
           export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
           python3 tools/ci/with_xvfb.py python3 tools/ci/ignored_tests.py "$SHARD"
+      - name: Require successful Nightly catalog integration
+        if: always() && !cancelled() && matrix.shard == 'horizon-items' && steps.catalog.outcome != 'success'
+        run: |
+          echo '::error::Nightly catalog integration did not succeed; see the real pinned export step.'
+          exit 1
       - name: Record data-leg end and compiler cache
         if: always()
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
           date -u '+data-leg end utc=%Y-%m-%dT%H:%M:%SZ'
           # Whole-job cgroup high-water: compilation, tests and file cache, not per-test RSS
           # or an isolated test-execution peak. Fixed kernel files only; telemetry is best effort.
           echo 'data-leg memory_scope=whole_job_cgroup_including_compilation_tests_file_cache'
+          if [ "$SHARD" = horizon-items ]; then
+            echo 'data-leg additional_scope=nightly_catalog_release_export_integration'
+          fi
           for metric in memory.peak memory.max memory.swap.peak memory.swap.max; do
             field="${metric//./_}_bytes"
             value=unavailable

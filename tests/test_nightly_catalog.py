@@ -111,21 +111,6 @@ printf 'gh:%s\\n' "$*" >> "$CALLS"
         nightly = (ROOT / ".github/workflows/nightly-build.yml").read_text()
         self.assertIn("pattern: horizon-*", nightly)
 
-    @unittest.skipUnless(shutil.which("cargo") and shutil.which("rustc"), "requires Rust for actual pinned catalog export")
-    def test_actual_pinned_export_from_clean_checkout(self):
-        if subprocess.run(["git", "diff", "--quiet", "HEAD", "--"], cwd=ROOT).returncode:
-            self.skipTest("requires committed source for the selected-commit provenance check")
-        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-        with tempfile.TemporaryDirectory() as temporary:
-            output = Path(temporary) / "mod-catalog.json"
-            CATALOG.export(ROOT, commit, output)
-            document = json.loads(output.read_text())
-            self.assertEqual(document["schema_version"], 1)
-            hook = next(hook for hook in document["hooks"] if hook["id"] == "use_item")
-            self.assertIn("hand", [argument["name"] for argument in hook["arguments"]])
-            self.assertTrue(document["points"])
-            self.assertFalse((ROOT / ".horizon-source-staged").exists())
-
     @unittest.skipUnless(os.name == "posix" and shutil.which("bash") and shutil.which("openssl"),
                          "requires Bash and OpenSSL for real Nightly signing")
     def test_catalog_is_signed_only_for_the_fork_and_payload_tampering_fails(self):
