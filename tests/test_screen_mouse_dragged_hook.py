@@ -58,6 +58,7 @@ struct Game { drag_button: Option<i32>, physical_buttons: HashSet<i32>, physical
     cursor: (f32, f32), modifiers: ModifiersState, synthetic: bool, open: bool, cancel: bool, handled: usize, posts: usize,
     calls: RefCell<Vec<(i32, [f32; 2], (f32, f32))>> }
 impl Game {
+    fn update_modifiers(&mut self, state: ModifiersState) { self.modifiers = state; }
     fn pad_synthetic_input(&self) -> bool { self.synthetic }
     fn screen_view_now(&self) -> Option<View> { self.open.then_some(View { mouse: self.cursor }) }
     fn native_screen_mouse_dragged_pre(&self, view: &View, button: i32, delta: [f32; 2], modifiers: u32, canceled: &mut bool) {
