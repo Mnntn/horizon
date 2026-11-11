@@ -228,7 +228,7 @@ fn controlled_peer(port: u16, expected: &[u8], game: &super::super::Game<'_>, ne
     use horizon_protocol::{
         connection::Connection,
         packets::{Empty, configuration as cfg, handshake, login, play},
-        payload_negotiation::{Control, Flow, Manifest, RegistrationPhase},
+        payload_negotiation::Control,
     };
     let mut c = Connection::connect("127.0.0.1", port, Duration::from_secs(10)).unwrap();
     c.reader
@@ -262,28 +262,20 @@ fn controlled_peer(port: u16, expected: &[u8], game: &super::super::Game<'_>, ne
     }
     c.send(&login::Serverbound::LoginAcknowledged(Empty).encode())
         .unwrap();
-    let mut manifest = Manifest::builder();
-    manifest
-        .register(
-            RegistrationPhase::Configuration,
-            CHANNEL,
-            Flow::Bidirectional,
-            "1",
-            false,
-        )
-        .unwrap();
-    for control in [Control::Query, Control::Offer(manifest.finish().unwrap())] {
-        c.send(
-            &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
-                channel: horizon_protocol::payload_negotiation::CHANNEL.into(),
-                data: control.encode().unwrap(),
-            })
-            .encode(),
-        )
-        .unwrap();
-    }
+    let local =
+        horizon_client::raw_payloads::Local::capture(horizon_client::raw_payloads::Side::Client)
+            .unwrap();
+    c.send(
+        &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+            channel: horizon_protocol::payload_negotiation::CHANNEL.into(),
+            data: Control::Query.encode().unwrap(),
+        })
+        .encode(),
+    )
+    .unwrap();
     let mut known = None;
     let mut offered = false;
+    let mut queried = false;
     while known.is_none() || !offered {
         let (id, body) = c.recv().unwrap();
         match cfg::Clientbound::decode(id, &body).unwrap() {
@@ -291,18 +283,41 @@ fn controlled_peer(port: u16, expected: &[u8], game: &super::super::Game<'_>, ne
             cfg::Clientbound::CustomPayload(p)
                 if p.channel == horizon_protocol::payload_negotiation::CHANNEL =>
             {
-                assert!(matches!(
-                    Control::decode(&p.data).unwrap(),
-                    Control::Offer(_)
-                ));
-                offered = true;
+                match Control::decode(&p.data).unwrap() {
+                    Control::Query => {
+                        assert!(!queried, "duplicate query");
+                        assert!(!offered, "query after offer");
+                        queried = true;
+                        c.send(
+                            &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                                channel: horizon_protocol::payload_negotiation::CHANNEL.into(),
+                                data: Control::Offer(local.manifest.clone()).encode().unwrap(),
+                            })
+                            .encode(),
+                        )
+                        .unwrap();
+                    }
+                    Control::Offer(_) => {
+                        assert!(queried, "offer before initial server query");
+                        assert!(!offered, "duplicate offer");
+                        offered = true;
+                    }
+                }
             }
             cfg::Clientbound::FinishConfiguration(_) => panic!("finished before known packs"),
             cfg::Clientbound::Disconnect(p) => panic!("disconnected: {p:?}"),
             _ => {}
         }
     }
+    struct Release(std::sync::mpsc::Sender<()>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
     let (release, held) = std::sync::mpsc::channel();
+    // Also release main during assertion unwinding, before the fixture shuts down.
+    let release = Release(release);
     if network {
         let (entered, ready) = std::sync::mpsc::channel();
         assert!(game.integrated.as_ref().unwrap().post(move |_| {
@@ -316,7 +331,8 @@ fn controlled_peer(port: u16, expected: &[u8], game: &super::super::Game<'_>, ne
             channel: CHANNEL.into(),
             data: expected.to_vec(),
         })
-        .encode(),
+        .try_encode_with_payload_codecs(&local.codecs)
+        .unwrap(),
     )
     .unwrap();
     if network {
@@ -329,12 +345,40 @@ fn controlled_peer(port: u16, expected: &[u8], game: &super::super::Game<'_>, ne
             std::thread::yield_now();
         }
     }
-    // Release immediately: the pending MAIN delivery/work must fence FinishConfiguration.
+    // Known packs releases registry construction, but main is still deliberately held.
     c.send(&cfg::Serverbound::SelectKnownPacks(known.unwrap()).encode())
         .unwrap();
     if network {
-        release.send(()).unwrap();
+        loop {
+            let (id, body) = c.recv().unwrap();
+            match cfg::Clientbound::decode(id, &body).unwrap() {
+                cfg::Clientbound::UpdateTags(_) => break,
+                cfg::Clientbound::FinishConfiguration(_) => {
+                    panic!("finish overtook blocked main work")
+                }
+                cfg::Clientbound::CustomPayload(p) => {
+                    assert_ne!(p.channel, CHANNEL, "reply before main work ran")
+                }
+                cfg::Clientbound::Disconnect(p) => panic!("disconnected: {p:?}"),
+                _ => {}
+            }
+        }
+        // ConnReader::fill_from commits each successful read to its persistent buffer;
+        // fill maps WouldBlock/TimedOut without discarding any partial frame. A later
+        // recv therefore resumes safely even if this probe timed out mid-frame.
+        c.reader
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        let probe = c.recv();
+        c.reader
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        assert!(
+            probe.as_ref().is_err_and(|error| error.is_timed_out()),
+            "packet escaped the main-work fence: {probe:?}"
+        );
     }
+    drop(release);
     let mut replies = 0;
     loop {
         let (id, body) = c.recv().unwrap();
