@@ -20,6 +20,25 @@ doesn't exist warns. Opening a world fails, naming the mod, when a part is attac
 doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
 does) can't see tag parts, and warns once.
 
+## Right click on a block
+
+`Hooks::right_click_block` corresponds to NeoForge 26.3's
+`PlayerInteractEvent.RightClickBlock`, on the clicking client and server, with
+identical switches for native and wasm mods:
+
+- `use_block = TriState::True` allows block use even while sneaking with an item
+  in either hand. `Default` skips while sneaking with either hand full; `False` skips block use.
+  The both-stacks `doesSneakBypassUse` exception remains open in #2934.
+- `use_item = TriState::True` enters the item's `useOn` phase even with an empty
+  hand or an item on cooldown. `Default` requires a held stack off cooldown;
+  `False` skips this phase. Adventure placement restrictions still apply.
+
+A consuming block result ends the click before the item phase. For forced empty-hand
+use, `use_item_on_block` fires with `phase = UsePhase::ItemAfterBlock` and
+`click.stack = None`; a listener can consume that use. Without a listener answer,
+there is no item Part or vanilla item behaviour to run and the empty use passes.
+Canceling `right_click_block` skips both uses and substitutes `cancellation_result`.
+
 ## Instant item use
 
 `ItemPart::use_item` receives `UseItemEvent { stack, hand }`. `hand: Hand` is the
@@ -45,6 +64,18 @@ The hand field corresponds to NeoForge's
 unhandled block or entity interaction. A block success or FAIL, or an entity success, stops fallback.
 The server fires it for the separate use-item packet, once for that packet's hand.
 Canceling skips the item Part and vanilla action on native and wasm alike.
+
+## Item use on a block
+
+`Hooks::use_item_on_block` (`UseItemOnBlockEvent`) runs on native and wasm with
+`HostSide` before each selected phase: `ItemBeforeBlock`, `Block`, then
+`ItemAfterBlock`. `event.click` describes the hit, hand, held stack and player.
+Return `Flow::Cancel` to skip the selected phase's Part and vanilla behaviour,
+using `*event.cancellation_result` (initially `TryWithEmptyHand`) as its result.
+
+Canceling `ItemBeforeBlock` skips the item's `on_item_use_first` Part. `Pass`
+continues to the block phase; any non-`Pass` result ends the block interaction. Cancellation alone does not suppress the later phases when its answer is `Pass`. A block-phase `TryWithEmptyHand`
+can still run the block's empty-hand behaviour on the main hand.
 
 ## Item wear
 

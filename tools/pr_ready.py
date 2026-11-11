@@ -438,6 +438,12 @@ cat > "$RUNNER_TEMP/changed" <<'PR_READY_CHANGED'
 {listing}
 PR_READY_CHANGED
 PARITY_HOSTS= python3 tools/parity.py --changed-files "$RUNNER_TEMP/changed" --timeout 1500"""
+    datafix = getattr(args, 'datafix', False)
+    harness.datafix_selected = datafix
+    if not datafix:
+        print('datafix parity not run: opt in with --datafix and a private HORIZON_DATAFIX_ROOT (default checkout .local/datafix).', file=sys.stderr)
+        if harness.command:
+            harness.command += ' --exclude datafix'
     steps.append(harness)
     return steps
 
@@ -446,8 +452,14 @@ def run_script(steps, host, verbose):
     """Runs the steps in one shell on host (here for "local"), each between markers, reading results as they come."""
     if not steps:
         return
+    # Explicit local opt-in can select datafix even with unknown dependencies.
+    # Preserve the validated absolute path across the subprocess cwd change.
+    environment = os.environ.copy()
+    if host == 'local' and any(step.name == 'Parity' and getattr(step, 'datafix_selected', False) for step in steps):
+        from tools.datafix_paths import VARIABLE, writable_root
+        environment[VARIABLE] = str(writable_root())
     if host == "local" and os.name == "nt":
-        run_windows(steps, verbose)
+        run_windows(steps, verbose, environment)
         return
     parts = [HOST_SETUP.get(host, ""), "set +e"]
     for index, step in enumerate(steps):
@@ -459,7 +471,7 @@ def run_script(steps, host, verbose):
     else:
         command = [str(RBUILD), host, "--", "bash", "-c", script]
     current = None
-    with subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    with subprocess.Popen(command, cwd=ROOT, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                           errors="replace") as process:
         for line in process.stdout:
             marker = re.match(r"@@pr_ready:(begin|end):(\d+)(?::(\d+):(\d+))?$", line.strip())
@@ -484,12 +496,12 @@ def run_script(steps, host, verbose):
             finish(step, verbose)
 
 
-def run_windows(steps, verbose):
+def run_windows(steps, verbose, environment=None):
     """Run local checks directly on Windows without requiring a Unix shell."""
     for step in steps:
         command = shlex.split(step.command)
         cwd = ROOT
-        env = os.environ.copy()
+        env = (os.environ if environment is None else environment).copy()
         env["PYTHONUTF8"] = "1"
         if command and command[0].startswith("CARGO_BUILD_JOBS="):  # the shell form, with no shell to read it
             command.pop(0)
@@ -645,6 +657,7 @@ def main():
                         help="where builds, tests and harnesses run: local, or a fleet machine through ~/fleet/rbuild")
     parser.add_argument("--quick", action="store_true", help="list the affected harnesses instead of running them")
     parser.add_argument("--verbose", action="store_true", help="show every check's output")
+    parser.add_argument('--datafix', action='store_true', help='opt in to datafix parity downloads in a private HORIZON_DATAFIX_ROOT')
     args = parser.parse_args()
     if args.host != "local" and not RBUILD.exists():
         parser.error(f"--host {args.host} needs {RBUILD}; without the fleet, run it here (no --host)")

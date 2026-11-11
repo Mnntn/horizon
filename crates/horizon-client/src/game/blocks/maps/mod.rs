@@ -1233,7 +1233,12 @@ impl Game<'_> {
     /// `MapItem.useOn`: a map used on a banner toggles that banner's marker
     /// on the map; when the map's data says no (`toggleBanner` fails) the use
     /// ends without a swing, and nothing else is done with the map either way.
-    pub(super) fn use_map_on_banner(&mut self, hit: &super::Hit, stack: &ItemStack) -> bool {
+    pub(super) fn use_map_on_banner(
+        &mut self,
+        hit: &super::Hit,
+        stack: &ItemStack,
+        before: &ItemStack,
+    ) -> bool {
         let Some(id) = map_id(stack) else {
             return false;
         };
@@ -1253,14 +1258,19 @@ impl Game<'_> {
         if failed {
             return true;
         }
-        self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);
+        self.trigger_block("minecraft:item_used_on_block", hit.pos, before);
         self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         true
     }
     /// `CompassItem.useOn`: a compass used on a lodestone locks onto it (a
     /// single one in survival changes in place, else one is split off).
-    pub(super) fn use_lodestone_compass(&mut self, hit: &super::Hit, stack: &ItemStack) -> bool {
+    pub(super) fn use_lodestone_compass(
+        &mut self,
+        hit: &super::Hit,
+        stack: &ItemStack,
+        before: &ItemStack,
+    ) -> bool {
         if &*stack.item != "minecraft:compass" {
             return false;
         }
@@ -1276,7 +1286,7 @@ impl Game<'_> {
             return false;
         }
         let at = [x, y, z].map(|v| f64::from(v) + 0.5);
-        self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);
+        self.trigger_block("minecraft:item_used_on_block", hit.pos, before);
         self.audio
             .play("minecraft:item.lodestone_compass.lock", Some(at), 1.0, 1.0);
         let target = Tag::compound([(
@@ -2183,7 +2193,7 @@ mod tests {
 
         // Without can_place_on, use_map_on_banner fails in adventure mode.
         *game.held_mut() = Some(stack.clone());
-        assert!(!game.use_map_on_banner(&hit, &stack));
+        assert!(!game.use_map_on_banner(&hit, &stack, &stack));
         assert!(game.map(map_id).unwrap().banners.is_empty());
 
         // With can_place_on listing the banner block, the marker toggles.
@@ -2195,13 +2205,13 @@ mod tests {
             )]),
         ));
         *game.held_mut() = Some(stack.clone());
-        assert!(game.use_map_on_banner(&hit, &stack));
+        assert!(game.use_map_on_banner(&hit, &stack, &stack));
         assert_eq!(game.map(map_id).unwrap().banners.len(), 1);
         assert_eq!(game.map(map_id).unwrap().banners[0].pos, pos);
         assert_eq!(game.map(map_id).unwrap().banners[0].color, "red");
 
         // Second use toggles the marker off.
-        assert!(game.use_map_on_banner(&hit, &stack));
+        assert!(game.use_map_on_banner(&hit, &stack, &stack));
         assert!(game.map(map_id).unwrap().banners.is_empty());
     }
 }

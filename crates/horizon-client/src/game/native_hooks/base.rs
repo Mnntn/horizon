@@ -3699,9 +3699,9 @@ impl Game<'_> {
     /// player). Before the block's own use (a chest, a door, a lever) and the
     /// item's (`Item.useOn`, `native_use_on`).
     ///
-    /// `use_block` forces the block's use off (`False`) or on even while
-    /// sneaking with something in hand (`True`); `use_item` forces the
-    /// item's `useOn` off, or on even while the item cools down. Cancelling
+    /// `use_block`: False skips; True overrides sneak; Default skips when sneaking with either hand full (the both-stacks sneak-bypass exception remains open in #2934). `use_item`: False skips; True forces
+    /// even an empty hand or cooldown; Default requires a held stack off cooldown. Empty hands reach
+    /// ItemAfterBlock with no stack, but no item Part. Adventure restrictions still apply; block consumption ends the click. Cancelling
     /// skips both and answers `cancellation_result` in their place:
     /// `Pass` (the default) goes on to the item's own use (`Item.use`) and
     /// then the other hand, `Fail` ends the click, and `Success`,

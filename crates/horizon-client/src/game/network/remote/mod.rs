@@ -8807,44 +8807,43 @@ impl Game<'_> {
                 }
             }
             // The held item's onItemUseFirst on this client: the broadcast
-            // event's ItemBeforeBlock phase answers for the block and the
-            // item, as on the server (a Part's answer comes from the server).
+            // event skips the item's before-block Part when canceled. Only
+            // non-PASS answers end the block interaction; PASS goes
+            // on to the block (a Part's answer comes from the server).
             if canceled.is_none()
                 && !spectator
                 && use_item.or(true)
                 && let Some(stack) = held.as_ref()
             {
-                canceled = self.use_item_on_block(
-                    &hit,
-                    hand,
-                    Some(stack),
-                    mod_api::UsePhase::ItemBeforeBlock,
-                );
+                canceled = self
+                    .use_item_on_block(&hit, hand, Some(stack), mod_api::UsePhase::ItemBeforeBlock)
+                    .filter(|answer| *answer != Answer::Pass);
             }
             // Player.isSecondaryUseActive with something in either hand
-            // keeps the block from reacting.
+            // keeps the block from reacting by default; an explicit block
+            // allow overrides that skip, and False always skips the block.
             let sneaking = self.remote_shift_down();
             let hands_full = self.stack_in(self.selected).is_some() || self.offhand.is_some();
             let block_used = canceled.is_none() && use_block.or(!(sneaking && hands_full));
-            let cooldown_forced = use_item == TriState::True;
+            let item_forced = use_item == TriState::True;
             let item_used = canceled.is_none()
                 && use_item.or(true)
-                && held.as_ref().is_some_and(|stack| {
-                    if !self.may_build()
-                        && !self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
-                    {
-                        return false;
-                    }
-                    self.items().get(&stack.item).is_some_and(|info| {
-                        cooldown_forced
-                            || !self
+                && (self.may_build()
+                    || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos)))
+                && held
+                    .as_ref()
+                    .is_none_or(|stack| self.items().get(&stack.item).is_some())
+                && (item_forced
+                    || held.as_ref().is_some_and(|stack| {
+                        self.items().get(&stack.item).is_some_and(|info| {
+                            !self
                                 .cooldowns
                                 .is_on_cooldown(&horizon_client::cooldowns::group(
                                     stack,
                                     info.use_cooldown.as_ref(),
                                 ))
-                    })
-                });
+                        })
+                    }));
             let block_answer = if !spectator && block_used {
                 self.use_item_on_block(&hit, hand, held.as_ref(), mod_api::UsePhase::Block)
             } else {

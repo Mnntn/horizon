@@ -438,8 +438,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   block, once per hand where `useItemOn` starts, on the clicking client and on the server (`click.side`). `click`
   (`BlockClick`) names the level, block, hit, hand, held stack and the player's UUID and entity id. `use_block`
   and `use_item` (`TriState`) force the block's use or the item's `useOn` off, or on (the block even while
-  sneaking with something in hand, the item even while it cools down). Cancelling skips both and answers
-  `cancellation_result` (`InteractionResult`, default `Pass`, which goes on to the item's own use and the other
+  sneaking with something in either hand, the item even with an empty hand or while it cools down).   Default skips sneak with either hand full (both-stacks bypass remains open in #2934) and requires a held item off cooldown; forced empty use reaches `ItemAfterBlock` with no stack or Part.
+  Adventure restrictions still apply. Cancelling skips both and answers `cancellation_result` (`InteractionResult`, default `Pass`, which goes on to the item's own use and the other
   hand); with `native_break_block`, a cancel with `Fail` keeps players out of claimed land, and the player's client is
   sent the block back.
 - **`native_use_item_on_block(click, phase, cancellation_result, canceled)`**: NeoForge's
@@ -2840,7 +2840,7 @@ registration path.
   (default `TryWithEmptyHand`); a main-hand block-phase TRY can still run the empty method.
   `UsePhase::ItemBeforeBlock` fires first, before the item's `on_item_use_first` Part and before
   the block is asked anything (ahead of the sneak gate, unless `right_click_block` denied the item);
-  a cancel there answers for the block and the item. On the client only this broadcast event fires:
+  canceling skips that item's Part, but `Pass` continues to the block. Any non-`Pass` answer ends the block interaction. On the client only this broadcast event fires:
   a Part's claim comes from the server, which corrects the predicted click as it does for the block
   Part.
 - `ItemPart::on_item_use_first(host, event)` is `IItemExtension.onItemUseFirst`, server side, for the
