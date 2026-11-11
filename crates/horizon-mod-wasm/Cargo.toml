@@ -34,3 +34,6 @@ wat = "1.261"
 [lints]
 workspace = true
 
+
+[features]
+runtime-fixture = []
