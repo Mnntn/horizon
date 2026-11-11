@@ -2,7 +2,7 @@
 # The full SHA must be a new merge parent outside the base; see tools/sync/README.md.
 # sync-baseline: 04a26210e31fedf763175dcb05c0b0bdf2fefd21
 crates/horizon-client-render/src/gfx.rs 13342
-crates/horizon-client/src/game.rs 18092
+crates/horizon-client/src/game.rs 18094
 crates/horizon-client/src/game/administration/commands/mod.rs 4748
 crates/horizon-client/src/game/entities/minecarts.rs 3367
 crates/horizon-client/src/game/mobs/creatures/mod.rs 9398
