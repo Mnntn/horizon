@@ -1278,7 +1278,7 @@ mod hub_tests {
         let before = hub.guests.update(0, |g| {
             g.unacknowledged = 3;
             let before = g.position;
-            g.inbox.push_back((
+            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
                 Serverbound::MovePlayerPos(MovePlayerPos {
                     x: before[0] + 40.0,
                     y: before[1],
@@ -1287,7 +1287,7 @@ mod hub_tests {
                 }),
                 10,
             ));
-            g.inbox.push_back((
+            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
                 Serverbound::ChunkBatchReceived(ChunkBatchReceived {
                     chunks_per_tick: 12.0,
                 }),
@@ -1818,7 +1818,7 @@ mod hub_tests {
         let before = hub.guests[i].position;
         hub.guests.update(i, |g| {
             g.unacknowledged = 2;
-            g.inbox.push_back((
+            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
                 Serverbound::MovePlayerPos(MovePlayerPos {
                     x: before[0] + 30.0,
                     y: before[1],
@@ -1827,7 +1827,7 @@ mod hub_tests {
                 }),
                 10,
             ));
-            g.inbox.push_back((
+            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
                 Serverbound::ChunkBatchReceived(ChunkBatchReceived {
                     chunks_per_tick: 9.0,
                 }),
@@ -1935,8 +1935,8 @@ mod hub_tests {
             g.last_seen
                 .add_pending(&[7; horizon_protocol::secure_chat::SIGNATURE_BYTES]);
             g.inbox
-                .push_back((Serverbound::ChatAck(ChatAck { offset: 1 }), 2));
-            g.inbox.push_back((
+                .push_back(horizon_client::lan::guest::InboxItem::synthetic(Serverbound::ChatAck(ChatAck { offset: 1 }), 2));
+            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
                 Serverbound::Chat(Chat {
                     message: "hello".into(),
                     timestamp: 0,

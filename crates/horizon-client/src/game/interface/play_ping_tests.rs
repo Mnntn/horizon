@@ -57,7 +57,7 @@ fn pass(game: &mut Game<'_>, conn: u32, packet: S) {
         .hub
         .guests
         .update_connection(conn, |guest| {
-            guest.inbox.push_back((packet, bytes));
+            guest.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(packet, bytes));
             guest.inbox_bytes += bytes;
         })
         .unwrap();
