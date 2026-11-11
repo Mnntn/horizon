@@ -77,5 +77,10 @@ if [ -n "$resources" ]; then
     (cd "$run" && env "${env_vars[@]}" timeout 180 "$scratch/engine/horizon-engine" --resources "$(realpath "$resources")" \
       --dedicated --nogui) > "$scratch/server.log" 2>&1 || true
   grep -F 'fnr:' "$scratch/server.log"
-  grep -F 'OVERWRITE by fnr_alpha' "$scratch/server.log"
+  if [[ " ${FNR_MODS:-alpha beta} " == *" alpha "* ]]; then
+    grep -F 'OVERWRITE by fnr_alpha' "$scratch/server.log"
+  fi
+  if [[ " ${FNR_MODS:-alpha beta} " == *" fdshape "* ]]; then
+    grep -F 'fnr: native_server_started dedicated=true' "$scratch/server.log"
+  fi
 fi

@@ -31,3 +31,10 @@ require = 1
 ordinal = 0
 helper = "src/mixins/knockback.rs"
 bindings = [{ name = "value", ty = "f64", value = "$value" }]
+
+[[mixin]]
+id = "native_server_started"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::base::Game<'_>::native_server_started"
+helper = "src/mixins/server_started.rs"
+bindings = [{ name = "dedicated", ty = "bool", value = "dedicated" }]
