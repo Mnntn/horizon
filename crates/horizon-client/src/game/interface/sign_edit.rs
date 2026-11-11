@@ -979,5 +979,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "sign_chain_tests.rs"]
+#[path = "tests/sign_chain_tests.rs"]
 mod sign_chain_tests;

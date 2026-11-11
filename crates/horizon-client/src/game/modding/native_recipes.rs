@@ -41,7 +41,7 @@ pub(super) struct RecipeTables {
     /// recipe_content`) over the window's own: what `Game::recipes` reads on
     /// a client once they came.
     synced: Option<horizon_client::crafting::Recipes>,
-    synced_index: Option<horizon_client::recipe_book::RecipeIndex>,
+    pub(super) synced_index: Option<horizon_client::recipe_book::RecipeIndex>,
     /// The recipe content's parts so far, until its last.
     incoming: Vec<(String, serde_json::Value)>,
     /// The types that came before the player did: the mods hear of them

@@ -897,8 +897,8 @@ mod map_limit_tests {
 
 #[cfg(test)]
 mod game_event_tests {
-    use super::super::native_machines::tests::server_game;
     use super::*;
+    use crate::game::game_tests::tests::server_game;
     use horizon_client::mobs::Who;
 
     fn frame(id: u32, pos: [i32; 3], item: Option<ItemStack>) -> ItemFrame {
@@ -936,7 +936,8 @@ mod game_event_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn putting_and_rotating_a_frame_item_posts_block_change() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         game.item_frames = vec![frame(1, [0, 64, 1], None)];
         let center = [0.5, 64.5, 1.03125];
         *game.held_mut() = Some(ItemStack::new("minecraft:stick", 3));
@@ -959,7 +960,8 @@ mod game_event_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn taking_a_frame_item_out_posts_block_change_from_the_player() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         game.item_frames = vec![frame(
             1,
             [0, 64, 1],
@@ -999,7 +1001,8 @@ mod game_event_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_frame_that_falls_posts_block_change_without_source() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let mut f = frame(1, [0, 64, 1], None);
         // BlockAttachedEntity.tick checks every 100 ticks.
         f.check_interval = 99;

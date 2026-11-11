@@ -756,5 +756,5 @@ mod off_level_tests {
 }
 
 #[cfg(test)]
-#[path = "villager_witness_tests.rs"]
+#[path = "tests/villager_witness_tests.rs"]
 mod witness_tests;

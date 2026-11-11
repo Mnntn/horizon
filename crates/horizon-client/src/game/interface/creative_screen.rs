@@ -42,7 +42,7 @@ impl Game<'_> {
     pub(super) fn creative_tab_title(&self, tab: &horizon_client::creative::Tab) -> String {
         if let Some((name, _, translate)) = &tab.name {
             return if *translate {
-                self.translate(name, name)
+                self.translate(name).unwrap_or_else(|| name.clone())
             } else {
                 name.clone()
             };

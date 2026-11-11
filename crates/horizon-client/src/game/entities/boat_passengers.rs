@@ -888,7 +888,8 @@ mod tests {
     fn only_the_mob_touching_a_cart_pushes_it() {
         use super::super::minecarts::{CartKind, Minecart};
         let pushed = [0, 12].map(|crowd: u32| {
-            let mut game = super::super::native_machines::tests::server_game();
+            let mut resources = None;
+            let mut game = crate::game::game_tests::tests::server_game(&mut resources);
             let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
             for (i, (x, z)) in [(0.5, 0.5), (20.5, 0.5), (0.5, 20.5), (20.5, 20.5)]
                 .into_iter()
@@ -922,7 +923,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_vehicles_box_query_matches_a_walk_over_every_mob() {
-        let mut game = super::super::native_machines::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
         // A small LCG keeps the scene the same on every run.
         let mut seed = 0x2545_f491_4f6c_dd1du64;
@@ -978,7 +980,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_vehicle_knows_its_mob_riders_as_soon_as_they_board() {
-        let mut game = super::super::native_machines::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
         for id in 1..=4 {
             game.mobs.push(Mob::new(id, pig.clone(), Vec3::ZERO, 0.0));

@@ -694,18 +694,12 @@ impl Game<'_> {
     /// its owner (`Projectile.getOwner`), a guest's rocket as theirs.
     fn rocket_explode_event(&mut self, mut owner: Option<Who>, guest: Option<u32>, at: [f64; 3]) {
         if let Some(conn) = guest.filter(|conn| self.lan_acting != Some(*conn)) {
-            let posted = if let Some(mut host) = self.lan.take() {
-                let posted = self
-                    .as_guest(&mut host, conn, |g| {
-                        let ctx = g.who_context(owner, None);
-                        g.post_game_event("minecraft:explode", at, ctx);
-                    })
-                    .is_some();
-                self.lan = Some(host);
-                posted
-            } else {
-                false
-            };
+            let posted = self
+                .as_guest(conn, |g| {
+                    let ctx = g.who_context(owner, None);
+                    g.post_game_event("minecraft:explode", at, ctx);
+                })
+                .is_some();
             if posted {
                 return;
             }
@@ -928,7 +922,7 @@ fn use_on_passes(fall_flying: bool) -> bool {
 }
 
 #[cfg(test)]
-#[path = "fireworks_events_tests.rs"]
+#[path = "tests/fireworks_events_tests.rs"]
 mod events_tests;
 
 #[cfg(test)]

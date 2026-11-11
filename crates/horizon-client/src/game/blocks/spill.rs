@@ -608,7 +608,13 @@ impl GameLevel<'_> {
         let mut copied = Pending::default();
         if let Some(block_entity) = self.world.block_entities.get(&key) {
             let name = self.world.block_names.get(&key).cloned();
-            copied.record(at, block_entity, &self.facts.get(state).name, name);
+            copied.record(
+                at,
+                block_entity,
+                &self.facts.get(state).name,
+                name,
+                self.world.block_lock(key),
+            );
         } else if let Some(tag) = saved_entity(self.world, at) {
             copied.record_saved(at, &tag);
         }

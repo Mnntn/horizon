@@ -1682,7 +1682,7 @@ impl LevelAccess for GameLevel<'_> {
     fn block_entity_signal(
         &self,
         pos: BlockPos,
-        state: BlockStateId,
+        _state: BlockStateId,
         _direction: Direction,
     ) -> i32 {
         native_level_signals::block_entity_signal(self.world, self.items, self.lid_openers, pos)

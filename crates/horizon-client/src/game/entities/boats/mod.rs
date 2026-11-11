@@ -1540,9 +1540,11 @@ impl Game<'_> {
     /// `BoatItem.use`: aim at a block or the water surface.
     /// `Entity.setYRot` on a boat just made (its old rotation moves with it).
     pub(super) fn set_boat_yaw(&mut self, id: u32, yaw: f32) {
-        if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-            b.yaw = yaw;
-            b.previous_yaw = yaw;
+        if let Some(index) = self.boats.iter().position(|b| b.id == id) {
+            self.boats.update(index, |b| {
+                b.yaw = yaw;
+                b.previous_yaw = yaw;
+            });
         }
     }
     pub(super) fn place_boat(&mut self, stack: &ItemStack) -> bool {

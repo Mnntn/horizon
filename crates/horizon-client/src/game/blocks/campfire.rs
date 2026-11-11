@@ -219,5 +219,5 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-#[path = "campfire_tests.rs"]
+#[path = "tests/campfire_tests.rs"]
 mod campfire_tests;

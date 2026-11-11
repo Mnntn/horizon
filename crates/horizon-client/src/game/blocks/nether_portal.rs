@@ -2240,5 +2240,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "portal_cooldown_tests.rs"]
+#[path = "tests/portal_cooldown_tests.rs"]
 mod cooldown_tests;

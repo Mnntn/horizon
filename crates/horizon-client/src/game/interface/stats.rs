@@ -20,7 +20,7 @@ struct PhantomTarget {
 }
 
 #[cfg(test)]
-#[path = "phantom_spawn_tests.rs"]
+#[path = "tests/phantom_spawn_tests.rs"]
 mod phantom_spawn_tests;
 
 /// `stats[type][key]`, with `type` and `key` namespaced ids.

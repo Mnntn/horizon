@@ -1,6 +1,7 @@
 //! The tamed-death message hook: the dispatch a mod's answer goes through, with no game state.
-use crate::mod_api::{self, Hooks, LivingDeathMessageEvent};
-use horizon_client_core::text::Text;
+use crate::game::api_values::TryIntoEngine;
+use mod_api::Text;
+use mod_api::{Hooks, LivingDeathMessageEvent};
 
 /// Sets the owner's message to `text`.
 struct Say(&'static str);
@@ -56,13 +57,20 @@ fn owner_message(mods: Vec<Box<dyn Hooks>>) -> Option<String> {
         .collect::<Vec<_>>()
         .into();
     mod_api::testing::with_mods(mods, || {
-        let reader = horizon_client_render::api_context::LoopReader(
-            crate::test_resources::server_loop_context(),
+        use horizon_world::native_load_context::{
+            DataLoadOrigin, LoadContext, LoadInputs, LoopSide,
+        };
+        let load = LoadContext::new(
+            DataLoadOrigin::ServerDataLoad,
+            std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default())),
+            [],
         );
+        let loop_context = load.loop_context(LoopSide::Server, []);
+        let reader = horizon_client_render::api_context::LoopReader(&loop_context);
         let context = reader.context();
         mod_api::dispatch_living_death_message(&context, 7, "minecraft:wolf", &mut message);
     });
-    message.map(|t| t.plain())
+    message.map(|t| t.try_into_engine(&()).unwrap().plain())
 }
 
 #[test]

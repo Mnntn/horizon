@@ -2733,7 +2733,8 @@ mod tests {
     /// A server with no player of its own, an open hub and one guest (conn 2)
     /// standing at (8.5, 200, 8.5) on a stone floor.
     fn server_with_guest() -> Game<'static> {
-        let mut game = super::super::native_machines::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.build_registries();
         game.set_allow_commands(true);
         game.block_ticks

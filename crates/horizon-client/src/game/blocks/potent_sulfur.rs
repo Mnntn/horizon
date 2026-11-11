@@ -413,35 +413,22 @@ impl Game<'_> {
         }
         // Every entity in the column is launched (`getEntitiesOfClass(Entity.class)`):
         // a projectile in flight or at rest, a boat and a minecart too.
-        for p in self
-            .creatures
-            .projectiles
-            .iter_mut()
-            .filter(|p| p.bounds().intersects(area))
-        {
-            if p.velocity.y < limit {
+        self.creatures.projectiles.for_each_mut(|p| {
+            if p.bounds().intersects(area) && p.velocity.y < limit {
                 p.velocity.y += push;
                 p.needs_sync = true;
             }
-        }
-        for boat in self
-            .boats
-            .iter_mut()
-            .filter(|b| b.bounds().intersects(area))
-        {
-            if boat.velocity.y < limit {
+        });
+        self.boats.for_each_mut(|boat| {
+            if boat.bounds().intersects(area) && boat.velocity.y < limit {
                 boat.velocity.y += push;
             }
-        }
-        for cart in self
-            .carts
-            .iter_mut()
-            .filter(|c| c.bounds().intersects(area))
-        {
-            if cart.velocity.y < limit {
+        });
+        self.carts.for_each_mut(|cart| {
+            if cart.bounds().intersects(area) && cart.velocity.y < limit {
                 cart.velocity.y += push;
             }
-        }
+        });
     }
 
     /// `PotentSulfurBlockEntity.LAUNCH_ENTITY_TICKER` on the client: the local

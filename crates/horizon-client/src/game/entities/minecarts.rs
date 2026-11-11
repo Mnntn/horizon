@@ -2322,7 +2322,7 @@ impl Game<'_> {
         if name.is_none() && custom.is_none() && data.is_none() {
             return;
         }
-        let Some(mut own) = self.entity_nbt(target) else {
+        let Some(mut own) = self.command_target_nbt(target) else {
             return;
         };
         if let Tag::Compound(map) = &mut own {

@@ -235,7 +235,19 @@ pub(crate) fn install_client_hooks() {
             }
             let reader = horizon_client_render::api_context::LoopReader(context);
             let context = reader.context();
-            mod_api::dispatch_living_death_message(&context, entity, kind, message);
+            use game::api_values::{TryIntoApi, TryIntoEngine};
+            let Ok(mut api_message) = message.as_ref().map(TryIntoApi::try_into_api).transpose()
+            else {
+                return;
+            };
+            mod_api::dispatch_living_death_message(&context, entity, kind, &mut api_message);
+            if let Ok(converted) = api_message
+                .as_ref()
+                .map(|text| text.try_into_engine(&()))
+                .transpose()
+            {
+                *message = converted;
+            }
         },
         living_heal: |context, entity, amount, cancel| {
             if !mod_api::__private::listened(mod_api::HookId::LivingHeal) {
