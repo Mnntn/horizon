@@ -39,17 +39,11 @@ static VIEWS: Mutex<Vec<WorldView>> = Mutex::new(Vec::new());
 static DRAWN: Mutex<Vec<(u64, [u32; 2], wgpu::TextureFormat, wgpu::Buffer)>> =
     Mutex::new(Vec::new());
 static DEVICE: Mutex<Option<wgpu::Device>> = Mutex::new(None);
-fn ask_views(event: &mut native_render::__ModRenderRenderWorldViewsRaw<'_, &mut Vec<WorldView>>) {
-    event.views.extend(VIEWS.lock().unwrap().iter().copied());
+fn ask_views(views: &mut Vec<WorldView>) {
+    views.extend(VIEWS.lock().unwrap().iter().copied());
 }
-fn view_drawn(
-    event: &mut native_render::__ModRenderRenderWorldViewDrawnRaw<
-        '_,
-        &mut native_render::WorldViewDrawn<'_>,
-    >,
-) {
+fn view_drawn(view: &mut native_render::WorldViewDrawn<'_>) {
     {
-        let view = &mut *event.view;
         let [width, height] = view.size;
         assert_eq!([view.color.width(), view.color.height()], view.size);
         let row = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
@@ -80,26 +74,8 @@ fn view_drawn(
 }
 
 fn install_mod() {
-    use mod_points::{__private::SlotListener, PointId};
-    // SAFETY: each pointer is coerced to this staged place's exact generated listener alias.
-    let listeners = unsafe {
-        [
-            SlotListener::new(
-                "fixture",
-                PointId::ModRenderRenderWorldViews.place(),
-                ask_views as native_render::__ModRenderRenderWorldViewsListener as *const (),
-            ),
-            SlotListener::new(
-                "fixture",
-                PointId::ModRenderRenderWorldViewDrawn.place(),
-                view_drawn as native_render::__ModRenderRenderWorldViewDrawnListener as *const (),
-            ),
-        ]
-    };
-    for listener in &listeners {
-        mod_points::register(listener).unwrap();
-    }
-    mod_points::__private::seal();
+    assert!(native_render::__fnr_world_views(ask_views));
+    assert!(native_render::__fnr_world_view_drawn(view_drawn));
 }
 
 /// The views drawn in the last frame, by id: their size and RGBA pixels.
