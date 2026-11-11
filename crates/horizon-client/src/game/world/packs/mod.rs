@@ -356,7 +356,6 @@ impl Game<'_> {
                     manifest: p.package.manifest.clone(),
                     icon: p.package.icon.clone(),
                     layouts: p.package.layouts.clone(),
-                    points: p.package.points.clone(),
                 },
             });
         self.mods.selected = content.chain(code).collect();

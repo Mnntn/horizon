@@ -885,12 +885,12 @@ mod mixed_install_tests {
 }
 
 /// Resolve generated boundary operations for hand-written guest integration fixtures.
-#[cfg(feature = "listener-fixture")]
+#[cfg(feature = "runtime-fixture")]
 pub fn fixture_import_id(owner: &str, method: &str) -> Option<u32> {
     boundary::import_id(owner, method)
 }
 /// Resolve generated hook operations for hand-written guest integration fixtures.
-#[cfg(feature = "listener-fixture")]
+#[cfg(feature = "runtime-fixture")]
 pub fn fixture_export_id(owner: &str, method: &str) -> Option<u32> {
     boundary::export_id(owner, method)
 }

@@ -1338,11 +1338,10 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
   out of the player's [`ENTITY_ITEMS`](../concepts/trait-mods.md#an-entitys-items) handler and put into the other's with `insert_any`
   ([the recipe](../concepts/trait-mods.md#an-entitys-items)). A changed offer or no room returns an error, and every move is put back.
 
-### Render hook points
+### Render functions
 
 `crates/horizon-mod-render/src/render.rs`: native-only, unstable raw frame places, outside `mod_api`.
-Use `[[inject]]` with `access = "internals"`, `kind = "head"` and a checked listener signature at
-`horizon_mod_render::render::<name>`. They run on the render thread with the frame's wgpu objects;
+A native mod replaces one with a `HEAD` mixin at `horizon_mod_render::render::<name>`. They run on the render thread with the frame's wgpu objects;
 what a mod draws there shows in that frame. Draw contexts remain the API-typed drawing route.
 
 - `world_drawn(world)`: the world is drawn (sky, terrain, entities, particles, weather and the world post pass),
