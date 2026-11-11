@@ -71,8 +71,7 @@ def paths(rows):
 def shared(path):
     return ('slots' in path.split('/') or path == 'Cargo.lock'
             or path in {'tools/fixtures/wire_enum_layouts.json',
-                        'tools/fixtures/wire_enum_baseline_identities.json',
-                        'tools/generate_wire_enum_goldens.py', 'tools/capture_wire_enum_layouts.py'}
+                        'tools/fixtures/wire_enum_baseline_identities.json'}
             or bool(re.search(r'(^|/)(?:fieldless_enum_goldens|wire_enum_goldens|wire_layout_pins)\.rs$', path)))
 
 
