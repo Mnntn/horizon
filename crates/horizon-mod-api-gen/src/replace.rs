@@ -26,6 +26,10 @@ pub(crate) const LIST: &str = "crates/horizon-mod-api-gen/replaceable.txt";
 /// Whether a function with this signature and these attributes can take a replacement: its
 /// slot holds one function pointer, so one compiled copy must stand for every call.
 pub fn eligible(attrs: &[syn::Attribute], sig: &syn::Signature) -> bool {
+    signature_exclusion(attrs, sig).is_none()
+}
+
+fn signature_exclusion(attrs: &[syn::Attribute], sig: &syn::Signature) -> Option<&'static str> {
     struct Opaque(bool);
     impl<'ast> syn::visit::Visit<'ast> for Opaque {
         fn visit_type_impl_trait(&mut self, _: &'ast syn::TypeImplTrait) {
@@ -34,33 +38,40 @@ pub fn eligible(attrs: &[syn::Attribute], sig: &syn::Signature) -> bool {
     }
     let mut opaque = Opaque(false);
     syn::visit::Visit::visit_signature(&mut opaque, sig);
-    !opaque.0
-        && sig.constness.is_none()
-        && sig.asyncness.is_none()
-        && sig.unsafety.is_none()
-        && sig.abi.is_none()
-        && sig.variadic.is_none()
-        && lifetimes_only(&sig.generics)
-        && !matches!(&sig.output, syn::ReturnType::Type(_, ty) if matches!(**ty, Type::Never(_)))
-        && sig.inputs.iter().all(|input| match input {
-            // `&self` and `&mut self` only: a by-value or typed receiver is not forwarded.
-            FnArg::Receiver(receiver) => {
-                receiver.reference.is_some()
-                    && receiver.colon_token.is_none()
-                    && receiver.attrs.is_empty()
-            }
-            FnArg::Typed(typed) => typed.attrs.is_empty(),
-        })
-        && !attrs.iter().any(|attr| {
-            let path = attr.path();
-            path.is_ident("cfg")
-                || path.is_ident("cfg_attr")
-                || path.is_ident("test")
-                || path.is_ident("track_caller")
-                || (path.is_ident("inline")
+    let rules = [
+        (opaque.0, "impl Trait"),
+        (sig.constness.is_some(), "const"),
+        (sig.asyncness.is_some(), "async"),
+        (sig.unsafety.is_some(), "unsafe"),
+        (sig.abi.is_some(), "extern ABI"),
+        (sig.variadic.is_some(), "variadic"),
+        (!lifetimes_only(&sig.generics), "function type/const generics"),
+        (matches!(&sig.output, syn::ReturnType::Type(_, ty) if matches!(**ty, Type::Never(_))), "never return"),
+        (sig.inputs.iter().any(|input| matches!(input, FnArg::Receiver(r) if r.reference.is_none() || r.colon_token.is_some())), "by-value/typed receiver"),
+        (sig.inputs.iter().any(|input| match input { FnArg::Receiver(r) => !r.attrs.is_empty(), FnArg::Typed(t) => !t.attrs.is_empty() }), "parameter attributes"),
+    ];
+    rules
+        .into_iter()
+        .find_map(|(applies, name)| applies.then_some(name))
+        .or_else(|| {
+            attrs.iter().find_map(|attr| {
+                let path = attr.path();
+                if path.is_ident("cfg") || path.is_ident("cfg_attr") {
+                    Some("conditional function")
+                } else if path.is_ident("test") {
+                    Some("test function")
+                } else if path.is_ident("track_caller") {
+                    Some("track_caller")
+                } else if path.is_ident("inline")
                     && attr
                         .parse_args::<syn::Ident>()
-                        .is_ok_and(|arg| arg == "always"))
+                        .is_ok_and(|arg| arg == "always")
+                {
+                    Some("inline(always)")
+                } else {
+                    None
+                }
+            })
         })
 }
 
@@ -97,22 +108,37 @@ pub fn replaceable_trait<'a>(
     types: &BTreeSet<String>,
     foreign: &BTreeSet<String>,
 ) -> Option<&'a syn::Ident> {
+    let (_, path, _) = block.trait_.as_ref()?;
+    trait_exclusion(block, traits, types, foreign)
+        .is_none()
+        .then(|| &path.segments.last().expect("a trait path has a name").ident)
+}
+
+fn trait_exclusion(
+    block: &syn::ItemImpl,
+    traits: &BTreeSet<String>,
+    types: &BTreeSet<String>,
+    foreign: &BTreeSet<String>,
+) -> Option<&'static str> {
     let (negative, path, _) = block.trait_.as_ref()?;
-    let last = path.segments.last()?;
+    let last = path.segments.last().expect("a trait path has a name");
     let Type::Path(owner) = &*block.self_ty else {
-        return None;
+        return Some("non-path trait owner");
     };
     let [owner] = owner.path.segments.iter().collect::<Vec<_>>()[..] else {
-        return None;
+        return Some("path-written trait owner");
     };
     let owner = owner.ident.to_string();
-    (negative.is_none()
-        && block.unsafety.is_none()
-        && last.arguments.is_none()
-        && traits.contains(&last.ident.to_string())
-        && types.contains(&owner)
-        && !foreign.contains(&owner))
-    .then_some(&last.ident)
+    [
+        (negative.is_some(), "negative trait impl"),
+        (block.unsafety.is_some(), "unsafe trait impl"),
+        (!last.arguments.is_none(), "trait generic arguments"),
+        (!traits.contains(&last.ident.to_string()), "foreign trait"),
+        (!types.contains(&owner), "foreign trait owner"),
+        (foreign.contains(&owner), "imported trait owner"),
+    ]
+    .into_iter()
+    .find_map(|(applies, name)| applies.then_some(name))
 }
 
 /// The names `items`' `use`s bring in from other crates: paths that don't start at `crate`,
@@ -426,6 +452,85 @@ fn functions<'a>(
     }
 }
 
+/// Module-scope function definitions, partitioned by their first exclusion rule. Local functions
+/// inside bodies and macro expansions are not source-level replacement candidates.
+fn inventory(
+    items: &[Item],
+    traits: &BTreeSet<String>,
+    types: &BTreeSet<String>,
+    inherited: Option<&'static str>,
+    counts: &mut BTreeMap<&'static str, usize>,
+) {
+    fn record(
+        attrs: &[syn::Attribute],
+        sig: &syn::Signature,
+        inherited: Option<&'static str>,
+        counts: &mut BTreeMap<&'static str, usize>,
+    ) {
+        let reason = inherited
+            .or_else(|| signature_exclusion(attrs, sig))
+            .unwrap_or("eligible");
+        *counts.entry(reason).or_default() += 1;
+    }
+    let foreign = foreign_imports(items);
+    for item in items {
+        match item {
+            Item::Mod(module) => {
+                if let Some((_, inner)) = &module.content {
+                    let reason = inherited.or_else(|| {
+                        (source::gated(&module.attrs) || source::test_only(&module.attrs))
+                            .then_some("conditional/test module")
+                    });
+                    inventory(inner, traits, types, reason, counts);
+                }
+            }
+            Item::Fn(function) => record(&function.attrs, &function.sig, inherited, counts),
+            Item::Impl(block) => {
+                let reason = inherited.or_else(|| {
+                    if source::gated(&block.attrs) {
+                        Some("conditional impl")
+                    } else if !lifetimes_only(&block.generics) {
+                        Some("impl type/const generics")
+                    } else if !matches!(&*block.self_ty, Type::Path(ty) if ty.qself.is_none()) {
+                        Some("non-path/qualified impl owner")
+                    } else {
+                        trait_exclusion(block, traits, types, &foreign)
+                    }
+                });
+                for member in &block.items {
+                    if let ImplItem::Fn(method) = member {
+                        let reason = reason.or_else(|| {
+                            block
+                                .trait_
+                                .as_ref()
+                                .filter(|(_, path, _)| {
+                                    names_associated(&qualified(&method.sig, path))
+                                })
+                                .map(|_| "associated constant signature")
+                        });
+                        record(&method.attrs, &method.sig, reason, counts);
+                    }
+                }
+            }
+            Item::Trait(item) => {
+                for member in &item.items {
+                    if let syn::TraitItem::Fn(method) = member
+                        && method.default.is_some()
+                    {
+                        record(
+                            &method.attrs,
+                            &method.sig,
+                            Some("trait default body"),
+                            counts,
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// The listed lower-crate functions, each with its line in the list for diagnostics.
 pub(crate) fn listed(root: &Path) -> Result<Vec<(String, String)>, String> {
     let file = root.join(LIST);
@@ -511,6 +616,8 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
     let mut staged = Staged::default();
     for krate in &crates {
         let mut count = 0;
+        let mut trait_methods = 0;
+        let mut counts = BTreeMap::new();
         // Each file's text as the pass leaves it, the crate root's included.
         let mut texts: BTreeMap<&Path, String> = BTreeMap::new();
         let mut parsed = Vec::new();
@@ -525,6 +632,9 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             parsed.push((file, text, items));
         }
         for (file, text, items) in &parsed {
+            if !krate.listed_only {
+                inventory(items, &traits, &types, None, &mut counts);
+            }
             let mut found = Vec::new();
             functions(&file.module, items, &traits, &types, &mut found);
             if krate.listed_only {
@@ -536,11 +646,26 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
                         .is_some()
                 });
             }
+            trait_methods += found
+                .iter()
+                .filter(|function| function.trait_name.is_some())
+                .count();
             let Some(text) = rewrite(&file.path, text, &found, &mut count)? else {
                 continue;
             };
             staged.files += 1;
             texts.insert(&file.path, text);
+        }
+        eprintln!(
+            "replacement slots: {}: total={count}, trait_methods={trait_methods}",
+            krate.lib.display()
+        );
+        if !krate.listed_only {
+            debug_assert_eq!(counts.get("eligible").copied().unwrap_or_default(), count);
+            eprintln!(
+                "replacement exclusions (first rule, module-scope definitions): {}",
+                serde_json::to_string(&counts).expect("static string counts serialize")
+            );
         }
         if count == 0 {
             continue;
@@ -855,6 +980,30 @@ mod tests {
             pointer_type(&free.sig).to_string(),
             quote!(fn(f32) -> i64).to_string()
         );
+    }
+
+    #[test]
+    fn inventory_partitions_definitions_by_the_actual_eligibility_rules() {
+        let file = syn::parse_file("fn free() {} const fn constant() {} fn generic<T>() {} struct T; trait Owned { fn required(&self); fn default(&self) {} } impl Owned for T { fn required(&self) {} } #[cfg(test)] mod tests { fn helper() {} } impl T { fn consume(self) {} }").unwrap();
+        let traits = BTreeSet::from(["Owned".to_owned()]);
+        let types = BTreeSet::from(["T".to_owned()]);
+        let mut counts = BTreeMap::new();
+        inventory(&file.items, &traits, &types, None, &mut counts);
+        assert_eq!(counts.values().sum::<usize>(), 7);
+        assert_eq!(
+            counts,
+            BTreeMap::from([
+                ("eligible", 2),
+                ("const", 1),
+                ("function type/const generics", 1),
+                ("trait default body", 1),
+                ("conditional/test module", 1),
+                ("by-value/typed receiver", 1),
+            ])
+        );
+        let mut found = Vec::new();
+        functions("fixture", &file.items, &traits, &types, &mut found);
+        assert_eq!(found.len(), counts["eligible"]);
     }
 
     #[test]
