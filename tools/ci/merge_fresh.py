@@ -82,17 +82,35 @@ def crate(path):
     return 'launcher' if path.startswith('launcher/') else None
 
 
+def module_files(label, files):
+    groups = {}
+    for path in sorted(files):
+        directory, _, name = path.rpartition('/')
+        groups.setdefault(directory + '/' if directory else './', []).append(name)
+    lines = [f'{label} ({len(files)} changed paths):']
+    for directory, names in sorted(groups.items()):
+        lines.append(f'  {directory} ({len(names)})')
+        lines.extend(f'    {name}' for name in names)
+    return '\n'.join(lines)
+
+
 def conflict(main_files, pr_files):
     contracts = sorted(p for p in main_files | pr_files if shared(p))
-    if contracts:
-        return 'shared contract changed: ' + contracts[0]
     overlap = sorted(main_files & pr_files)
-    if overlap:
-        return 'same file changed: ' + overlap[0]
     common = {crate(p) for p in main_files} & {crate(p) for p in pr_files} - {None}
+    if contracts:
+        reason = 'shared contract changed: ' + contracts[0]
+    elif overlap:
+        reason = 'same file changed: ' + overlap[0]
+    elif common:
+        reason = 'same crate changed: ' + sorted(common)[0]
+    else:
+        return None
     if common:
-        return 'same crate changed: ' + sorted(common)[0]
-    return None
+        # Include all changed paths, not just the shared crate, for proximity judgment.
+        reason += '\n' + module_files('Intervening main', main_files)
+        reason += '\n' + module_files('PR', pr_files)
+    return reason
 
 
 def provenance(record, run, number, head, source_attempt):
