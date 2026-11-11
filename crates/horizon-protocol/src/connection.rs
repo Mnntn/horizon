@@ -1,5 +1,6 @@
 //! A blocking connection with vanilla's pipeline: optional AES/CFB8
-//! encryption, VarInt21 framing and threshold compression. After login it
+//! encryption, VarInt21 framing and threshold compression on TCP. Memory pipes
+//! use private u64-length framing without network compression or size limits. After login it
 //! splits into a reader (for a receive thread) and a shareable writer, or
 //! gives its stream up ([`Connection::detach`]) to be polled without blocking,
 //! the halves then keeping only the framing, compression and encryption. It
@@ -10,137 +11,14 @@ use std::{
     io::{Read, Write},
     net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs},
     sync::{
-        Arc, Condvar, Mutex,
+        Arc,
         atomic::{AtomicI64, Ordering},
     },
     time::{Duration, Instant},
 };
 
-/// Called when a [`Pipe`] end has bytes to read or was closed ([`Pipe::on_ready`]).
-type Notify = Arc<dyn Fn() + Send + Sync>;
-
-/// One direction of a [`Pipe`]: the bytes written and not read yet, and
-/// whether either end closed it.
-#[derive(Default)]
-struct Channel {
-    state: Mutex<(std::collections::VecDeque<u8>, bool)>,
-    ready: Condvar,
-    /// The reading end's [`Pipe::on_ready`].
-    notify: Mutex<Option<Notify>>,
-}
-impl Channel {
-    fn close(&self) {
-        self.state.lock().unwrap().1 = true;
-        self.ready.notify_all();
-        self.notify();
-    }
-    /// Tell a reader that doesn't block, outside the state's lock.
-    fn notify(&self) {
-        let notify = self.notify.lock().unwrap().clone();
-        if let Some(notify) = notify {
-            notify();
-        }
-    }
-}
-/// The channels of one end; dropping the end's last clone closes them, as
-/// a socket closes with its process.
-struct End {
-    incoming: Arc<Channel>,
-    outgoing: Arc<Channel>,
-}
-impl Drop for End {
-    fn drop(&mut self) {
-        self.incoming.close();
-        self.outgoing.close();
-    }
-}
-/// One end of an in-memory byte pipe: what one end writes the other reads.
-pub struct Pipe {
-    end: Arc<End>,
-    /// The read timeout (`set_read_timeout`).
-    timeout: Mutex<Option<Duration>>,
-    /// Reads with nothing to read fail with `WouldBlock` instead of waiting.
-    nonblocking: bool,
-}
-impl Pipe {
-    /// Two connected ends.
-    pub fn pair() -> (Self, Self) {
-        let (a, b) = (Arc::new(Channel::default()), Arc::new(Channel::default()));
-        let end = |incoming, outgoing| Self {
-            end: Arc::new(End { incoming, outgoing }),
-            timeout: Mutex::new(None),
-            nonblocking: false,
-        };
-        (end(a.clone(), b.clone()), end(b, a))
-    }
-    fn try_clone(&self) -> Self {
-        Self {
-            end: self.end.clone(),
-            timeout: Mutex::new(*self.timeout.lock().unwrap()),
-            nonblocking: self.nonblocking,
-        }
-    }
-    /// Reads with nothing to read fail with `WouldBlock`, as a non-blocking socket's do.
-    pub fn set_nonblocking(&mut self, nonblocking: bool) {
-        self.nonblocking = nonblocking;
-    }
-    /// Call `notify` whenever bytes arrive at this end or the pipe closes (also
-    /// now, if either already happened), as a poller's readiness would: a
-    /// non-blocking reader then reads until `WouldBlock`.
-    pub fn on_ready(&self, notify: impl Fn() + Send + Sync + 'static) {
-        let incoming = &self.end.incoming;
-        *incoming.notify.lock().unwrap() = Some(Arc::new(notify));
-        let state = incoming.state.lock().unwrap();
-        let ready = !state.0.is_empty() || state.1;
-        drop(state);
-        if ready {
-            incoming.notify();
-        }
-    }
-    /// Close both directions: reads at either end then see the end of the stream.
-    pub fn shutdown(&self) {
-        self.end.incoming.close();
-        self.end.outgoing.close();
-    }
-}
-impl Read for Pipe {
-    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-        let deadline = self.timeout.lock().unwrap().map(|t| Instant::now() + t);
-        let mut state = self.end.incoming.state.lock().unwrap();
-        if self.nonblocking && state.0.is_empty() && !state.1 {
-            return Err(std::io::ErrorKind::WouldBlock.into());
-        }
-        while state.0.is_empty() && !state.1 {
-            state = match deadline {
-                None => self.end.incoming.ready.wait(state).unwrap(),
-                Some(deadline) => {
-                    let left = deadline.saturating_duration_since(Instant::now());
-                    if left.is_zero() {
-                        return Err(std::io::ErrorKind::TimedOut.into());
-                    }
-                    self.end.incoming.ready.wait_timeout(state, left).unwrap().0
-                }
-            };
-        }
-        state.0.read(out)
-    }
-}
-impl Write for Pipe {
-    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        let mut state = self.end.outgoing.state.lock().unwrap();
-        if state.1 {
-            return Err(std::io::ErrorKind::BrokenPipe.into());
-        }
-        state.0.extend(data);
-        self.end.outgoing.ready.notify_all();
-        drop(state);
-        self.end.outgoing.notify();
-        Ok(data.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
+mod memory;
+pub use memory::Pipe;
 
 /// What a connection runs over.
 enum Stream {
@@ -222,6 +100,7 @@ pub struct Counters {
 }
 
 pub struct ConnReader {
+    memory: bool,
     stream: Stream,
     /// Bytes read: `buffer[start..end]` are not consumed yet, and reads go
     /// straight into `buffer[end..]`.
@@ -246,6 +125,7 @@ impl Closer {
 }
 
 pub struct ConnWriter {
+    memory: bool,
     stream: Stream,
     encrypt: Option<Cfb8>,
     pub threshold: Option<usize>,
@@ -370,8 +250,10 @@ impl Connection {
     fn over(stream: Stream) -> Result<Self> {
         let counters = Arc::new(Counters::default());
         let write = stream.try_clone()?;
+        let memory = matches!(stream, Stream::Memory(_));
         Ok(Self {
             reader: ConnReader {
+                memory,
                 stream,
                 buffer: Vec::new(),
                 start: 0,
@@ -384,6 +266,7 @@ impl Connection {
                 older_client: None,
             },
             writer: ConnWriter {
+                memory,
                 stream: write,
                 encrypt: None,
                 threshold: None,
@@ -466,6 +349,20 @@ enum Next {
     Partial(usize),
 }
 impl ConnReader {
+    fn header(&self) -> Result<Option<(usize, usize)>> {
+        let bytes = &self.buffer[self.start..self.end];
+        if !self.memory {
+            return frame::header(bytes);
+        }
+        if bytes.len() < 8 {
+            return Ok(None);
+        }
+        let len = usize::try_from(u64::from_le_bytes(bytes[..8].try_into().unwrap()))
+            .ok()
+            .filter(|len| len.checked_add(8).is_some())
+            .ok_or_else(|| Error::new("memory frame length overflows address space"))?;
+        Ok(Some((8, len)))
+    }
     /// Read exactly `len` bytes as they are, with no framing.
     pub fn read_raw(&mut self, len: usize) -> Result<Vec<u8>> {
         let mut out = vec![0u8; len];
@@ -531,7 +428,7 @@ impl ConnReader {
     }
     /// The bytes the next frame needs, once its length prefix is whole.
     fn next_header(&self) -> Result<Option<usize>> {
-        Ok(frame::header(&self.buffer[self.start..self.end])?.map(|(prefix, len)| prefix + len))
+        Ok(self.header()?.map(|(prefix, len)| prefix + len))
     }
     /// Take the next frame off the buffer, if it is whole.
     fn next(&mut self) -> Result<Next> {
@@ -541,7 +438,7 @@ impl ConnReader {
         if self.end - self.start < wanted {
             return Ok(Next::Partial(wanted));
         }
-        let (prefix, _) = frame::header(&self.buffer[self.start..self.end])?.expect("whole");
+        let (prefix, _) = self.header()?.expect("whole");
         let frame = self.start + prefix..self.start + wanted;
         self.start = frame.end;
         Ok(match self.packet(frame)? {
@@ -557,7 +454,11 @@ impl ConnReader {
     /// empty compressed frame is skipped and the connection stays up.
     fn packet(&mut self, frame: std::ops::Range<usize>) -> Result<Option<(i32, Vec<u8>)>> {
         let frame = &self.buffer[frame];
-        match frame::body(frame, self.threshold, &mut self.inflater)? {
+        match if self.memory {
+            frame::Body::Plain(0)
+        } else {
+            frame::body(frame, self.threshold, &mut self.inflater)?
+        } {
             frame::Body::Plain(at) => {
                 let body = &frame[at..];
                 if body.is_empty() {
@@ -637,6 +538,15 @@ impl ConnReader {
     }
 }
 impl ConnWriter {
+    /// Encode frame contents for this transport. Memory packets bypass network
+    /// compression and its size limits; use this before `frame_into` when detached.
+    pub fn contents(&self, body: &[u8]) -> Result<Vec<u8>> {
+        if self.memory {
+            Ok(body.to_vec())
+        } else {
+            frame::contents(body, self.threshold)
+        }
+    }
     /// The server release selected for this connection (local play uses the pinned release).
     pub fn server_version(&self) -> crate::adapter::ServerVersion {
         self.adapter
@@ -670,23 +580,22 @@ impl ConnWriter {
     pub fn send(&mut self, body: &[u8]) -> Result<()> {
         if self.older_client.is_some() {
             return match self.for_client(body)? {
-                Some(body) => self.send_contents(&frame::contents(&body, self.threshold)?),
+                Some(body) => self.send_contents(&self.contents(&body)?),
                 None => Ok(()),
             };
         }
         if let Some(a) = self.adapter.clone() {
             if let Some(body) = a.serverbound(body)? {
-                self.send_contents(&frame::contents(&body, self.threshold)?)?;
+                self.send_contents(&self.contents(&body)?)?;
             }
             for body in a.take_outgoing() {
-                self.send_contents(&frame::contents(&body, self.threshold)?)?;
+                self.send_contents(&self.contents(&body)?)?;
             }
             return Ok(());
         }
-        self.send_contents(&frame::contents(body, self.threshold)?)
+        self.send_contents(&self.contents(body)?)
     }
-    /// Send a frame whose contents [`frame::contents`] made with this
-    /// writer's threshold.
+    /// Send a frame whose contents [`Self::contents`] made for this transport.
     pub fn send_contents(&mut self, contents: &[u8]) -> Result<()> {
         let mut framed = Vec::with_capacity(contents.len() + 3);
         self.frame_into(contents, &mut framed);
@@ -698,7 +607,11 @@ impl ConnWriter {
     /// runs on).
     pub fn frame_into(&mut self, contents: &[u8], out: &mut Vec<u8>) {
         let at = out.len();
-        crate::buf::write_varint(out, contents.len() as i32);
+        if self.memory {
+            out.extend_from_slice(&(contents.len() as u64).to_le_bytes());
+        } else {
+            crate::buf::write_varint(out, contents.len() as i32);
+        }
         out.extend_from_slice(contents);
         if let Some(c) = &mut self.encrypt {
             c.encrypt(&mut out[at..]);
