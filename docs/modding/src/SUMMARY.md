@@ -19,7 +19,6 @@
 - [Where the mod API is going](concepts/design.md)
 - [Design: vehicle health layout](concepts/vehicle-health-layout.md)
 - [Design: per-type batched block entity ticks](concepts/block-entity-batching.md)
-- [Design: Source-validated guest point artifact](concepts/guest-point-artifact.md)
 - [Design: typed cauldron interactions](concepts/cauldron-interactions.md)
 - [Design: villager professions and trades](concepts/villager-professions.md)
 
@@ -27,8 +26,7 @@
 
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
-- [Injections](injections.md)
-- [Mixins](mixins.md)
+- [Native mixins](mixins.md)
 
 # Reference
 

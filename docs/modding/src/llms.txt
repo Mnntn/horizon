@@ -1,38 +1,7 @@
 # Modding Horizon
 
-> Horizon is Minecraft: Java Edition 26.3 in Rust. A mod is one `.hmod`: content (assets/ and data/), plus an optional Rust crate built native or to mod.wasm against the `mod_api` crate (`horizon-mod-api`).
+Use mod_api::Hooks and Parts on native and wasm. Native game code changes use function-replacement mixins: the launcher compiles patched functions against the prebuilt game without rebuilding the game. Wasm uses hooks and Parts only.
 
-Prefer a hook or Part method; otherwise a compiled-slot `[[inject]]` with `access = "api"` and a `with` function. Use `access = "internals"` with top-level fingerprinted declarations only when the API shape cannot express it; injects never compile game code. Missing slots are refused on native too. Use [[mixin]] for supported native source edits, or request the slot. Mixins are trusted code compiled into the game. Every injection is a hook request. NeoForge 26.3 names, no `on_` prefix, `&mut` events, writes take `host`.
-
-## Rules
-
-- [Rules for agents](agents.md): the rules in order and the manifest fields.
-- [Injections](injections.md): the decision ladder, convertible injections, the hook-request template, ordering.
-
-## Guide
-
-- [Your first native mod](start/first-mod.md)
-- [Installing and using mods](start/installing.md)
-- [Making a content mod](how-to/content-mods.md)
-- [Native mods](how-to/native-mods.md)
-- [Query attachment holders](how-to/attachments.md): snapshots, explicit server writes, scope and costs.
-- [Trait mods, Parts and attachments](concepts/trait-mods.md)
-- [Publishing your mod](how-to/publish.md)
-
-## Per-concept sources
-
-Edit the individual pages in `concepts/trait-mods/` and `how-to/native-mods/`, not their aggregate pages.
-`mdbook build docs/modding` discovers sorted `.md` files there automatically, using the leading
-`<!-- chapter: Title -->` metadata for navigation. Adding a concept needs no SUMMARY edit.
-Existing heading anchors stay unchanged on the aggregate pages; relative links and compiled-example
-includes in a concept page are relative to that page. The build checks their targets and anchors.
-The preprocessor needs only Python 3 and runs automatically in local and CI builds.
-
-## Reference
-
-- [NeoForge extension coverage](reference/neoforge-extensions.md): every public method of NeoForge 26.3's block, item, entity, block-entity and fluid extension interfaces, and what Horizon has for it.
-- [The manifest and the package](reference/manifest.md)
-- [The registry index](reference/registry-index.md)
-- [Hook notes](reference/hook-notes.md)
-- [NeoForge counterparts](reference/neoforge-counterparts.md)
-- [The mod API (rustdoc)](reference/api.md)
+- [Agent rules](agents.md)
+- [Native mixins](mixins.md)
+- [Manifest](reference/manifest.md)

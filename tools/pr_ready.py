@@ -47,7 +47,7 @@ if "PARITY_SHARED" not in os.environ and not (ROOT / ".local" / "minecraft").exi
     # A fleet worktree without vanilla data still knows each harness's dependencies.
     os.environ["PARITY_SHARED"] = str(FLEET_SHARED)
 from tools import parity, release_train  # noqa: E402
-from tools.ci import listed_calls, rust_changes  # noqa: E402
+from tools.ci import rust_changes  # noqa: E402
 
 RBUILD = Path.home() / "fleet" / "rbuild"
 # What rbuild's login shell needs on each fleet machine before cargo (it adds sccache itself). The ThinkPad no
@@ -82,7 +82,7 @@ MOD_API_INPUTS = ("crates/horizon-mod-vocab/src/hooks/",)
 # own crate with its own suite; a `--manifest-path` run keeps both out of the workspace selection above.
 DISPATCH_TESTS = "crates/horizon-mod-api-gen/dispatch-tests/Cargo.toml"
 DISPATCH_TEST_INPUTS = ("crates/horizon-mod-api-gen/", "crates/horizon-mod-api-macros/",
-                        "crates/horizon-mod-point-shape/", "crates/horizon-mod-api/",
+                        "crates/horizon-mod-api/",
                         "crates/horizon-mod-vocab/", *MOD_API_INPUTS)
 MOD_REGISTRY = "crates/horizon-mod-registry/Cargo.toml"
 
@@ -412,8 +412,6 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
                           ("launcher tests", "cargo test --locked --lib --bins $features")]:
         steps.append(Step(name, f"cd launcher && {LAUNCHER_FEATURES}\nin_shell {shlex.quote(command)}", skip=launcher_skip,
                           summary=tests_passed if name == "launcher tests" else None))
-    steps.append(Step("listed call loader proof", "python3 tools/ci/listed_calls.py --force",
-                      skip=None if listed_calls.applies(changed) else "listed call machinery untouched"))
     harness = Step("Parity", summary=parity_summary)
     affected = affected_here(changed)
     local_data = (ROOT / ".local" / "minecraft").exists() and (ROOT / ".local" / "horizon-client").exists()

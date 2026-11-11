@@ -16,13 +16,9 @@ fn main() {
         // SAFETY: these signatures are compiled from the adjacent fixtures with this compiler.
         unsafe {
             let identity = library
-                .get::<fn() -> [usize; 2]>(b"probe_identity")
+                .get::<fn() -> [usize; 1]>(b"probe_identity")
                 .unwrap();
             assert_eq!(identity(), probe_shared::identity());
-            assert_eq!(
-                identity()[1],
-                &mod_points::__private::POINTS as *const _ as usize
-            );
             let bump = library.get::<fn() -> usize>(b"probe_bump").unwrap();
             assert_eq!(bump(), index);
             let exchange = library
@@ -42,12 +38,10 @@ fn main() {
                     hook: "test",
                     part: None,
                 });
-            mod_points::__private::POINTS[0].store(true, Ordering::SeqCst);
             tls(Some("probe"));
-            // Global registry shared across threads, but native call attribution is TLS.
+            // Native call attribution is thread-local.
             std::thread::spawn(move || {
                 assert_eq!(mod_api::content::crash::current_native_mod(), None);
-                mod_points::__private::POINTS[0].store(false, Ordering::SeqCst);
                 tls(None);
             })
             .join()
@@ -65,6 +59,6 @@ fn main() {
     }
     assert_eq!(probe_shared::STATE.load(Ordering::SeqCst), 2);
     println!(
-        "PASS: two independently loaded mods share game API, points, TLS and dependency state; cross-image allocation/drop completed"
+        "PASS: two independently loaded mods share game API, TLS and dependency state; cross-image allocation/drop completed"
     );
 }

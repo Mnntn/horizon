@@ -36,7 +36,7 @@ process exit. Assertions check:
 
 - The shared dependency's static address and counter, with ordered mutations
   through both separately loaded consumers.
-- Actual `mod_points` registry address identity and cross-image/thread writes.
+- Shared dependency address identity and cross-image allocation and drop.
 - Actual `mod_api` crash detail registry writes from the shared dependency, read
   by the executable.
 - Actual `mod_api` native-call TLS, entered by the executable and observed by
