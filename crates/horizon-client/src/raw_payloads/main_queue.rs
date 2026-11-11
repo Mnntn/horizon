@@ -22,9 +22,10 @@ pub(crate) enum PreparedMain {
     Server(Prepared<NetEvent>),
 }
 /// Keeps failed opaque work alive until after the caller releases its epoch gate.
+/// Boxing occurs only on failed publication, keeping the success path allocation-free.
 pub(crate) enum FailedMain {
-    Client(Refused<Event>),
-    Server(Refused<NetEvent>),
+    Client(Box<Refused<Event>>),
+    Server(Box<Refused<NetEvent>>),
 }
 impl FailedMain {
     pub fn reason(&self) -> Refusal {
@@ -63,8 +64,12 @@ impl MainQueue {
 impl PreparedMain {
     pub(crate) fn publish(self) -> Result<(), FailedMain> {
         match self {
-            Self::Client(prepared) => prepared.publish().map_err(FailedMain::Client),
-            Self::Server(prepared) => prepared.publish().map_err(FailedMain::Server),
+            Self::Client(prepared) => prepared
+                .publish()
+                .map_err(|error| FailedMain::Client(Box::new(error))),
+            Self::Server(prepared) => prepared
+                .publish()
+                .map_err(|error| FailedMain::Server(Box::new(error))),
         }
     }
 }
