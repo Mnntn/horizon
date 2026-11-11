@@ -1522,12 +1522,7 @@ impl Hub {
         // for, to a Horizon client only.
         if g.brand == "horizon" {
             send_recipe_content(g);
-            g.send(&C::CustomPayload(
-                horizon_protocol::packets::configuration::CustomPayload {
-                    channel: super::recipes::TRANSFER_CHANNEL.into(),
-                    data: Vec::new(),
-                },
-            ));
+            super::recipes::advertise_viewer_channels(g);
         }
         // PlayerList.sendPlayerPermissionLevel, then the recipe book.
         self.send_permission_level(i);

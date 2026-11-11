@@ -1,4 +1,5 @@
 use super::*;
+mod listed_bench;
 mod owned;
 use crate::crossing::tests::internal;
 
@@ -909,12 +910,9 @@ fn private_borrowed_calls_have_call_scoped_records_for_both_ordinals() {
         assert!(rewritten.contains("Args < 'a >"), "{rewritten}");
         assert!(rewritten.contains("for < 'g , 'a >"));
         assert!(rewritten.contains("folder : & 'a str"));
-        assert!(
-            super::rewrite(source, "horizon_client::game", &entries, &[request], false)
-                .unwrap_err()
-                .to_string()
-                .contains("borrowing or non-Copy")
-        );
+        let (listed, _) =
+            super::rewrite(source, "horizon_client::game", &entries, &[request], false).unwrap();
+        assert_eq!(listed, rewritten);
     }
 }
 
@@ -954,12 +952,8 @@ fn private_engine_borrow_and_copy_array_are_call_scoped() {
     );
     assert!(rewritten.contains("p : [i32 ; 3]"));
     assert_eq!(sites[0].output, "bool");
-    assert!(
-        super::rewrite(source, module, &entries, &[request.clone()], false)
-            .unwrap_err()
-            .to_string()
-            .contains("borrowing or non-Copy")
-    );
+    let (listed, _) = super::rewrite(source, module, &entries, &[request.clone()], false).unwrap();
+    assert_eq!(listed, rewritten);
     entries[2].signature = "fn farmland(w: &mut MobWorld, p: [i32; 3]) -> bool".into();
     assert!(
         super::rewrite(source, module, &entries, &[request], true)

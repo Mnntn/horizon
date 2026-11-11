@@ -520,6 +520,8 @@ fn rustc(rust: &Toolchain, game: &Path, out: &Path, edition: &str) -> Command {
     .arg("-L")
     .arg(format!("dependency={}", game.join("deps").display()))
     .arg("-L")
+    .arg(format!("dependency={}", game.join("host").display()))
+    .arg("-L")
     .arg(format!("native={}", game.join("native").display()))
     .arg("-L")
     .arg(format!("dependency={}", out.display()));
@@ -1072,10 +1074,10 @@ mod tests {
         let name = native::prebuilt_archive("x86_64-unknown-linux-gnu", true);
         assert_eq!(
             name,
-            "horizon-prebuilt-v3-x86_64-unknown-linux-gnu-server.tar.gz"
+            "horizon-prebuilt-v4-x86_64-unknown-linux-gnu-server.tar.gz"
         );
         let listing =
-            format!("AB12  horizon-prebuilt-v3-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
+            format!("AB12  horizon-prebuilt-v4-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
         assert_eq!(expected_sum(&listing, &name).as_deref(), Some("cd34"));
         assert_eq!(expected_sum(&listing, "horizon-prebuilt-x.tar.gz"), None);
     }

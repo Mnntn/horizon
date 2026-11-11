@@ -240,7 +240,7 @@ impl Session {
     /// may draw while trading: those of the levels above it.
     pub fn sequences_needed(trades: &Trades, profession: &str, level: i32) -> Vec<String> {
         (level.saturating_add(1)..=5)
-            .filter_map(|l| trades.sequence(&Trades::set_for(profession, l)))
+            .filter_map(|l| trades.sequence(&trades.set_for(profession, l)))
             .collect()
     }
     /// `Villager.updateSpecialPrices` for the trading player.
@@ -274,7 +274,7 @@ impl Session {
             if can_level_up(self.level) && self.xp >= max_xp(self.level) {
                 self.level += 1;
                 if let Some(env) = env {
-                    let set = Trades::set_for(&self.profession, self.level);
+                    let set = env.trades.set_for(&self.profession, self.level);
                     if env.trades.sets.contains_key(&set) {
                         let more = self.offers_from_set(env, items, &set);
                         self.offers.extend(more);
@@ -333,6 +333,7 @@ impl Session {
 
 /// The trade registries.
 pub struct Trades {
+    pub professions: std::sync::Arc<crate::mobs::villager::ResolvedProfessions>,
     pub trades: HashMap<String, Value>,
     /// villager_trade tags, ordered.
     pub tags: HashMap<String, Vec<String>>,
@@ -447,6 +448,7 @@ impl Trades {
         Self {
             trades,
             tags: expand_all(&raw),
+            professions: std::sync::Arc::new(crate::mobs::villager::ResolvedProfessions::vanilla()),
             sets,
             potion_tags: expand_all(&raw_potions),
         }
@@ -466,12 +468,11 @@ impl Trades {
         v
     }
     /// `VillagerProfession.getTrades(level)`.
-    pub fn set_for(profession: &str, level: i32) -> String {
-        let name = profession.trim_start_matches("minecraft:");
-        let base = crate::mobs::villager::profession_index(name)
-            .and_then(|index| crate::mobs::villager::profession(index).trade_set)
-            .unwrap_or(name);
-        format!("minecraft:{base}/level_{level}")
+    pub fn set_for(&self, profession: &str, level: i32) -> String {
+        self.professions
+            .trade_key(profession, level)
+            .unwrap_or("")
+            .to_owned()
     }
     fn trade_list(&self, spec: &Value) -> Vec<String> {
         match spec {
@@ -1092,6 +1093,7 @@ mod tests {
         let t = Trades {
             trades,
             tags,
+            professions: std::sync::Arc::new(crate::mobs::villager::ResolvedProfessions::vanilla()),
             sets,
             potion_tags: HashMap::new(),
         };
@@ -1143,6 +1145,7 @@ mod tests {
         let t = Trades {
             trades: HashMap::new(),
             tags: HashMap::new(),
+            professions: std::sync::Arc::new(crate::mobs::villager::ResolvedProfessions::vanilla()),
             sets: HashMap::new(),
             potion_tags: HashMap::new(),
         };

@@ -6,6 +6,7 @@ use super::{Game, spill, storage::is_shulker_box};
 use horizon_core::nbt::Tag;
 use mod_api::__private::game::*;
 
+pub(in crate::game) mod cauldron_contents;
 #[cfg(test)]
 mod contents_changed_tests;
 mod crafter;

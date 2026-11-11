@@ -8,6 +8,7 @@ import struct
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from tools import prebuilt_game
@@ -34,6 +35,23 @@ class AllocatorSelectionTests(unittest.TestCase):
         for platform in ("linux", "darwin"):
             self.assertEqual(prebuilt_game.cargo_features(False, platform), [])
             self.assertEqual(prebuilt_game.cargo_features(True, platform), ["--no-default-features"])
+
+    def test_build_uses_explicit_host_target_and_target_dynamic_flags(self):
+        class Captured(Exception):
+            pass
+
+        def capture(command, **kwargs):
+            self.assertEqual(command[command.index("--target") + 1], "fixture-host")
+            self.assertIn("-C prefer-dynamic", kwargs["env"]["RUSTFLAGS"])
+            self.assertNotIn("CARGO_ENCODED_RUSTFLAGS", kwargs["env"])
+            raise Captured
+
+        with patch.object(prebuilt_game, "stage", return_value=Path("staged")), \
+             patch.object(prebuilt_game, "rustc_host", return_value="fixture-host"), \
+             patch.object(prebuilt_game, "run", side_effect=capture), \
+             patch.dict(prebuilt_game.os.environ, {"CARGO_ENCODED_RUSTFLAGS": "-Cprefer-dynamic=no"}):
+            with self.assertRaises(Captured):
+                prebuilt_game.build(Path("unused-sdk"), False)
 
 
 class ExecutableLinkPolicyTests(unittest.TestCase):
@@ -93,23 +111,38 @@ class PrebuiltContentsTests(unittest.TestCase):
             (root / name).write_bytes(b"")
         return root
 
-    def test_only_current_cargo_artifacts_enter_the_archive(self):
+    def test_only_target_artifacts_and_host_proc_macros_enter_the_archive(self):
         root = self.folder(
-            "cache/libpoint_shape-old.rmeta", "cache/libpoint_shape-host.rmeta",
-            "cache/libpoint_shape-target.rmeta", "cache/libpoint_shape-target.rlib",
-            "cache/libderive.so", "cache/libhorizon_client.so",
+            "cache/release/deps/libshared-host.rmeta",
+            "cache/release/deps/libderive.so",
+            "cache/host/release/deps/libshared-target.rmeta",
+            "cache/host/release/deps/libshared-second-version.rmeta",
+            "cache/host/release/deps/libshared-target.rlib",
+            "cache/host/release/deps/libhorizon_client.so",
         )
-        output = root / "sdk"
-        output.mkdir()
-        current = ["libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta",
-                   "libpoint_shape-target.rlib", "libderive.so", "libhorizon_client.so"]
+        output, macros = root / "sdk/deps", root / "sdk/host"
+        output.mkdir(parents=True)
+        macros.mkdir()
+        def artifact(path, kind):
+            return {"reason": "compiler-artifact", "target": {"kind": [kind]},
+                    "filenames": [str(root / path)]}
         prebuilt_game.copy_artifacts([
-            {"reason": "compiler-artifact", "filenames": [str(root / "cache" / name) for name in current]},
+            artifact("cache/release/deps/libshared-host.rmeta", "lib"),
+            artifact("cache/release/deps/libderive.so", "proc-macro"),
+            artifact("cache/host/release/deps/libshared-target.rmeta", "lib"),
+            artifact("cache/host/release/deps/libshared-second-version.rmeta", "lib"),
+            artifact("cache/host/release/deps/libshared-target.rlib", "lib"),
+            artifact("cache/host/release/deps/libhorizon_client.so", "dylib"),
             {"reason": "build-finished", "success": True},
-        ], output)
+        ], output, macros, root / "cache/host")
         self.assertEqual({path.name for path in output.iterdir()}, {
-            "libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta", "libderive.so", "libhorizon_client.so",
+            "libshared-target.rmeta", "libshared-second-version.rmeta", "libhorizon_client.so",
         })
+        self.assertEqual({path.name for path in macros.iterdir()}, {"libderive.so"})
+        # Multiple legitimate target versions remain available to rustc's transitive lookup.
+        # Only explicit extern/facade lookup must reject ambiguous names.
+        with self.assertRaises(ValueError):
+            prebuilt_game.extern_args(output, "shared")
 
     def test_facades_exclude_build_only_and_ambiguous_runtime_crates(self):
         def package(name, kind="lib"):
@@ -174,6 +207,23 @@ class PrebuiltContentsTests(unittest.TestCase):
         (root / "libhorizon_mod_package-build.rmeta").write_bytes(b"")
         with self.assertRaisesRegex(ValueError, "expected exactly one SDK metadata for horizon_mod_package"):
             prebuilt_game.extern_args(root, "horizon_mod_package")
+
+    def test_host_macros_pass_but_host_dependency_metadata_is_refused(self):
+        root = self.folder("deps/libhorizon_client.so", "deps/libhorizon_mod_wasm.so", "deps/libhorizon_mod_host.so",
+                           "host/libderive.so", "host/derive.dll", "host/libderive.dylib")
+        (root / prebuilt_game.CATALOG).write_bytes(b"{}")
+        (root / prebuilt_game.IDENTITY).write_text(json.dumps({"files": {
+            prebuilt_game.CATALOG: prebuilt_game.sha256(root / prebuilt_game.CATALOG)}}))
+        prebuilt_game.check(root)
+        (root / "host/libshared-host.rmeta").write_bytes(b"")
+        with self.assertRaisesRegex(SystemExit, "aren't compiler outputs"):
+            prebuilt_game.check(root)
+
+    def test_unrelated_multiversion_dependencies_do_not_break_named_externs(self):
+        root = self.folder("deps/libmod_api-one.rmeta", "deps/libhorizon_mod_package-one.rmeta",
+                           "deps/libshared-v1.rmeta", "deps/libshared-v2.rmeta",
+                           "host/libmod_api-host.so")
+        prebuilt_game.assert_externs(root, [])
 
     def test_compiler_outputs_pass(self):
         root = self.folder(

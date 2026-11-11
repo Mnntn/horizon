@@ -170,7 +170,7 @@ path = "tests/mod_api_hooks.rs"
 workspace = true
 
 [dev-dependencies]
-horizon-mod-wasm = { path = "../horizon-mod-wasm", features = ["runtime-fixture"] }
+horizon-mod-wasm = { path = "../horizon-mod-wasm", features = ["runtime-fixture", "listener-fixture"] }
 wat = "1.261"
 tempfile = "3"
 horizon-mod-runtime = { path = "../horizon-mod-runtime", features = ["test-work-count"] }

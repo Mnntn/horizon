@@ -69,14 +69,15 @@ use mod_api::GameMode;
 use mod_api::GameTests;
 pub use mod_api::game::{PhantomSpawnResult, Shake, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, BlockTintSources, CameraDrawContext, CauldronInteractions,
-    ClientAudioOptions, ClientChatOptions, ClientGraphicsOptions, ClientGuiOptions,
-    ClientInputOptions, ClientMiningPrediction, ClientModifiers, ClientReloadListeners,
-    ColorResolvers, CommandInvocation, EnchantmentDamageEffects, EnchantmentInfo, EntityRef,
-    GameRuleActor, HandRender, InteractionAttempt, InteractionKey, LayerDefinition,
-    LifecycleContext, LivingRef, NoteBlockChange, ParticleProviders, PathComputationType,
-    Placement, PlayerRef, PoiTypeExtensions, RecipeBookCategory, ScreenId, ScreenOpening,
-    ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    self, Answered, BlockPlacement, BlockTintSources, CameraDrawContext, CauldronFluidContents,
+    CauldronInteractions, ClientAudioOptions, ClientChatOptions, ClientGraphicsOptions,
+    ClientGuiOptions, ClientInputOptions, ClientMiningPrediction, ClientModifiers,
+    ClientReloadListeners, ColorResolvers, CommandInvocation, EnchantmentDamageEffects,
+    EnchantmentInfo, EntityRef, GameRuleActor, HandRender, InteractionAttempt, InteractionKey,
+    LayerDefinition, LifecycleContext, LivingRef, NoteBlockChange, ParticleProviders,
+    PathComputationType, Placement, PlayerRef, PoiTypeExtensions, RecipeBookCategory, ScreenId,
+    ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController,
+    ToolUse, VillagerProfessions, WorldPhase,
 };
 use mod_api::{
     ActiveEffect, AttachmentStore, BlockClick, BlockUpdateFlags, BonemealSource, ChunkRef,

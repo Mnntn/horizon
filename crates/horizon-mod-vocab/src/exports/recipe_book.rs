@@ -4,3 +4,4 @@ pub use crate::item::recipe_book::{
 pub use crate::item::recipe_book::{RecipeBookDisplay, RecipeBookDisplayEntry, RecipeSlotDisplay};
 
 pub use crate::item::recipe_book::PlacementInfo;
+pub use crate::item::recipe_book::{RecipeTransferCheck, RecipeTransferResult};

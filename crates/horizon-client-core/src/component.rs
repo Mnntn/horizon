@@ -1104,6 +1104,9 @@ mod tests {
 
     #[test]
     fn a_text_received_whole_has_the_spans_its_parts_would() {
+        let _guard = crate::key_display::TEST_BINDINGS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         use serde_json::json;
         for v in [
             json!(""),

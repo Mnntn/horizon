@@ -199,7 +199,7 @@ impl Game<'_> {
                 if !horizon_client::mobs::villager::profession_table()
                     .entries()
                     .iter()
-                    .any(|p| p.trade_set == Some(profession.as_str()))
+                    .any(|p| p.trade_set.as_deref() == Some(profession.as_str()))
                 {
                     return Err(format!("unknown profession {profession}").into());
                 }

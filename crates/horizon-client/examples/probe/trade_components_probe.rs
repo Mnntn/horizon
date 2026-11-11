@@ -16,6 +16,9 @@ pub fn main() -> horizon_client::Result<()> {
     let items = Items::catalog(root, &PackOverlay::NONE, &defaults)?;
     let enchantments = Enchantments::load(root, &defaults)?;
     let trades = Trades {
+        professions: std::sync::Arc::new(
+            horizon_client::mobs::villager::ResolvedProfessions::vanilla(),
+        ),
         trades: HashMap::new(),
         tags: HashMap::new(),
         sets: HashMap::new(),

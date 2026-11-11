@@ -8,9 +8,10 @@ Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answ
 an amount, kept as an item stack's are (a potion fluid's contents; water and lava have none), and a tank fills only
 from empty or with the same fluid and the same components. A `FluidStack` is one with an amount, as tanks keep it
 (`resource.to_stack(amount)`, `FluidResource::of(&stack)`). The game's own answer is a mod block's tanks by side
-(`block_entity_fluids`) and a cauldron, one tank of 1000 mB that holds water in thirds and lava only whole; a
-cauldron has no block entity and is answered by position, and a powder snow cauldron holds no fluid. A cauldron
-takes water and lava whatever their components and discards them, so
+(`block_entity_fluids`) and a cauldron, one tank holding the content its block has: vanilla's water (a bucket in
+thirds) and lava (a bucket only whole), or one a mod registered through `register_cauldron_fluid_content`, filled
+and drained by whole levels; a cauldron has no block entity and is answered by position, and a powder snow
+cauldron holds no fluid. A cauldron takes the fluids that have a content whatever their components and discards them, so
 what comes out of it is plain: the one place a fluid's components are dropped. A mod block's saved tanks take no
 fluid with components. `level.capability(host, &FLUIDS, pos, side)` finds a handler in a `LevelRef`'s level, as
 `ITEMS`' are found, and `move_resources` moves fluids as it moves items. A move the target takes only part of is

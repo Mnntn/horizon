@@ -1071,7 +1071,7 @@ steers a mob through the engine's own controls, each a momentary wish the mob's 
 
 ### Mobs drawn by a mod
 
-`crates/horizon-client/src/game/modding/native_mob_draw.rs`: `native_mob_submit(mob, draw, drawn)` (client) is asked once a frame for
+`crates/horizon-client/src/game/modding/native_mob_draw.rs`: `native_mob_submit(mob, draw, hidden, drawn)` (client) is asked once a frame for
 every mob in view but players (vanilla's `EntityRenderer.submit`). Set `drawn` and the mob's vanilla model, armour and held
 items are left out (NeoForge's `RenderLivingEvent.Pre`, cancelled); its name tag, shadow, flames and glowing outline still draw.
 
@@ -2196,7 +2196,7 @@ registration path.
 
 `native_movement_input(forward, strafe, jump, sneak)` runs on the client each local player tick after input is read and before it is applied. Mods may change all four values; positive strafe is left. The server receives direction flags, not scalar magnitudes, so remote servers may correct modified movement.
 
-- Mobs drawn by client mods: `native_mob_submit(mob, draw, drawn)` is asked each frame for every mob in view but players,
+- Mobs drawn by client mods: `native_mob_submit(mob, draw, hidden, drawn)` is asked each frame for every mob in view but players,
   with its id, kind, custom name and the frame's body and head turns and walk cycle; a mod draws a model of its own with the
   block entity drawing helpers under `draw`'s pose (at the feet, turned with the body) and sets `drawn` to leave out the vanilla
   model.
@@ -2763,7 +2763,7 @@ registration path.
   results and rules for supported vanilla types, and the original JSON for mod-defined types. `Recipe` does not
   define display pages, per-result chances or fluid input/output slots: a viewer interprets its own machine-recipe
   JSON and draws those details itself. `known_recipes`, `place_recipe` and `transfer_recipe` provide recipe-book
-  integration; they do not create a machine-recipe display record.
+  integration, `transfer_recipe_check` its dry run on the server; they do not create a machine-recipe display record.
   `native_sprite` takes an optional `tint` (`0xAARRGGBB`) that multiplies every texel, as a fluid's colour does.
   `DrawContext::text(text, at, argb, shadow)` takes its colour as vanilla's `GuiGraphics` does, `0xAARRGGBB`
   (`0xFFFFFFFF` is opaque white), and draws nothing for a fully transparent one, as vanilla's does.

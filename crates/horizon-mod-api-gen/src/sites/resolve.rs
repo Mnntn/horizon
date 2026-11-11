@@ -266,7 +266,6 @@ pub(crate) fn resolve<'a>(
     lexical: &super::analysis::Scope,
     entries: &'a [Internal],
     rule: &Rule,
-    private: bool,
 ) -> Result<Resolved<'a>, Error> {
     let Callee {
         callee,
@@ -303,35 +302,30 @@ pub(crate) fn resolve<'a>(
             let syn::Pat::Ident(pat) = &*arg.pat else {
                 return Err(Cause::Record("destructured callee parameter").into());
             };
-            let shape = if private {
-                source_shape(
-                    rule,
-                    entries,
-                    &callee_module,
-                    callee_this.as_deref(),
-                    &arg.ty,
-                )
-            } else {
-                rule.shape(&callee_module, callee_this.as_deref(), &arg.ty)
-            };
+            let shape = source_shape(
+                rule,
+                entries,
+                &callee_module,
+                callee_this.as_deref(),
+                &arg.ty,
+            );
             // Owned non-Copy fields cannot implement a repeatable original. Shared
-            // references are Copy; source records bind their referents to the call.
-            let borrowed = private && matches!(shape, Shape::Ref { mutable: false, .. });
-            let owned = private
-                && !shape.may_borrow()
+            // references are Copy; native records bind their referents to the call.
+            let borrowed = matches!(shape, Shape::Ref { mutable: false, .. });
+            let owned = !shape.may_borrow()
                 && !matches!(
                     shape,
                     Shape::Slice(_) | Shape::DynError | Shape::Scalar(crate::crossing::Scalar::Str)
                 )
                 && !copy_shape(&shape, true);
             once |= owned;
-            if !borrowed && !owned && !copy_shape(&shape, private) {
+            if !borrowed && !owned && !copy_shape(&shape, true) {
                 return Err(Cause::Record(
                     "argument record requires a borrowing or non-Copy field",
                 )
                 .into());
             }
-            let ty = if borrowed || owned || (private && matches!(&*arg.ty, Type::Path(_))) {
+            let ty = if borrowed || owned || matches!(&*arg.ty, Type::Path(_)) {
                 let spelling = crate::internals_table::spell(&shape).ok_or(Cause::Record(
                     "argument record requires a borrowing or non-Copy field",
                 ))?;

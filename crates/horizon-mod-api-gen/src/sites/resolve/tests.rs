@@ -27,7 +27,7 @@ fn refuse(entries: &[Internal], sig: &syn::Signature, call: &str) -> Error {
     let expr = syn::parse_str(call).unwrap();
     let rule = Rule::new(entries);
     let lexical = Scope::scan(sig, None);
-    resolve(&expr, &entries[3], sig, &lexical, entries, &rule, false)
+    resolve(&expr, &entries[3], sig, &lexical, entries, &rule)
         .err()
         .expect("call must be refused")
 }
@@ -48,7 +48,7 @@ fn site_resolution_walks_fields_and_annotated_parameters_and_path_calls() {
         "super::game::add(7)",
     ] {
         let expr = syn::parse_str(call).unwrap();
-        let resolved = resolve(&expr, &entries[3], &sig, &lexical, &entries, &rule, false).unwrap();
+        let resolved = resolve(&expr, &entries[3], &sig, &lexical, &entries, &rule).unwrap();
         assert_eq!(resolved.fields[0], "value");
         assert_eq!(resolved.types[0].to_token_stream().to_string(), "u32");
         assert_eq!(resolved.output.to_string(), "u32");
@@ -119,7 +119,6 @@ fn site_resolution_refuses_unresolved_receivers_and_non_record_shapes() {
         ("u32", "self.child.step::<u8>(1)", "generic callee"),
         ("T", "self.child.step(1)", "borrowing or non-Copy"),
         ("&mut u32", "self.child.step(1)", "borrowing or non-Copy"),
-        ("String", "self.child.step(1)", "borrowing or non-Copy"),
         ("u32", "self.child.step(self.x)", "two-phase borrowing"),
         ("u32", "child.step(child.x)", "two-phase borrowing"),
         ("u32", "self.child.step(alias.x)", "two-phase borrowing"),

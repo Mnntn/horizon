@@ -157,6 +157,19 @@ impl<T: Copy> PoiSections<T> {
     }
 }
 
+impl<T> PoiSections<T> {
+    /// Drop classification compiled against a previous owning resource snapshot.
+    pub fn clear(&self) {
+        let mut lists = self
+            .sections
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        lists.by_column.clear();
+        lists.len = 0;
+        lists.prune_at = MIN_PRUNE;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

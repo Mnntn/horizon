@@ -43,6 +43,10 @@ on:
     - cron: '7-59/10 * * * *'
   workflow_dispatch:
     inputs:
+      base:
+        description: Main commit to build (empty selects the normal release base)
+        type: string
+        default: ''
       dry_run:
         description: Build everything and write the notes, but publish nothing
         type: boolean
@@ -92,11 +96,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASES_PAUSED: ${{ vars.RELEASES_PAUSED }}
-          # A push or a run off main builds its own commit; otherwise main's newest commit with green checks.
-          HEAD_SHA: ${{ (github.event_name == 'push' || steps.mode.outputs.dry_run == 'true') && github.sha || '' }}
+          BASE: ${{ inputs.base }}
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ steps.mode.outputs.dry_run }}
+          SOURCE_SHA: ${{ github.sha }}
           FORCE: ${{ inputs.force && 'yes' || '' }}
         run: |
           set -euo pipefail
+          # Explicit manual source wins, but can only name a commit on trusted main.
+          # Resolve once to an immutable SHA before passing it to the release decision.
+          HEAD_SHA=
+          if [[ -n "$BASE" ]]; then
+            git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+            HEAD_SHA=$(git rev-parse --verify --end-of-options "${BASE}^{commit}") || {
+              echo "::error::base must resolve to a commit on main"; exit 1;
+            }
+            git merge-base --is-ancestor "$HEAD_SHA" refs/remotes/origin/main || {
+              echo "::error::base is not on main"; exit 1;
+            }
+          elif [[ "$EVENT" == push || "$DRY_RUN" == true ]]; then
+            HEAD_SHA=$SOURCE_SHA
+          fi
           python3 tools/release_train.py decide --kind launcher ${HEAD_SHA:+--head "$HEAD_SHA"} ${FORCE:+--force} | tee decision.json
           echo "### $(jq -r '.reason' decision.json)" >> "$GITHUB_STEP_SUMMARY"
           tag=$(jq -r '.tag' decision.json)
@@ -105,7 +125,7 @@ jobs:
           # A dry run (and a launcher branch's push) builds whatever the decision.
           if [[ "${{ steps.mode.outputs.dry_run }}" == true ]]; then
             echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "head=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            echo "head=${HEAD_SHA:-$GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           fi
 
   build:

@@ -542,8 +542,9 @@ pub(super) fn emit<'a>(
                     .collect();
                 let refs: Vec<_> = engine.iter().map(|(name, ty)| (name.clone(), ty)).collect();
                 let (fields, generics) = carrier_fields(&refs);
+                let visibility = method.vis.to_token_stream();
                 fire.push_str(&format!(
-                    "pub(in crate::game) struct {carrier}{generics} {{ {fields} }}\n"
+                    "{visibility} struct {carrier}{generics} {{ {fields} }}\n"
                 ));
                 for arg in &mut signature.inputs {
                     if let FnArg::Typed(arg) = arg

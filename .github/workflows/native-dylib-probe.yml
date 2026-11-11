@@ -1,80 +1,55 @@
 name: native dylib linkage probe
 
-# Probe only: no release, mod loader, or player data. Open the probe PR only
-# after the local gates pass; its ready head receives one cross-platform run.
+# Full SDK proof is main-only; cheap Python contract tests remain in verify.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
     paths:
-      # Dependency-set changes and the SDK producer/consumer contract.
-      - 'crates/horizon-addresses/Cargo.toml'
-      - 'crates/horizon-anticheat/Cargo.toml'
-      - 'crates/horizon-assets/Cargo.toml'
-      - 'crates/horizon-bench/Cargo.toml'
-      - 'crates/horizon-chat-filter/Cargo.toml'
-      - 'crates/horizon-client-core/Cargo.toml'
-      - 'crates/horizon-client-input/Cargo.toml'
-      - 'crates/horizon-client-lib/Cargo.toml'
-      - 'crates/horizon-client-render/Cargo.toml'
-      - 'crates/horizon-client/Cargo.toml'
-      - 'crates/horizon-command/Cargo.toml'
-      - 'crates/horizon-core/Cargo.toml'
-      - 'crates/horizon-cosmetics/Cargo.toml'
-      - 'crates/horizon-dualsense/Cargo.toml'
-      - 'crates/horizon-engine-slots/Cargo.toml'
-      - 'crates/horizon-friends/Cargo.toml'
-      - 'crates/horizon-game-discovery/Cargo.toml'
-      - 'crates/horizon-hdr/Cargo.toml'
-      - 'crates/horizon-hooks/Cargo.toml'
-      - 'crates/horizon-items/Cargo.toml'
-      - 'crates/horizon-mcp/Cargo.toml'
-      - 'crates/horizon-mod-api-gen/Cargo.toml'
-      - 'crates/horizon-mod-api-macros/Cargo.toml'
-      - 'crates/horizon-mod-api/Cargo.toml'
-      - 'crates/horizon-mod-host/Cargo.toml'
-      - 'crates/horizon-mod-package/**'
-      - 'crates/horizon-mod-point-emit/Cargo.toml'
-      - 'crates/horizon-mod-point-shape/**'
-      - 'crates/horizon-mod-points/Cargo.toml'
-      - 'crates/horizon-mod-render/Cargo.toml'
-      - 'crates/horizon-mod-runtime/Cargo.toml'
-      - 'crates/horizon-mod-vocab/Cargo.toml'
-      - 'crates/horizon-mod-wasm/Cargo.toml'
-      - 'crates/horizon-narrator/Cargo.toml'
-      - 'crates/horizon-optifine/Cargo.toml'
-      - 'crates/horizon-platform/**'
-      - 'crates/horizon-polytone/Cargo.toml'
-      - 'crates/horizon-protocol/Cargo.toml'
-      - 'crates/horizon-server-files/Cargo.toml'
-      - 'crates/horizon-shader-api/Cargo.toml'
-      - 'crates/horizon-shaders/Cargo.toml'
-      - 'crates/horizon-system/Cargo.toml'
-      - 'crates/horizon-telemetry/Cargo.toml'
-      - 'crates/horizon-theme/Cargo.toml'
-      - 'crates/horizon-threads/Cargo.toml'
-      - 'crates/horizon-world/Cargo.toml'
-      - 'third_party/libmimalloc-sys/Cargo.toml'
-      - 'third_party/naga/Cargo.toml'
-      - 'third_party/wgpu-hal/Cargo.toml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'third_party/**'
+      - '.cargo/**'
+      - 'packaging/windows/exe.rs'
+      - 'packaging/executable_link.rs'
+      - 'rust-toolchain*'
+      - 'launcher/src/rust_toolchain.rs'
+      - 'tools/prebuilt_game.py'
       - 'tools/native_dylib_probe.py'
       - 'tools/native_dylib_probe/**'
-      - 'tools/prebuilt_game.py'
+      - 'tools/native_probe_ci.py'
       - '.github/workflows/native-dylib-probe.yml'
-      - 'launcher/src/native_mods/**'
-      - 'launcher/src/native_mods.rs'
-      - 'launcher/src/rust_toolchain.rs'
-      - 'rust-toolchain*'
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
   group: native-dylib-probe-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      selected: ${{ steps.select.outputs.selected }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: select
+        env:
+          PROBE_SELECT: '1'
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/native_probe_ci.py
   linkage:
-    if: github.event.pull_request.draft == false
+    needs: select
+    if: needs.select.outputs.selected == 'true'
     name: linkage ${{ matrix.target }}
     strategy:
       fail-fast: false
@@ -96,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
       - name: Record exact head and select the launcher's pinned compiler
         id: rust
         run: |
@@ -126,3 +101,21 @@ jobs:
       - name: Probe command log
         if: failure()
         run: tail -n 120 target/native-dylib-probe/commands.log
+
+  main-break:
+    needs: [select, linkage]
+    if: always() && (needs.linkage.result == 'failure' || needs.select.result == 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Main break and last green range
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo '## MAIN BREAK: native dylib probe failed; fast-path fix required.' >> "$GITHUB_STEP_SUMMARY"
+          python tools/native_probe_ci.py

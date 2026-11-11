@@ -60,13 +60,11 @@ fn owned_records_forward_cancel_unwind_and_reject_escapes() {
     let site = &sites[0];
     assert!(site.once);
     assert!(site.args[2].1.contains("crate :: game :: Payload"));
-    // The same declaration must still refuse a listed record.
-    assert!(
-        rewrite(source, "horizon_client::game", &catalog, &[request])
-            .unwrap_err()
-            .to_string()
-            .contains("borrowing or non-Copy")
-    );
+    // Listed and source builds expose exactly the same record and listener.
+    let (listed, listed_sites) =
+        rewrite(source, "horizon_client::game", &catalog, &[request]).unwrap();
+    assert_eq!(listed, rewritten);
+    assert_eq!(listed_sites[0].hash, site.hash);
     let name = &site.name;
     let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../target")

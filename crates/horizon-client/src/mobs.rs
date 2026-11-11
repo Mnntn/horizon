@@ -2025,6 +2025,7 @@ pub enum MobEvent {
         count: u32,
     },
     Sound(&'static str, [f64; 3], f32, f32),
+    ProfessionWorkSound(Arc<str>, [f64; 3], f32, f32),
     /// `level.playSound(null, mob, sound, source, volume, pitch)`: a sound
     /// bound to mob `mob` (`ServerLevel.playSeededSound`'s entity overload),
     /// in vanilla's `source`, from where the mob stands.
@@ -2980,6 +2981,7 @@ pub struct Seen {
     pub meeting: Option<[i32; 3]>,
     /// A villager's vanilla profession projection, absent for unknown IDs.
     pub profession: Option<u8>,
+    pub custom_profession: Option<Arc<str>>,
     /// A llama's strength or a horse's markings.
     pub secondary_variant: u8,
     /// A villager's experience.
@@ -3043,19 +3045,7 @@ impl Seen {
 impl Mob {
     /// The name used by command replies: CustomName takes precedence over the type.
     pub fn command_name(&self) -> crate::text::Text {
-        if let Some(name) = &self.custom_name {
-            return crate::text::Text::literal(name);
-        }
-        // Villager.getTypeName returns its registered profession's name.
-        if self.species() == Species::Villager {
-            let profession = villager::profession(self.extra.profession.index().unwrap_or(0)).id;
-            return crate::text::Text::translate(
-                &format!("entity.minecraft.villager.{profession}"),
-                &[],
-            );
-        }
-        let id = crate::command::args::normalize(&self.kind.id);
-        crate::text::Text::translate(&format!("entity.{}", id.replace(':', ".")), &[])
+        villager::command_name(self)
     }
 
     /// What the mob holds and wears, by `EquipmentSlot` ordinal: main hand,
@@ -3215,6 +3205,7 @@ impl Mob {
             potential_job: villager_brain::potential_job_site(m),
             meeting: villager.then_some(m.extra.meeting).flatten(),
             profession: villager.then(|| m.extra.profession.index()).flatten(),
+            custom_profession: villager::seen_profession_name(m, villager),
             secondary_variant: m.extra.variant2,
             xp: villager::xp(m),
             villager: villager.then(|| Arc::new(villager::seen(m))),
@@ -3613,6 +3604,7 @@ pub trait LiveMobs {
 
 #[derive(Clone)]
 pub struct MobWorld<'a> {
+    pub professions: &'a villager::ResolvedProfessions,
     /// What the motion value hooks are given: the loop context of the side that
     /// ticks these mobs.
     pub loop_context: &'a horizon_world::native_load_context::LoopContext,

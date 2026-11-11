@@ -62,6 +62,9 @@ pub struct Rider {
     pub sprint: bool,
     /// Holding the jump key (a happy ghast rises).
     pub jumping: bool,
+    /// Holding the sneak key (`Player.isShiftKeyDown`): a mount whose `entity_mount` listener
+    /// kept a sneaking rider on reads it here.
+    pub sneak: bool,
     /// A server's player whose own client moves the mount
     /// (`Entity.isClientAuthoritative`): here it only turns (`tickRidden`).
     pub client: bool,

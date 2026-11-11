@@ -14,6 +14,7 @@ mod pufferfish_player;
 mod residency;
 #[cfg(test)]
 mod retained_limits_tests;
+mod world_view;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 
 use super::level_sounds::LevelSound;
@@ -1074,110 +1075,6 @@ impl Game<'_> {
             }
         }
         self.world.bottom_y()
-    }
-    pub(super) fn mob_world_base<'s>(&'s self, others: &'s [Seen]) -> MobWorld<'s> {
-        let (rain, thunder) = self.weather_levels(1.0);
-        let weather = self.can_have_weather();
-        let player = self.player_view();
-        MobWorld {
-            loop_context: &self.loop_context,
-            world: &self.world,
-            registry: self.pack.assets.registry,
-            facts: self.res.facts(),
-            fluid_tables: &self.motion.fluids,
-            attributes: &self.motion.attributes,
-            movement: &self.motion.blocks,
-            collision: self.collision,
-            suffocation: self.mob_suffocation(),
-            data: self.res.mob_data(),
-            controlling_player_movement: None,
-            nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
-            player,
-            player_identity: self.player_identity(),
-            player_selection: None,
-            others,
-            live_mobs: None,
-            dragon: self.dragon_target(),
-            leash_boats: &self.leash_boats,
-            others_grid: None,
-            others_index: None,
-            passenger_objects: &[],
-            others_villagers: None,
-            others_solid: None,
-            daylight: self.dim != Dim::Nether && self.sky_darken() < 4,
-            // day.json: false from tick 12542, true from 23460 (a step track).
-            monsters_burn: self.dimension_type().has_timeline("minecraft:day")
-                && !(12542..23460).contains(&self.world.day_time.rem_euclid(24000)),
-            game_time: self.world.game_time,
-            day_time: self.world.day_time,
-            raining: weather && rain > 0.2,
-            thundering: weather && thunder > 0.9,
-            level: self.level_key(),
-            block_tags: &self.items().block_tags,
-            landing: &self.motion.landing,
-            biomes: world_biomes!(self),
-            mob_griefing: self
-                .ui
-                .rules
-                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
-            universal_anger: self
-                .ui
-                .rules
-                .bool_at(horizon_client::gamerules::vanilla::UNIVERSAL_ANGER),
-            mob_drops: self
-                .ui
-                .rules
-                .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS),
-            max_entity_cramming: self
-                .ui
-                .rules
-                .int_at(horizon_client::gamerules::vanilla::MAX_ENTITY_CRAMMING),
-            dimension_type: self.dimension_type(),
-            world_seed: self.level.seed,
-            sea_level: self.dim.sea_level(),
-            teams: std::sync::Arc::new(self.mob_teams()),
-            items: Some(self.items()),
-            lid_openers: &self.lid_openers,
-            mod_effects: if self.remote.is_none() {
-                Some(self)
-            } else {
-                None
-            },
-            mob_hooks: (self.native_authoritative()
-                && [
-                    mod_api::HookId::EndermanAnger,
-                    mod_api::HookId::EntityMobGriefing,
-                    mod_api::HookId::LivingVisibility,
-                    mod_api::HookId::LivingChangeTarget,
-                ]
-                .into_iter()
-                .any(mod_api::__private::listened))
-            .then_some(self as &dyn horizon_client::mobs::MobHooks),
-            goal_host: (self.native_authoritative()
-                && (mod_api::__private::has_entity_parts()
-                    || mod_api::__private::listened(mod_api::HookId::LivingChangeTarget)))
-            .then_some(self as &dyn horizon_client::mobs::part_goals::GoalHost),
-            asks_animal_tame: self.remote.is_none()
-                && mod_api::__private::listened(mod_api::HookId::AnimalTame),
-            asks_living_destroy_block: self.remote.is_none()
-                && mod_api::__private::listened(mod_api::HookId::LivingDestroyBlock),
-            asks_baby_spawn: self.remote.is_none()
-                && mod_api::__private::listened(mod_api::HookId::BabyEntitySpawn),
-            // A warden's away suspects are UUIDs: on the server side, where the
-            // entity UUIDs live, they resolve back to the mobs that are here.
-            who_lookup: if self.remote.is_none() {
-                Some(self)
-            } else {
-                None
-            },
-            border: Some(self.border.geometry()),
-            // The first player in the level: a server has no player of its own.
-            difficulty: self.local_difficulty(
-                self.level_players_iter()
-                    .next()
-                    .map_or([0.0; 3], |p| [p.position.x, p.position.y, p.position.z]),
-            ),
-        }
     }
     /// What the generator finalizes this level's structure mobs with.
     pub(super) fn share_spawn_conditions(&self) {
@@ -2717,6 +2614,9 @@ impl Game<'_> {
                 }
                 MobEvent::Sound(name, at, volume, pitch) => {
                     self.audio.play(&full_id(name), Some(at), volume, pitch)
+                }
+                MobEvent::ProfessionWorkSound(name, at, volume, pitch) => {
+                    self.audio.play(&name, Some(at), volume, pitch)
                 }
                 MobEvent::LocalSound(name, at, volume, pitch) => {
                     self.audio
@@ -8512,10 +8412,8 @@ impl Game<'_> {
             let (modded, hidden) = match who {
                 _ if layers_only => (false, mod_api::HiddenParts::default()),
                 Some(who) => self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out),
-                None => (
-                    !is_player && self.mod_mob_geometry(mob, alpha as f32, camera, packed, out),
-                    mod_api::HiddenParts::default(),
-                ),
+                None if is_player => (false, mod_api::HiddenParts::default()),
+                None => self.mod_mob_geometry(mob, alpha as f32, camera, packed, out),
             };
             if modded {
                 if let Some(rgb) = outline {
@@ -8573,6 +8471,7 @@ impl Game<'_> {
                     &lookup,
                     packed,
                     self.res.mob_data(),
+                    hidden,
                     listened.then_some(&mut parts),
                     out,
                     &mut skin,
@@ -11516,6 +11415,7 @@ mod pearl_tests {
             goal_host: None,
             live_mobs: None,
             teams: Default::default(),
+            professions: horizon_client::mobs::villager::profession_table(),
             loop_context: &crate::game::test_server_load()
                 .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
             world: &world,

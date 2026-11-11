@@ -602,7 +602,7 @@ Use those aliases for the callback. The generated main adapts each kind to one w
 | `wrap_call` | Receiver, mutable arguments and mutable `original` continuation; returns the result |
 | `wrap_if` | Receiver and shared arguments; returns whether to call the original; unit output only |
 
-Native source `internals` calls also admit immutable borrowed arguments, such as `&str`.
+Native `internals` calls on both listed and source routes admit immutable borrowed arguments, such as `&str`.
 Their generated `Args<'a>` record borrows the original values for the call; no implicit
 owned-string conversion occurs. The listener is higher-ranked over that lifetime, so safe
 callbacks cannot retain the record or its references beyond the call, or mutate the referent
@@ -616,14 +616,14 @@ can read the world's public fields and call its shared-reference methods using R
 normal field projection, including public nested values, even without naming every type.
 Naming `MobWorld` itself requires its internals facade export. It cannot obtain exclusive
 access or extend either lifetime. Copy arrays of scalar values, such as `[i32; 3]`, can
-accompany these references in source records.
+accompany these references in either route's records.
 `modify_value` still receives only the receiver and owned result, not the argument record.
-Mutable borrowed arguments remain refused, as do borrowed arguments on API/listed routes;
+Mutable borrowed arguments remain refused, as do borrowed arguments on API routes;
 this does not enable API source adapters or wasm call sites.
 
-### Owned arguments on native source calls
+### Owned arguments on native calls
 
-A native source `internals` call can also move owned arguments, such as the `ItemStack`
+A native `internals` call on either route can also move owned arguments, such as the `ItemStack`
 in `Game::dispense_item`, into its record. Argument expressions run once in their original
 order. No stack is implicitly cloned. A record with any owned non-Copy field selects the
 **single-use** listener contract; named value types are conservatively treated as owned,
@@ -659,7 +659,29 @@ and copies shared references; dropping the record does not drop their referents.
 `internals` callbacks are trusted code, not a sandbox: a callback may explicitly take an
 owned value through replacement or by owning Args, and may call `mem::forget`. The engine
 promises no hidden copies or leaks; it cannot prohibit these explicit mod-side transfers.
-Mutable-reference arguments, listed/prebuilt owned records and API/wasm routes remain refused.
+Mutable-reference arguments and API/wasm routes remain refused.
+A reviewed call row compiles the same typed record into the prebuilt game. Attaching a
+listener to that listed site does not rebuild the game, and uses the same listener source
+and lifetime rules as source routing. A stale listed declaration is refused by name;
+it never falls back to a source build.
+
+The reviewed Portizon rows use the catalog's physical caller paths:
+- `horizon_client_lib::mobs::villager_brain::secondary::sense_secondary`: `farmland`, ordinal 0;
+- `horizon_client::game::sign_edit::Game<'_>::draw_sign_editor`: `editor_sprite`, ordinals 0 and 1;
+- `horizon_client::game::machines::Game<'_>::dispense_from`: `Game::dispense_item`, ordinal 0.
+
+Use these caller paths in the manifest. The nominal `horizon_client::game::Game::...`
+caller spelling is currently refused as Missing by the loader; listing a call does not
+add a nominal alias or change identity matching.
+
+With no listener, these sites cost what every already-listed site costs: one relaxed
+atomic load and a branch, without constructing Args or allocating. This is not literally
+zero overhead relative to an uninstrumented call. An optimized author benchmark on an
+Intel Core i9-13900H measured 1.44 ns per plain call versus 1.93 ns per unsubscribed listed
+call, a difference of +0.49 ns per call (six alternating samples of 50 million calls,
+with the subscription flag opaque to the optimizer). Run the generator's ignored
+`unsubscribed_listed_call_cost` test to reproduce the measurement on another machine.
+
 Owned shapes containing further borrows remain refused; direct immutable-reference fields
 can accompany owned fields.
 

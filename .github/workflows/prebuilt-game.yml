@@ -1,8 +1,8 @@
 name: prebuilt game
 # The prebuilt game (#589): horizon-client as a Rust dylib plus every crate's metadata, one archive per OS, so the
 # launcher builds native trait mods against it with rustc alone, in seconds, instead of rebuilding the game.
-# Each OS builds on that OS: the proc-macro libraries in the archive run inside the player's own rustc. Built with
-# the launcher's pinned Rust (launcher/src/rust_toolchain.rs), because rustc reads only metadata from its own
+# Each OS builds with explicit --target <host>: target metadata lives in deps/, host proc-macros in host/.
+# Built with the launcher's pinned Rust (launcher/src/rust_toolchain.rs), because rustc reads only metadata from its own
 # version. Built once a day from main's head (a run whose commit already has a release stops early) and published as
 # a prerelease tagged prebuilt-<sha>, never marked latest, keeping the newest KEEP. Only compiler outputs go in:
 # tools/prebuilt_game.py refuses anything else, and nothing here reads vanilla data. A dispatch on another branch
@@ -63,7 +63,7 @@ jobs:
     env:
       # v<layout>: the launcher asks only for the archive layout it reads (prebuilt_archive in
       # crates/horizon-mod-package/src/index/native.rs); bump both when the folder's layout changes.
-      ARCHIVE: horizon-prebuilt-v3-${{ matrix.target }}${{ matrix.server && '-server' || '' }}.tar.gz
+      ARCHIVE: horizon-prebuilt-v4-${{ matrix.target }}${{ matrix.server && '-server' || '' }}.tar.gz
     steps:
       - uses: actions/checkout@v4
         with:

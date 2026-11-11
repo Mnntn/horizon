@@ -186,7 +186,7 @@ def main():
     shipped = output / "shipped"
     shipped.mkdir(exist_ok=True)
     route = ["rustc", "--edition", "2024", "-C", "prefer-dynamic", "-C", "opt-level=3", "-L", f"dependency={deps}",
-             "-L", f"native={sdk / 'native'}", "-L", f"dependency={shipped}"]
+             "-L", f"dependency={sdk / 'host'}", "-L", f"native={sdk / 'native'}", "-L", f"dependency={shipped}"]
     starter = (sdk_tools.ROOT / "crates/cargo-horizon-mod/template/native/lib.rs").read_text()
     (shipped / "mod_0.rs").write_text(starter.replace("{id}", "probe"))
     subprocess.run([*route, "--crate-type", "rlib", "--crate-name", "mod_0", *extern("mod_api"),
@@ -223,7 +223,7 @@ def main():
             failures.append("the shipped executable and the game allocate from different heaps (shipped/route-heap.txt)")
 
     common = ["rustc", "--edition=2024", "-C", "prefer-dynamic", "-L", f"dependency={deps}",
-              "-L", f"native={sdk / 'native'}", "-L", f"dependency={output}"]
+              "-L", f"dependency={sdk / 'host'}", "-L", f"native={sdk / 'native'}", "-L", f"dependency={output}"]
     for crate, source in [("probe_shared", "shared.rs"), ("probe_a", "mod.rs"), ("probe_b", "mod.rs")]:
         extra = [] if crate == "probe_shared" else ["--extern", f"probe_shared={output / (prefix + 'probe_shared' + extension)}"]
         run([*common, "--crate-type=dylib", "--crate-name", crate, *extern("horizon_client"), *extern("mod_api"), *extern("mod_points"),

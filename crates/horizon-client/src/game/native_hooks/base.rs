@@ -1234,27 +1234,27 @@ impl Game<'_> {
     ) {
         self.fire_block_entity_render_bounding_box(pos, block, state, entity, bounds);
     }
-    /// Draw the mob `mob` (its id, kind, custom name and the frame's body
-    /// and head turns and walk cycle, `LivingEntityRenderState`) on this
-    /// client with a model of your own, once a frame while it is in view
-    /// (vanilla's `EntityRenderer.submit`), and set `drawn` to leave out its
-    /// vanilla model, armour and held items (NeoForge's `RenderLivingEvent.Pre`,
-    /// cancelled). Add geometry with `native_draw_cube`, `native_draw_quad`,
-    /// `native_draw_block` and `native_draw_item` under `draw`'s pose stack,
-    /// which starts at the mob's feet turned with its body: +z is the way it
-    /// faces, +x its left, +y up, in blocks. `draw` also has the partial tick,
-    /// the game time and the mob's light. Its name tag, shadow, flames and
-    /// glowing outline draw as for any mob. Asked for every mob in view but
-    /// players; a mob your server half spawned (`native_spawn_mob`) is told
-    /// apart by its id, sent with mod messages, or by its custom name.
-    /// A mob is drawn afresh each frame: `draw.keep()` does nothing here.
+    /// Draw the mob `mob` (its id, kind, custom name and the frame's body and head turns and walk
+    /// cycle, `LivingEntityRenderState`) on this client with a model of your own, once a frame
+    /// while it is in view (vanilla's `EntityRenderer.submit`), and set `drawn` to leave out its
+    /// vanilla model, armour and held items (NeoForge's `RenderLivingEvent.Pre`, cancelled). Add
+    /// geometry with `native_draw_cube`, `native_draw_quad`, `native_draw_block` and
+    /// `native_draw_item` under `draw`'s pose stack, which starts at the mob's feet turned with its
+    /// body: +z is the way it faces, +x its left, +y up, in blocks. `draw` also has the partial
+    /// tick, the game time and the mob's light. Its name tag, shadow, flames and glowing outline
+    /// draw as for any mob. Asked for every mob in view but players; a mob your server half spawned
+    /// (`native_spawn_mob`) is told apart by its id, sent with mod messages, or by its custom name.
+    /// A mob is drawn afresh each frame: `draw.keep()` does nothing here. `hidden.hide_named(name)`
+    /// leaves only the part of that name out of the vanilla model this frame (a villager's `nose`):
+    /// its children go with it, while its armour, held items and other layers keep every part.
     pub(in crate::game) fn native_mob_submit(
         &self,
         mob: &MobRender<'_>,
         draw: &mut BlockEntityDraw,
+        hidden: &mut HiddenParts,
         drawn: &mut bool,
     ) {
-        self.fire_mob_submit(mob, draw, drawn);
+        self.fire_mob_submit(mob, draw, hidden, drawn);
     }
     /// Whether a mod listens to `native_player_submit` or `native_mob_layer`: a
     /// mod that hooks either hooks this one too and sets `listened` (HEAD,
@@ -1270,7 +1270,7 @@ impl Game<'_> {
     /// window's player is drawn only in third person (and F5 front view); an
     /// invisible player is not asked. `draw` is the frame of `native_mob_submit`:
     /// at the player's feet, turned with the body. The name tag, shadow,
-    /// flames and glowing outline draw as before. `hidden.hide(part)` leaves only that part out of
+    /// flames and glowing outline draw as before. `hidden.hide(part)` (or `hidden.hide_named(name)`) leaves only that part out of
     /// the vanilla model this frame (after Skin Customization; its children go with it, its
     /// armour, held items and other layers, the cape among them, keep theirs).
     pub(in crate::game) fn native_player_submit(

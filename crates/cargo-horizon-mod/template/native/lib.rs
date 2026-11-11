@@ -13,7 +13,7 @@ impl Hooks for Mod {
     fn player_logged_in(&self, host: &mut dyn ServerHost, event: &mut PlayerLoggedInEvent<'_>) {
         let line = format!("{id} says hello, {}!", event.name);
         if let Some(player) = host.player(event.player) {
-            player.tell(host, Text::literal(line));
+            let _ = player.tell(host, Text::literal(line));
         }
     }
 }

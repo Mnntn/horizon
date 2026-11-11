@@ -15,7 +15,7 @@ use std::sync::{Arc, atomic::AtomicI32, mpsc};
 const GUEST: &str = "CamelGuest";
 
 /// A host on a stone floor with one connected, placed guest (conn 2).
-fn game() -> Game<'static> {
+pub(super) fn game() -> Game<'static> {
     let root = std::path::PathBuf::from(
         std::env::var_os("HORIZON_TEST_RESOURCES")
             .expect("set HORIZON_TEST_RESOURCES to prepared resources"),

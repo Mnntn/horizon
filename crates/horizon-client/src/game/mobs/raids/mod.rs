@@ -1304,7 +1304,9 @@ impl Game<'_> {
             let bed = m.extra.bed.filter(|&[x, y, z]| {
                 !self.world.loaded(x, z)
                     || horizon_client::mobs::villager_brain::poi_at(&world, x, y, z)
-                        == Some(horizon_world::poi::PoiType::Home)
+                        == Some(horizon_world::poi::PoiIdentity::Vanilla(
+                            horizon_world::poi::PoiType::Home,
+                        ))
             });
             for p in [m.extra.home, bed, m.extra.meeting].into_iter().flatten() {
                 out.insert(section(p));

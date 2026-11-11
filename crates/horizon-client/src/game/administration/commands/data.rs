@@ -429,8 +429,12 @@ impl Game<'_> {
                 )
                 .ok_or_else(stale)?;
                 horizon_client::mobs::armor::prepare(&new, &self.motion.attributes);
-                self.warn_missing_profession(&new);
-                let unresolved = new.extra.profession.index().is_none();
+                self.resolve_loaded_profession(&mut new);
+                let unresolved = self
+                    .stations()
+                    .professions
+                    .state_index(&new.extra.profession)
+                    .is_none();
                 if let Some(slot) = self.mobs.iter_mut().find(|m| m.id == id) {
                     // LivingEntity.readAdditionalSaveData only replaces a decoded
                     // Brain. Keep the Allay's modeled LIKED_PLAYER when the

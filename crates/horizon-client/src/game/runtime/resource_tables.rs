@@ -147,6 +147,7 @@ impl PackResources {
         let visibility = models::load_visibility(root.prepared(), assets.registry)?;
         api_values::resolve_block_definitions(assets.registry)?;
         mods::extend_poi_types(assets.registry);
+        mods::register_cauldron_fluid_contents(assets.registry);
         let tables = Arc::new(
             MeshTables::new(
                 &assets,

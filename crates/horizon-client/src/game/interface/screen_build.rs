@@ -115,11 +115,38 @@ impl ContainerLayout {
     }
 }
 
+/// The pause menu's widgets: its buttons and its icon row, as `PauseScreen.init`
+/// lays them out. Read by the drawing, `pause_click` and `pause_key`; never
+/// rebuilt per call.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct PauseLayout {
+    /// The `PauseScreen.init` inputs this layout was made from: a server's
+    /// links or a custom-additions dialog appearing, or a page registering a
+    /// row, is a new layout even at the same size.
+    pub(super) inputs: PauseInputs,
+    /// `(x, y, width, label key, action id, active)`, in `PauseScreen`'s order.
+    pub(super) buttons: Vec<(f32, f32, f32, &'static str, u8, bool)>,
+    /// `(x, y, sprite)`: the report bugs, feedback, friends and player reporting
+    /// icons, in that order.
+    pub(super) icons: [(f32, f32, &'static str); 4],
+}
+
+/// What `PauseScreen.init` reads and the paused screen can see change while it
+/// is open: the connection (the disconnect label), a server's links, the
+/// custom-additions dialog and the extra page rows.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct PauseInputs {
+    pub(super) remote: bool,
+    pub(super) links: bool,
+    pub(super) additions: bool,
+    pub(super) rows: Vec<(&'static str, u8)>,
+}
+
 /// A screen's own widgets, as rectangles.
 ///
 /// Step 2 fills `Container` for the inventory, the creative inventory and
-/// every container or station window; `Options`, `Pause` and `Chat` arrive
-/// with the screens that fill them.
+/// every container or station window, and step 3 fills `Pause`; `Options` and
+/// `Chat` arrive with the screens that fill them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) enum BuildLayout {
     /// Not migrated yet: the build has the window's rectangle only.
@@ -127,21 +154,30 @@ pub(super) enum BuildLayout {
     Empty,
     /// A container screen: its panel, the panels beside it, its slot boxes.
     Container(ContainerLayout),
+    /// The pause menu: its buttons and icon row.
+    Pause(PauseLayout),
+}
+
+/// A layout a screen just made for its build. One arm per migrated screen;
+/// `sync` replaces the built one when it differs.
+pub(super) enum ScreenLayout {
+    Container(ContainerLayout),
+    Pause(PauseLayout),
 }
 
 impl ScreenBuild {
-    /// The build for `screen` at `gui`. A screen without a `ContainerLayout`
-    /// knows no panel and no widgets, so its rectangle is the window and its
-    /// origin is zero.
+    /// The build for `screen` at `gui`. A screen without a layout knows no
+    /// panel and no widgets, so its rectangle is the window and its origin is
+    /// zero.
     fn new(
         screen: Screen,
         identity: Option<&'static str>,
         gui: GuiSize,
-        container: Option<ContainerLayout>,
+        layout: Option<ScreenLayout>,
     ) -> Self {
         let size = (gui.size[0] as f32, gui.size[1] as f32);
-        let (rect, origin, layout, exclusion) = match container {
-            Some(layout) => {
+        let (rect, origin, layout, exclusion) = match layout {
+            Some(ScreenLayout::Container(layout)) => {
                 let exclusion = layout.exclusion();
                 (
                     layout.image,
@@ -150,6 +186,12 @@ impl ScreenBuild {
                     exclusion,
                 )
             }
+            Some(ScreenLayout::Pause(layout)) => (
+                [0.0, 0.0, size.0, size.1],
+                (0.0, 0.0),
+                BuildLayout::Pause(layout),
+                Vec::new(),
+            ),
             None => (
                 [0.0, 0.0, size.0, size.1],
                 (0.0, 0.0),
@@ -177,7 +219,18 @@ impl ScreenBuild {
         }
         match &self.layout {
             BuildLayout::Container(layout) => Some(layout),
-            BuildLayout::Empty => None,
+            _ => None,
+        }
+    }
+
+    /// The build's pause layout, when it has one at this size.
+    pub(super) fn pause(&self, width: f32, height: f32) -> Option<&PauseLayout> {
+        if self.size != (width, height) {
+            return None;
+        }
+        match &self.layout {
+            BuildLayout::Pause(layout) => Some(layout),
+            _ => None,
         }
     }
 }
@@ -249,12 +302,30 @@ impl ScreenBuildState {
         }));
     }
 
+    /// Whether `sync` would make a new build for this screen, identity and
+    /// size: the caller makes the fresh layout only then.
+    pub(super) fn needs_build(
+        &self,
+        screen: Screen,
+        shown: bool,
+        identity: Option<&'static str>,
+        gui: GuiSize,
+    ) -> bool {
+        shown
+            && self.current.as_ref().is_none_or(|build| {
+                build.screen != screen
+                    || build.identity != identity
+                    || build.size != (gui.size[0] as f32, gui.size[1] as f32)
+                    || build.scale != gui.scale as f32
+            })
+    }
+
     /// Reconciles the build with what shows now: a different screen or a
     /// different GUI size makes it, the same one keeps it, and nothing shown
     /// drops it. A call that changes nothing allocates nothing, so the frame
     /// path checks it every frame, and a menu swap on the same screen keeps it.
     ///
-    /// `container` is supplied only when the frame's allocation-free input
+    /// `layout` is supplied only when the frame's allocation-free input
     /// comparison found a change. The same screen can keep its panel while its layout
     /// moves under it (a book opens, the effects answer changes, a creative
     /// tab swaps the slots), so a different layout remakes the build in place.
@@ -264,37 +335,52 @@ impl ScreenBuildState {
         shown: bool,
         identity: Option<&'static str>,
         gui: GuiSize,
-        container: Option<ContainerLayout>,
+        layout: Option<ScreenLayout>,
     ) {
         if !shown {
             self.current = None;
             return;
         }
-        let stale = self.current.as_ref().is_none_or(|build| {
-            build.screen != screen
-                || build.identity != identity
-                || build.size != (gui.size[0] as f32, gui.size[1] as f32)
-                || build.scale != gui.scale as f32
-        });
-        if stale {
-            self.current = Some(ScreenBuild::new(screen, identity, gui, container));
+        if self.needs_build(screen, shown, identity, gui) {
+            self.current = Some(ScreenBuild::new(screen, identity, gui, layout));
             #[cfg(test)]
             {
                 self.builds += 1;
             }
             return;
         }
-        let Some(layout) = container else {
+        let Some(layout) = layout else {
             return;
         };
         let build = self.current.as_mut().expect("shown");
-        if matches!(&build.layout, BuildLayout::Container(built) if *built == layout) {
-            return;
-        }
-        let exclusion = layout.exclusion();
-        build.rect = layout.image;
-        build.origin = layout.origin;
-        build.layout = BuildLayout::Container(layout);
+        let (rect, origin, built, exclusion) = match layout {
+            ScreenLayout::Container(layout) => {
+                if matches!(&build.layout, BuildLayout::Container(built) if *built == layout) {
+                    return;
+                }
+                let exclusion = layout.exclusion();
+                (
+                    layout.image,
+                    layout.origin,
+                    BuildLayout::Container(layout),
+                    exclusion,
+                )
+            }
+            ScreenLayout::Pause(layout) => {
+                if matches!(&build.layout, BuildLayout::Pause(built) if *built == layout) {
+                    return;
+                }
+                (
+                    build.rect,
+                    build.origin,
+                    BuildLayout::Pause(layout),
+                    Vec::new(),
+                )
+            }
+        };
+        build.rect = rect;
+        build.origin = origin;
+        build.layout = built;
         build.exclusion = exclusion;
         #[cfg(test)]
         {
@@ -388,9 +474,32 @@ impl Game<'_> {
                 )
             })
         });
+        // The pause menu's inputs can change while it is open: a server's
+        // links or a custom-additions dialog arriving. Compare them here and
+        // make the layout only when they moved.
+        let pause = (shown && self.screen == Screen::Paused).then(|| {
+            let unchanged = self
+                .screen_state
+                .build
+                .current
+                .as_ref()
+                .is_some_and(|build| {
+                    build.screen == self.screen
+                        && build.identity == identity
+                        && build.scale == gui.scale as f32
+                        && build
+                            .pause(gui.size[0] as f32, gui.size[1] as f32)
+                            .is_some_and(|old| self.pause_inputs_match(&old.inputs))
+                });
+            (!unchanged).then(|| self.pause_layout(gui.size[0] as f32, gui.size[1] as f32))
+        });
+        let pause = pause.flatten();
+        let layout = container
+            .map(ScreenLayout::Container)
+            .or_else(|| pause.map(ScreenLayout::Pause));
         self.screen_state
             .build
-            .sync(self.screen, shown, identity, gui, container);
+            .sync(self.screen, shown, identity, gui, layout);
     }
 
     /// The build's container layout, when it holds `batch`'s size.
@@ -404,11 +513,23 @@ impl Game<'_> {
             .as_ref()?
             .container(batch.width, batch.height)
     }
+
+    /// The build's pause layout, when it holds `(width, height)`.
+    pub(super) fn built_pause(&self, width: f32, height: f32) -> Option<&PauseLayout> {
+        self.screen_state
+            .build
+            .current
+            .as_ref()?
+            .pause(width, height)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{BuildLayout, ContainerLayout, EffectsLayout, ScreenBuildState};
+    use super::{
+        BuildLayout, ContainerLayout, EffectsLayout, PauseInputs, PauseLayout, ScreenBuildState,
+        ScreenLayout,
+    };
     use crate::game::Screen;
     use horizon_client::hud::{GuiScale, HudBatch};
     use horizon_client::window::GuiSize;
@@ -643,6 +764,119 @@ mod tests {
         }
     }
 
+    /// The pause menu's layout is made when it opens and when it resizes, not
+    /// per frame: the build keeps it, and the readers get the same buttons and
+    /// icons the frame drew.
+    #[test]
+    fn the_pause_layout_is_built_once_per_open_and_resize() {
+        let mut state = ScreenBuildState::default();
+        let small = gui([854, 480], 0);
+        let layout = PauseLayout {
+            inputs: PauseInputs::default(),
+            buttons: vec![
+                (113.0, 74.0, 204.0, "menu.returnToGame", 0, true),
+                (113.0, 98.0, 98.0, "gui.advancements", 4, true),
+            ],
+            icons: [
+                (173.0, 122.0, "gui/sprites/pause_menu/bug"),
+                (197.0, 122.0, "gui/sprites/pause_menu/social_interactions"),
+                (221.0, 122.0, "gui/sprites/friends/friends"),
+                (245.0, 122.0, "gui/sprites/pause_menu/player_reporting"),
+            ],
+        };
+        state.sync(
+            Screen::Paused,
+            true,
+            None,
+            small,
+            Some(ScreenLayout::Pause(layout.clone())),
+        );
+        assert_eq!(state.builds, 1);
+        // Frames pass no fresh layout: the build keeps the one it made.
+        for _ in 0..3 {
+            state.sync(Screen::Paused, true, None, small, None);
+        }
+        assert_eq!(state.builds, 1);
+        let built = state.current.as_ref().unwrap();
+        assert_eq!(
+            built.pause(small.size[0] as f32, small.size[1] as f32),
+            Some(&layout)
+        );
+        // Another size is another build, and reads the new one.
+        let large = gui([1920, 1080], 0);
+        let moved = PauseLayout {
+            inputs: PauseInputs::default(),
+            buttons: vec![(500.0, 200.0, 204.0, "menu.returnToGame", 0, true)],
+            icons: layout.icons,
+        };
+        state.sync(
+            Screen::Paused,
+            true,
+            None,
+            large,
+            Some(ScreenLayout::Pause(moved.clone())),
+        );
+        assert_eq!(state.builds, 2);
+        assert_eq!(
+            state
+                .current
+                .as_ref()
+                .unwrap()
+                .pause(large.size[0] as f32, large.size[1] as f32),
+            Some(&moved)
+        );
+        assert_eq!(
+            state
+                .current
+                .as_ref()
+                .unwrap()
+                .pause(small.size[0] as f32, small.size[1] as f32),
+            None
+        );
+        // A server's links appearing while the menu is open is another
+        // layout at the same size, even with the same buttons.
+        let linked = PauseLayout {
+            inputs: PauseInputs {
+                links: true,
+                ..Default::default()
+            },
+            buttons: moved.buttons.clone(),
+            icons: moved.icons,
+        };
+        state.sync(
+            Screen::Paused,
+            true,
+            None,
+            large,
+            Some(ScreenLayout::Pause(linked.clone())),
+        );
+        assert_eq!(state.builds, 3);
+        assert_eq!(
+            state
+                .current
+                .as_ref()
+                .unwrap()
+                .pause(large.size[0] as f32, large.size[1] as f32),
+            Some(&linked)
+        );
+        // The same inputs keep it.
+        state.sync(
+            Screen::Paused,
+            true,
+            None,
+            large,
+            Some(ScreenLayout::Pause(linked)),
+        );
+        assert_eq!(state.builds, 3);
+        // A different screen is its own build.
+        state.sync(Screen::Options, true, None, large, None);
+        assert_eq!(state.builds, 4);
+        assert!(matches!(
+            state.current.as_ref().unwrap().layout,
+            BuildLayout::Empty
+        ));
+    }
+
     /// The build's exclusion is the panels that build draws, and it follows
     /// them in the same call: the effects appearing or the mod's answer moving
     /// them never leaves the exclusion a frame behind.
@@ -652,13 +886,25 @@ mod tests {
         let size = gui([854, 480], 0);
         let book = [100.0, 20.0, 147.0, 166.0];
         let mut layout = container(Some(book), None, EffectsLayout::vanilla(200), None);
-        state.sync(Screen::Inventory, true, None, size, Some(layout.clone()));
+        state.sync(
+            Screen::Inventory,
+            true,
+            None,
+            size,
+            Some(ScreenLayout::Container(layout.clone())),
+        );
         assert_eq!(state.builds, 1);
         assert_eq!(state.current.as_ref().unwrap().exclusion, vec![book]);
         // A potion takes effect: from this call on the book and the panel.
         let panel = [200.0, 20.0, 100.0, 32.0];
         layout.effects = Some(panel);
-        state.sync(Screen::Inventory, true, None, size, Some(layout.clone()));
+        state.sync(
+            Screen::Inventory,
+            true,
+            None,
+            size,
+            Some(ScreenLayout::Container(layout.clone())),
+        );
         assert_eq!(state.builds, 2);
         assert_eq!(state.current.as_ref().unwrap().exclusion, vec![book, panel]);
         // The mod answers compact and nudged: the exclusion follows at once.
@@ -669,7 +915,13 @@ mod tests {
             offset: 5,
             hidden: false,
         };
-        state.sync(Screen::Inventory, true, None, size, Some(layout.clone()));
+        state.sync(
+            Screen::Inventory,
+            true,
+            None,
+            size,
+            Some(ScreenLayout::Container(layout.clone())),
+        );
         assert_eq!(state.builds, 3);
         assert_eq!(state.current.as_ref().unwrap().exclusion, vec![book, moved]);
         // The panel the drawing reads is the one the exclusion named.
@@ -682,7 +934,13 @@ mod tests {
             [10.0, 20.0, 176.0, 166.0]
         );
         // An unchanged frame keeps the build.
-        state.sync(Screen::Inventory, true, None, size, Some(layout));
+        state.sync(
+            Screen::Inventory,
+            true,
+            None,
+            size,
+            Some(ScreenLayout::Container(layout)),
+        );
         assert_eq!(state.builds, 3);
     }
 
@@ -694,12 +952,24 @@ mod tests {
         let size = gui([1280, 720], 0);
         let tabs = Some([[0.0, 0.0, 195.0, 28.0], [0.0, 136.0, 195.0, 28.0]]);
         let layout = container(None, None, EffectsLayout::vanilla(100), tabs);
-        state.sync(Screen::Creative, true, None, size, Some(layout.clone()));
+        state.sync(
+            Screen::Creative,
+            true,
+            None,
+            size,
+            Some(ScreenLayout::Container(layout.clone())),
+        );
         assert_eq!(
             state.current.as_ref().unwrap().exclusion,
             vec![[0.0, 0.0, 195.0, 28.0], [0.0, 136.0, 195.0, 28.0]]
         );
-        state.sync(Screen::Creative, true, None, size, Some(layout));
+        state.sync(
+            Screen::Creative,
+            true,
+            None,
+            size,
+            Some(ScreenLayout::Container(layout)),
+        );
         assert_eq!(state.builds, 1);
     }
 

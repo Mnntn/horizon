@@ -15,3 +15,5 @@ pub(crate) mod payload_codec;
 pub(crate) mod payloads;
 pub(crate) mod registry_keys;
 pub(crate) mod resource;
+
+pub(crate) mod professions;

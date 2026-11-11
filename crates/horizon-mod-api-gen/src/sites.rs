@@ -305,4 +305,6 @@ mod stage;
 pub(crate) use stage::{ids, stage, tracked};
 
 #[cfg(test)]
+mod production_tests;
+#[cfg(test)]
 mod tests;

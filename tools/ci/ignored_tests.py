@@ -18,11 +18,12 @@ may pass or fail; one marked `harness` is a parity harness's step, run by its ha
 environment it sets, and is skipped here; one marked `gpu` needs a graphics adapter and runs only where
 the runner has a Vulkan driver (an ICD file), and must pass there.
 
-Only test names, results, panic locations and explicitly marked screen-effect event loop errors
-are printed: the prepared data is Mojang's, and a failing assertion could quote it.
+Runtime diagnostics expose identities and allowlisted panic categories, never arbitrary assertion
+payloads: the prepared data is Mojang's. Compile/list failures expose bounded compiler headings.
 """
 
 import os
+from functools import lru_cache
 import re
 import subprocess
 import sys
@@ -45,6 +46,69 @@ INTEGRATION_TESTS = {"horizon-client"}
 LEG = re.compile(r"^(?P<package>[^#]+)#(?P<number>\d+)of(?P<count>\d+)$")
 LISTED = re.compile(r"^(\S+): test$")
 ICD_DIRS = ("/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d")
+
+
+def compile_diagnostics(output):
+    """List mode never executes tests. Show headings, not source excerpts or arbitrary Cargo output."""
+    headings = []
+    for line in output.splitlines():
+        if re.match(r"^error(?:\[E\d+\])?:", line):
+            # Compiler/proc-macro diagnostics can contain resource-derived text even
+            # without quotes. Only fixed reason forms cross this boundary.
+            code = re.match(r"^error(\[E\d+\])?:", line)[1] or ""
+            reason = line.split(":", 1)[1].strip()
+            safe = reason if reason in {
+                "mismatched types", "type annotations needed", "unexpected closing delimiter",
+                "unclosed delimiter", "expected item, found keyword", "aborting due to previous error",
+            } else "custom diagnostic payload withheld"
+            if reason.startswith("linking with "):
+                safe = "linker failure; command/output withheld"
+                if status := re.search(r"(?:^|: )exit status: (\d{1,5})(?:\D|$)", reason):
+                    safe += f"; exit status={status[1]}"
+            elif reason.startswith("failed to run custom build command for "):
+                safe = "custom build command failure; command/output withheld"
+            headings.append(f"error{code}: {safe}")
+        elif re.match(r"^\s*--> [\w./-]+:\d+:\d+$", line):
+            headings.append(line)
+    for line in headings[:20]:
+        print("  compiler: " + line[:300] + (" [shortened]" if len(line) > 300 else ""))
+        if line.strip().startswith("--> "):
+            panic_source(line.strip()[4:], kind="compiler")
+    if len(headings) > 20:
+        print(f"  compiler diagnostics truncated: {len(headings) - 20} more headings")
+    if not headings:
+        print("  no recognized compiler diagnostic; non-diagnostic output withheld")
+
+
+@lru_cache(maxsize=32)
+def source_lines(path):
+    """Only immutable tracked Rust blobs, never a working-tree or resource file."""
+    if not re.fullmatch(r"(?:crates|launcher)/[A-Za-z0-9_./-]+\.rs", path):
+        return None
+    if any(part in ("", ".", "..", "target", ".local") for part in path.split("/")):
+        return None
+    # ls-tree mode rejects symlinks and bounds blobs before git-show allocates output.
+    entry = subprocess.run(["git", "ls-tree", "-l", "HEAD", "--", path],
+                           capture_output=True, text=True, errors="replace")
+    fields = entry.stdout.split()
+    if entry.returncode or len(fields) != 5 or fields[0] not in ("100644", "100755") or fields[1] != "blob":
+        return None
+    if not fields[3].isdigit() or int(fields[3]) > 256_000:
+        return None
+    blob = subprocess.run(["git", "show", f"HEAD:{path}"], capture_output=True, text=True, errors="replace")
+    return blob.stdout.splitlines() if blob.returncode == 0 else None
+
+
+def panic_source(location, kind="panic"):
+    found = re.fullmatch(r"(.+\.rs):(\d+):(\d+)", location)
+    lines = source_lines(found[1]) if found else None
+    if lines is None or not 1 <= int(found[2]) <= len(lines):
+        print(f"  {kind} source unavailable (not a bounded tracked Rust location)")
+        return
+    line = lines[int(found[2]) - 1]
+    # Prefix and escape controls so checked-in text cannot inject workflow commands.
+    line = line.encode("unicode_escape").decode("ascii")
+    print(f"  {kind} source: " + line[:300] + (" [shortened]" if len(line) > 300 else ""))
 
 
 def has_vulkan():
@@ -114,11 +178,12 @@ def run(package, skip, number=None, count=None):
             # List what exists, then skip every test another leg owns.
             listing = subprocess.run(
                 [*command, "--", "--list", "--include-ignored"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace", env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", env=env,
             )
             names = {found[1] for line in listing.stdout.splitlines() if (found := LISTED.match(line))}
             if listing.returncode or not names:
                 print(f"{package}: could not list the tests to split into legs (cargo exit {listing.returncode})")
+                compile_diagnostics(listing.stderr)
                 return None
             others = sorted(name for name in names if not in_leg(name, number, count))
             # Every test this leg owns and does not skip must report a result.
@@ -145,7 +210,36 @@ def run(package, skip, number=None, count=None):
     target_number = 0
     awaiting_count = False
     incomplete = False
+    panic_reason_pending = False
+    panic_operands = 0
+    diagnostic_count = 0
     for line in process.stdout.splitlines():
+        if panic_operands and line.strip():
+            if operand := re.fullmatch(r"\s*(left|right):\s*(-?(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|inf)|NaN|true|false)\s*", line):
+                if diagnostic_count < 50:
+                    print(f"  assertion {operand[1]}: {operand[2][:80]}")
+            elif re.match(r"\s*(?:left|right):", line) and diagnostic_count < 50:
+                print("  assertion operand withheld (private string/blob)")
+            panic_operands -= 1
+        if panic_reason_pending and line.strip():
+            # No free-form panic text or assertion operands cross the resource boundary.
+            reason = next((label for prefix, label in (
+                ("assertion `left == right` failed", "assertion equality failed"),
+                ("assertion `left != right` failed", "assertion inequality failed"),
+                ("assertion failed:", "assertion condition failed"),
+                ("called `Result::unwrap()`", "Result::unwrap on an error"),
+                ("called `Option::unwrap()`", "Option::unwrap on None"),
+                ("index out of bounds", "index out of bounds"),
+                ("attempt to", "arithmetic failure"),
+            ) if line.strip().startswith(prefix)), "custom panic")
+            if bounds := re.fullmatch(r"index out of bounds: the len is (\d{1,20}) but the index is (\d{1,20})", line.strip()):
+                reason = f"index out of bounds: len={bounds[1]} index={bounds[2]}"
+            elif arithmetic := re.fullmatch(r"attempt to ((?:add|subtract|multiply|divide|negate|shift left|shift right) with overflow|(?:divide|calculate the remainder) by zero)", line.strip()):
+                reason = "attempt to " + arithmetic[1]
+            if diagnostic_count < 50:
+                print(f"  panic reason: {reason}; payload withheld (resource privacy)")
+            panic_reason_pending = False
+            panic_operands = 2 if reason.startswith("assertion equality") or reason.startswith("assertion inequality") else 0
         if TARGET.match(line):
             incomplete |= target_count is not None or awaiting_count
             target_number += 1
@@ -156,8 +250,16 @@ def run(package, skip, number=None, count=None):
             awaiting_count = False
         if found := RESULT.match(line):
             results[found[1]] = found[2] == "ok"
+            if found[2] == "FAILED":
+                diagnostic_count += 1
+                if diagnostic_count <= 50:
+                    print(f"  failed test: {found[1][:200]}")
         elif found := PANIC.match(line):
-            print(f"  {found[1]} panicked at {found[2]}")
+            diagnostic_count += 1
+            if diagnostic_count <= 50:
+                print(f"  {found[1][:200]} panicked at {found[2][:200]}")
+                panic_source(found[2])
+            panic_reason_pending = True
         elif line.startswith("screen-effect event loop error: "):
             print(line)
         elif found := SUMMARY.match(line):
@@ -170,9 +272,15 @@ def run(package, skip, number=None, count=None):
         elif status := re.search(r"\((?:signal|exit status): \d+", line):
             # Emit only the numeric status, never adjacent test output.
             print(f"{package}: {status[0]})")
+    if diagnostic_count > 50:
+        print(f"{package}: diagnostics truncated after 50 identities/locations")
+    if panic_reason_pending:
+        print(f"{package}: panic reason missing from captured output")
     if incomplete or awaiting_count or target_count is not None:
         print(f"{package}: test target did not finish (cargo exit {process.returncode})")
         return None
+    if process.returncode and not target_number:
+        compile_diagnostics(process.stdout)
     if process.returncode and all(results.values()):
         print(f"{package}: cargo exited {process.returncode} without a parsed test failure")
         return None
@@ -215,6 +323,8 @@ def main(shards):
             continue
         for test, passed in sorted(results.items()):
             listed = (package, test) in known
+            if not passed and listed and known[(package, test)] != "gpu":
+                print(f"{package} {test}: accepted failure policy={KNOWN.name} mark={known[(package, test)] or 'known'}")
             if not passed and not listed:
                 problems.append(f"{package} {test}: failed, and isn't a known failure")
             elif not passed and known[(package, test)] == "gpu":

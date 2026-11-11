@@ -66,7 +66,13 @@ impl Game<'_> {
         mob: &horizon_client::mobs::Mob,
         read: impl FnOnce(&[MerchantOffer], i32, i32) -> T,
     ) -> T {
-        if mob.species() == Species::Villager && mob.extra.profession.index().is_none() {
+        if mob.species() == Species::Villager
+            && self
+                .stations()
+                .professions
+                .state_index(&mob.extra.profession)
+                .is_none()
+        {
             return read(
                 &[],
                 mob.extra.trade.as_deref().map_or(0, |t| t.xp),
@@ -97,7 +103,13 @@ impl Game<'_> {
         edit: impl FnOnce(&mut Vec<MerchantOffer>, &mut i32, &mut i32) -> bool,
     ) -> bool {
         let mob = &self.mobs[index];
-        if mob.species() == Species::Villager && mob.extra.profession.index().is_none() {
+        if mob.species() == Species::Villager
+            && self
+                .stations()
+                .professions
+                .state_index(&mob.extra.profession)
+                .is_none()
+        {
             return false;
         }
         let id = mob.id;
@@ -233,19 +245,23 @@ impl Game<'_> {
         };
         let Some(profession) = Identifier::parse(profession)
             .ok()
-            .filter(|id| id.namespace() == "minecraft")
-            .and_then(|id| villager::profession_index(id.path()))
+            .and_then(|id| self.stations().professions.resolve(&id.to_string()))
         else {
             return false;
         };
         let id = self.mobs[index].id;
-        if self.mobs[index].extra.profession.index().is_none()
+        if self
+            .stations()
+            .professions
+            .state_index(&self.mobs[index].extra.profession)
+            .is_none()
             || self.mobs[index].extra.flag2
             || self.lan_trade_conn(id).is_some()
         {
             return false;
         }
-        villager::set_profession(&mut self.mobs[index], profession);
+        let table = self.stations().professions.clone();
+        villager::set_profession(&mut self.mobs[index], &table, profession);
         true
     }
 

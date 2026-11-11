@@ -523,18 +523,42 @@ def passed_on(workflow, sha):
     return bool(done) and done[0]["conclusion"] == "success"
 
 
+def gate_jobs_passed(run_id, required):
+    """Require every named gate on the latest attempt, regardless of non-gate failures."""
+    pages = gh_json("api", "--paginate", "--slurp",
+                    f"repos/{REPO}/actions/runs/{run_id}/jobs?filter=latest&per_page=100")
+    jobs = [job for page in pages for job in page["jobs"] if job["name"] in required]
+    return (required == {job["name"] for job in jobs}
+            and all(job["status"] == "completed" and job["conclusion"] == "success" for job in jobs))
+
+
 def green_main_head(parity=False):
     """The newest commit on main whose checks passed: what an automatic release builds. With parity (game
     releases), the newest commit parity-main passed on whose checks passed too: parity-main runs on batches of
     merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing. A
     later batch that failed holds only the merges after that commit, which the green one doesn't contain."""
     if REPO == "arismoko/horizon":
-        # The fork replaces checks/parity-main with dyna-checks. Never query disabled
-        # upstream workflows, and never turn an untested main head into a release base.
-        runs = gh_json("run", "list", "--repo", REPO, "--workflow", "dyna-checks", "--branch", "main",
-                       "--event", "push", "--status", "success", "--limit", "50", "--json", "headSha,status,conclusion")
-        return next((entry["headSha"] for entry in runs
-                     if entry["status"] == "completed" and entry["conclusion"] == "success"), None)
+        # Runs are ordered by creation, not completion: a late old run must not
+        # displace a newer push. Paginate beyond bursts of cancelled main runs.
+        pages = gh_json("api", "--paginate", "--slurp",
+                        f"repos/{REPO}/actions/workflows/dyna-ci.yml/runs?branch=main&event=push&per_page=100")
+        seen = set()
+        for page in pages:
+            for entry in page["workflow_runs"]:
+                sha = entry["head_sha"]
+                if entry["head_branch"] != "main" or entry["event"] != "push" or sha in seen:
+                    continue
+                seen.add(sha)
+                if not gate_jobs_passed(entry["id"], {"lint", "verify", "launcher", "pool-watch"}):
+                    continue
+                fixtures = gh_json("api", "--paginate", "--slurp",
+                                   f"repos/{REPO}/actions/workflows/wasm-mods.yml/runs"
+                                   f"?branch=main&event=push&head_sha={sha}&per_page=100")
+                runs = [run for page in fixtures for run in page["workflow_runs"]
+                        if run["head_sha"] == sha and run["head_branch"] == "main" and run["event"] == "push"]
+                if runs and gate_jobs_passed(runs[0]["id"], {"fixture"}):
+                    return sha
+        return None
     if parity:
         # Only the successful runs: while merges land, one run at a time finishes (the pending one is replaced at
         # every push), and a later failed or timed-out batch must not starve the Nightly of the commit an earlier

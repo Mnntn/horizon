@@ -13,6 +13,7 @@ pub(crate) mod block_state;
 pub(crate) mod block_state_range;
 pub(crate) mod block_states;
 pub(crate) mod block_tint;
+pub(crate) mod cauldron_fluid_content;
 pub(crate) mod cauldron_interactions;
 pub(crate) mod fluid_capability;
 pub(crate) mod fluid_model;

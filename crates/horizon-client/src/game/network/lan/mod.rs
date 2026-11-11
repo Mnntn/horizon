@@ -1018,7 +1018,7 @@ pub(super) fn mob_meta(
             }
             let villager_type = VILLAGER_TYPES[e.variant as usize % VILLAGER_TYPES.len()];
             let profession =
-                horizon_client::mobs::villager::profession(e.profession.index().unwrap_or(0)).id;
+                horizon_client::mobs::villager::profession_id(e.profession.index().unwrap_or(0));
             if let (Some(t), Some(p)) = (
                 id("minecraft:villager_type", villager_type),
                 id("minecraft:villager_profession", profession),

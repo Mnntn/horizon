@@ -119,4 +119,6 @@ pub(super) fn adapter(
 }
 
 #[cfg(test)]
+mod listed_port_tests;
+#[cfg(test)]
 mod tests;

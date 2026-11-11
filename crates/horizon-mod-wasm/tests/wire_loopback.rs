@@ -249,6 +249,16 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             event.add_exhaustion(0.5);
             event.keep = false;
         }
+        fn mob_submit(
+            &self,
+            _: &dyn mod_api::ClientHost,
+            event: &mut mod_api::MobSubmitEvent<'_>,
+        ) -> mod_api::Flow {
+            assert!(event.hidden.contains_named("nose"));
+            event.hidden.hide_named("hat_rim").unwrap();
+            event.hidden.hide(mod_api::HumanoidPart::Head);
+            mod_api::Flow::Continue
+        }
         fn mob_layer(&self, _: &dyn mod_api::ClientHost, event: &mut mod_api::MobLayerEvent<'_>) {
             assert_eq!(event.mob.kind, "test:mob");
             assert_eq!(event.mob.custom_name, Some("custom"));
@@ -1744,3 +1754,56 @@ fn listener_metadata_and_cancellation_cross_the_real_guest() {
 
 #[path = "wire_loopback/arm_pose_registration.rs"]
 mod arm_pose_registration;
+
+#[test]
+fn wire_loopback_mob_submit_hidden_parts_write_back() {
+    struct Client;
+    impl mod_api::Host for Client {}
+    mod_api::impl_host_areas!(Client);
+    impl mod_api::ClientHost for Client {}
+    mod_api::impl_client_host_areas!(Client);
+    struct Draw(u32);
+    impl mod_api::BlockEntityDrawContext for Draw {
+        fn set_light(&mut self, value: u32) {
+            self.0 = value;
+        }
+    }
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        listeners: &[],
+        corrupt: false,
+    };
+    let mob = mod_api::MobRender {
+        id: 1,
+        kind: "test:mob",
+        custom_name: Some("custom"),
+        baby: false,
+        partial: 0.5,
+        age: 1.,
+        body_yaw: 0.,
+        head_yaw: 0.,
+        pitch: 0.,
+        walk_position: 0.,
+        walk_speed: 0.,
+        hurt_time: 0,
+        death_time: 0,
+        on_ground: true,
+    };
+    let mut hidden = mod_api::HiddenParts::default();
+    hidden.hide_named("nose").unwrap();
+    let mut draw = Draw(0);
+    module.mob_submit(
+        &Client,
+        &mut mod_api::MobSubmitEvent {
+            mob: &mob,
+            draw: &mut draw,
+            hidden: &mut hidden,
+            cancelled: false,
+        },
+    );
+    assert!(hidden.contains_named("nose"));
+    assert!(hidden.contains_named("hat_rim"));
+    assert!(hidden.contains(mod_api::HumanoidPart::Head));
+}

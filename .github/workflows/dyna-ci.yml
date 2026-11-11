@@ -282,15 +282,19 @@ jobs:
       - name: Restore unchanged source timestamps
         if: needs.changes.outputs.rust_required != 'false'
         run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Check formatting and lint
+      - name: Check formatting
         if: needs.changes.outputs.rust_required != 'false'
-        id: native-lint
+        id: formatting
+        continue-on-error: true
         run: |
           cargo +stable fmt --all -- --check
           find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --config skip_children=true --check
           rustup run stable rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
-          cargo +stable clippy $JOBS --keep-going --workspace --all-targets -- -D warnings
+      - name: Lint native targets
+        if: needs.changes.outputs.rust_required != 'false'
+        id: native-lint
+        run: cargo +stable clippy $JOBS --keep-going --workspace --all-targets -- -D warnings
       - name: Lint the server build without sound or controllers
         if: needs.changes.outputs.rust_required != 'false'
         id: server-lint
@@ -301,6 +305,11 @@ jobs:
       - name: The mod API builds for wasm32
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable check $JOBS -p horizon-mod-api --target wasm32-unknown-unknown --locked
+      - name: Propagate formatting failure
+        if: ${{ always() && steps.formatting.outcome == 'failure' }}
+        run: |
+          echo '::error::Formatting failed; see Check formatting. Independent build failures remain above.'
+          exit 1
       - name: Report lint compiler cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
@@ -431,6 +440,11 @@ jobs:
       - name: Test Rust documentation examples
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable test $JOBS --workspace --doc
+      - name: Test listed call production export and real registry
+        if: needs.changes.outputs.rust_required != 'false'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 tools/ci/listed_calls.py --base "${BASE_SHA:-HEAD^}"
       - name: Report test compiler cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
@@ -527,6 +541,19 @@ jobs:
         if: always()
         run: |
           date -u '+data-leg end utc=%Y-%m-%dT%H:%M:%SZ'
+          # Whole-job cgroup high-water: compilation, tests and file cache, not per-test RSS
+          # or an isolated test-execution peak. Fixed kernel files only; telemetry is best effort.
+          echo 'data-leg memory_scope=whole_job_cgroup_including_compilation_tests_file_cache'
+          for metric in memory.peak memory.max memory.swap.peak memory.swap.max; do
+            field="${metric//./_}_bytes"
+            value=unavailable
+            if IFS= read -r sample 2>/dev/null < "/sys/fs/cgroup/$metric"; then
+              if [[ "$sample" =~ ^[0-9]+$ || "$sample" == max ]]; then
+                value="$sample"
+              fi
+            fi
+            echo "data-leg $field=$value"
+          done
           sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
   # Never turn missing prepared-data coverage into a green main/nightly run.
   ignored-tests:

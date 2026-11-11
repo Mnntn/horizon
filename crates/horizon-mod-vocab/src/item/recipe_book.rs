@@ -35,6 +35,37 @@ pub struct RecipeBookCategory {
     pub displays: Vec<RecipeBookDisplayEntry>,
 }
 
+/// What a recipe viewer's transfer into the open crafting grid does or would
+/// do (`RecipesClientHost::transfer_recipe`, `transfer_recipe_check`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the four answers of Horizon's transfer channels, matched without a wildcard
+#[derive(horizon_mod_api_macros::Wire)]
+pub enum RecipeTransferResult {
+    /// It moves a set of the recipe's ingredients into the grid.
+    Moves,
+    /// The items there are don't make a set.
+    Missing,
+    /// The grid's items have no room in the inventory.
+    NoRoom,
+    /// Not into the open menu: the recipe doesn't fit its grid, or the
+    /// server doesn't know it.
+    NotIntoMenu,
+}
+
+/// The server's answer to `transfer_recipe_check`: what the transfer would
+/// do, and with `Missing`, the recipe's cells nothing fills.
+#[derive(Clone, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct RecipeTransferCheck {
+    /// What the transfer would do.
+    pub result: RecipeTransferResult,
+    /// With `Missing`, the recipe's cells no item fills: indices into its
+    /// slots (width by height for a shaped recipe, else its ingredients in
+    /// order). Empty otherwise.
+    pub missing_cells: Vec<u32>,
+}
+
 /// A namespaced custom recipe book identity returned during registration.
 /// This owns no settings; player settings and synchronization are separate.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]

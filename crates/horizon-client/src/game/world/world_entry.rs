@@ -283,13 +283,14 @@ impl Game<'_> {
             )?
         };
         let recipes = Recipes::from_resolved(root, &items, &overlay, &sources)?;
-        let stations = horizon_client::stations::StationData::from_sources(
+        let mut stations = horizon_client::stations::StationData::from_sources(
             root,
             &items,
             &overlay,
             self.res.item_defaults(),
             &sources,
         );
+        self.prepare_professions(root, &items, &mut stations)?;
         let data_maps = native_data_maps::DataMaps::load(
             &data_map_types,
             &overlay,
@@ -402,6 +403,7 @@ impl Game<'_> {
     ) -> Result<()> {
         (self.world_tables, self.health_resources) =
             self.build_world_tables(stack, false, root, self.mods.data_switched)?;
+        self.install_profession_save_snapshots();
         self.mods.datapack_registries = self.mods.datapack_candidate.take().map(|candidate| {
             Arc::new(mod_api::DatapackRegistrySet::first(
                 candidate,
@@ -455,6 +457,11 @@ impl Game<'_> {
             );
         }
         self.world_tables = tables;
+        self.install_profession_save_snapshots();
+        self.world.pois.clear();
+        for world in self.levels.parked_worlds() {
+            world.pois.clear();
+        }
         self.mods.datapack_registries = datapack_registries.map(Arc::new);
         horizon_client::datapack_net::serve(self.mods.datapack_registries.clone());
         self.send_datapack_snapshots();

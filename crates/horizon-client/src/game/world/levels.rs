@@ -408,6 +408,15 @@ impl Levels {
         self.parked.get(&dim).map(|level| &level.border)
     }
 
+    pub(super) fn install_profession_save_snapshots(
+        &self,
+        table: Arc<horizon_client::mobs::villager::ResolvedProfessions>,
+    ) {
+        for level in self.parked.values() {
+            level.save.install_profession_snapshot(table.clone());
+        }
+    }
+
     pub(super) fn parked_worlds(&self) -> impl Iterator<Item = &World> {
         self.parked.values().map(|level| &level.world)
     }
@@ -499,6 +508,7 @@ impl Game<'_> {
             &self.level.enabled_features,
             self.server_loot.clone(),
         )?;
+        save.install_profession_snapshot(self.stations().professions.clone());
         let mut world = World::new(self.res.facts().air, self.level.seed);
         world.attachments = save.load_attachments();
         world.shape = self.level_shapes.get(dim.id());

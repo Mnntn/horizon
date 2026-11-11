@@ -160,6 +160,14 @@ pub enum TransferError {
     Unavailable,
 }
 
+/// A viewer transfer worked out without moving anything (`Menu::check_transfer`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransferCheck {
+    pub result: Result<(), TransferError>,
+    /// The recipe's cells the items can't fill, when `result` is `Missing`.
+    pub missing: Vec<usize>,
+}
+
 /// The menu slots a placement works on.
 struct Grid {
     width: usize,
@@ -282,6 +290,41 @@ impl Menu {
     /// `StackedItemContents`, capped at the ingredients' stack size).
     /// The viewer leaves both alone on failure, including in creative mode.
     pub fn transfer_recipe(&mut self, env: &Env, id: &str, all: bool) -> Result<(), TransferError> {
+        let (grid, placement, mut stacked) = self.transfer_match(env, id)?;
+        self.transfer_place(env, id, &grid, &placement, &mut stacked, all)?;
+        self.recompute(env);
+        Ok(())
+    }
+
+    /// What `transfer_recipe(env, id, false)` would answer, worked out on a
+    /// copy of the menu: the same matching, then the same placement on the
+    /// copy for the room it needs. With `Missing`, the recipe's cells the
+    /// counted items can't fill. `self` is only read, so nothing moves, no
+    /// source changes and nothing drops.
+    pub fn check_transfer(&self, env: &Env, id: &str) -> TransferCheck {
+        let result = match self.transfer_match(env, id) {
+            Ok((grid, placement, mut stacked)) => {
+                let mut copy = self.clone();
+                copy.transfer_place(env, id, &grid, &placement, &mut stacked, false)
+            }
+            Err(error) => Err(error),
+        };
+        let missing = match result {
+            Err(TransferError::Missing) => self.missing_cells(env, id),
+            _ => Vec::new(),
+        };
+        TransferCheck { result, missing }
+    }
+
+    /// A viewer transfer's matching, shared by `transfer_recipe` and
+    /// `check_transfer`: whether the recipe goes into this menu's grid, then
+    /// `stacked_contents` (the inventory, the mods' sources and the grid) and
+    /// one set picked from them. Reads the menu only.
+    fn transfer_match(
+        &self,
+        env: &Env,
+        id: &str,
+    ) -> Result<(Grid, Placement, Stacked), TransferError> {
         if !(matches!(self.kind, Kind::Inventory | Kind::Crafting) || self.mod_crafting().is_some())
             || self.carried.is_some()
         {
@@ -305,13 +348,26 @@ impl Menu {
         if !stacked.try_pick(&ingredients, 1, None) {
             return Err(TransferError::Missing);
         }
-        // The vanilla placement can return leftover grid items as drops.
-        // A viewer transfer must keep the original slots if it cannot move
-        // every input without dropping anything.
+        Ok((grid, placement, stacked))
+    }
+
+    /// The placement of a matched transfer (`transfer_match`). The vanilla
+    /// placement can return leftover grid items as drops: a viewer transfer
+    /// keeps the original slots if it cannot move every input without
+    /// dropping anything.
+    fn transfer_place(
+        &mut self,
+        env: &Env,
+        id: &str,
+        grid: &Grid,
+        placement: &Placement,
+        stacked: &mut Stacked,
+        all: bool,
+    ) -> Result<(), TransferError> {
         let previous = self.containers.clone();
         let sources = self.sources.clone();
         let (drops, dropped) = (self.drops.len(), self.dropped.len());
-        self.place(env, &grid, &placement, &mut stacked, all, false);
+        self.place(env, grid, placement, stacked, all, false);
         let no_room = self.dropped.len() != dropped;
         if no_room || !self.recipe_in_grid(env, id) {
             self.containers = previous;
@@ -324,8 +380,33 @@ impl Menu {
                 TransferError::Unavailable
             });
         }
-        self.recompute(env);
         Ok(())
+    }
+
+    /// The cells of recipe `id` the counted items can't fill
+    /// (`check_transfer`): its ingredients taken one at a time in order, each
+    /// kept when the items still cover it with the ones kept before, as
+    /// `StackedItemContents` matches them, so alternatives and shared items
+    /// count as the transfer counts them. Indices into the recipe's `slots`
+    /// (width by height for a shaped recipe, else its ingredients in order).
+    fn missing_cells(&self, env: &Env, id: &str) -> Vec<usize> {
+        let Some(placement) = env.recipes.placement(id) else {
+            return Vec::new();
+        };
+        let mut stacked = self.stacked_contents(env);
+        let mut kept: Vec<&Ingredient> = Vec::new();
+        let mut lacking = Vec::new();
+        for (k, ingredient) in placement.ingredients.iter().enumerate() {
+            kept.push(ingredient);
+            if !stacked.try_pick(&kept, 1, None) {
+                kept.pop();
+                lacking.push(k as i32);
+            }
+        }
+        (placement.slots.iter().enumerate())
+            .filter(|(_, k)| lacking.contains(k))
+            .map(|(cell, _)| cell)
+            .collect()
     }
 
     /// `recipeMatches`: the recipe already fills the grid.
@@ -589,6 +670,9 @@ impl Menu {
 
 #[cfg(test)]
 mod transfer_all_tests;
+
+#[cfg(test)]
+mod transfer_check_tests;
 
 #[cfg(test)]
 mod tests {

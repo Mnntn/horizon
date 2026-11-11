@@ -1019,17 +1019,6 @@ impl Game<'_> {
             self.persist.unknown.entry(key).or_default().push(tag);
         }
     }
-    pub(super) fn warn_missing_profession(&mut self, mob: &horizon_client::mobs::Mob) {
-        if let horizon_client::mobs::villager::ProfessionState::Unresolved(id) =
-            &mob.extra.profession
-            && self.missing_professions.insert(id.clone())
-        {
-            log::warn!(
-                "Unknown villager profession {id} at {:?}; preserving its saved identity",
-                mob.position
-            );
-        }
-    }
 
     /// `Entity.load`: adopt the bounded TAG_LIST_CODEC input as a set.
     /// Keep that adopted Mob state in the retained compound for commands and saves.

@@ -123,15 +123,18 @@ impl Entry {
             (name.len() == 12).then_some(name)?
         } else if parent == Path::new("native/prebuilt") {
             let (revision, archive) = name.split_once('-')?;
+            // Eviction must recognize older installed caches too, even though native
+            // builds accept only the current SDK layout.
+            let target = [
+                "horizon-prebuilt-v3-",
+                horizon_mod_package::index::native::PREBUILT_ARCHIVE,
+            ]
+            .into_iter()
+            .find_map(|prefix| archive.strip_prefix(prefix))?;
+            let target = target.strip_suffix("-server").unwrap_or(target);
             crate::rust_toolchain::hosts()
                 .iter()
-                .any(|host| {
-                    [false, true].into_iter().any(|server| {
-                        horizon_mod_package::index::native::prebuilt_archive(host.target, server)
-                            .trim_end_matches(".tar.gz")
-                            == archive
-                    })
-                })
+                .any(|host| host.target == target)
                 .then_some(revision)?
         } else if parent == Path::new("native/internals-sync") {
             if let Some(catalog) = name.strip_prefix("catalog-") {
@@ -869,6 +872,24 @@ mod eviction_tests {
                 format!("native/prebuilt/{sha}-horizon-prebuilt-v3-x86_64-unknown-linux-gnu"),
                 Some(sha),
             ),
+            (
+                format!("native/prebuilt/{sha}-horizon-prebuilt-v3-x86_64-unknown-linux-gnu-server"),
+                Some(sha),
+            ),
+            (
+                format!("native/prebuilt/{sha}-horizon-prebuilt-v4-x86_64-unknown-linux-gnu"),
+                Some(sha),
+            ),
+            (
+                format!("native/prebuilt/{sha}-horizon-prebuilt-v4-x86_64-unknown-linux-gnu-server"),
+                Some(sha),
+            ),
+            (format!("native/prebuilt/{sha}-horizon-prebuilt-v3-unknown-target"), None),
+            (format!("native/prebuilt/{sha}-horizon-prebuilt-v4-unknown-target"), None),
+            (format!("native/prebuilt/{sha}-horizon-prebuilt-v30-x86_64-unknown-linux-gnu"), None),
+            (format!("native/prebuilt/{sha}-horizon-prebuilt-v4-x86_64-unknown-linux-gnu-server-server"), None),
+            (format!("native/prebuilt/{sha}-horizon-prebuilt-v4-x86_64-unknown-linux-gnu.tar.gz"), None),
+            (format!("native/prebuilt/not-{sha}-horizon-prebuilt-v4-x86_64-unknown-linux-gnu"), None),
             (
                 format!("native/internals-sync/catalog-{sha}-x86_64-unknown-linux-gnu"),
                 Some(sha),

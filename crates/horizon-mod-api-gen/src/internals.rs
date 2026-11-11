@@ -647,11 +647,92 @@ impl Pass {
         self.sources.push(Source {
             path: path.to_owned(),
             text,
-            parsed,
+            parsed: parsed.clone(),
             lines,
             edits: BTreeMap::new(),
             annotations: BTreeMap::new(),
         });
+        // A loaded staging unit may have widened fields or methods whose signatures
+        // were not catalogued (layout-only traversal). Give its concrete type declarations the
+        // same visibility, independently of whether their layouts can cross the ABI.
+        // Macro-generated declarations need the equivalent rule on expansion tokens.
+        fn declarations(source: &mut Source, tokens: proc_macro2::TokenStream) {
+            use proc_macro2::TokenTree;
+            let tokens: Vec<_> = tokens.into_iter().collect();
+            for (index, token) in tokens.iter().enumerate() {
+                if let TokenTree::Group(group) = token {
+                    declarations(source, group.stream());
+                }
+                if let TokenTree::Ident(keyword) = token
+                    && matches!(
+                        keyword.to_string().as_str(),
+                        "struct" | "enum" | "trait" | "union"
+                    )
+                    && matches!(tokens.get(index + 1), Some(TokenTree::Ident(_)))
+                    && !matches!(index.checked_sub(1).and_then(|i| tokens.get(i)), Some(TokenTree::Ident(previous)) if previous == "pub")
+                {
+                    let visibility = if index >= 2
+                        && matches!(&tokens[index - 2], TokenTree::Ident(previous) if previous == "pub")
+                        && matches!(&tokens[index - 1], TokenTree::Group(_))
+                    {
+                        syn::parse2(tokens[index - 2..index].iter().cloned().collect())
+                            .expect("restricted macro visibility")
+                    } else {
+                        Visibility::Inherited
+                    };
+                    // `$vis struct` is unsupported: inserting `pub` here would produce `$vis pub struct`.
+                    source.public(&visibility, keyword.span(), "macro type");
+                }
+            }
+        }
+        struct StagedTypes<'a>(&'a mut Source);
+        impl<'ast> syn::visit::Visit<'ast> for StagedTypes<'_> {
+            fn visit_block(&mut self, _: &'ast syn::Block) {}
+            fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+                if !test_only(&item.attrs) {
+                    syn::visit::visit_item_mod(self, item);
+                }
+            }
+            fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
+                if test_only(&item.attrs) {
+                    return;
+                }
+                self.0.public(&item.vis, item.struct_token.span(), "struct");
+            }
+            fn visit_item_enum(&mut self, item: &'ast syn::ItemEnum) {
+                if test_only(&item.attrs) {
+                    return;
+                }
+                self.0.public(&item.vis, item.enum_token.span(), "enum");
+            }
+            fn visit_item_union(&mut self, item: &'ast syn::ItemUnion) {
+                if test_only(&item.attrs) {
+                    return;
+                }
+                self.0.public(&item.vis, item.union_token.span(), "union");
+            }
+            fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
+                if test_only(&item.attrs) {
+                    return;
+                }
+                // `unsafe trait` is unsupported: keyword insertion would produce `unsafe pub trait`, not `pub unsafe trait`.
+                self.0.public(&item.vis, item.trait_token.span(), "trait");
+            }
+            fn visit_item_macro(&mut self, item: &'ast syn::ItemMacro) {
+                if item.mac.path.is_ident("macro_rules") {
+                    let tokens: Vec<_> = item.mac.tokens.clone().into_iter().collect();
+                    for window in tokens.windows(3) {
+                        if matches!(&window[0], proc_macro2::TokenTree::Punct(p) if p.as_char() == '=')
+                            && matches!(&window[1], proc_macro2::TokenTree::Punct(p) if p.as_char() == '>')
+                            && let proc_macro2::TokenTree::Group(group) = &window[2]
+                        {
+                            declarations(self.0, group.stream());
+                        }
+                    }
+                }
+            }
+        }
+        syn::visit::Visit::visit_file(&mut StagedTypes(&mut self.sources[index]), &parsed);
         Ok(index)
     }
 
@@ -1367,6 +1448,18 @@ fn collect(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<Pas
         pass.lower(root, path)
             .map_err(|e| format!("{origin}: {path}: {e}"))?;
     }
+    // A canonical lower-crate callee needs a typed catalog entry, not an extra
+    // function point. Lexical selectors remain resolved from their enclosing scope.
+    for declaration in &slots.calls {
+        if let Some((krate, _)) = declaration.selector.split_once("::")
+            && krate != "horizon_client"
+            && crate::points::crate_root(root, krate).is_ok()
+        {
+            pass.lower(root, &declaration.selector).map_err(|error| {
+                format!("{}: {}: {error}", declaration.origin, declaration.selector)
+            })?;
+        }
+    }
     pass.shapes(root)?;
     if discovery {
         let crates: BTreeSet<_> = pass
@@ -1446,6 +1539,35 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    #[test]
+    fn listed_callee_is_catalogued_without_creating_a_function_point() {
+        let fixture = Fixture::new("fn run(s: &str) -> usize { lower::size(s) }");
+        fixture.lower();
+        fixture.put(
+            "crates/lower/src/lib.rs",
+            "fn size(s: &str) -> usize { s.len() }",
+        );
+        fixture.put(
+            "crates/horizon-mod-api-gen/slots/port.txt",
+            "horizon_client::game::run | lower::size | 0 |\n",
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        assert!(entries.iter().any(|entry| entry.path == "lower::size"));
+        let declarations = crate::sites::slots(&fixture.0.join(crate::sites::DIRECTORY)).unwrap();
+        assert!(declarations.functions.is_empty());
+        let (_, sites) = crate::sites::rewrite::rewrite(
+            &fixture.game(),
+            "horizon_client::game",
+            &entries,
+            &declarations.calls,
+            false,
+        )
+        .unwrap();
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].call, "lower::size");
+        assert_eq!(sites[0].args[0].1, "& 'a str");
     }
 
     #[test]
@@ -1848,10 +1970,8 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
         let lexical = crate::sites::analysis::Scope::scan(&sig, None);
         for call in ["imported(1)", "Alias::make(1)", "Self::make(1)"] {
             let expr = syn::parse_str(call).unwrap();
-            crate::sites::resolve::resolve(
-                &expr, enclosing, &sig, &lexical, &entries, &rule, false,
-            )
-            .unwrap();
+            crate::sites::resolve::resolve(&expr, enclosing, &sig, &lexical, &entries, &rule)
+                .unwrap();
         }
         let old_hash = enclosing.hash.clone();
         fixture.put(
@@ -2036,6 +2156,62 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
         let again = widen_with(&fixture.0, &[]).unwrap();
         assert_eq!(result.entries, again.entries);
         assert!(again.changed.is_empty());
+    }
+
+    #[test]
+    fn macro_generated_types_widen_only_in_expansions() {
+        let fixture = shapes_fixture(
+            "macro_rules! types { () => { enum Hidden { Value } pub(crate) struct Restricted; pub struct Public; }; } types!(); fn value() -> Hidden { Hidden::Value }\n",
+        );
+        widen_with(&fixture.0, &[]).unwrap();
+        let staged = fixture.game();
+        assert!(staged.contains("pub enum Hidden"), "{staged}");
+        assert!(staged.contains("pub struct Restricted"), "{staged}");
+        assert!(staged.contains("pub struct Public"), "{staged}");
+        assert!(!staged.contains("pub pub"), "{staged}");
+        syn::parse_file(&staged).unwrap();
+    }
+
+    #[test]
+    fn staged_signatures_expose_private_types_and_traits() {
+        let fixture = shapes_fixture("struct Game;\n");
+        fixture.put("crates/horizon-items/src/items.rs",
+            "struct Hidden; trait Screen { type Page; } fn hidden() -> Hidden { Hidden } fn screen(_: &dyn Screen<Page = Hidden>) {}\n");
+        widen_with(
+            &fixture.0,
+            &[(
+                "internals.txt",
+                "horizon_items::hidden\nhorizon_items::screen\n".into(),
+            )],
+        )
+        .unwrap();
+        let staged =
+            fs::read_to_string(fixture.0.join("crates/horizon-items/src/items.rs")).unwrap();
+        assert!(staged.contains("pub struct Hidden"), "{staged}");
+        assert!(staged.contains("pub trait Screen"), "{staged}");
+        assert!(staged.contains("pub fn hidden"), "{staged}");
+        let output = fixture.0.join("staged.rlib");
+        let compile = |source: &str| {
+            let path = fixture.0.join("visibility.rs");
+            fs::write(&path, source).unwrap();
+            std::process::Command::new("rustc")
+                .args([
+                    "--crate-type=lib",
+                    "--edition=2024",
+                    "-Dprivate_interfaces",
+                    "-Adead_code",
+                ])
+                .arg(path)
+                .arg("-o")
+                .arg(&output)
+                .output()
+                .unwrap()
+        };
+        assert!(compile(&staged).status.success());
+        let mutant = staged.replace("pub struct Hidden", "struct Hidden");
+        let refused = compile(&mutant);
+        assert!(!refused.status.success());
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("more private"));
     }
 
     #[test]
@@ -2317,7 +2493,7 @@ pub struct ItemStack { a: First, b: Second, c: second::Kind }
     }
 
     #[test]
-    fn widens_items_without_touching_uses_traits_macros_or_local_items() {
+    fn widens_items_without_touching_uses_trait_impls_or_local_items() {
         let fixture = Fixture::new(
             r#"use std::fmt;
 pub(crate) struct Game<'a> { world: u32, marker: &'a str }
@@ -2372,7 +2548,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
             "struct Local;",
             "#[cfg(test)] fn test_method() {}",
             "impl Trait for Game<'_> { fn call(&self) {} }",
-            "macro_rules! untouched { () => { struct MacroItem; } }",
+            "macro_rules! untouched { () => { pub struct MacroItem; } }",
             "#[cfg(test)] mod tests { struct Private; }",
             "#[cfg(test)] struct TestItem;",
             "#[test] fn test_function() {}",

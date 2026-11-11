@@ -464,3 +464,7 @@ mod tests {
         }
     }
 }
+
+#[path = "poi_snapshot.rs"]
+mod snapshot;
+pub use snapshot::{PoiIdentity, PoiSnapshot};

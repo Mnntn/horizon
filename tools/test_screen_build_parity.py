@@ -8,8 +8,9 @@ screens, with or without the recipe book's offset, and reports the panel
 (`leftPos`/`topPos`/`imageWidth`/`imageHeight`), the slots' screen positions and
 the slot `AbstractContainerScreen`'s hover test answers for the case's cursor
 points. The game (`HORIZON_SCREEN_BUILD_FIXTURE`) builds the same screens'
-`ScreenBuild::ContainerLayout` and reports the panel, the origin, the slot
-boxes and the slot `slot_at` answers. Both sides must agree; the first
+`ScreenBuild::ContainerLayout` (and the pause screen's `PauseLayout`) and
+reports the panel, the origin, the slot boxes, the slot `slot_at` answers and
+the pause menu's buttons and icons. Both sides must agree; the first
 comparison is the GUI scale and size, so a size mismatch cannot pass.
 """
 import argparse
@@ -80,6 +81,7 @@ def cases():
     for window in WINDOWS:
         for scale in SCALES:
             gui_scale, gui_width, gui_height = gui_size(window, scale)
+            out.append({'kind': 'pause', 'window': window, 'scale': scale})
             for kind in kinds:
                 rows = int(kind[5:]) if kind.startswith('chest') else 0
                 width, height = image(kind, rows)
@@ -145,6 +147,10 @@ def main():
                 or a['gui'][1:] != list(gui_size(case['window'], case['scale'])[1:]):
             bad.append((case, 'gui', a['gui'], b['gui']))
             continue
+        if case['kind'] == 'pause':
+            if a['pause'] != b['pause']:
+                bad.append((case, 'pause', a['pause'], b['pause']))
+            continue
         for key in ('image', 'origin'):
             if a[key] != b[key]:
                 bad.append((case, key, a[key], b[key]))
@@ -155,7 +161,10 @@ def main():
             bad.append((case, 'hits', [a['hits'][i] for i in differing],
                         [b['hits'][i] for i in differing]))
     for case, key, vanilla, horizon in bad[:args.detail]:
-        print(f'{case["kind"]} rows {case["rows"]} book {case["book"]} {case["window"]} scale {case["scale"]}: {key}')
+        labels = f'{case["kind"]}'
+        if 'rows' in case:
+            labels += f' rows {case["rows"]} book {case["book"]}'
+        print(f'{labels} {case["window"]} scale {case["scale"]}: {key}')
         print('  vanilla', vanilla)
         print('  horizon', horizon)
     print(f'{len(chosen) - len(bad) - errors}/{len(chosen)} cases match ({errors} errors)')
