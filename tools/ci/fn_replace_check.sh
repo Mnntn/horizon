@@ -53,7 +53,9 @@ for mod in ${FNR_MODS:-alpha beta}; do
   sed -i "s/^horizon = \"HEAD\"$/horizon = \"$revision\"/; s/^mixins = \"MIXINS\"$/mixins = \"$mixins\"/" "$mods/fnr_$mod/horizon-mod.toml"
   sed -i "s/rev = \"HEAD\"/rev = \"$revision\"/" "$mods/fnr_$mod/Cargo.toml"
 done
-game_hash=$(sha256sum "$sdk"/deps/libhorizon_mod_host.* | cut -d' ' -f1)
+# The game library: libhorizon_mod_host.so / .dylib, or horizon_mod_host.dll on Windows.
+game_library() { ls "$sdk"/deps/*horizon_mod_host.so "$sdk"/deps/*horizon_mod_host.dylib "$sdk"/deps/*horizon_mod_host.dll 2>/dev/null | head -1; }
+game_hash=$(sha256sum "$(game_library)" | cut -d' ' -f1)
 
 env_vars=(HORIZON_HOME="$scratch/home" HORIZON_LAUNCHER_HOME="$data" XDG_DATA_HOME="$scratch/data"
   XDG_CONFIG_HOME="$scratch/config" HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1
@@ -63,13 +65,13 @@ started=$(date +%s.%N)
 env "${env_vars[@]}" "$launcher" native-build "$mods" --server-output "$scratch/engine" --version native-ci --profile optimized \
   --trust-native-code
 echo "native build: $(python3 -c "print(round($(date +%s.%N) - $started, 1))") s"
-test -x "$scratch/engine/horizon-engine"
+test -x "$scratch/engine/horizon-engine" || test -x "$scratch/engine/horizon-engine.exe"
 log=$data/native/build.log
 grep -F 'Function replacement:' "$log"
 # The prebuilt route, and no game source compiled.
 grep -F '"route": "prebuilt"' "$data"/versions/*/native-mods.json > /dev/null || grep -rF 'prebuilt' "$log" > /dev/null
 test ! -d "$data/native/stage/crates/horizon-client" || { echo "the game was staged for a source build"; exit 1; }
-test "$(sha256sum "$sdk"/deps/libhorizon_mod_host.* | cut -d' ' -f1)" = "$game_hash"
+test "$(sha256sum "$(game_library)" | cut -d' ' -f1)" = "$game_hash"
 
 if [ -n "$resources" ]; then
   run=$scratch/run

@@ -21,19 +21,6 @@ pub(super) fn compile(
     resolution: &dependencies::Resolution,
     options: Options<'_>,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
-    // Function replacement compiles its patch library against the mods' rlibs, which this
-    // route leaves to Cargo; until it builds the patch library too, it refuses rather than
-    // drop the rows.
-    if let Some(project) = projects
-        .iter()
-        .find(|project| project.bundle.needs_mixins())
-    {
-        return Err(format!(
-            "E_MIXIN_REGISTRY_DEPS: {}: a mod with crates.io dependencies can't carry \
-             `[[native.mixin]]`, bridge, module or state tables yet",
-            project.bundle.manifest.id
-        ));
-    }
     let sdk = prebuilt::identity(game)?;
     let lock = sdk.registry_lock.as_ref().ok_or("The prebuilt SDK does not declare a locked registry graph; install an SDK that supports registry-bearing native mods")?;
     let links = sdk.native_links.as_ref().ok_or("The prebuilt SDK does not declare native library providers; registry-bearing mods cannot be linked safely")?;
@@ -197,21 +184,86 @@ pub(super) fn compile(
         );
         members.push(relative);
     }
+    // `[[native.mixin]]` rows: the patched crates join the workspace beside the mods, whose
+    // crates their helpers call, and compile against the SDK like a mod.
+    let patch = super::patch::prepare(rust, game, &out.join("fnr"), projects, &sdk)?;
+    if let Some(patch) = &patch {
+        for name in &patch.names {
+            let dir = patch.dir.join(name);
+            let mut manifest = toml::toml! { [package] name = (name.clone()) version = "0.0.0" edition = "2024" [lib] path = "src/lib.rs" };
+            let mut dependencies = toml::Table::new();
+            for bundle in &patch.bundles {
+                let id = &bundle.manifest.id;
+                let project = projects
+                    .iter()
+                    .find(|project| project.bundle.manifest.id == *id)
+                    .expect("a prepared mod is a project");
+                let krate = project
+                    .cargo
+                    .get("lib")
+                    .and_then(|l| l.get("name"))
+                    .and_then(toml::Value::as_str)
+                    .map_or_else(|| project.package.replace('-', "_"), str::to_owned);
+                dependencies.insert(
+                    krate,
+                    toml::toml! { path = (out.join("native-api").join(id).display().to_string()) package = (project.package.clone()) }
+                        .into(),
+                );
+            }
+            manifest.insert("dependencies".into(), dependencies.into());
+            let features: toml::Table = sdk
+                .game_features()
+                .iter()
+                .map(|feature| (feature.clone(), toml::Value::Array(Vec::new())))
+                .collect();
+            manifest.insert("features".into(), features.into());
+            fs::write(dir.join("Cargo.toml"), manifest.to_string()).map_err(|e| e.to_string())?;
+            bindings.insert(
+                dir,
+                registry_rustc::Bindings {
+                    externs: super::patch::sdk_externs(game, &sdk)?.into_iter().collect(),
+                    link_args: Vec::new(),
+                },
+            );
+            let relative = format!(
+                "fnr/{}/{name}",
+                patch
+                    .dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+            );
+            members.push(relative.clone());
+            wrapper_deps.insert(
+                name.clone(),
+                toml::toml! { path = (relative) features = (sdk.game_features().iter().cloned().map(toml::Value::String).collect::<Vec<_>>()) }.into(),
+            );
+        }
+        // The tool's workspace files would make the crates a second workspace inside this one.
+        for file in ["Cargo.toml", "Cargo.lock"] {
+            let _ = fs::remove_file(patch.dir.join(file));
+        }
+    }
     let manifests: Vec<_> = resolution
         .order
         .iter()
         .map(|&index| &projects[index].bundle.manifest)
         .collect();
     fs::create_dir_all(out.join("src")).map_err(|e| e.to_string())?;
-    fs::write(
-        out.join("src/main.rs"),
-        api::main_rs(
-            &api::template(&game.join(prebuilt::TEMPLATE))?,
-            &manifests,
-            &catalog,
-        ),
-    )
-    .map_err(|e| e.to_string())?;
+    let mut main = api::main_rs(
+        &api::template(&game.join(prebuilt::TEMPLATE))?,
+        &manifests,
+        &catalog,
+    );
+    if let Some(patch) = &patch {
+        let installs: String = patch
+            .installs
+            .iter()
+            .map(|install| format!("        {install},\n"))
+            .collect();
+        main = main.replace("/* MOD_REDIRECTS */", installs.trim_end());
+    }
+    fs::write(out.join("src/main.rs"), main).map_err(|e| e.to_string())?;
     let mut manifest = toml::toml! { [package] name = "horizon-native-registry-game" version = "0.0.0" edition = "2024" [workspace] resolver = "2" };
     manifest
         .get_mut("workspace")
@@ -272,6 +324,17 @@ pub(super) fn compile(
     for name in ["horizon_client", "mod_api", "horizon_mod_package"] {
         externs.insert(name.to_owned(), prebuilt::library(&deps, name)?);
     }
+    // The template's runtime entry points (`install_redirects`, the mod loader) live in the game
+    // host library, as on the prebuilt route.
+    if fs::read_to_string(out.join("src/main.rs"))
+        .map_err(|e| e.to_string())?
+        .contains("horizon_mod_host::")
+    {
+        externs.insert(
+            "horizon_mod_host".to_owned(),
+            prebuilt::library(&deps, "horizon_mod_host")?,
+        );
+    }
     let mut link_args = sdk.link_args;
     if cfg!(target_os = "linux") {
         link_args.push("-Wl,--disable-new-dtags".into());
@@ -302,7 +365,9 @@ pub(super) fn compile(
         target: rust.host.target.into(),
         cache_wrapper: std::env::var_os("RUSTC_WRAPPER").map(PathBuf::from),
         workspace_wrapper: std::env::var_os("RUSTC_WORKSPACE_WRAPPER").map(PathBuf::from),
-        search: vec![deps],
+        // The SDK's proc-macro crates (`host/`) too: `mod_api`'s metadata names its macros
+        // crate, and without it rustc reports `mod_api` itself as missing (E0463).
+        search: vec![deps, game.join("host")],
         native: game.join("native"),
         crates: bindings,
     };
@@ -315,6 +380,9 @@ pub(super) fn compile(
         Some(fs::File::create(&messages).map_err(|e| e.to_string())?),
     );
     let outputs = super::registry_runtime::Outputs::read(&messages)?;
+    if let Some(patch) = &patch {
+        patch.log()?;
+    }
     super::append_log(&fs::read_to_string(&messages).map_err(|e| e.to_string())?)?;
     if let Err(failure) = result {
         let mut error = format!("{}\n{}", failure.error, outputs.errors.join("\n"));

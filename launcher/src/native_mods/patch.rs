@@ -3,7 +3,7 @@
 //! crate (`horizon_mod_api_gen::patch`), horizon-mixins applies every mod's rows to those copies
 //! in one pass (one combined copy per function, in the tool's order), rustc compiles the crate
 //! against the prebuilt game and the mods, and the generated `main` installs each copy through
-//! its function's replacement slot. What can't take this route is refused by name; nothing here
+//! its point's replacement slot. What can't take this route is refused by name; nothing here
 //! falls back to compiling the game.
 use super::{api, prebuilt::Identity, Bundle};
 use crate::i18n::trf;
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// The patch crate's name: the copies' ids and the executable's `--extern` use it.
 pub(super) const CRATE: &str = "horizon_patch";
 
-/// The compiled patch crates, `(crate name, rlib)`, and the installation expressions the
+/// The compiled patch crates, `(crate name, rlib)`, and the installation result expressions the
 /// generated `main` installs.
 pub(super) struct Patch {
     pub rlibs: Vec<(String, PathBuf)>,
@@ -79,9 +79,24 @@ fn extras(bundles: &[&Bundle]) -> Result<api_gen::patch::Extras, String> {
     Ok(extras)
 }
 
-/// Builds the patch crate for `projects`' `[[native.mixin]]` rows against `game`, into `out`; `None`
-/// when no mod has one. `rlibs` and `crates` are the compiled mods and their crate names, which
-/// helpers may call.
+/// The patched sources of `projects`' `[[native.mixin]]` rows, supports modules and bridges,
+/// ready to compile: one crate folder per name under `dir`.
+pub(super) struct Prepared<'a> {
+    pub dir: PathBuf,
+    pub names: Vec<String>,
+    pub installs: Vec<String>,
+    /// The mods whose helpers the crates may call.
+    pub bundles: Vec<&'a Bundle>,
+    count: usize,
+    rows: usize,
+    started: std::time::Instant,
+    copied: std::time::Duration,
+    applied: std::time::Duration,
+}
+
+/// Builds the patch crates for `projects`' `[[native.mixin]]` rows against `game`, into `out`;
+/// `None` when no mod has one. `rlibs` and `crates` are the compiled mods and their crate names,
+/// which helpers may call.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build(
     rust: &Toolchain,
@@ -93,6 +108,91 @@ pub(super) fn build(
     sdk: &Identity,
     rustc: impl Fn(&str) -> std::process::Command,
 ) -> Result<Option<Patch>, String> {
+    let Some(prepared) = prepare(rust, game, out, projects, sdk)? else {
+        return Ok(None);
+    };
+    // The patched crates, against the prebuilt game and the mods.
+    let mut compiled = Vec::new();
+    for name in &prepared.names {
+        let rlib = out.join(format!("lib{name}.rlib"));
+        let mut cmd = rustc("2024");
+        cmd.args([
+            "--crate-type",
+            "rlib",
+            "--crate-name",
+            name,
+            "--cap-lints",
+            "allow",
+        ])
+        .arg("-o")
+        .arg(&rlib)
+        .arg(prepared.dir.join(name).join("src/lib.rs"));
+        for feature in sdk.game_features() {
+            cmd.arg("--cfg").arg(format!("feature=\"{feature}\""));
+        }
+        for (krate, library) in sdk_externs(game, sdk)? {
+            cmd.arg("--extern")
+                .arg(format!("{krate}={}", library.display()));
+        }
+        for bundle in &prepared.bundles {
+            let id = bundle.manifest.id.as_str();
+            cmd.arg("--extern")
+                .arg(format!("{}={}", crates[id], rlibs[id].display()));
+        }
+        super::run(cmd, "Compiling the patched functions", |_| {})?;
+        compiled.push((name.clone(), rlib));
+    }
+    prepared.log()?;
+    Ok(Some(Patch {
+        rlibs: compiled,
+        installs: prepared.installs,
+    }))
+}
+
+/// The SDK libraries a patch crate compiles against: the game crate and the facade crates.
+pub(super) fn sdk_externs(game: &Path, sdk: &Identity) -> Result<Vec<(String, PathBuf)>, String> {
+    let deps = game.join("deps");
+    let mut externs = vec![(
+        "horizon_client".to_owned(),
+        super::prebuilt::library(&deps, "horizon_client")?,
+    )];
+    for krate in sdk.facade_crates() {
+        if krate != "horizon_client" {
+            externs.push((
+                krate.to_owned(),
+                super::prebuilt::facade_library(&deps, krate, sdk)?,
+            ));
+        }
+    }
+    Ok(externs)
+}
+
+impl Prepared<'_> {
+    /// The build log's line for this mixin build.
+    pub(super) fn log(&self) -> Result<(), String> {
+        super::append_log(&trf(
+            "Function replacement: {count} functions patched by {rows} mixins, without rebuilding the game (copy {copy} ms, horizon-mixins {tool} ms, compile {compile} ms, total {total} ms)",
+            &[
+                ("count", &self.count.to_string()),
+                ("rows", &self.rows.to_string()),
+                ("copy", &self.copied.as_millis().to_string()),
+                ("tool", &(self.applied - self.copied).as_millis().to_string()),
+                ("compile", &(self.started.elapsed() - self.applied).as_millis().to_string()),
+                ("total", &self.started.elapsed().as_millis().to_string()),
+            ],
+        ))
+    }
+}
+
+/// Copies, generates and transforms the patch crates for `projects` into `out`, without
+/// compiling them; `None` when no mod has a mixin, module or bridge.
+pub(super) fn prepare<'a>(
+    rust: &Toolchain,
+    game: &Path,
+    out: &Path,
+    projects: &[api::Project<'a>],
+    sdk: &Identity,
+) -> Result<Option<Prepared<'a>>, String> {
     let bundles: Vec<&Bundle> = projects
         .iter()
         .map(|project| project.bundle)
@@ -118,7 +218,7 @@ pub(super) fn build(
         .iter()
         .flat_map(|bundle| bundle.native().mixin.iter().map(|row| row.target.clone()))
         .collect();
-    // The generator owns named refusals for functions without a replacement installer.
+    // The generator refuses targets the staged game cannot replace.
     let extras = extras(&bundles)?;
     let generated = api_gen::patch::generate(&source, CRATE, &targets, &extras);
     let refusals: Vec<String> = match &generated {
@@ -228,63 +328,19 @@ pub(super) fn build(
         patched
     };
     let applied = started.elapsed();
-    // The patched crates, against the prebuilt game and the mods.
-    let deps = game.join("deps");
-    let mut compiled = Vec::new();
-    for name in &names {
-        let rlib = out.join(format!("lib{name}.rlib"));
-        let mut cmd = rustc("2024");
-        cmd.args([
-            "--crate-type",
-            "rlib",
-            "--crate-name",
-            name,
-            "--cap-lints",
-            "allow",
-        ])
-        .arg("-o")
-        .arg(&rlib)
-        .arg(patched.join(name).join("src/lib.rs"));
-        for feature in sdk.game_features() {
-            cmd.arg("--cfg").arg(format!("feature=\"{feature}\""));
-        }
-        cmd.arg("--extern").arg(format!(
-            "horizon_client={}",
-            super::prebuilt::library(&deps, "horizon_client")?.display()
-        ));
-        for krate in sdk.facade_crates() {
-            if krate != "horizon_client" {
-                cmd.arg("--extern").arg(format!(
-                    "{krate}={}",
-                    super::prebuilt::facade_library(&deps, krate, sdk)?.display()
-                ));
-            }
-        }
-        for bundle in &bundles {
-            let id = bundle.manifest.id.as_str();
-            cmd.arg("--extern")
-                .arg(format!("{}={}", crates[id], rlibs[id].display()));
-        }
-        super::run(cmd, "Compiling the patched functions", |_| {})?;
-        compiled.push((name.to_string(), rlib));
-    }
-    super::append_log(&trf(
-        "Function replacement: {count} functions patched by {rows} mixins, without rebuilding the game (copy {copy} ms, horizon-mixins {tool} ms, compile {compile} ms, total {total} ms)",
-        &[
-            ("count", &generated.patched.len().to_string()),
-            ("rows", &targets.len().to_string()),
-            ("copy", &copied.as_millis().to_string()),
-            ("tool", &(applied - copied).as_millis().to_string()),
-            ("compile", &(started.elapsed() - applied).as_millis().to_string()),
-            ("total", &started.elapsed().as_millis().to_string()),
-        ],
-    ))?;
-    Ok(Some(Patch {
-        rlibs: compiled,
+    Ok(Some(Prepared {
+        dir: patched,
+        names: names.iter().map(|name| name.to_string()).collect(),
         installs: generated
             .patched
-            .into_iter()
-            .map(|p| format!("({:?}, {})", p.target, p.install))
+            .iter()
+            .map(|p| p.install.clone())
             .collect(),
+        bundles,
+        count: generated.patched.len(),
+        rows: targets.len(),
+        started,
+        copied,
+        applied,
     }))
 }

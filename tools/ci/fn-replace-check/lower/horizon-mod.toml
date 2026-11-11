@@ -1,0 +1,19 @@
+id = "fnr_lower"
+name = "Function replacement check: a function below the game crate"
+version = "0.1.0"
+description = "fn-replace: HEAD on a listed horizon-client-lib function, copied into its own patch crate"
+authors = []
+api = "0.2"
+side = "both"
+capabilities = ["registries"]
+
+[native]
+game = "26.3"
+horizon = "HEAD"
+mixins = "MIXINS"
+
+[[native.mixin]]
+id = "advance"
+target = "horizon_client_lib::clock::FixedStep::advance"
+kind = "HEAD"
+helper = "src/mixins/advance.rs"

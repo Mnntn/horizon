@@ -22,7 +22,7 @@ helper = "src/mixins/head.rs"
 # A function below the game crate.
 [[native.mixin]]
 id = "lower"
-target = "horizon_client_lib::clock::FixedStep::advance"
+target = "horizon_client_render::chunk::Chunk::get"
 kind = "HEAD"
 helper = "src/mixins/head.rs"
 

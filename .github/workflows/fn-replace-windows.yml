@@ -1,0 +1,68 @@
+name: fn-replace windows
+# Function replacement on Windows (fn-replace, branch-only): the server SDK built with the launcher's
+# windows-gnu toolchain, the launcher's native build of the check mods against it (patch crates, the
+# carried horizon-mixins patch, the registry route), and the patched engine linked. No vanilla data in
+# CI, so the server does not start; the build and link are what this checks.
+on:
+  push:
+    branches: [fn-replace-windows]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: The launcher's pinned Rust
+        id: rust
+        run: |
+          echo "version=$(sed -n 's/^pub const VERSION: &str = "\(.*\)";$/\1/p' launcher/src/rust_toolchain.rs)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}-x86_64-pc-windows-gnu
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fn-replace-windows
+          workspaces: |
+            . -> target
+            launcher -> target
+      - name: Server SDK
+        run: python tools/prebuilt_game.py build prebuilt --server
+      - name: Exported names, toward Windows' 65,535
+        run: python tools/prebuilt_game.py exports prebuilt | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Launcher (built with MSVC stable, as launcher-windows-check builds it)
+        working-directory: launcher
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
+          cargo +stable-x86_64-pc-windows-msvc build --locked
+      - name: Function replacement check (build and link)
+        run: |
+          FNR_MODS="alpha beta support fdshape registry" tools/ci/fn_replace_check.sh \
+            launcher/target/debug/horizon-launcher.exe prebuilt fnr-scratch 2>&1 | tee fnr-check.log
+          grep -F 'Function replacement:' fnr-check.log >> "$GITHUB_STEP_SUMMARY"
+      - name: Refusals by name
+        if: always()
+        run: |
+          for set in "alpha overwrite2" refused refused_state; do
+            FNR_KEEP=1 FNR_MODS="$set" tools/ci/fn_replace_check.sh launcher/target/debug/horizon-launcher.exe prebuilt fnr-scratch > "refusal-${set// /_}.log" 2>&1 && { echo "$set built"; exit 1; } || true
+            grep -E 'E_[A-Z_]+' "refusal-${set// /_}.log" | head -5 | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fn-replace-windows-logs
+          path: |
+            fnr-check.log
+            refusal-*.log
+            fnr-scratch/launcher/native/build.log
+          if-no-files-found: warn
+          retention-days: 7
