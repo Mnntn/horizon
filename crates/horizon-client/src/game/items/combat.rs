@@ -56,6 +56,7 @@ impl CombatTracker {
 }
 #[derive(Default)]
 pub(super) struct CombatTracker {
+    pub(super) death_weapons: std::collections::HashMap<u32, super::creatures::AcceptedWeapon>,
     /// The arrows and bee stingers stuck in the body.
     pub(super) stuck: Stuck,
     entries: Vec<Entry>,

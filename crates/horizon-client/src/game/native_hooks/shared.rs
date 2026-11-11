@@ -2,6 +2,8 @@
 mod book_screen;
 #[path = "shared/item_fallthrough.rs"]
 mod item_fallthrough;
+#[path = "shared/loot.rs"]
+mod loot;
 
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
@@ -2695,85 +2697,7 @@ impl Game<'_> {
     pub(super) fn native_acting_id(&mut self) -> u128 {
         horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid())
     }
-    /// The mods' say on a broken block's drops (`native_loot_drops`).
-    pub(super) fn native_block_loot(
-        &mut self,
-        pos: [i32; 3],
-        state: BlockStateId,
-        player: Option<u128>,
-        tool: Option<&ItemStack>,
-        explosion: Option<f32>,
-        drops: &mut Vec<ItemStack>,
-    ) {
-        if !mod_api::__private::listened(mod_api::HookId::LootDrops) {
-            return;
-        }
-        let Ok(snapshot) = tool.try_into_api() else {
-            return;
-        };
-        let items = match &self.world_tables {
-            Some(tables) => &tables.items,
-            None => self.res.items(),
-        };
-        let table = items.block_loot_table(self.pack.assets.registry, state);
-        let Ok(state) = state.try_into_api() else {
-            return;
-        };
-        let context = LootDrops::from(mod_api::__private::built::LootDrops {
-            damage_source: None,
-            table: table.as_deref().unwrap_or_default(),
-            dimension: self.dim.id(),
-            origin: pos.map(|c| f64::from(c) + 0.5),
-            block: Some((pos, state)),
-            entity: None,
-            player,
-            tool: snapshot.as_ref(),
-            explosion,
-            used: false,
-        });
-        self.native_loot_drops(&context, drops);
-        drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
-    }
-    /// The mods' say on what a use drops (`LootDrops::used`): `table`
-    /// is the loot table rolled, if any, and `player` the user, none for a
-    /// dispenser.
-    pub(super) fn native_use_drops(
-        &mut self,
-        table: &str,
-        origin: [f64; 3],
-        block: Option<([i32; 3], BlockStateId)>,
-        entity: Option<(u32, &str)>,
-        player: Option<u128>,
-        tool: Option<&ItemStack>,
-        drops: &mut Vec<ItemStack>,
-    ) {
-        if !mod_api::__private::listened(mod_api::HookId::LootDrops) {
-            return;
-        }
-        let Ok(snapshot) = tool.try_into_api() else {
-            return;
-        };
-        let Ok(block) = block
-            .map(|(pos, state)| state.try_into_api().map(|state| (pos, state)))
-            .transpose()
-        else {
-            return;
-        };
-        let context = LootDrops::from(mod_api::__private::built::LootDrops {
-            damage_source: None,
-            table,
-            dimension: self.dim.id(),
-            origin,
-            block,
-            entity,
-            player,
-            tool: snapshot.as_ref(),
-            explosion: None,
-            used: true,
-        });
-        self.native_loot_drops(&context, drops);
-        drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
-    }
+
     /// Whether a native mod keeps the acting player from taking `stack`.
     pub(super) fn native_pickup_refused(&mut self, stack: &ItemStack) -> bool {
         let player = self.native_acting_id();
@@ -3474,25 +3398,6 @@ impl Game<'_> {
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
             page.settings = settings;
         }
-    }
-    /// `ClientHooks.onClickInput`: tells `native_interaction_key_mapping_triggered` that
-    /// `key` is about to act with `hand`. `None` when the action goes on; when a mod
-    /// cancelled it, `Some` of whether the hand swings.
-    pub(super) fn native_interaction(
-        &mut self,
-        key: InteractionKey,
-        hand: Hand,
-        attempt: InteractionAttempt,
-    ) -> Option<bool> {
-        let (mut swing_hand, mut canceled) = (true, false);
-        self.native_interaction_key_mapping_triggered(
-            key,
-            hand,
-            attempt,
-            &mut swing_hand,
-            &mut canceled,
-        );
-        canceled.then_some(swing_hand)
     }
     /// A client mod's command (the `command` hook); a server never asks.
     pub(super) fn client_mod_command(&mut self, command: &str) -> bool {

@@ -319,6 +319,11 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             assert!(event.context.tool.is_none());
             EXPECTED_LOOT_HAND.with(|expected| {
                 assert_eq!(
+                    event.context.weapon_item(host),
+                    expected.borrow().clone(),
+                    "the recorded weapon crosses the generated hook boundary"
+                );
+                assert_eq!(
                     host.entity(source.causing as u32)
                         .and_then(|e| host.living(e))
                         .and_then(|living| living.hand_item(host, mod_api::Hand::Main)),
@@ -1027,6 +1032,7 @@ fn wire_loopback_borrowed_tuple_inside_optional_context() {
     .unwrap();
     EXPECTED_LOOT_HAND.with(|expected| *expected.borrow_mut() = Some(hand.clone()));
     let context: mod_api::LootDrops = mod_api::__private::built::LootDrops {
+        weapon: Some(&hand),
         damage_source: Some(mod_api::HurtSource {
             damage_type: "minecraft:arrow",
             causing: 41,

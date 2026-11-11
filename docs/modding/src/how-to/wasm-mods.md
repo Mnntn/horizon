@@ -235,6 +235,16 @@ The game caches compiled wasm modules in `<game_dir>/.horizon-cache/wasm/`, keye
 wasm bytes, Wasmtime compatibility and engine settings. Hits map the compiled file into memory;
 files shipped beside a mod are never loaded as compiled code.
 
+On Unix, a cache miss compiles in a short-lived child of the game executable, returning
+compiler memory to the operating system when the child exits. The internal entry runs before
+game initialization, with closed standard streams and an empty environment. It receives a
+private input file and the expected cache key, refuses changed input, and writes through the
+same atomic cache writer. The parent accepts only its expected entry through the verified
+opened-file loader. Startup failure, a crash, a non-zero exit, an invalid entry or a timeout
+falls back to in-process compilation with a log message. A timed-out child is killed and
+reaped before fallback; its input and unfinished writer files are removed. This child path
+is Unix-only; Windows continues to compile in process with persistent caching disabled.
+
 On Unix, the game creates the cache folder with mode 0700 and entries with mode 0600. It checks
 folder ownership and permissions, then checks each opened entry is a regular file owned by the
 current user, not writable by group or others, and has only one hard link. Symlink entries are

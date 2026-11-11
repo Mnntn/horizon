@@ -220,8 +220,15 @@ impl Game<'_> {
     pub(super) fn swing_hand(&mut self, hand: Hand, animation: SwingAnimation) {
         self.try_swing_hand(hand, animation);
     }
-    /// Returns false when the item vetoes the swing, including its packet.
+    /// Returns false when the interaction policy or item vetoes the swing and its packet.
     pub(super) fn try_swing_hand(&mut self, hand: Hand, animation: SwingAnimation) -> bool {
+        if self
+            .remote
+            .as_ref()
+            .is_some_and(|r| !r.interaction_swing[usize::from(hand == Hand::Off)])
+        {
+            return false;
+        }
         if self.native_entity_swing_event(hand) {
             return false;
         }

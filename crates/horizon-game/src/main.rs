@@ -7,8 +7,6 @@ static GAME_IDENTITY: [u8; horizon_mod_package::game_identity::MARK.len()] =
     horizon_mod_package::game_identity::MARK;
 
 fn main() {
-    let startup = horizon_client::entry::prepare();
-    std::hint::black_box(&horizon_mod_package::holder::CAPABILITY);
     std::hint::black_box(&GAME_IDENTITY);
-    horizon_mod_host::main_with(Vec::new(), &[], &[], startup);
+    horizon_game::main();
 }

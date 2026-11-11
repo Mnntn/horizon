@@ -13,10 +13,17 @@ pub(crate) enum Source {
     Cached,
 }
 
+type ChildCommand = fn(&Path, &str) -> std::process::Command;
+type ChildCompile = Option<(ChildCommand, std::time::Duration)>;
+
+pub(crate) const CACHE_DIR: &str = ".horizon-cache/wasm";
+
 pub(crate) struct ModuleCache {
-    root: PathBuf,
-    disabled: Option<String>,
+    pub(super) root: PathBuf,
+    pub(super) disabled: Option<String>,
     warned: AtomicBool,
+    #[cfg(test)]
+    compiles: AtomicU64,
 }
 
 impl ModuleCache {
@@ -30,6 +37,15 @@ impl ModuleCache {
     }
 
     fn new_for_platform(root: PathBuf, windows: bool) -> Self {
+        Self::prepare(root, windows, true)
+    }
+
+    /// The parent already swept at startup. Age alone cannot prove a file is unused.
+    pub(super) fn for_child(root: PathBuf) -> Self {
+        Self::prepare(root, cfg!(windows), false)
+    }
+
+    fn prepare(root: PathBuf, windows: bool, sweep: bool) -> Self {
         let disabled = if windows {
             Err(io::Error::other(
                 "Windows owner/DACL/inheritance trust is not verified; compiling wasm",
@@ -39,7 +55,7 @@ impl ModuleCache {
         }
         .err()
         .map(|why| format!("folder {}: {why}", root.display()));
-        if disabled.is_none() {
+        if disabled.is_none() && sweep {
             remove_stale_temporaries(&root);
         }
         if let Some(why) = &disabled {
@@ -47,6 +63,8 @@ impl ModuleCache {
         }
         Self {
             root,
+            #[cfg(test)]
+            compiles: AtomicU64::new(0),
             warned: AtomicBool::new(disabled.is_some()),
             disabled,
         }
@@ -72,13 +90,66 @@ impl ModuleCache {
         engine: &Engine,
         bytes: &[u8],
     ) -> wasmtime::Result<(Module, Source)> {
+        #[cfg(unix)]
+        let child = if cfg!(test) {
+            None
+        } else {
+            Some((
+                production_command as fn(&Path, &str) -> std::process::Command,
+                crate::compile_child::TIMEOUT,
+            ))
+        };
+        #[cfg(not(unix))]
+        let child = None;
+        self.load_with_child(engine, bytes, child)
+    }
+
+    pub(crate) fn load_with_child(
+        &self,
+        engine: &Engine,
+        bytes: &[u8],
+        child: ChildCompile,
+    ) -> wasmtime::Result<(Module, Source)> {
         if self.disabled.is_some() {
             return Module::new(engine, bytes).map(|module| (module, Source::Compiled));
         }
-        let path = self
-            .root
-            .join(format!("{}.cwasm", Self::key(engine, bytes)));
-        match trusted_entry(&path) {
+        let path = self.entry_path(&Self::key(engine, bytes));
+        if let Some(module) = self.load_cached(engine, &path) {
+            return Ok((module, Source::Cached));
+        }
+        // Windows caching is disabled before this point (#2901).
+        #[cfg(not(unix))]
+        let _ = child;
+        #[cfg(unix)]
+        if let Some((command, timeout)) = child {
+            let result =
+                crate::compile_child::run(self, bytes, &Self::key(engine, bytes), command, timeout);
+            let why = match result {
+                Ok(()) => {
+                    if let Some(module) = self.load_cached(engine, &path) {
+                        return Ok((module, Source::Cached));
+                    }
+                    "no valid cache entry".to_owned()
+                }
+                Err(why) => why.to_string(),
+            };
+            log::warn!("wasm compiler child failed: {why}; compiling wasm in process");
+        }
+        #[cfg(test)]
+        self.compiles.fetch_add(1, Ordering::Relaxed);
+        let module = Module::new(engine, bytes)?;
+        if let Err(why) = self.write(&path, &module) {
+            log::debug!("wasm module cache write {}: {why}", path.display());
+        }
+        Ok((module, Source::Compiled))
+    }
+
+    pub(crate) fn entry_path(&self, key: &str) -> PathBuf {
+        self.root.join(format!("{key}.cwasm"))
+    }
+
+    fn load_cached(&self, engine: &Engine, path: &Path) -> Option<Module> {
+        match trusted_entry(path) {
             Ok(file) => {
                 // SAFETY: the account is the trust boundary. Unix folder and entry are owned
                 // by this user and not group/other writable. We verify the opened handle,
@@ -90,18 +161,14 @@ impl ModuleCache {
                 // inode and preserving every live mapping; they never rewrite in place.
                 // Unix also rejects hard links; Windows never reaches this path.
                 match unsafe { Module::deserialize_open_file(engine, file) } {
-                    Ok(module) => return Ok((module, Source::Cached)),
-                    Err(why) => self.warn_once(&path, &why),
+                    Ok(module) => return Some(module),
+                    Err(why) => self.warn_once(path, &why),
                 }
             }
             Err(why) if why.kind() == io::ErrorKind::NotFound => {}
-            Err(why) => self.warn_once(&path, &why),
+            Err(why) => self.warn_once(path, &why),
         }
-        let module = Module::new(engine, bytes)?;
-        if let Err(why) = self.write(&path, &module) {
-            log::debug!("wasm module cache write {}: {why}", path.display());
-        }
-        Ok((module, Source::Compiled))
+        None
     }
 
     fn warn_once(&self, path: &Path, why: &dyn std::fmt::Display) {
@@ -113,7 +180,7 @@ impl ModuleCache {
         }
     }
 
-    fn write(&self, path: &Path, module: &Module) -> wasmtime::Result<()> {
+    pub(super) fn write(&self, path: &Path, module: &Module) -> wasmtime::Result<()> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let bytes = module.serialize()?;
         let (temporary, mut file) = loop {
@@ -142,6 +209,15 @@ impl ModuleCache {
                 file.set_permissions(fs::Permissions::from_mode(0o600))?;
             }
             file.write_all(&bytes)?;
+            #[cfg(test)]
+            if std::env::var("HORIZON_COMPILER_MODE").as_deref() == Ok("midwrite") {
+                assert!(!path.exists());
+                // Let the parent kill a writer with an uncommitted artifact on disk.
+                fs::write(self.root.parent().unwrap().join("write-blocked"), b"ready")?;
+                loop {
+                    std::thread::park();
+                }
+            }
             file.sync_all()?;
             drop(file);
             fs::rename(&temporary, path)
@@ -316,3 +392,14 @@ mod tests;
 #[cfg(test)]
 #[path = "module_cache_gate_tests.rs"]
 mod gate_tests;
+
+#[cfg(unix)]
+fn production_command(input: &Path, key: &str) -> std::process::Command {
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap_or_default());
+    command
+        .env_clear()
+        .arg("--compile-wasm-module")
+        .arg(input)
+        .arg(key);
+    command
+}

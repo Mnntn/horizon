@@ -1045,7 +1045,7 @@ pub struct Aim {
     pub feet: [f64; 3],
 }
 /// A damage source: its type, the attacking entity and where it came from.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Damage {
     pub kind: DamageKind,
     pub attacker: Option<Who>,
@@ -1863,6 +1863,8 @@ pub struct Mob {
     /// `Stats.DAMAGE_DEALT_ABSORBED` to the player whose turn it is (see [`Mob::soak_hit`]).
     pub dealt_absorbed: i32,
     pub last_damage: Option<(Damage, i64)>,
+    /// Whether the most recent projectile damage call committed its source.
+    pub projectile_damage_committed: bool,
     /// `DamageSource.getDirectEntity` of `last_damage` when [`Damage`] cannot name it (a
     /// thrown potion, an area effect cloud): its entity type.
     pub last_direct: Option<&'static str>,
@@ -4053,6 +4055,7 @@ impl Mob {
             absorption: 0.0,
             dealt_absorbed: 0,
             last_damage: None,
+            projectile_damage_committed: false,
             last_direct: None,
             combat: combat::Tracker::default(),
             removed: false,
@@ -4255,21 +4258,6 @@ impl Mob {
         self.attacker_aim = aim;
         let hurt = self.damage(level, amount, source);
         self.attacker_aim = None;
-        hurt
-    }
-    /// `damage` of a blow dealt by a projectile (`motion`: its horizontal movement) whose owner
-    /// is `aim`.
-    pub fn damage_projectile(
-        &mut self,
-        level: &mut DamageLevel<'_>,
-        amount: f32,
-        source: Damage,
-        aim: Option<Aim>,
-        motion: [f64; 2],
-    ) -> bool {
-        self.projectile_motion = Some(motion);
-        let hurt = self.damage_aimed(level, amount, source, aim);
-        self.projectile_motion = None;
         hurt
     }
     /// `hurtServer` of `amount` from `source` in `level`.
@@ -4592,6 +4580,9 @@ impl Mob {
         let success = blocked <= 0.0 || amount > 0.0;
         if success {
             self.last_damage = Some((source, i64::from(self.age)));
+            if self.projectile_motion.is_some() {
+                self.projectile_damage_committed = true;
+            }
         }
         self.last_direct = None;
         if let Some(who) = source.attacker {
@@ -7819,3 +7810,5 @@ mod hidden_speed_mob_tick_tests {
         }
     }
 }
+
+mod projectile_damage;

@@ -525,6 +525,7 @@ impl Game<'_> {
                 self.hurt_held_without_breaking(1);
             }
             // trident_spin_attack_strength: 1.5 + 0.75 per level above the first.
+            let spin_stack = self.held().cloned();
             let strength = 1.5 + 0.75 * (riptide as f32 - 1.0);
             let d = view_vector(self.yaw, self.pitch);
             if let Some(p) = self.player.as_mut() {
@@ -536,6 +537,7 @@ impl Game<'_> {
                 // Player.startAutoSpinAttack(20, 8, stack).
                 p.auto_spin_attack_ticks = 20;
                 p.auto_spin_attack_dmg = 8.0;
+                p.auto_spin_attack_item = spin_stack;
             }
             // `player.move(SELF, (0, 1.1999999, 0))` when on the ground: the lift
             // stops at a ceiling.
@@ -1056,6 +1058,7 @@ impl Game<'_> {
                             self.evaluate_weapon_damage(&t.stack, Some((attacker, id)), ctx, 8.0);
                         t.dealt_damage = true;
                         let mut hurt_at = None;
+                        let mut accepted_source = None;
                         let aim = self.attacker_aim(Some(Who::Player));
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                             let from = Some([t.position.x, t.position.y, t.position.z]);
@@ -1072,8 +1075,16 @@ impl Game<'_> {
                                 [t.velocity.x, t.velocity.z],
                             );
                             if hurt {
+                                if mod_api::__private::listened(mod_api::HookId::LootDrops)
+                                    && m.projectile_damage_committed
+                                {
+                                    accepted_source = m.last_damage;
+                                }
                                 hurt_at = Some([m.position.x, m.position.y, m.position.z]);
                             }
+                        }
+                        if let Some(source) = accepted_source {
+                            self.capture_projectile_weapon(id, source, Some(&t.stack));
                         }
                         self.thrower_dealt_absorbed(t.guest);
                         // ThrownTrident.onHitEntity on a boat or minecart:

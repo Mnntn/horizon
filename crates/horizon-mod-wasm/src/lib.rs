@@ -2,10 +2,12 @@
 //! (the same model as native mods: required and optional, semver on `horizon-mod.toml`
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
 //! Mods page.
+mod compile_child;
 #[cfg(feature = "runtime-fixture")]
 pub mod fixture;
 pub mod link;
 mod module_cache;
+pub use compile_child::compile_child;
 #[cfg(test)]
 #[path = "../tests/support/no_hooks.rs"]
 mod no_hooks;
@@ -344,7 +346,7 @@ pub fn refusal(id: &str) -> Option<Refusal> {
 /// startup: the same selection as content mods (`horizon_mod_package::selection`), so a wasm mod's
 /// `assets/` and `data/` load as content beside its code. Refusals are kept for [`refused`].
 pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
-    let cache = module_cache::ModuleCache::new(game_dir.join(".horizon-cache/wasm"));
+    let cache = module_cache::ModuleCache::new(game_dir.join(module_cache::CACHE_DIR));
     let enabled = horizon_mod_package::mod_list::ModList::load(game_dir).enabled;
     let mut refused: Vec<_> = horizon_mod_package::selection::package_errors(
         horizon_mod_package::find(&game_dir.join(horizon_mod_package::mod_list::DIR))

@@ -452,16 +452,6 @@ impl Game<'_> {
         let Slot::Block(p, i) = s else {
             return true;
         };
-        // Clearing a jukebox's SlotAccess does not insert a non-disc item.
-        if stack.is_none()
-            && *i == 0
-            && matches!(
-                self.world.block_entities.get(&(p[0], p[1], p[2])),
-                Some(BlockEntity::Jukebox(_))
-            )
-        {
-            return true;
-        }
         let air = ItemStack {
             item: "minecraft:air".into(),
             count: 0,
@@ -574,9 +564,7 @@ impl Game<'_> {
         slot: &Slot,
         stack: Option<ItemStack>,
     ) -> bool {
-        self.slot_accepts(slot, stack.as_ref())
-            && self.equipment_slot_accepts(slot, &stack)
-            && self.slot_set(slot, stack)
+        self.equipment_slot_accepts(slot, &stack) && self.slot_set(slot, stack)
     }
     /// Put a stack (or nothing) in a slot; false when the slot cannot take it.
     pub(in crate::game) fn slot_set(&mut self, s: &Slot, stack: Option<ItemStack>) -> bool {

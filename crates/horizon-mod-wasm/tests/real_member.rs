@@ -24,6 +24,8 @@ impl mod_api::prelude::ItemsHost for Quiet {
         mod_api::__private::item_key_by_identifier(id)
     }
 }
+impl mod_api::ClientHost for Quiet {}
+mod_api::impl_client_host_areas!(Quiet);
 impl mod_api::ServerHost for Quiet {}
 mod_api::impl_server_host_areas!(Quiet, except(projectiles));
 static OWNER_LAUNCH_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -130,6 +132,55 @@ fn real_member() {
                 .any(|kind| kind.id == "wasm_fixture:counter")
         );
         mod_api::__private::mark_game_thread();
+        // Independent expected values cross the actual wasm guest boundary. Game packet
+        // and observer behavior must be checked at the higher client layer, not by Quiet.
+        for key in [
+            mod_api::InteractionKey::Attack,
+            mod_api::InteractionKey::Use,
+            mod_api::InteractionKey::PickBlock,
+        ] {
+            for (hand, attempt, expected_cancel, expected_swing) in [
+                (
+                    mod_api::Hand::Main,
+                    mod_api::InteractionAttempt::Press,
+                    false,
+                    false,
+                ),
+                (
+                    mod_api::Hand::Main,
+                    mod_api::InteractionAttempt::Held,
+                    false,
+                    true,
+                ),
+                (
+                    mod_api::Hand::Off,
+                    mod_api::InteractionAttempt::Press,
+                    true,
+                    false,
+                ),
+                (
+                    mod_api::Hand::Off,
+                    mod_api::InteractionAttempt::Held,
+                    true,
+                    true,
+                ),
+            ] {
+                let (mut swing, mut canceled) = (true, false);
+                mod_api::dispatch_interaction_key_mapping_triggered(
+                    &mut Quiet,
+                    key,
+                    hand,
+                    attempt,
+                    &mut swing,
+                    &mut canceled,
+                );
+                assert_eq!(
+                    (canceled, swing),
+                    (expected_cancel, expected_swing),
+                    "{key:?} {hand:?} {attempt:?}"
+                );
+            }
+        }
         // Exercise the same three subscriptions as the native residency regression.
         // The guest only observes; terminal falling-block retirement belongs to
         // the engine and does not depend on the listener's target.

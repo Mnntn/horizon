@@ -366,3 +366,221 @@ fn failed_replacement_keeps_compiled_module_and_cleans_temp_files() {
     }
     assert_eq!(entries(&cache), vec![path]);
 }
+
+#[test]
+fn compiler_actor() {
+    let Some(input) = std::env::var_os("HORIZON_COMPILER_INPUT") else {
+        return;
+    };
+    let output = std::env::var_os("HORIZON_COMPILER_OUTPUT").unwrap();
+    match std::env::var("HORIZON_COMPILER_MODE").as_deref() {
+        Ok("blocked") => {
+            fs::write(
+                Path::new(&input)
+                    .parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("compile-blocked"),
+                b"ready",
+            )
+            .unwrap();
+            loop {
+                std::thread::park();
+            }
+        }
+        Ok("crash") => std::process::abort(),
+        Ok("nonzero") => std::process::exit(7),
+        Ok("wrong") => {
+            fs::write(&input, wasm(43)).unwrap();
+            let engine = crate::runtime::engine().unwrap();
+            let key = ModuleCache::key(&engine, &wasm(43));
+            crate::compile_child::compile(Path::new(&input), &key).unwrap();
+        }
+        _ => crate::compile_child::compile(Path::new(&input), &output.to_string_lossy()).unwrap(),
+    }
+}
+
+#[test]
+#[ignore = "local child measurement; set HORIZON_CACHE_BENCH_WASM"]
+fn measure_child_compile() {
+    let bytes = fs::read(std::env::var_os("HORIZON_CACHE_BENCH_WASM").unwrap()).unwrap();
+    let engine = crate::runtime::engine().unwrap();
+    let mut times = Vec::new();
+    for _ in 0..5 {
+        let (_dir, cache, _, _) = fixture();
+        let input = crate::compile_child::Input::new(&cache.root, &bytes).unwrap();
+        let start = std::time::Instant::now();
+        assert!(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "module_cache::tests::compiler_actor"])
+                .env_clear()
+                .env("HORIZON_COMPILER_INPUT", &input.0)
+                .env("HORIZON_COMPILER_OUTPUT", ModuleCache::key(&engine, &bytes))
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        );
+        times.push(start.elapsed().as_secs_f64());
+    }
+    eprintln!("child compile {} bytes: {times:?}", bytes.len());
+}
+
+#[test]
+fn compiler_key_mismatch_writes_nothing() {
+    let (_dir, cache, _, bytes) = fixture();
+    let input = crate::compile_child::Input::new(&cache.root, &bytes).unwrap();
+    assert!(crate::compile_child::compile(&input.0, &"0".repeat(64)).is_err());
+    drop(input);
+    assert!(entries(&cache).is_empty());
+}
+
+fn actor_command(input: &Path, key: &str, mode: &str) -> std::process::Command {
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .env_clear()
+        .args(["--exact", "module_cache::tests::compiler_actor"])
+        .env("HORIZON_COMPILER_INPUT", input)
+        .env("HORIZON_COMPILER_OUTPUT", key)
+        .env("HORIZON_COMPILER_MODE", mode);
+    command
+}
+fn happy(input: &Path, key: &str) -> std::process::Command {
+    actor_command(input, key, "happy")
+}
+fn killed(input: &Path, key: &str) -> std::process::Command {
+    actor_command(input, key, "midwrite")
+}
+fn blocked(input: &Path, key: &str) -> std::process::Command {
+    actor_command(input, key, "blocked")
+}
+fn wrong(input: &Path, key: &str) -> std::process::Command {
+    actor_command(input, key, "wrong")
+}
+fn crash(input: &Path, key: &str) -> std::process::Command {
+    actor_command(input, key, "crash")
+}
+fn nonzero(input: &Path, key: &str) -> std::process::Command {
+    actor_command(input, key, "nonzero")
+}
+fn missing(_: &Path, _: &str) -> std::process::Command {
+    std::process::Command::new("/no-such-horizon-compiler-2878")
+}
+
+#[test]
+fn child_success_avoids_in_process_compile() {
+    let (_dir, cache, _, bytes) = fixture();
+    let engine = crate::runtime::engine().unwrap();
+    let (module, source) = cache
+        .load_with_child(
+            &engine,
+            &bytes,
+            Some((happy, std::time::Duration::from_secs(60))),
+        )
+        .unwrap();
+    assert_eq!(source, Source::Cached);
+    assert_eq!(answer(&engine, &module), 42);
+    assert_eq!(cache.compiles.load(Ordering::Relaxed), 0);
+    assert_eq!(entries(&cache).len(), 1);
+}
+
+#[test]
+fn child_failures_fall_back_to_identical_compilation() {
+    for (command, marker) in [
+        (wrong as fn(&Path, &str) -> std::process::Command, None),
+        (crash, None),
+        (nonzero, None),
+        (missing, None),
+        (killed, Some("write-blocked")),
+        (blocked, Some("compile-blocked")),
+    ] {
+        let (_dir, cache, _, bytes) = fixture();
+        let engine = crate::runtime::engine().unwrap();
+        let (module, source) = cache
+            .load_with_child(
+                &engine,
+                &bytes,
+                Some((command, std::time::Duration::from_secs(2))),
+            )
+            .unwrap();
+        assert_eq!(source, Source::Compiled);
+        if let Some(marker) = marker {
+            assert!(cache.root.parent().unwrap().join(marker).exists());
+        }
+        assert_eq!(answer(&engine, &module), 42);
+        assert_eq!(cache.compiles.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            module.serialize().unwrap(),
+            Module::new(&engine, &bytes).unwrap().serialize().unwrap()
+        );
+        assert!(
+            entries(&cache)
+                .iter()
+                .all(|p| p.extension().unwrap() == "cwasm")
+        );
+    }
+}
+
+#[test]
+fn internal_compiler_flag_refuses_malformed_arguments() {
+    use std::ffi::OsString;
+    for args in [
+        vec!["--compile-wasm-module"],
+        vec!["--compile-wasm-module", "input"],
+        vec!["--compile-wasm-module", "input", "key", "extra"],
+    ] {
+        assert_eq!(
+            crate::compile_child(args.into_iter().map(OsString::from)),
+            Some(1)
+        );
+    }
+    assert_eq!(crate::compile_child([OsString::from("--help")]), None);
+}
+
+#[test]
+fn compiler_refuses_correctly_keyed_input_outside_cache_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = wasm(42);
+    let engine = crate::runtime::engine().unwrap();
+    let input = crate::compile_child::Input::new(dir.path(), &bytes).unwrap();
+    let key = ModuleCache::key(&engine, &bytes);
+    assert_eq!(
+        crate::compile_child([
+            std::ffi::OsString::from("--compile-wasm-module"),
+            input.0.clone().into_os_string(),
+            key.into(),
+        ]),
+        Some(1)
+    );
+    assert!(fs::read_dir(dir.path()).unwrap().all(|entry| {
+        entry
+            .unwrap()
+            .path()
+            .extension()
+            .is_none_or(|ext| ext != "cwasm")
+    }));
+}
+
+#[test]
+fn compiler_keeps_old_live_input_and_other_writer_temporary() {
+    let (_dir, cache, _, bytes) = fixture();
+    let engine = crate::runtime::engine().unwrap();
+    let input = crate::compile_child::Input::new(&cache.root, &bytes).unwrap();
+    let writer = cache.root.join(".98765-0.tmp");
+    fs::write(&writer, b"unfinished writer").unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+    for path in [&input.0, &writer] {
+        File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+    }
+    crate::compile_child::compile(&input.0, &ModuleCache::key(&engine, &bytes)).unwrap();
+    assert!(input.0.exists());
+    assert_eq!(fs::read(writer).unwrap(), b"unfinished writer");
+}

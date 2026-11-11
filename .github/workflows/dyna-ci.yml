@@ -530,6 +530,17 @@ jobs:
             fi
           done
           HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+      - name: Retain typed preparation diagnostics only
+        if: failure() && steps.data.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: preparation-diagnostic-${{ strategy.job-index }}
+          path: |
+            ${{ runner.temp }}/prepare-build.diagnostic.json
+            ${{ runner.temp }}/prepare.diagnostic.json
+            ${{ runner.temp }}/seed-extras.diagnostic.json
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Generate the fishing test's vanilla reference inputs
         if: steps.data.outputs.present != 'false' && (matrix.shard == 'horizon-client' || startsWith(matrix.shard, 'horizon-client#'))
         run: |

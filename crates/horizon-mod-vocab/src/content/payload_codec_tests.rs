@@ -314,3 +314,150 @@ fn independent_float_varint_and_utf8_fixtures() {
         Err(PayloadDecodeError::LengthOverLimit { .. })
     ));
 }
+
+/// A derived record: its fields in declaration order, nothing between them.
+#[derive(Debug, PartialEq, horizon_mod_api_macros::PayloadCodec)]
+struct Cell {
+    out: VarInt,
+    input: Option<String>,
+    flags: u8,
+}
+
+/// A derived enum: a VarInt tag counting variants from 0, then the variant's
+/// fields.
+#[derive(Debug, PartialEq, horizon_mod_api_macros::PayloadCodec)]
+enum Update<T> {
+    Clear,
+    Set(i16, T),
+    Rename { name: String },
+}
+
+/// Discriminants do not change the tags: `Red` is 0 and `Blue` is 1.
+#[derive(Debug, PartialEq, horizon_mod_api_macros::PayloadCodec)]
+enum Colour {
+    Red = 7,
+    Blue = 9,
+}
+
+#[derive(Debug, PartialEq, horizon_mod_api_macros::PayloadCodec)]
+struct Tree(Vec<Tree>);
+
+#[test]
+fn a_derived_codec_writes_fields_in_order_and_variants_by_position() {
+    let cell = Cell {
+        out: VarInt(300),
+        input: Some("a".to_owned()),
+        flags: 9,
+    };
+    let bytes = [0xAC, 0x02, 1, 1, b'a', 9];
+    assert_eq!(encode_payload(&cell, 64), Ok(bytes.to_vec()));
+    assert_eq!(decode_payload(&bytes), Ok(cell));
+
+    for (update, bytes) in [
+        (Update::Clear, &[0][..]),
+        (Update::Set(0x0102, true), &[1, 1, 2, 1]),
+        (
+            Update::Rename {
+                name: "é".to_owned(),
+            },
+            &[2, 2, 0xC3, 0xA9],
+        ),
+    ] {
+        assert_eq!(encode_payload(&update, 64), Ok(bytes.to_vec()));
+        assert_eq!(decode_payload(bytes), Ok(update));
+    }
+    assert_eq!(encode_payload(&Colour::Blue, 64), Ok(vec![1]));
+    assert_eq!(decode_payload(&[0]), Ok(Colour::Red));
+    assert_eq!(
+        decode_payload::<Colour>(&[7]),
+        Err(PayloadDecodeError::InvalidDiscriminant { value: 7 })
+    );
+}
+
+#[test]
+fn a_derived_codec_refuses_what_its_fields_refuse() {
+    use PayloadDecodeError::*;
+    // A tag past the last variant, and a tag of -1.
+    assert_eq!(
+        decode_payload::<Update<bool>>(&[3]),
+        Err(InvalidDiscriminant { value: 3 })
+    );
+    assert_eq!(
+        decode_payload::<Update<bool>>(&[0xFF, 0xFF, 0xFF, 0xFF, 0x0F]),
+        Err(InvalidDiscriminant { value: -1 })
+    );
+    // A field's own refusal comes through: the boolean of Set is 2.
+    assert_eq!(
+        decode_payload::<Update<bool>>(&[1, 0, 0, 2]),
+        Err(InvalidDiscriminant { value: 2 })
+    );
+    assert_eq!(decode_payload::<Update<bool>>(&[1, 0]), Err(UnexpectedEnd));
+    assert_eq!(
+        decode_payload::<Update<bool>>(&[0, 0]),
+        Err(Trailing { bytes: 1 })
+    );
+    // A derived type that holds itself is bounded by its lists: 64 lists, one
+    // inside the other, fit and 65 do not.
+    let nest = |lists: usize| {
+        let mut bytes = vec![1; lists];
+        bytes.push(0);
+        bytes
+    };
+    assert!(decode_payload::<Tree>(&nest(63)).is_ok());
+    assert_eq!(decode_payload::<Tree>(&nest(64)), Err(TooDeep));
+    assert_eq!(
+        encode_payload(&decode_payload::<Tree>(&nest(63)).unwrap(), 64),
+        Ok(nest(63))
+    );
+}
+
+#[cfg(test)]
+mod derive_shapes {
+    use super::{decode_payload, encode_payload};
+    use crate::content::payload_codec as contract;
+
+    // Deliberately shadow prelude types and result constructors.
+    #[allow(dead_code)]
+    struct Result;
+    #[allow(dead_code)]
+    struct Option;
+    #[allow(dead_code)]
+    struct Ok;
+    #[allow(dead_code)]
+    struct Err;
+
+    #[derive(Debug, PartialEq, horizon_mod_api_macros::PayloadCodec)]
+    #[payload(crate = contract)]
+    struct Tuple(u8);
+
+    #[derive(Debug, PartialEq, horizon_mod_api_macros::PayloadCodec)]
+    struct Unit;
+
+    #[derive(Debug, PartialEq, horizon_mod_api_macros::PayloadCodec)]
+    #[non_exhaustive]
+    struct Generic<T, const N: usize>
+    where
+        T: Clone,
+    {
+        r#type: T,
+    }
+
+    #[derive(Debug, PartialEq, horizon_mod_api_macros::PayloadCodec)]
+    enum Choice {
+        One,
+        Two(u8),
+    }
+
+    #[test]
+    fn shapes_compile_and_match_independent_bytes() {
+        assert_eq!(encode_payload(&Tuple(9), 1).unwrap(), [9]);
+        assert_eq!(decode_payload::<Tuple>(&[9]).unwrap(), Tuple(9));
+        assert_eq!(encode_payload(&Unit, 0).unwrap(), Vec::<u8>::new());
+        assert_eq!(decode_payload::<Unit>(&[]).unwrap(), Unit);
+        let value = Generic::<u8, 3> { r#type: 7 };
+        assert_eq!(encode_payload(&value, 1).unwrap(), [7]);
+        assert_eq!(decode_payload::<Generic<u8, 3>>(&[7]).unwrap(), value);
+        assert_eq!(decode_payload::<Choice>(&[1, 5]).unwrap(), Choice::Two(5));
+        assert!(decode_payload::<Choice>(&[2]).is_err());
+    }
+}

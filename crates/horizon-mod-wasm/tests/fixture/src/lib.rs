@@ -21,6 +21,19 @@ pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn interaction_key_mapping_triggered(
+        &self,
+        _: &mut dyn mod_api::ClientHost,
+        event: &mut mod_api::InteractionKeyMappingTriggeredEvent,
+    ) -> mod_api::Flow {
+        event.swing_hand = event.attempt == mod_api::InteractionAttempt::Held;
+        if event.hand == mod_api::Hand::Off {
+            mod_api::Flow::Cancel
+        } else {
+            mod_api::Flow::Continue
+        }
+    }
+
     fn register_json_animation_types(
         &self,
         _: &mod_api::RegistrationContext,

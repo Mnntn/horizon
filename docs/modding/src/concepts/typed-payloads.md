@@ -57,7 +57,7 @@ Run mod codecs and handlers on the logical receiving main thread, with bounded b
 
 ## Stage 2: the value codec
 
-`crates/horizon-mod-vocab/src/content/payload_codec.rs` holds the pure codec half of stage 2, exported from `mod_api`. It is the part that touches neither registration nor delivery, so it stands apart from the raw transport of [#2882](https://github.com/arismoko/horizon/issues/2882). Nothing calls it yet: the typed handler adapter that decodes a received body, and the typed send helper that encodes one, arrive with registration.
+`crates/horizon-mod-vocab/src/content/payload_codec.rs` holds the pure codec half of stage 2, exported from `mod_api`, and `#[derive(PayloadCodec)]` writes a type's codec from its fields. It is the part that touches neither registration nor delivery, so it stands apart from the raw transport of [#2882](https://github.com/arismoko/horizon/issues/2882). Nothing calls it yet: the typed handler adapter that decodes a received body, and the typed send helper that encodes one, arrive with registration.
 
 | Item | Contract |
 | --- | --- |
@@ -68,6 +68,7 @@ Run mod codecs and handlers on the logical receiving main thread, with bounded b
 | `PAYLOAD_MAX_DEPTH` | 64. Each list, each present option and each `nested` level counts one; level 65 is `TooDeep` |
 | `PAYLOAD_MAX_STRING_BYTES`, `PAYLOAD_MAX_LIST_ENTRIES` | 4096 each, the defaults of `String` and `Vec<T>`. A schema with another bound calls `str_within(limit)`, `bytes(limit)` or `list(limit, read)` itself, so these are not a transport ceiling |
 | `PAYLOAD_DECODE_BUDGET` | 8,388,608 bytes of allocation for one value. A list is charged `count * size_of::<T>()` before it is reserved, an owned string its length, so a small body cannot ask for a large allocation |
+| `#[derive(PayloadCodec)]` | The generated codec, in `crates/horizon-mod-api-macros/src/payload.rs`. A struct is its fields in declaration order with nothing between them. An enum is a VarInt tag, the variant's position from 0 whatever its discriminant, then that variant's fields; a tag no variant has is `InvalidDiscriminant`. Each field goes through its own `PayloadCodec`, so the bounds above hold inside a derived type, and it adds no nesting level of its own. An enum with no variants, a union and a field without a codec do not compile |
 | `PayloadDecodeError` | `UnexpectedEnd`, `VarIntTooLong`, `NegativeLength`, `LengthOverLimit`, `Utf8`, `TooDeep`, `InvalidDiscriminant`, `NonFinite`, `BudgetExhausted`, `Trailing`, `InvalidValue`; has a Wire form |
 | `PayloadEncodeError` | `TooLarge`, `LengthOverLimit`, `TooDeep`, `NonFinite`; has a Wire form. An encoder refuses what the peer's decoder would refuse |
 
