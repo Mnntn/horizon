@@ -265,6 +265,25 @@ impl MobWorld<'_> {
         }
         (water, lava)
     }
+    /// `Entity.updateFluidInteraction`'s pushes for an entity fluids push
+    /// (`isPushedByFluid`) with the box `bounds`: its `velocity` after the
+    /// water's and the lava's currents (`EntityFluidInteraction.applyCurrentTo`).
+    pub fn pushed_by_currents(&self, bounds: Aabb, mut velocity: Vec3) -> Vec3 {
+        let (water, lava) = self.fluid_currents(bounds);
+        let lava_scale = if self.dimension_type.fast_lava {
+            0.007
+        } else {
+            0.0023333333333333335
+        };
+        let mut pushed = Pushed(&mut velocity);
+        if water.height > 0.0 {
+            let _ = water.apply_to(&mut pushed, 0.014);
+        }
+        if lava.height > 0.0 {
+            let _ = lava.apply_to(&mut pushed, lava_scale);
+        }
+        velocity
+    }
     /// `BlockState.getCollisionShape(level, pos)` (the empty collision
     /// context) as boxes in the world.
     pub fn block_collision_boxes(&self, x: i32, y: i32, z: i32) -> Vec<Aabb> {
@@ -426,6 +445,19 @@ impl Mob {
     pub fn on_climbable(&self, w: &MobWorld) -> bool {
         if self.kind.flags.climber {
             return self.climbing;
+        }
+        // `AbstractHorse.onClimbable`, `Ghast.onClimbable`, `Phantom.onClimbable`
+        // and `HappyGhast.onClimbable` are a plain false: no horse, donkey,
+        // mule, undead horse, llama, trader llama, camel or camel husk (nor
+        // those flying monsters) is ever on a climbable block, whatever it
+        // stands in.
+        if super::equine::is_equine(self.species())
+            || matches!(
+                self.species(),
+                super::Species::Ghast | super::Species::Phantom | super::Species::HappyGhast
+            )
+        {
+            return false;
         }
         let (x, y, z) = (
             self.position.x.floor() as i32,

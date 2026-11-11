@@ -4,8 +4,17 @@
     "builder": "DOCKERFILE",
     "dockerfilePath": "crates/horizon-mod-registry/Dockerfile",
     "watchPatterns": [
+      "/crates/horizon-core/**",
+      "/crates/horizon-game-discovery/**",
+      "/crates/horizon-mod-api-gen/**",
+      "/crates/horizon-mod-api-macros/**",
       "/crates/horizon-mod-package/**",
+      "/crates/horizon-mod-point-shape/**",
       "/crates/horizon-mod-registry/**",
+      "/crates/horizon-mod-runtime/**",
+      "/crates/horizon-mod-vocab/**",
+      "/crates/horizon-release-sign/**",
+      "/crates/horizon-shader-api/**",
       "/Cargo.toml"
     ]
   },
@@ -15,7 +24,9 @@
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5,
     "multiRegionConfig": {
-      "europe-west4-drams3a": { "numReplicas": 1 }
+      "europe-west4-drams3a": {
+        "numReplicas": 1
+      }
     }
   }
 }

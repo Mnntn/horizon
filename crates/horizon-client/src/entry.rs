@@ -107,6 +107,8 @@ pub fn start<G>(
     // then the Horizon parts still in this crate; none registers after this point.
     game::player_hooks::register();
     horizon_hooks::engine::seal();
+    // The text crates ship (`horizon_hooks::lang`), loaded with the game's own languages.
+    horizon_client::lang::install_crate_files(horizon_hooks::lang::engine::all());
     horizon_client::spans::startup::init(std::time::Instant::now());
     horizon_client::spans::trace::start_from_env();
     let (ids, _loaded_code) = load(&native, &launch);
@@ -226,6 +228,14 @@ pub(crate) fn install_client_hooks() {
         menu_slot_rules: game::api_values::menu_slot_rules,
         item_stacked_on_other: |context, event, canceled| {
             game::api_values::stacked_on_other(context, event, canceled);
+        },
+        living_death_message: |context, entity, kind, message| {
+            if !mod_api::__private::listened(mod_api::HookId::LivingDeathMessage) {
+                return;
+            }
+            let reader = horizon_client_render::api_context::LoopReader(context);
+            let context = reader.context();
+            mod_api::dispatch_living_death_message(&context, entity, kind, message);
         },
         living_heal: |context, entity, amount, cancel| {
             if !mod_api::__private::listened(mod_api::HookId::LivingHeal) {

@@ -3,7 +3,7 @@
 //! what's new and joining a friend.
 use super::*;
 use crate::plate::alpha;
-use crate::shell::{action, c, label, Action};
+use crate::shell::{Action, action, c, label};
 use theme::night;
 
 impl Launcher {
@@ -255,14 +255,14 @@ impl Launcher {
             PlayPress::Nothing => play = disabled(play),
             PlayPress::Play => {
                 play = play.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                    this.picker_open = false;
+                    this.picker.open = false;
                     this.play();
                     cx.notify();
                 }))
             }
             PlayPress::PrepareThenPlay => {
                 play = play.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                    this.picker_open = false;
+                    this.picker.open = false;
                     this.play_when_prepared = this.selected().cloned();
                     this.prepare(backend::MinecraftFrom::Install);
                     cx.notify();

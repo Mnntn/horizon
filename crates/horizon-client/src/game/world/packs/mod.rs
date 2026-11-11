@@ -503,6 +503,7 @@ impl Game<'_> {
         self.random_tick_sections.clear();
         self.portals.sections.clear();
         self.options.resources = root.clone();
+        self.falling_vertices.get_mut().clear();
         self.pack = pack;
         self.gui = gui;
         self.standalone_geometry = standalone_geometry;

@@ -44,3 +44,5 @@
 //!
 //! The game function a hook names starts as `let _ = (every, parameter);`; `cargo run -p xtask --
 //! mod-api` fills in the dispatch call.
+
+mod living_death_message;

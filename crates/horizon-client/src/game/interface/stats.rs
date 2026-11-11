@@ -19,6 +19,10 @@ struct PhantomTarget {
     identity: Option<(u128, String)>,
 }
 
+#[cfg(test)]
+#[path = "phantom_spawn_tests.rs"]
+mod phantom_spawn_tests;
+
 /// `stats[type][key]`, with `type` and `key` namespaced ids.
 #[derive(Default)]
 pub(super) struct Stats {
@@ -493,7 +497,10 @@ impl Game<'_> {
         }
         let attempt = match result.unwrap_or(PhantomSpawnResult::Default) {
             PhantomSpawnResult::Allow => true,
-            PhantomSpawnResult::Default => pos[1] >= self.dim.sea_level() && self.can_see_sky(pos),
+            PhantomSpawnResult::Default => {
+                pos[1] >= self.dim.sea_level()
+                    && self.mob_world_base(&[]).can_see_sky(pos[0], pos[1], pos[2])
+            }
             PhantomSpawnResult::Deny => false,
             _ => unreachable!("PhantomSpawnResult: unhandled variant"),
         };
@@ -538,12 +545,6 @@ impl Game<'_> {
                 ),
             );
         }
-    }
-    fn can_see_sky(&self, pos: [i32; 3]) -> bool {
-        (pos[1] + 1..pos[1] + 256).all(|y| {
-            let f = self.res.facts().get(self.world.block(pos[0], y, pos[2]));
-            !f.full_collision && f.fluid == horizon_client::blocks::Fluid::None
-        })
     }
 }
 

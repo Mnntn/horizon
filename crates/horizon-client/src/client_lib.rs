@@ -96,6 +96,7 @@ pub mod lan;
 pub mod landing;
 pub mod legacy_combat;
 pub mod living_attributes;
+pub mod living_death;
 pub mod locator_bar;
 pub mod lod_net;
 pub mod map_decoration_types;

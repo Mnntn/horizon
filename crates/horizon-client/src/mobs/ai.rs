@@ -1,6 +1,10 @@
 //! The per-tick mob update in vanilla order (`Entity.baseTick`,
 //! `LivingEntity.baseTick/tick/aiStep`, `Mob.serverAiStep`) and the
 //! dispatch to each species family's goals and special behaviour.
+mod feeding;
+
+pub use feeding::takes_food;
+
 use super::{
     Damage, DamageKind, Mob, MobEvent, MobWorld, Species, Who, aquatic,
     control::{BodyRotation, LookControl, MoveControl},
@@ -23,6 +27,9 @@ use horizon_world::native_load_context::LoopContext;
 #[cfg(test)]
 #[path = "fall_flying_tests.rs"]
 mod fall_flying_tests;
+#[path = "ai_glide.rs"]
+mod glide;
+use glide::update_fall_flying;
 #[cfg(test)]
 #[path = "wet_fire_tests.rs"]
 mod wet_fire_tests;
@@ -872,12 +879,8 @@ fn ai_and_finish_tick(
         if m.species() == Species::Ravager {
             super::ravager::ai_step(m, w, events);
         }
-        if m.species() == Species::Pufferfish {
-            // Pufferfish.aiStep's mob contacts run even when serverAiStep is skipped.
-            aquatic::sting_touching_mobs(m, w, events);
-        }
-        if m.species() == Species::GlowSquid {
-            aquatic::glow_squid_dark_tick(m);
+        if family(m.species()) == Family::Aquatic {
+            aquatic::no_ai_step(m, w, events);
         }
         super::cube::no_ai_tick(m, w, events); // AbstractCubeMob.tick
         // Shulker.tick after its living tick: a NoAI shell still keeps a
@@ -2668,12 +2671,12 @@ pub fn despawn_check(m: &mut Mob, w: &MobWorld) -> bool {
 }
 /// `Mob.requiresCustomPersistence` and its overrides: a passenger or a leashed
 /// mob, a raider in a raid, an enderman carrying a block, a tame nautilus, a
-/// sulfur cube holding a block or let out of a bucket, a fish or axolotl
-/// let out of a bucket (`AbstractFish`/`Axolotl`: `|| fromBucket()`). The spawn
-/// caps do not count these mobs either (`NaturalSpawner.createState`).
+/// sulfur cube holding a block or let out of a bucket, a fish or axolotl let
+/// out of a bucket and every tadpole (`AbstractFish`/`Axolotl`: `fromBucket()`).
+/// The spawn caps do not count these mobs either (`NaturalSpawner.createState`).
 pub fn requires_custom_persistence(m: &Mob) -> bool {
     super::riders::keeps_alive(m)
-        || m.extra.from_bucket
+        || super::aquatic::from_bucket(m)
         || m.extra.leash.is_some()
         || super::raider::state(m).is_some_and(|s| s.raid_id.is_some())
         || m.species() == Species::Enderman && m.extra.carried.is_some()
@@ -2706,10 +2709,10 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
     let persistent = m.persistent || requires_custom_persistence(m);
     // removeWhenFarAway: animals, villagers, golems, patrols and raiders,
     // zombie villagers being cured and ridden mobs stay, bar the two felines.
-    let creature = m.kind.category == "creature";
     let feline_goes = feline_removed_when_far(m.species(), m.extra.tame || m.extra.trusting, m.age);
     let removable = !(never_removed_when_far(m.species())
-        || creature && m.kind.flags.animal && !m.extra.jockey && !feline_goes
+        || super::aquatic::named_keeps_it(m)
+        || m.kind.category == "creature" && m.kind.flags.animal && !m.extra.jockey && !feline_goes
         || super::raider::keeps_alive(m, d)
         || super::zombie_villager::keeps_alive(m)
         || super::riders::keeps_alive(m));
@@ -2876,16 +2879,6 @@ pub(super) fn inherited_voice_sounds(m: &Mob) -> [&'static str; 3] {
         }
         _ => m.kind.sounds,
     }
-}
-/// Whether `Animal.mobInteract` takes the animal's food: an adult at age 0
-/// that `canFallInLove` (not in love yet) or a baby that `canAgeUp` (not age
-/// locked). Tamed wolves and cats only sit or stand when it does not.
-pub fn takes_food(m: &Mob) -> bool {
-    // `Turtle.canFallInLove` is `super.canFallInLove() && !this.hasEgg()`: a
-    // turtle that already carries an egg refuses its food instead of breeding.
-    let breedable =
-        m.extra.in_love <= 0 && !(m.species() == Species::Turtle && super::turtle::has_egg(m));
-    (m.extra.age == 0 && breedable) || (m.extra.age < 0 && !m.extra.age_locked)
 }
 /// `Animal.mobInteract` with its food in hand: an adult that can fall in
 /// love does, a baby grows up by a tenth, and either plays its eating sound
@@ -3785,6 +3778,31 @@ mod despawn_tests {
         for s in [Species::Cow, Species::Sheep, Species::Wolf] {
             assert!(!feline_removed_when_far(s, false, 12000), "{s:?}");
         }
+    }
+    /// `AbstractFish.removeWhenFarAway` and `Axolotl.removeWhenFarAway`: a fish or
+    /// an axolotl with a custom name is kept however far it swims, while the name
+    /// saves no other mob — a monster still goes.
+    #[test]
+    fn a_named_fish_or_axolotl_never_despawns() {
+        crate::mobs::world::with_test_world(&[], |w, types| {
+            let far = MobWorld {
+                // 200 blocks from the player: past the 128 a monster loses.
+                nearest_player: Some(Vec3::new(200.0, 64.0, 0.0)),
+                ..w.clone()
+            };
+            let checked = |id: &str, name: Option<&str>| {
+                let kind = std::sync::Arc::new(types.types[id].clone());
+                let mut m = Mob::new(1, kind, Vec3::new(0.0, 64.0, 0.0), 0.0);
+                m.custom_name = name.map(str::to_owned);
+                despawn_check(&mut m, &far)
+            };
+            for fish in ["minecraft:cod", "minecraft:salmon", "minecraft:axolotl"] {
+                assert!(checked(fish, Some("Bubbles")), "{fish} keeps its name");
+                assert!(!checked(fish, None), "{fish} without one goes");
+            }
+            // A name is not persistence for anything else.
+            assert!(!checked("minecraft:zombie", Some("Bubbles")));
+        });
     }
 }
 
@@ -5138,6 +5156,36 @@ mod feed_tests {
             m.extra.age = 6000;
             assert!(!takes_food(&m), "{id}: breeding cooldown");
         }
+    }
+
+    /// `Animal.mobInteract`'s growing branch is `canAgeUp()` — `isBaby() &&
+    /// !isAgeLocked()` — and a species `canBeABaby` says is never a baby does
+    /// not grow when fed, however negative its `Age` is: a frog spawned with
+    /// `Age` at `getBabyStartAge` keeps its food. A cow at the same age takes
+    /// it and grows a tenth.
+    #[test]
+    fn a_mob_that_cannot_be_a_baby_never_takes_the_food_that_grows_it() {
+        let mob = |id: &str, species: Species, age: i32| {
+            let mut kind = crate::mobs::sensor_scan_tests::kind();
+            let k = Arc::make_mut(&mut kind);
+            k.id = id.into();
+            k.species = species;
+            let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
+            m.extra.age = age;
+            m
+        };
+        let mut level = LegacyRandom::new(0);
+        let mut frog = mob("minecraft:frog", Species::Frog, -24_000);
+        assert!(!frog.is_baby());
+        assert!(!takes_food(&frog), "a frog is never a baby");
+        assert!(feed_animal(&mut frog, &mut level, None).is_none());
+        assert_eq!(frog.extra.age, -24_000, "it does not grow");
+
+        let mut cow = mob("minecraft:cow", Species::Cow, -24_000);
+        assert!(cow.is_baby());
+        assert!(takes_food(&cow));
+        assert!(feed_animal(&mut cow, &mut level, None).is_some());
+        assert_eq!(cow.extra.age, -24_000 + 120 * 20, "it grows a tenth");
     }
 
     /// `Turtle.canFallInLove` (#8612): a turtle that already carries an egg

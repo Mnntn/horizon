@@ -290,20 +290,26 @@ impl Instance {
         }
         Ok(())
     }
+    pub fn compute_value(&self) -> f64 {
+        if !self.dirty.get() {
+            return self.cached.get();
+        }
+        let mut base = self.base;
+        for m in self.operation_modifiers(Operation::AddValue) {
+            base += m.amount();
+        }
+        let mut value = base;
+        for m in self.operation_modifiers(Operation::AddMultipliedBase) {
+            value += base * m.amount();
+        }
+        for m in self.operation_modifiers(Operation::AddMultipliedTotal) {
+            value *= 1.0 + m.amount();
+        }
+        self.definition.sanitize(value)
+    }
     pub fn value(&self) -> f64 {
         if self.dirty.get() {
-            let mut base = self.base;
-            for m in self.operation_modifiers(Operation::AddValue) {
-                base += m.amount();
-            }
-            let mut value = base;
-            for m in self.operation_modifiers(Operation::AddMultipliedBase) {
-                value += base * m.amount();
-            }
-            for m in self.operation_modifiers(Operation::AddMultipliedTotal) {
-                value *= 1.0 + m.amount();
-            }
-            self.cached.set(self.definition.sanitize(value));
+            self.cached.set(self.compute_value());
             self.dirty.set(false);
         }
         self.cached.get()
@@ -360,5 +366,48 @@ fn array_put(map: &mut Vec<Modifier>, m: Modifier) -> Option<Modifier> {
     } else {
         map.push(m);
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Silent;
+    impl Observer for Silent {
+        type Error = std::convert::Infallible;
+        fn dirty(&mut self, _: &mut Instance) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn compute_value_evaluates_dirty_modifiers_without_clearing_state() {
+        let def = Definition::ranged(4.0, 0.0, 1024.0).unwrap();
+        let mut inst = Instance::new(def);
+        assert_eq!(inst.base_value(), 4.0);
+        assert_eq!(inst.compute_value(), 4.0);
+
+        let m1 = Modifier::new("test:add", 16.0, Operation::AddValue).unwrap();
+        inst.add_transient(m1, &mut Silent).unwrap();
+        assert!(inst.is_dirty());
+        assert_eq!(inst.compute_value(), 20.0);
+        // compute_value did not mutate or reset dirty flag
+        assert!(inst.is_dirty());
+
+        let m2 = Modifier::new("test:mult_base", 0.5, Operation::AddMultipliedBase).unwrap();
+        inst.add_transient(m2, &mut Silent).unwrap();
+        // (4.0 + 16.0) + (20.0 * 0.5) = 30.0
+        assert_eq!(inst.compute_value(), 30.0);
+
+        let m3 = Modifier::new("test:mult_total", 0.1, Operation::AddMultipliedTotal).unwrap();
+        inst.add_transient(m3, &mut Silent).unwrap();
+        // 30.0 * 1.1 = 33.0
+        assert!((inst.compute_value() - 33.0).abs() < 1e-6);
+
+        // Calling value() updates cache and clears dirty
+        assert!((inst.value() - 33.0).abs() < 1e-6);
+        assert!(!inst.is_dirty());
+        assert!((inst.compute_value() - 33.0).abs() < 1e-6);
     }
 }

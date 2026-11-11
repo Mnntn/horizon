@@ -4028,7 +4028,7 @@ impl Game<'_> {
             };
             let present = components.get(&id.as_str().into());
             let result = match term[split..].chars().next() {
-                Some('=') => {
+                Some('=') if id != "minecraft:count" => {
                     let value = horizon_core::nbt::parse_snbt(term[split + 1..].trim())
                         .ok()
                         .map(|(t, _)| t);
@@ -4040,7 +4040,7 @@ impl Game<'_> {
                         _ => false,
                     }
                 }
-                Some('~') => {
+                Some('~' | '=') => {
                     // Sub-predicates: `count` and component predicates.
                     let value = horizon_core::nbt::parse_snbt(term[split + 1..].trim())
                         .ok()
@@ -6368,3 +6368,7 @@ mod knot_identity_tests;
 
 #[cfg(test)]
 mod mob_display_name_tests;
+
+#[cfg(test)]
+#[path = "item_count_predicate_tests.rs"]
+mod item_count_predicate_tests;

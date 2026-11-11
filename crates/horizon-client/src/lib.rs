@@ -16,4 +16,8 @@ static ALLOCATOR: horizon_threads::Allocator = horizon_threads::ALLOCATOR;
 #[cfg(all(feature = "alloc-census", not(feature = "system-allocator")))]
 #[global_allocator]
 static ALLOCATOR: horizon_threads::CensusAllocator = horizon_threads::CensusAllocator;
+#[cfg(test)]
+mod brewing_speed_load_tests;
 pub mod game;
+#[cfg(test)]
+mod living_death_tests;

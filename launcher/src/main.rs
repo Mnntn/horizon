@@ -87,10 +87,10 @@ mod while_playing;
 mod worlds_page;
 
 use gpui::{
-    actions, div, ease_out_quint, prelude::*, px, relative, size, Animation, AnimationExt,
-    AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId, FocusHandle, FontWeight, Hsla,
-    KeyBinding, KeyDownEvent, Menu, MenuItem, MouseDownEvent, PathPromptOptions, Pixels, Point,
-    SharedString, Stateful, Subscription, Window, WindowBounds, WindowOptions,
+    Animation, AnimationExt, AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId,
+    FocusHandle, FontWeight, Hsla, KeyBinding, KeyDownEvent, Menu, MenuItem, MouseDownEvent,
+    PathPromptOptions, Pixels, Point, SharedString, Stateful, Subscription, Window, WindowBounds,
+    WindowOptions, actions, div, ease_out_quint, prelude::*, px, relative, size,
 };
 use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
@@ -105,9 +105,9 @@ use native_consent::PendingConsent;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::Ordering;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 use theme::Theme;
 
@@ -298,7 +298,7 @@ struct Launcher {
     confirm_remove: Option<String>,
     /// The releases whose patch notes the Versions page shows open.
     notes_open: std::collections::HashSet<String>,
-    picker_open: bool,
+    picker: glass_home::PickerState,
     /// Settings' any-colour swatch shows the hue strip (the glass look).
     accent_strip: bool,
     /// Settings' Glass and Blur sliders (the glass look).
@@ -521,39 +521,44 @@ impl Launcher {
             cx.notify();
         });
         let window_handle = window.window_handle();
-        cx.spawn(async move |this, cx| loop {
-            cx.background_executor()
-                .timer(Duration::from_millis(80))
-                .await;
-            if this
-                .update(cx, |this, cx| this.drain(window_handle, cx))
-                .is_err()
-            {
-                break;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(80))
+                    .await;
+                if this
+                    .update(cx, |this, cx| this.drain(window_handle, cx))
+                    .is_err()
+                {
+                    break;
+                }
             }
         })
         .detach();
         // Counts the time a partner banner is on screen, until it may be hidden.
-        cx.spawn(async move |this, cx| loop {
-            cx.background_executor()
-                .timer(Duration::from_secs(10))
-                .await;
-            let counting = this.update(cx, |this, cx| {
-                let s = &mut this.settings;
-                if s.partner_hidden || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE {
-                    return false;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs(10))
+                    .await;
+                let counting = this.update(cx, |this, cx| {
+                    let s = &mut this.settings;
+                    if s.partner_hidden || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE {
+                        return false;
+                    }
+                    // On screen on every page: the card in the sidebar, the banner on Servers.
+                    s.partner_seen_secs += 10;
+                    if s.partner_seen_secs % 60 == 0
+                        || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE
+                    {
+                        this.save_settings();
+                        cx.notify();
+                    }
+                    true
+                });
+                if !matches!(counting, Ok(true)) {
+                    break;
                 }
-                // On screen on every page: the card in the sidebar, the banner on Servers.
-                s.partner_seen_secs += 10;
-                if s.partner_seen_secs % 60 == 0 || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE
-                {
-                    this.save_settings();
-                    cx.notify();
-                }
-                true
-            });
-            if !matches!(counting, Ok(true)) {
-                break;
             }
         })
         .detach();
@@ -639,7 +644,7 @@ impl Launcher {
             native_log: Default::default(),
             confirm_remove: None,
             notes_open: Default::default(),
-            picker_open: false,
+            picker: glass_home::PickerState::default(),
             accent_strip: false,
             look_sliders: Default::default(),
             hue_area: std::rc::Rc::new(std::cell::Cell::new(None)),
@@ -903,7 +908,7 @@ impl Launcher {
                 self.mods.reset_lists();
             }
         }
-        self.picker_open = false;
+        self.picker.open = false;
         self.language_menu = false;
         self.mods.browse.sort_menu = false;
         self.account_menu = false;
@@ -3120,12 +3125,12 @@ impl Launcher {
                 .child(blocks::icon("chevron-down", 20., t.muted))
                 .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
                     if !this.closed_by_this_press(event) {
-                        this.picker_open = !this.picker_open;
+                        this.picker.open = !this.picker.open;
                     }
                     cx.notify();
                 })),
         );
-        if self.picker_open {
+        if self.picker.open {
             let mut menu = div()
                 .absolute()
                 .top(px(theme::night::PLAY + 6.))
@@ -3139,7 +3144,7 @@ impl Launcher {
                 .flex()
                 .flex_col()
                 .on_mouse_down_out(cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    this.picker_open = false;
+                    this.picker.open = false;
                     this.menu_closed_at = Some(event.position);
                     cx.notify();
                 }));
@@ -3179,7 +3184,7 @@ impl Launcher {
                         )
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.pin_version((!latest).then(|| tag.clone()));
-                            this.picker_open = false;
+                            this.picker.open = false;
                             cx.notify();
                         })),
                 );
@@ -3199,7 +3204,7 @@ impl Launcher {
                     .child(tr("Manage versions"))
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.go(Page::Versions);
-                        this.picker_open = false;
+                        this.picker.open = false;
                         cx.notify();
                     })),
             );
@@ -4867,7 +4872,7 @@ impl Launcher {
                             },
                         )),
                     ),
-                )
+                );
             }
             Load::Ready(r) if r.is_empty() => {
                 return page.child(centered(tr("No releases yet."), &t));
@@ -5665,7 +5670,7 @@ fn closed_by_press(closed_at: Option<Point<Pixels>>, event: &ClickEvent) -> bool
 mod tests {
     #[test]
     fn an_unopenable_data_folder_starts_on_settings_instead_of_exiting() {
-        use super::{page_after_startup, Page};
+        use super::{Page, page_after_startup};
         assert!(matches!(
             page_after_startup(Page::Play, true),
             Page::Settings
@@ -5677,7 +5682,7 @@ mod tests {
     #[test]
     fn a_menu_button_stays_closed_after_the_press_that_closed_its_menu() {
         use super::closed_by_press;
-        use gpui::{point, px, ClickEvent, KeyboardClickEvent, MouseClickEvent, MouseDownEvent};
+        use gpui::{ClickEvent, KeyboardClickEvent, MouseClickEvent, MouseDownEvent, point, px};
         let click = |x: f32| {
             ClickEvent::Mouse(MouseClickEvent {
                 down: MouseDownEvent {
@@ -5700,7 +5705,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn cmd_q_quits_and_cmd_w_closes_the_window() {
-        use super::{key_bindings, CloseWindow, Quit};
+        use super::{CloseWindow, Quit, key_bindings};
         use gpui::{Keymap, Keystroke};
         let keymap = Keymap::new(key_bindings());
         let key = |s: &'static str| [Keystroke::parse(s).unwrap()];
@@ -5766,7 +5771,7 @@ mod tests {
     /// it stays off: signing in comes first.
     #[test]
     fn play_prepares_first_for_an_owner() {
-        use super::{play_press, PlayPress};
+        use super::{PlayPress, play_press};
         assert_eq!(play_press(true, Some(true), false), PlayPress::Play);
         assert_eq!(play_press(true, None, false), PlayPress::Play);
         assert_eq!(
@@ -5796,7 +5801,7 @@ mod tests {
 
     #[test]
     fn a_completed_sign_in_is_handled_once_across_ui_polls() {
-        use super::{sign_in_change, SignInState};
+        use super::{SignInState, sign_in_change};
         let mut shown = None;
         let completed = SignInState::Done(Ok(horizon_launcher::account::Account {
             uuid: "11111111111111111111111111111111".into(),

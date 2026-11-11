@@ -2485,8 +2485,8 @@ impl Goal for Breed {
                     && (!(equine || camel) || s.tame && !s.ridden && s.health >= s.stats[0] as f32)
                     && (!sniffer || super::sniffer::can_mate_state(s.variant))
             })
-            .map(|s| s.id)
-            .next();
+            .find(|s| m.distance_sqr(s.position) <= 64.0)
+            .map(|s| s.id);
         self.partner.is_some()
     }
     fn can_continue(&mut self, _: &mut Mob, cx: &mut Cx) -> bool {
@@ -4494,3 +4494,10 @@ impl Mob {
             .is_none_or(|(center, radius)| within_home(center, radius, block))
     }
 }
+
+#[cfg(test)]
+#[path = "breed_partner_range_tests.rs"]
+mod breed_partner_range_tests;
+#[cfg(test)]
+#[path = "breed_xp_tests.rs"]
+mod breed_xp_tests;

@@ -302,6 +302,17 @@ fn arrival_from_tag(a: &Tag) -> Option<Arrival> {
     })
 }
 
+/// Keep an explicitly captured counter. Old archives without a positive counter
+/// retain the historical fallback; their migration needs separate evidence.
+#[cfg(test)]
+fn preserve_arrival_cooldown(tag: &mut Tag) {
+    if let Tag::Compound(fields) = tag
+        && !matches!(fields.get(&"PortalCooldown".into()), Some(Tag::Int(delay)) if *delay > 0)
+    {
+        fields.insert("PortalCooldown".into(), Tag::Int(ENTITY_DELAY));
+    }
+}
+
 impl Game<'_> {
     /// The world border's extent.
     pub(super) fn border_bounds(&self) -> BorderBounds {
@@ -669,15 +680,15 @@ impl Game<'_> {
     /// at the start of their tick: an item or mob that stayed in a portal
     /// goes through (transition time 0) and waits for its dimension.
     pub(super) fn handle_entity_portals(&mut self) {
-        self.handle_portals(false);
+        self.handle_portals(false, false);
     }
     /// `Entity.handlePortal` of the boats and minecarts, which `tick_boats`
     /// and `tick_carts` move: it runs before them, from the position they
     /// ended the last tick at, as the start of a vehicle's own tick does.
     pub(super) fn handle_vehicle_portals(&mut self) {
-        self.handle_portals(true);
+        self.handle_portals(true, false);
     }
-    fn handle_portals(&mut self, vehicles: bool) {
+    fn handle_portals(&mut self, vehicles: bool, after_move: bool) {
         if self.remote.is_some() {
             return;
         }
@@ -693,19 +704,21 @@ impl Game<'_> {
             before.clear();
         }
         let mut ids: Vec<(u32, bool)> = Vec::new();
-        // ServerLevel.tick ticks only the entities in entity-ticking chunks,
-        // and handlePortal runs in their tick: past the simulation distance an
-        // entity's portal time and cooldown wait, kept as they are.
+        // Portal handling runs only in entity-ticking chunks; retain frozen
+        // states while their entities are outside the simulation distance.
         let entity_ticking = self.entity_ticking_area();
         let mut waiting: Vec<u32> = Vec::new();
         let frozen = self.mobs_below_off_level();
         let tracked = &self.portals.entities;
         for_each_entity!(entity_lists_of!(self), entity => {
-            let can_sweep = entity.portal_size().is_some();
+            let can_sweep = entity.sweeps_portals();
             let has_portal_state = tracked.contains_key(&entity.id());
             // Entity.processPortalCooldown still runs for entities this
             // portal pass cannot send, such as an ender pearl.
-            if entity.is_vehicle() == vehicles && (can_sweep || has_portal_state) {
+            if entity.is_vehicle() == vehicles
+                && entity.portal_after_move() == after_move
+                && (can_sweep || has_portal_state)
+            {
                 let at = entity.position();
                 if frozen.contains(&entity.id()) || !entity_ticking(at.x.floor() as i32, at.z.floor() as i32) {
                     if has_portal_state {
@@ -717,7 +730,10 @@ impl Game<'_> {
                     before.insert(entity.id(), entity.position());
                 }
                 if has_portal_state {
-                    ids.push((entity.id(), can_sweep && entity.can_use_portal(self)));
+                    ids.push((
+                        entity.id(),
+                        can_sweep && entity.can_use_portal(self),
+                    ));
                 }
             }
         });
@@ -943,6 +959,10 @@ impl Game<'_> {
     /// transition time is 0 too).
     pub(super) fn find_entity_portals(&mut self) {
         self.find_portals(None);
+        // AbstractArrow, ThrowableProjectile and AbstractHurtingProjectile apply
+        // block effects before calling Entity.tick, so their refreshed cooldown
+        // is decremented (or their new portal handled) in this same tick.
+        self.handle_portals(false, true);
     }
     /// The same for the vehicles server players ride, once `tick_guests` has
     /// moved them: a ridden vehicle moves with its rider, after the other
@@ -991,6 +1011,12 @@ impl Game<'_> {
         }
         let mut inside: Vec<(u32, BlockPos)> = Vec::new();
         let mut portal_sections = std::mem::take(&mut self.portals.sections);
+        // No loaded section has a portal state in its palette (nearly always): no
+        // sweep below can meet a portal block, so the walk would find nothing.
+        if !self.level_may_hold_portal(&mut portal_sections) {
+            self.portals.sections = portal_sections;
+            return;
+        }
         // Only the entities that tick (in entity-ticking chunks) move, so only
         // they can have swept into a portal.
         let entity_ticking = self.entity_ticking_area();
@@ -998,9 +1024,9 @@ impl Game<'_> {
         // The first portal block each entity's box swept through since the
         // start of its tick (a stuck arrow that did not move enters none).
         for_each_entity!(entity_lists_of!(self), entity => {
-            let Some((width, height)) = entity.portal_size() else {
+            if !entity.sweeps_portals() {
                 continue;
-            };
+            }
             let (id, to) = (entity.id(), entity.position());
             if frozen.contains(&id) || !entity_ticking(to.x.floor() as i32, to.z.floor() as i32) {
                 continue;
@@ -1018,6 +1044,9 @@ impl Game<'_> {
             let from = entity
                 .portal_from()
                 .unwrap_or_else(|| self.portals.before.get(&id).copied().unwrap_or(to));
+            let Some((width, height)) = entity.portal_size() else {
+                continue;
+            };
             if let Some(pos) = self.swept_portal(from, to, width, height, &mut portal_sections) {
                 inside.push((id, pos));
             }
@@ -1107,19 +1136,32 @@ impl Game<'_> {
             return true;
         }
         let y_mask = SectionMask::below(y1 as usize + 1).from(y0 as usize);
-        let behaviours = self.res.behaviours();
         let chunks = &self.world.chunks;
         (x0..=x1).any(|cx| {
             (z0..=z1).any(|cz| {
                 chunks.get(&(cx, cz)).is_some_and(|chunk| {
-                    let portals = sections.get((cx, cz), chunk, |v| {
-                        let state = horizon_world::registry::BlockStateId(v);
-                        behaviours.portal_axis(state).is_some() || self.is_end_portal(state)
-                    });
+                    let portals = sections.get((cx, cz), chunk, |v| self.is_portal_state(v));
                     !(portals & y_mask).is_empty()
                 })
             })
         })
+    }
+    /// [`Self::may_hold_portal`] for the whole level: whether any loaded section has
+    /// a nether or End portal state in its palette.
+    fn level_may_hold_portal(
+        &self,
+        sections: &mut horizon_client::portal_sections::PortalSections,
+    ) -> bool {
+        self.world.chunks.iter().any(|(&key, chunk)| {
+            !sections
+                .get(key, chunk, |v| self.is_portal_state(v))
+                .is_empty()
+        })
+    }
+    /// A nether or End portal state, by its id in a palette.
+    fn is_portal_state(&self, v: u32) -> bool {
+        let state = horizon_world::registry::BlockStateId(v);
+        self.res.behaviours().portal_axis(state).is_some() || self.is_end_portal(state)
     }
     /// `Entity.teleportCrossDimension` away from the loaded dimension: the
     /// entity is saved and removed, and waits for its dimension to load.
@@ -2149,6 +2191,27 @@ mod tests {
     }
 
     #[test]
+    fn legacy_arrivals_keep_explicit_positive_counters_without_type_migration() {
+        for old in [None, Some(0), Some(-1), Some(5)] {
+            let mut tag = Tag::compound([("id", Tag::String("minecraft:oak_boat".into()))]);
+            if let (Some(old), Tag::Compound(fields)) = (old, &mut tag) {
+                fields.insert("PortalCooldown".into(), Tag::Int(old));
+            }
+            preserve_arrival_cooldown(&mut tag);
+            let arrival = Arrival {
+                plan: Plan::end_portal(Dim::Overworld, BlockPos::new(0, 64, 0), 1.375, 0.5625),
+                tag,
+            };
+            let restored = arrival_from_tag(&arrival_tag(&arrival)).unwrap();
+            let expected = old.filter(|n| *n > 0).unwrap_or(ENTITY_DELAY);
+            assert_eq!(
+                restored.tag.get("PortalCooldown"),
+                Some(&Tag::Int(expected))
+            );
+        }
+    }
+
+    #[test]
     fn waiting_arrivals_keep_their_end_destination_when_saved() {
         let tag = Tag::compound([("id", Tag::String("minecraft:cow".into()))]);
         for (from, dim) in [(Dim::Overworld, Dim::End), (Dim::End, Dim::Overworld)] {
@@ -2175,3 +2238,7 @@ mod tests {
         assert!(!arrival_from_tag(&old).unwrap().plan.end);
     }
 }
+
+#[cfg(test)]
+#[path = "portal_cooldown_tests.rs"]
+mod cooldown_tests;
