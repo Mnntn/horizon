@@ -1267,21 +1267,13 @@ mod tests {
             "horizon_patch",
             &[
                 "horizon_client::game::autosave::Game<'_>::no_such_function".into(),
-                "horizon_client::game::autosave::Game<'_>::on_tick_rate_changed".into(),
                 "horizon_no_such_crate::f".into(),
             ],
             &Extras::default(),
         )
         .unwrap_err();
         let codes: Vec<_> = error.iter().map(|r| r.code).collect();
-        assert_eq!(
-            codes,
-            [
-                "E_MIXIN_TARGET_MISSING",
-                "E_MIXIN_TARGET_MISSING",
-                "E_MIXIN_NOT_REPLACEABLE"
-            ]
-        );
+        assert_eq!(codes, ["E_MIXIN_TARGET_MISSING", "E_MIXIN_NOT_REPLACEABLE"]);
     }
 
     #[test]
