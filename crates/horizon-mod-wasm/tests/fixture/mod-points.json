@@ -4,6 +4,34 @@
   "opted_out": [],
   "points": [
     {
+      "name": "game_payload_finish",
+      "target": "wasm_fixture::game_payload::finish",
+      "hash": "e6849d91823bf54c",
+      "signature": "wasm_fixture::game_payload::finish: fnf(bytes:PayloadBytes,cx:&mutdynIPayloadContext)->Result<(),String> []",
+      "raw": true,
+      "at_return": false,
+      "api_refusal": "argument 1 `bytes` (`PayloadBytes`) has no API type yet",
+      "returns": "none",
+      "host": "none",
+      "return_ty": "Result<(),String>",
+      "listener": "crate::game_payload::__GamePayloadFinishListener",
+      "return_listener": "crate::game_payload::__GamePayloadFinishReturnListener"
+    },
+    {
+      "name": "game_payload_register",
+      "target": "wasm_fixture::game_payload::register",
+      "hash": "829e71c065469135",
+      "signature": "wasm_fixture::game_payload::register: fnf(registrar:&mutdynRegistrar) []",
+      "raw": true,
+      "at_return": false,
+      "api_refusal": "argument 1 `registrar` (`&mutdynRegistrar`) has no API type yet",
+      "returns": "none",
+      "host": "none",
+      "return_ty": "()",
+      "listener": "crate::game_payload::__GamePayloadRegisterListener",
+      "return_listener": "crate::game_payload::__GamePayloadRegisterReturnListener"
+    },
+    {
       "name": "matrix_mirrors",
       "target": "wasm_fixture::matrix::mirrors",
       "hash": "cdf81bd8a6caa50d",
@@ -44,20 +72,6 @@
       "return_ty": "()",
       "listener": "crate::__OnTickListener",
       "return_listener": "crate::__OnTickReturnListener"
-    },
-    {
-      "name": "payload_register",
-      "target": "wasm_fixture::payload::register",
-      "hash": "1baefd712c9be24a",
-      "signature": "wasm_fixture::payload::register: fnf(registrar:&mutdynRegistrar) []",
-      "raw": true,
-      "at_return": false,
-      "api_refusal": "argument 1 `registrar` (`&mutdynRegistrar`) has no API type yet",
-      "returns": "none",
-      "host": "none",
-      "return_ty": "()",
-      "listener": "crate::payload::__PayloadRegisterListener",
-      "return_listener": "crate::payload::__PayloadRegisterReturnListener"
     },
     {
       "name": "replace_own_average",
