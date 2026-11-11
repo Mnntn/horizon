@@ -1044,6 +1044,23 @@ pub(super) mod tests {
         game.lan_acting_uuid = Some(uuid);
     }
 
+    /// Frozen vanilla bytes only; every mutable game and registration stays fresh.
+    /// Run through tools/ci/frozen_scratch.py so the process-owned tree is cleaned.
+    pub(in crate::game) fn with_frozen_game(test: impl FnOnce(&mut super::Game<'_>)) {
+        with_game_at(
+            super::super::resource_load::frozen_gameplay_inputs::standard_root(),
+            test,
+        );
+    }
+
+    pub(in crate::game) fn with_frozen_client_game(test: impl FnOnce(&mut super::Game<'_>)) {
+        with_game_role(
+            super::super::resource_load::frozen_gameplay_inputs::standard_root(),
+            super::super::execution_role::ExecutionRole::Client,
+            test,
+        );
+    }
+
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         with_game_at(root, test);

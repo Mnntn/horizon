@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 from tools import lab
 from tools.ci import ignored_tests
+from tools.ci import frozen_scratch
+import tempfile
 
 
 class IgnoredTestsHomeTest(unittest.TestCase):
@@ -25,6 +27,13 @@ class IgnoredTestsHomeTest(unittest.TestCase):
                 self.assertEqual(Path(env[key]).parent, home.parent)
             for key in ("HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"):
                 self.assertEqual(Path(env[key]).parent, home.parent)
+            temporary = Path(env["TMPDIR"])
+            self.assertEqual(str(temporary), env["HORIZON_FROZEN_SCRATCH"])
+            frozen = temporary / "static-snapshot"
+            frozen.mkdir()
+            (frozen / "input").write_text("private")
+            (frozen / "input").chmod(0o400)
+            frozen.chmod(0o500)
             homes.append(home)
             return SimpleNamespace(
                 returncode=0,
@@ -36,7 +45,9 @@ class IgnoredTestsHomeTest(unittest.TestCase):
                 ),
             )
 
-        with patch.dict(os.environ, HORIZON_HOME="parent-home", HORIZON_TEST_RESOURCES="prepared-fixture"):
+        local = Path(__file__).resolve().parents[2] / ".local"
+        local.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=local) as parent, patch.dict(os.environ, HORIZON_HOME="parent-home", HORIZON_TEST_RESOURCES="prepared-fixture", HORIZON_TEST_SCRATCH_PARENT=parent), patch.object(frozen_scratch.subprocess, "check_output", return_value="ext2/ext3\n"):
             with patch.object(ignored_tests.lab, "game_env", wraps=lab.game_env) as sandbox:
                 with patch.object(ignored_tests.subprocess, "run", side_effect=execute):
                     for _ in range(2):

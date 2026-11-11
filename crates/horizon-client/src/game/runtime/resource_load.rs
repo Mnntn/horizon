@@ -143,9 +143,13 @@ pub(super) struct CoreTables {
     pub(super) environment: Environment,
     pub(super) collision: Arc<BlockCollisionRegistry<'static>>,
 }
+#[cfg(test)]
+#[path = "resource_load/frozen_gameplay_inputs.rs"]
+pub(in crate::game) mod frozen_gameplay_inputs;
+
 /// The block facts and the tables read from them.
 pub(super) struct GameplayTables {
-    pub(super) behaviour_json: serde_json::Value,
+    pub(super) behaviour_json: Arc<serde_json::Value>,
     pub(super) facts: BlockFacts,
     pub(super) gameplay_projection: Vec<horizon_client::blocks::GameplayProjection>,
     pub(super) light: LightTables,
@@ -323,16 +327,19 @@ pub(super) fn gameplay_tables(
     progress: &Progress,
 ) -> std::result::Result<GameplayTables, String> {
     let facts_step = startup::step("core.block_facts");
-    // Read whole, then parsed from the buffer: `serde_json::from_reader`
-    // pulls through a `BufReader` and is measurably slower on a file this
-    // size than one read plus `from_slice`, which is how `BlockFacts` next
-    // door already reads its own. Same value either way.
-    let behaviour_json: serde_json::Value =
-        horizon_world::json_file::read(&root.join("block-behaviours.json"))
-            .map_err(|e| e.to_string())?;
-    let (facts, gameplay_projection) =
-        BlockFacts::load_with_projection(root, assets.registry, &behaviour_json, parallel)
-            .map_err(|e| e.to_string())?;
+    let decode = || -> std::result::Result<_, String> {
+        let behaviour_json: serde_json::Value =
+            horizon_world::json_file::read(&root.join("block-behaviours.json"))
+                .map_err(|e| e.to_string())?;
+        let (facts, projection) =
+            BlockFacts::load_with_projection(root, assets.registry, &behaviour_json, parallel)
+                .map_err(|e| e.to_string())?;
+        Ok((Arc::new(behaviour_json), facts, projection))
+    };
+    #[cfg(test)]
+    let (behaviour_json, facts, gameplay_projection) = frozen_gameplay_inputs::load(root, decode)?;
+    #[cfg(not(test))]
+    let (behaviour_json, facts, gameplay_projection) = decode()?;
     drop(facts_step);
     progress.set(2);
     let (light, motion) = std::thread::scope(|scope| {
