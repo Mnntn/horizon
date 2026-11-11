@@ -5,7 +5,7 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
 };
-// points.json is already about 9 MiB; leave ample growth room.
+// The internals catalog grows with the game; leave ample room.
 pub const MAX_CATALOG: u64 = 256 << 20;
 #[derive(Debug)]
 pub enum ReadError {

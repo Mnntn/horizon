@@ -155,19 +155,19 @@ class PrebuiltContentsTests(unittest.TestCase):
 
         metadata = {
             "packages": [package("horizon-mod-host", "dylib"), package("horizon-client"),
-                         package("horizon-mod-wasm", "rlib"), package("point_shape"), package("horizon_core"),
+                         package("horizon-mod-wasm", "rlib"), package("shape_tool"), package("horizon_core"),
                          package("build_tool"), package("derive", "proc-macro"), package("macro_helper")],
             "resolve": {"nodes": [
                 node("horizon-mod-host", ("horizon-client", None), ("horizon-mod-wasm", None),
                      ("build_tool", "build")), node("horizon-mod-wasm"),
-                node("horizon-client", ("point_shape", None), ("horizon_core", None), ("derive", None)),
-                node("point_shape"), node("horizon_core"), node("build_tool"),
+                node("horizon-client", ("shape_tool", None), ("horizon_core", None), ("derive", None)),
+                node("shape_tool"), node("horizon_core"), node("build_tool"),
                 node("derive", ("macro_helper", None)), node("macro_helper"),
             ]},
         }
         runtime = prebuilt_game.runtime_crates(metadata, "horizon-mod-host")
-        self.assertEqual(runtime, {"horizon_mod_host", "horizon_mod_wasm", "horizon_client", "point_shape", "horizon_core"})
-        deps = self.folder("libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta",
+        self.assertEqual(runtime, {"horizon_mod_host", "horizon_mod_wasm", "horizon_client", "shape_tool", "horizon_core"})
+        deps = self.folder("libshape_tool-host.rmeta", "libshape_tool-target.rmeta",
                            "libhorizon_core-one.rmeta", "libbuild_tool-one.rmeta", "libmacro_helper-one.rmeta",
                            "libhorizon_mod_host.so", "libhorizon_mod_wasm-one.rmeta", "libhorizon_client-one.rmeta")
         eligible = prebuilt_game.facade_crates(deps, runtime)
