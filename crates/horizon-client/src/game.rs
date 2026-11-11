@@ -7287,27 +7287,11 @@ impl Game<'_> {
                     respawn_anchor::AnchorUse::Pass => anchor_passed = true,
                     respawn_anchor::AnchorUse::Other => {}
                 }
-                // CeilingHangingSignBlock.useItemOn: a hanging sign aimed at the underside passes, so the next sign chains below instead of
-                // opening the editor, unless the side has click commands to run (`shouldTryToChainAnotherHangingSign`).
-                chains_sign = hit.face == [0, -1, 0]
-                // `instanceof HangingSignItem`, independent of the item's name.
-                && held.as_ref().is_some_and(|s| {
-                    self.res.behaviours().item_binding(&s.item)
-                        .is_some_and(|i| i.kind == horizon_world::level::ItemKind::HangingSign)
-                })
-                && self
-                    .res
-                    .facts()
-                    .get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
-                    .has_class("CeilingHangingSignBlock")
-                && matches!(
-                    self.world
-                        .block_entities
-                        .get(&(hit.pos[0], hit.pos[1], hit.pos[2])),
-                    Some(BlockEntity::Sign(_))
-                )
-                && !self.sign_can_execute_click_commands((hit.pos[0], hit.pos[1], hit.pos[2]));
-
+                // CeilingHangingSignBlock.useItemOn: a hanging sign aimed at the
+                // underside passes, so the next sign chains below instead of
+                // opening the editor, unless the side has click commands to run
+                // (`shouldTryToChainAnotherHangingSign`).
+                chains_sign = self.chains_hanging_sign(hit.pos, hit.face, held.as_ref());
             }
             if block_answer.is_none() {
                 use horizon_world::level::UseBranch::ItemOn;
