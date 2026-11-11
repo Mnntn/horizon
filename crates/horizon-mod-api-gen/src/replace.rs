@@ -622,6 +622,23 @@ fn rewrite(
         let end = at(function.end);
         edits.push((end, end, format!(" {items}")));
     }
+    // The placeholder macro has no callers after its invocations are rewritten. Remove its
+    // declaration too, keeping line endings so source locations still match the pinned tree.
+    let parsed = syn::parse_file(text).map_err(|e| format!("{}: {e}", path.display()))?;
+    for item in parsed.items {
+        if let Item::Macro(item) = item
+            && item.mac.path.is_ident("macro_rules")
+            && item.ident.as_ref().is_some_and(|name| name == "replaced")
+        {
+            let span = syn::spanned::Spanned::span(&item);
+            let (start, end) = (at(span.start()), at(span.end()));
+            edits.push((
+                start,
+                end,
+                text[start..end].chars().filter(|c| *c == '\n').collect(),
+            ));
+        }
+    }
     // `replaced!(f)`: whether a copy of the free function `f` of this module is installed.
     let free: BTreeSet<String> = found
         .iter()
@@ -775,7 +792,7 @@ mod tests {
 
     #[test]
     fn slots_are_numbered_per_crate_and_replaced_reads_the_slot() {
-        let source = "pub fn world_drawn(view: &mut View) { let _ = view; }\npub fn hooked() -> bool { replaced!(world_drawn) }\n";
+        let source = "macro_rules! replaced { ($name:ident) => { false }; }\npub fn world_drawn(view: &mut View) { let _ = view; }\npub fn hooked() -> bool { replaced!(world_drawn) }\n";
         let file = syn::parse_file(source).unwrap();
         let mut found = Vec::new();
         functions(
@@ -790,6 +807,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(count, 9);
+        assert!(!out.contains("macro_rules!"));
+        assert_eq!(source.lines().count(), out.lines().count());
         assert!(out.contains("crate :: __REPLACE [7usize]"), "{out}");
         assert!(out.contains("crate :: __REPLACE [8usize]"), "{out}");
         assert!(
