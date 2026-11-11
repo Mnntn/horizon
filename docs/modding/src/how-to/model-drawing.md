@@ -124,3 +124,32 @@ Typed humanoid parts have separate storage, so all twelve always fit alongside t
 - A hidden part takes its children with it: the hat goes with the head, a sleeve with its arm.
 - Only the body loses the part. The armour, held items and other layers keep every part, and
   the cape, a layer of its own, stays.
+
+## Text and animation in block entities
+
+`BlockEntityDrawContext::text` draws a component under the current pose in font pixels,
+with its styles and the frame's light. Its RGB colour is opaque. Glowing text uses full
+light; `Some(0)` is a black outline, not an absent outline. `text` and `text_width`
+return the styled advance rounded up, as vanilla `Font.width` does. Use half that width
+to centre a line. Kept text retains its glyphs, including obfuscated glyph choices,
+until it is drawn again. Resource reload invalidates kept geometry.
+
+Spinning parts use the client's animation clock: level-running texture ticks plus the
+level's partial tick, not the camera's partial tick or the server's day time. Pausing
+holds that clock; `/tick freeze` holds the level partial at 1 and stops texture ticks.
+Camera motion during a freeze does not spin a part backwards. Server time updates do
+not reset animation. Held-arm, hand, mob and scene draws use this same level partial.
+
+## Copycat faces
+
+Ask `block_sprites` for the material's side faces, then use each face's `texture` and
+`quad_on(side, from, to)` to draw it on your box. The result supplies outward-wound
+corners and a UV rectangle in texels, preserving the material's rotations and mirrors
+and cropping to your box. It returns `None` for a slanted or sheared texture mapping
+that cannot be represented by a rectangle; use another drawing route rather than
+substituting an upright texture.
+
+Multiply tinted faces by `block_tint_color(state, face.tint_index, pos)` at their world
+position. Untinted faces return `None`. Water faces use tint index 0 and the world's
+water colour, including resource-pack water colormaps; other water indices return
+`None`. This differs from `fluid_box`, whose colour comes from its fluid stack.

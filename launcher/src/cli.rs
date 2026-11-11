@@ -852,10 +852,11 @@ enum Cmd {
         /// Allow native code for this install (remembered; revoke in Settings, Storage)
         #[arg(long)]
         trust_native_code: bool,
-        /// This instance's build mode: optimized, balanced or developer. Remembers an explicit
-        /// choice for this instance; otherwise uses its saved choice, starting at Balanced.
-        /// Without a picker reason or explicit choice, installed mods use the prebuilt route.
-        #[arg(long, value_enum)]
+        #[arg(
+            long,
+            value_enum,
+            help = tr("This instance's build mode: optimized, balanced or developer. An explicit choice is remembered; otherwise the automatic picker uses a matching prebuilt SDK when possible.")
+        )]
         profile: Option<native_mods::Profile>,
     },
     /// Show a release's patch notes (default: the newest)
@@ -1414,12 +1415,10 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                         .ok_or_else(backend::no_version_installed)?
                 }
             };
-            let explicit = folder.is_some() || profile.is_some();
             let folder = match folder {
                 Some(folder) => folder,
                 None => native_mods::installed_mods(&target.home)?,
             };
-            let profile = explicit.then_some(target.native_profile);
             let built =
                 native_mods::build(&base, &folder, &target, profile, steps, registry_consent).map_err(|error| {
                     let error = String::from(error);

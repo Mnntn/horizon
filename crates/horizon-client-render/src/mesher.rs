@@ -1240,6 +1240,22 @@ impl MeshTables {
         let tinted = (state.0, info);
         self.tint_at(tinted, 0, &mut tints, local, nether_shading, true)
     }
+    /// The water colour at `pos` as the fluid mesher tints water there: the packs' water
+    /// colormap, else the biome's water colour blended over `blend_radius`. Water has no
+    /// model tint (`block_tints` answers none for it); its faces take this.
+    pub fn water_tint(
+        &self,
+        pos: [i32; 3],
+        region: &[[Option<&Chunk>; 3]; 3],
+        biomes: &Biomes,
+        zoom: BiomeZoom,
+        blend_radius: i32,
+    ) -> u32 {
+        let [x, y, z] = pos;
+        let origin = [x >> 4, z >> 4, y & !15];
+        let mut tints = Tints::new(region, biomes, zoom, blend_radius, origin).with_colormaps(self);
+        tints.water(x & 15, y & 15, z & 15)
+    }
     /// `BlockColors` for each of the state's tint indices at `pos`, as the
     /// chunk mesher tints them (grass blocks included): `None` for an
     /// untinted (-1) layer. For block models drawn outside the chunk mesh; `nether_shading` as

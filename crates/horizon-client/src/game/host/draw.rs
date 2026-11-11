@@ -141,6 +141,9 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
     fn game_time(&self) -> i64 {
         self.game.native_draw_game_time(&*self.surface)
     }
+    fn animation_time(&self) -> f64 {
+        self.game.native_draw_animation_time(&*self.surface)
+    }
     fn light(&self) -> u32 {
         self.game.native_draw_light(&*self.surface)
     }
@@ -200,7 +203,7 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
         at: [f32; 2],
         color: u32,
         glowing: bool,
-        outline: u32,
+        outline: Option<u32>,
     ) -> Result<f32, mod_api::text::TextFormError> {
         let text = text.try_into_engine(&())?;
         Ok(self
@@ -215,8 +218,9 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
         self.game
             .native_draw_terrain_model(&mut *self.surface, model, options)
     }
-    fn text_width(&self, text: &str) -> f32 {
-        self.game.native_draw_text_width(&*self.surface, text)
+    fn text_width(&self, text: &Text) -> Result<f32, mod_api::text::TextFormError> {
+        let text = text.try_into_engine(&())?;
+        Ok(self.game.native_draw_text_width(&*self.surface, &text))
     }
     fn model_part(&mut self, part: &ModelPart, sprite: &str, tint: u32) -> bool {
         self.game

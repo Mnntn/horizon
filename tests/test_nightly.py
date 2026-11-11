@@ -246,10 +246,10 @@ class PruneBuildsTests(unittest.TestCase):
 class SdkPairTests(unittest.TestCase):
     def test_only_complete_published_exact_pair_is_eligible(self):
         assets = [{"name": name} for name in (
-            "SHA256SUMS", "horizon-prebuilt-v4-x86_64-unknown-linux-gnu.tar.gz",
-            "horizon-prebuilt-v4-x86_64-unknown-linux-gnu-server.tar.gz",
-            "horizon-prebuilt-v4-x86_64-pc-windows-gnu.tar.gz",
-            "horizon-prebuilt-v4-aarch64-apple-darwin.tar.gz")]
+            "SHA256SUMS", "horizon-prebuilt-v5-x86_64-unknown-linux-gnu.tar.gz",
+            "horizon-prebuilt-v5-x86_64-unknown-linux-gnu-server.tar.gz",
+            "horizon-prebuilt-v5-x86_64-pc-windows-gnu.tar.gz",
+            "horizon-prebuilt-v5-aarch64-apple-darwin.tar.gz")]
         release = {"draft": False, "tag_name": "prebuilt-" + "a" * 40, "assets": assets}
         for changes, expected in [({}, True), ({"draft": True}, False),
                                   ({"tag_name": "prebuilt-" + "b" * 40}, False)]:

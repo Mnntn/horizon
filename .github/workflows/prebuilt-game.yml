@@ -63,7 +63,7 @@ jobs:
     env:
       # v<layout>: the launcher asks only for the archive layout it reads (prebuilt_archive in
       # crates/horizon-mod-package/src/index/native.rs); bump both when the folder's layout changes.
-      ARCHIVE: horizon-prebuilt-v4-${{ matrix.target }}${{ matrix.server && '-server' || '' }}.tar.gz
+      ARCHIVE: horizon-prebuilt-v5-${{ matrix.target }}${{ matrix.server && '-server' || '' }}.tar.gz
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,7 +92,7 @@ jobs:
         run: python tools/prebuilt_game.py exports prebuilt | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Archive
         run: |
-          tar -czf "$ARCHIVE" -C prebuilt .
+          tar --sort=name --mtime="@0" --owner=0 --group=0 --numeric-owner -cf - -C prebuilt . | gzip -n > "$ARCHIVE"
           echo "$(du -h "$ARCHIVE" | cut -f1) $ARCHIVE" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
@@ -123,4 +123,4 @@ jobs:
           sha256sum horizon-prebuilt-*.tar.gz > SHA256SUMS
           gh release create "$TAG" horizon-prebuilt-*.tar.gz SHA256SUMS --target "$GITHUB_SHA" --prerelease \
             --latest=false --title "Prebuilt game ${GITHUB_SHA::10}" \
-            --notes "The game as a Rust dylib plus crate metadata, for the launcher's native mod builds (#589). Compiler outputs only."
+            --notes "The game as a Rust dylib plus crate metadata, for the launcher's native mod builds (#589). Compiler outputs plus game-owned registry patch sources."

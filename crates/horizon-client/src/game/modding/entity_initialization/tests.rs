@@ -168,6 +168,7 @@ fn borrowed_spawn_first_read_and_dimension_transfer_keep_one_initialization() {
             game.detach_entity(id);
             game.enter_level(Dim::Nether).unwrap();
             let moved = game.load_mob_transferred(saved, None, Some(state)).unwrap();
+            assert_eq!(game.persist.uuid_of(moved), Some(uuid));
             assert_eq!(VALUE.get(game, Holder::Entity(moved)), Ok(41));
             assert_eq!(calls.lock().unwrap().len(), 1);
             game.forget_entity(moved);

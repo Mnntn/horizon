@@ -64,6 +64,8 @@ The hand field corresponds to NeoForge's
 unhandled block or entity interaction. A block success or FAIL, or an entity success, stops fallback.
 The server fires it for the separate use-item packet, once for that packet's hand.
 Canceling skips the item Part and vanilla action on native and wasm alike.
+`Success`, `SuccessServer` and `Consume` end the client's hand loop.
+`Success` swings on the client, `SuccessServer` on the server, and `Consume` has no swing.
 
 ## Item use on a block
 

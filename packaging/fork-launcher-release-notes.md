@@ -19,6 +19,7 @@ Account and token storage remain separate from the official launcher.
 
 These launcher releases contain Linux x86_64 and Windows x64 packages only.
 The launcher checks signed updates from this fork automatically.
+Older launchers build native mods from source against newer Nightlies until they update.
 
 ## Verify the download
 

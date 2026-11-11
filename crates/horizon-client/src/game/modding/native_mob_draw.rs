@@ -149,7 +149,8 @@ impl Game<'_> {
             mob_pose(feet - camera, render.body_yaw),
             diffuse_lights(self.dim == Dim::Nether),
             std::mem::take(out),
-        );
+        )
+        .animated(self.animation_time());
         let keep = hook(&render, &mut draw);
         *out = draw.into_vertices();
         if !keep {

@@ -2,10 +2,12 @@
 use crate::module_cache::{CACHE_DIR, ModuleCache};
 use std::{
     ffi::OsString,
-    fs::{self, OpenOptions},
-    io::{self, Read, Write},
-    path::{Path, PathBuf},
+    fs::OpenOptions,
+    io::{self, Read},
+    path::Path,
 };
+#[cfg(any(unix, all(test, not(windows))))]
+use std::{fs, io::Write, path::PathBuf};
 
 /// Owns both the spelling and validation of private input names.
 struct InputName(u32, u64);
@@ -37,7 +39,10 @@ impl InputName {
     }
 }
 
+// Production handoff is Unix-only; the non-Windows cache tests also create inputs.
+#[cfg(any(unix, all(test, not(windows))))]
 pub(crate) struct Input(pub(crate) PathBuf);
+#[cfg(any(unix, all(test, not(windows))))]
 impl Input {
     pub(crate) fn new(root: &Path, bytes: &[u8]) -> io::Result<Self> {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -68,6 +73,7 @@ impl Input {
         }
     }
 }
+#[cfg(any(unix, all(test, not(windows))))]
 impl Drop for Input {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);

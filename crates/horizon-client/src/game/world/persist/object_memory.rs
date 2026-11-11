@@ -490,7 +490,8 @@ impl Game<'_> {
         }
         let riders = self.take_mob_passengers(&mut tag);
         // The mob's own random makes its UUID, kept unless the tag has one.
-        let (own, _fresh) = horizon_client::mobs::living_random();
+        let (own, fresh) = horizon_client::mobs::living_random();
+        let uuid = Some(uuid.unwrap_or(fresh));
         let mut m = entity_nbt::mob_from_nbt_with_random(
             &tag,
             self.res.mob_types(),

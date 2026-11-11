@@ -32,10 +32,7 @@ impl Game<'_> {
             return None;
         }
         if let Some(answer) = self.right_click_item(self.hand, stack) {
-            if matches!(
-                answer,
-                mod_api::InteractionResult::Success | mod_api::InteractionResult::SuccessServer
-            ) {
+            if answer == mod_api::InteractionResult::SuccessServer {
                 self.swing_arm();
             }
             return Some(answer.consumes_action());

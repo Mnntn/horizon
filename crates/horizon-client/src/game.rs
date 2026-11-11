@@ -2621,12 +2621,12 @@ struct Game<'a> {
     /// Controllers (Horizon's own).
     pad: pad::Pads,
     frames: u64,
-    /// The glint clock and options, read once at the start of each frame
-    /// (game/interface/item_draw.rs).
+    /// The glint clock and options, read once per frame (game/interface/item_draw.rs).
     glint_frame: horizon_client::item_render::GlintFrame,
-    /// Mod block entities' geometry their mods kept
-    /// (game/modding/native_block_entity_draw.rs).
+    /// Mod block entities' kept geometry (game/modding/native_block_entity_draw.rs).
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
+    /// Glyphs from `native_draw_text` (`&self`): uploaded to the font atlas with the frame.
+    text_patches: std::cell::RefCell<Vec<horizon_client::font::Patch>>,
     /// Prepared block-entity copies for this frame, in entity-stream order.
     prepared_model_draws: std::cell::RefCell<Vec<horizon_client::gfx::PreparedModelDraw>>,
     world_geometry: Option<horizon_client::world_geometry::WorldGeometry>,
@@ -2634,8 +2634,7 @@ struct Game<'a> {
     debug_renderers: Vec<String>,
     /// `DebugRenderer.lastDebugEntriesVersion`: none before the first view of a world.
     debug_renderers_version: Option<u64>,
-    /// The next place in the HUD's layer order (`gui_layers::order`) whose mod layers are not
-    /// drawn yet this frame; `None` while the HUD is hidden or outside its pass.
+    /// Next undrawn mod layer in HUD `gui_layers::order`; `None` while hidden or outside its pass.
     hud_layer_next: Option<usize>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
     mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
@@ -11696,7 +11695,7 @@ impl Game<'_> {
         self.end.set_locator(locator);
         self.share_spawn_conditions();
         self.score = Default::default();
-        let stack = self.reload_datapacks(false, &level.enabled_features)?;
+        let stack = self.open_world_datapacks(&level.enabled_features)?;
         let root = self.options.resources.clone();
         self.open_world_tables(&stack, &root)?;
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
@@ -13531,7 +13530,8 @@ impl Game<'_> {
                 m,
                 horizon_client::block_entity_render::diffuse_lights(self.dim == Dim::Nether),
                 std::mem::take(out),
-            );
+            )
+            .animated(self.animation_time());
             let mut canceled = false;
             self.native_render_arm(
                 self.own_uuid(),
@@ -13872,15 +13872,13 @@ impl Game<'_> {
         }
         (out, runs)
     }
-    /// The renderer for the window, with the current block sprites, GUI
-    /// atlas and world border texture.
-    /// A new renderer's atlas holds only the pack's sprites: what was drawn into it at run time
-    /// (skins, maps, the themed UI's glyphs and corners) has to be drawn again.
+    /// Reset replaced atlas: re-upload skins/maps/glyphs/corners; discard queued uploads and kept geometry.
     pub(super) fn forget_atlas_slots(&mut self) {
         self.skin_slots.forget();
         self.maps.slots.forget();
         self.trim_slots.forget();
         self.map_patches.clear();
+        self.text_patches.get_mut().clear();
         self.kept_block_entities.get_mut().clear();
         horizon_client::ui_theme::reset_atlas();
     }
@@ -15365,6 +15363,7 @@ impl Game<'_> {
         // geometry (game/blocks/maps/mod.rs, world text) upload with this batch; draining
         // map_patches any earlier leaves them a frame behind.
         hud.patches.append(&mut self.map_patches);
+        hud.patches.append(self.text_patches.get_mut());
         let entity_spans = std::mem::take(self.entity_spans.get_mut());
         let entity_motion = std::mem::take(self.entity_motion.get_mut());
         let entity_motion_posed = std::mem::take(self.entity_motion_posed.get_mut());
@@ -16278,6 +16277,7 @@ impl<'a> Game<'a> {
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
+            text_patches: Default::default(),
             prepared_model_draws: Default::default(),
             world_geometry: Some(Default::default()),
             debug_renderers: Vec::new(),
