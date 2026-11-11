@@ -37,8 +37,8 @@ class Evidence:
     def pages(self, endpoint, key):
         if endpoint.startswith('actions/workflows/'):
             return [self.run]
-        if endpoint.endswith('/jobs'):
-            assert '/attempts/2/' in endpoint
+        if endpoint.endswith('/jobs?filter=latest'):
+            assert endpoint == 'actions/runs/12/jobs?filter=latest'
             return self.jobs
         if endpoint.endswith('/artifacts'):
             return self.artifacts
@@ -124,6 +124,20 @@ class Freshness(unittest.TestCase):
             with self.subTest(mutate=mutate), self.assertRaises(m.Unavailable):
                 m.check(api, 7)
 
+    def test_reused_jobs_and_latest_failure(self):
+        api = self.history('crates/a/src/a.rs', 'crates/b/src/b.rs')
+        # filter=latest returns the reused lint and rerun verify executions.
+        api.jobs[0]['run_attempt'] = 1
+        api.jobs[1]['run_attempt'] = 2
+        self.assertIsNone(m.check(api, 7))
+        api.jobs[1]['conclusion'] = 'failure'
+        with self.assertRaises(m.Unavailable):
+            m.check(api, 7)
+        api.jobs[1]['conclusion'] = 'success'
+        api.jobs.append(dict(api.jobs[1]))
+        with self.assertRaises(m.Unavailable):
+            m.check(api, 7)
+
     def test_reused_source_and_inconsistent_triples(self):
         api = self.history('crates/a/src/a.rs', 'crates/b/src/b.rs')
         api.artifacts[0]['name'] = 'gate-source-1'
@@ -158,6 +172,10 @@ class Freshness(unittest.TestCase):
             self.assertEqual(m.GitHub('arismoko/horizon').pages('endpoint', 'items'), [])
             self.assertEqual(run.call_args.args[0], ['gh', 'api', 'repos/arismoko/horizon/endpoint?per_page=100&page=1'])
         api = m.GitHub('arismoko/horizon')
+        with patch.object(api, 'get', side_effect=[{'jobs': list(range(100)), 'total_count': 101},
+                                                 {'jobs': [100], 'total_count': 101}]) as get:
+            self.assertEqual(api.pages('actions/runs/12/jobs?filter=latest', 'jobs'), list(range(101)))
+            self.assertEqual(get.call_args.args[0], 'actions/runs/12/jobs?filter=latest&per_page=100&page=2')
         with patch.object(api, 'get', return_value={'items': [], 'total_count': 1}), self.assertRaises(m.Unavailable):
             api.pages('endpoint', 'items')
 
