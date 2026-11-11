@@ -24,13 +24,13 @@ impl Drop for Watch {
     }
 }
 pub(super) fn prepared(channel: &str, work: bool) {
-    if let Some((watched, counts)) = WATCH.lock().unwrap().as_mut() {
-        if watched == channel {
-            if work {
-                counts.work += 1;
-            } else {
-                counts.replies += 1;
-            }
+    if let Some((watched, counts)) = WATCH.lock().unwrap().as_mut()
+        && watched == channel
+    {
+        if work {
+            counts.work += 1;
+        } else {
+            counts.replies += 1;
         }
     }
 }
