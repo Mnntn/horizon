@@ -2449,8 +2449,12 @@ impl Hub {
                 break;
             };
             match &packet {
-                S::Chat(c) => self.apply_last_seen(i, &c.last_seen, events),
-                S::ChatCommandSigned(c) => self.apply_last_seen(i, &c.last_seen, events),
+                S::Chat(c) => {
+                    self.apply_last_seen(i, &c.last_seen, events);
+                }
+                S::ChatCommandSigned(c) => {
+                    self.apply_last_seen(i, &c.last_seen, events);
+                }
                 S::ChatAck(c) => self.chat_ack(i, c.offset, events),
                 S::AcceptTeleportation(_)
                 | S::PlayerLoaded(_)
