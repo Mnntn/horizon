@@ -78,13 +78,13 @@ fn has(game: &Game<'_>, id: &str) -> bool {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn default_block_use_awards_default_then_any() {
+fn default_block_use_awards_only_default() {
     with_guests(|g| {
         install(g);
         let p = g.player(12).unwrap();
         assert_eq!(p.trigger_block_use(g, [0, 64, 0]), Ok(()));
         assert!(has(g, "default"));
-        assert!(has(g, "any"));
+        assert!(!has(g, "any"));
         assert!(!has(g, "item2"));
         assert!(!has(g, "any1"));
         assert!(!has(g, "any2"));
@@ -99,7 +99,6 @@ fn item_block_use_distinguishes_snapshots() {
         let p = g.player(12).unwrap();
         let key = mod_api::__private::item_key("minecraft:stone").unwrap();
         let original = mod_api::ItemStack::new(key, 2).unwrap();
-        let after = mod_api::ItemStack::new(key, 1).unwrap();
         g.lan
             .as_mut()
             .unwrap()
@@ -109,12 +108,12 @@ fn item_block_use_distinguishes_snapshots() {
             })
             .unwrap();
         assert_eq!(
-            p.trigger_item_used_on_block(g, [0, 64, 0], &original, &after),
+            p.trigger_item_used_on_block(g, [0, 64, 0], &original),
             Ok(())
         );
         assert!(has(g, "item2"));
-        assert!(has(g, "any1"));
-        assert!(has(g, "any"));
+        assert!(!has(g, "any1"));
+        assert!(!has(g, "any"));
         assert!(!has(g, "any2"));
         assert!(!has(g, "default"));
     });
@@ -135,10 +134,8 @@ fn block_use_refusals_grant_nothing() {
             999,
         )
         .unwrap();
-        let after =
-            mod_api::ItemStack::of(mod_api::__private::item_key("minecraft:stone").unwrap());
         assert_eq!(
-            p.trigger_item_used_on_block(g, [0, 64, 0], &invalid, &after),
+            p.trigger_item_used_on_block(g, [0, 64, 0], &invalid),
             Err(TriggerCriterionError::Stack(
                 mod_api::StackWriteError::CountExceeded { maximum: 64 }
             ))

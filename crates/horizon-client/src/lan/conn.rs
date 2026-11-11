@@ -1854,6 +1854,7 @@ impl KeepAliveWatch {
 
 #[cfg(test)]
 mod tests {
+    include!("profession_join_tests.rs");
 
     #[test]
     fn undrained_packets_stop_at_twice_the_inbox() {

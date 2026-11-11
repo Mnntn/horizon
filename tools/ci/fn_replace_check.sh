@@ -48,6 +48,9 @@ echo '{}' > "$base/.local/horizon-client/26.3/horizon-resources.json"
 version=$data/versions/native-ci
 mkdir -p "$version"
 touch "$version/.installed"
+# On Windows the launcher picks the build target from the installed game's PE machine; any x64
+# executable stands in for it, and the launcher itself is one.
+case $launcher in *.exe) cp "$launcher" "$version/horizon-client.exe" ;; esac
 printf '{"base": "ci", "horizon": "%s", "target": "%s"}\n' "$revision" "$side" > "$version/native-mods.json"
 
 mods=$scratch/mods/fnr

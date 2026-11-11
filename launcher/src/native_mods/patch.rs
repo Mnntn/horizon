@@ -154,15 +154,22 @@ pub(super) fn build(
         for feature in sdk.game_features() {
             cmd.arg("--cfg").arg(format!("feature=\"{feature}\""));
         }
+        // An `@` file, one argument per line: an extern per SDK crate passes Windows'
+        // 32,767-character command-line limit.
+        let mut externs = Vec::new();
         for (krate, library) in sdk_externs(game, sdk)? {
-            cmd.arg("--extern")
-                .arg(format!("{krate}={}", library.display()));
+            externs.push(format!("--extern\n{krate}={}", library.display()));
         }
         for bundle in &prepared.bundles {
             let id = bundle.manifest.id.as_str();
-            cmd.arg("--extern")
-                .arg(format!("{}={}", crates[id], rlibs[id].display()));
+            externs.push(format!("--extern\n{}={}", crates[id], rlibs[id].display()));
         }
+        let argfile = out.join(format!("{name}.externs"));
+        fs::write(&argfile, externs.join("\n"))
+            .map_err(|e| format!("Could not write {}: {e}", argfile.display()))?;
+        let mut arg = std::ffi::OsString::from("@");
+        arg.push(&argfile);
+        cmd.arg(arg);
         super::run(cmd, "Compiling the patched functions", |_| {})?;
         compiled.push((name.clone(), rlib));
     }

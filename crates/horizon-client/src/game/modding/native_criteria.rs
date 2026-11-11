@@ -84,8 +84,7 @@ impl Game<'_> {
         .ok_or(TriggerCriterionError::PlayerUnavailable)?
     }
 
-    /// `ServerPlayerGameMode.useItemOn`'s consumed default use, for a use a mod handled:
-    /// `default_block_use`, then `any_block_use` with the empty hand, for the player in place.
+    /// Fire only `default_block_use` for a use a mod handled.
     pub(super) fn player_trigger_block_use(
         &mut self,
         player: PlayerRef,
@@ -93,27 +92,18 @@ impl Game<'_> {
     ) -> Result<(), TriggerCriterionError> {
         self.with_block_use_player(player, pos, |g| {
             g.trigger_default_block_use(pos);
-            // The default use has no tool: `any_block_use` sees the empty stack the engine's
-            // own use path passes for an empty hand.
-            g.trigger_any_block_use(
-                pos,
-                &horizon_client::items::ItemStack::new("minecraft:air", 0),
-            );
         })
     }
 
-    /// The consumed item use, for a use a mod handled: `item_used_on_block` against
-    /// `original` (the hook's snapshot), then `any_block_use` against `after`.
+    /// Fire only `item_used_on_block` against the pre-use snapshot.
     pub(super) fn player_trigger_item_used_on_block(
         &mut self,
         player: PlayerRef,
         pos: [i32; 3],
         original: &horizon_client::items::ItemStack,
-        after: &horizon_client::items::ItemStack,
     ) -> Result<(), TriggerCriterionError> {
         self.with_block_use_player(player, pos, |g| {
             g.trigger_block("minecraft:item_used_on_block", pos, original);
-            g.trigger_any_block_use(pos, after);
         })
     }
 

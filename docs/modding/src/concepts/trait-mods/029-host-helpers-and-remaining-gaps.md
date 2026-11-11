@@ -48,16 +48,19 @@ the wasm runtime's current same-group callback limitation.
 
 A mod that consumes a block use can run vanilla advancement predicates and rewards
 through `PlayerRef::trigger_block_use(host, pos)` or
-`PlayerRef::trigger_item_used_on_block(host, pos, original, after)`. These server
-operations use the player's own level and never read inventory. Default use fires
-`default_block_use`, then `any_block_use`, both without a tool: the default helper
-is specifically tool-free, not general default block use while holding an item.
-Item use fires `item_used_on_block` against `original` (copied after a before-block
-PASS and before block/item effects), then `any_block_use` against `after` (that
-original hand stack mutated in place, excluding a replacement swapped into the
-hand), in that order. Consuming right-click/before-block cancellation already
-fires automatic `any_block_use` only; do not call either pair helper for it,
-which would duplicate any and add an inner trigger. This follows
+`PlayerRef::trigger_item_used_on_block(host, pos, original)`. These server
+operations use the player's own level and never read inventory. The default
+helper fires only `default_block_use`, without a tool. The item helper fires
+only `item_used_on_block` against `original` (copied after a before-block PASS
+and before block/item effects). Neither helper fires `any_block_use`: the engine
+alone fires it once per consuming block-use packet, including a consuming
+right-click or before-block cancellation. A mod may explicitly fire the inner
+criterion when handling such a cancellation without duplicating the outer one.
+The outer criterion sees the hand after the use; a replacement stack is visible,
+unlike vanilla's original object. Single player uses the same integrated-server
+packet path as LAN. PASS and FAIL do not fire the outer criterion. Items such as
+shears, honeycomb and block-transforming items can legitimately fire
+`item_used_on_block` twice: once inside the item and once from the game mode. This follows
 `ServerPlayerGameMode.useItemOn` and `ServerGamePacketListenerImpl.handleUseItemOn`;
 the predicate evaluators are `DefaultBlockInteractionTrigger`,
 `ItemUsedOnLocationTrigger`, and `AnyBlockInteractionTrigger`.
@@ -65,7 +68,7 @@ the predicate evaluators are `DefaultBlockInteractionTrigger`,
 `Ok(())` means the player was reached, even if no criterion matched. Failures are
 `NotServer` for a remote client, `PlayerUnavailable` for a stale, offline or
 displaced handle, `UnloadedChunk` for a position outside loaded chunks, and
-`Stack(StackWriteError)` when the item boundary rejects either stack before any
+`Stack(StackWriteError)` when the item boundary rejects the snapshot before any
 trigger fires. Native and wasm use the same generated operations. The
 `minecraft:` guard on `trigger_criterion` remains: this grants no general access
 to fire arbitrary vanilla triggers.

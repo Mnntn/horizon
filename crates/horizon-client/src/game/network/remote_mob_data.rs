@@ -3,6 +3,7 @@
 //! `onSyncedDataUpdated`): what a client draws from it rather than from its
 //! own simulation, which a client of a server doesn't run.
 use super::Game;
+#[cfg(test)]
 use horizon_client::mobs::render::VILLAGER_TYPES;
 use horizon_client::mobs::{
     Mob, Species, Who, armadillo, bat, bee, camel, creaking, equine, finalize, illusioner, panda,
@@ -16,7 +17,7 @@ use horizon_world::registry::BlockStateId;
 /// The values `apply` takes from one SetEntityData packet, by vanilla's entry
 /// indices (Entity 0..=7, LivingEntity 8..=14, Mob 15, then the subclasses).
 /// `builtin` names the ids of built-in registries.
-fn apply(
+pub(super) fn apply(
     m: &mut Mob,
     values: &[(u8, i32, Value)],
     builtin: &Builtin,
@@ -479,32 +480,7 @@ fn swirls(list: &[Particle], builtin: &Builtin) -> Vec<ParticleOptions> {
         .collect()
 }
 
-/// VillagerData as the network sends it: the type and the profession by
-/// their built-in registry ids, then the level.
-fn villager_data(m: &mut Mob, data: &[i32], builtin: &Builtin) {
-    let &[kind, profession, level] = data else {
-        return;
-    };
-    let index = |registry: &str, id: i32, names: &[&str]| {
-        let name = builtin
-            .get(registry)?
-            .name(id)?
-            .strip_prefix("minecraft:")?;
-        names.iter().position(|n| *n == name).map(|i| i as u8)
-    };
-    if let Some(t) = index("minecraft:villager_type", kind, &VILLAGER_TYPES) {
-        m.extra.variant = t;
-    }
-    if let Some(p) = builtin
-        .get("minecraft:villager_profession")
-        .and_then(|r| r.name(profession))
-        .and_then(|name| name.strip_prefix("minecraft:"))
-        .and_then(horizon_client::mobs::villager::profession_index)
-    {
-        m.extra.profession = horizon_client::mobs::villager::ProfessionState::from_index(p);
-    }
-    m.extra.villager_level = level.max(1);
-}
+use super::villager_client::villager_data;
 
 impl Game<'_> {
     /// SetEntityData for a mob of the server's.
@@ -518,8 +494,10 @@ impl Game<'_> {
             (14, _, Value::OptPos(bed)) => Some(bed.map_or(0, |b| self.bed_facing(b))),
             _ => None,
         });
+        let professions = r.professions.clone();
         if let Some(m) = self.mob_index.get_mut(&mut self.mobs, id as u32) {
-            let stare_sound = apply(m, values, &r.builtin, r.entity_id);
+            let stare_sound =
+                super::villager_client::receive(m, values, &r.builtin, r.entity_id, &professions);
             apply_registry_data(m, values, &r.registries, self.world.game_time);
             if let Some(code) = bed
                 && m.species() == Species::Villager

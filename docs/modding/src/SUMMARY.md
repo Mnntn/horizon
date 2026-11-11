@@ -21,6 +21,7 @@
 - [Design: per-type batched block entity ticks](concepts/block-entity-batching.md)
 - [Design: typed cauldron interactions](concepts/cauldron-interactions.md)
 - [Design: villager professions and trades](concepts/villager-professions.md)
+- [Villager profession resources and clients](concepts/villager-professions-client.md)
 
 # How-to
 

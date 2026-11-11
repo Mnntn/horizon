@@ -32,6 +32,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: fn-replace-windows
+          cache-on-failure: true
           workspaces: |
             . -> target
             launcher -> target
@@ -39,21 +40,22 @@ jobs:
         run: python tools/prebuilt_game.py build prebuilt --server
       - name: Exported names, toward Windows' 65,535
         run: python tools/prebuilt_game.py exports prebuilt | tee -a "$GITHUB_STEP_SUMMARY"
+      # Release, as players get it: the debug launcher overflows Windows' 1 MiB main-thread stack.
       - name: Launcher (built with MSVC stable, as launcher-windows-check builds it)
         working-directory: launcher
         run: |
           rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
-          cargo +stable-x86_64-pc-windows-msvc build --locked
+          cargo +stable-x86_64-pc-windows-msvc build --release --locked
       - name: Function replacement check (build and link)
         run: |
           FNR_MODS="alpha beta support fdshape registry" tools/ci/fn_replace_check.sh \
-            launcher/target/debug/horizon-launcher.exe prebuilt fnr-scratch 2>&1 | tee fnr-check.log
+            launcher/target/release/horizon-launcher.exe prebuilt fnr-scratch 2>&1 | tee fnr-check.log
           grep -F 'Function replacement:' fnr-check.log >> "$GITHUB_STEP_SUMMARY"
       - name: Refusals by name
         if: always()
         run: |
           for set in "alpha overwrite2" refused refused_state; do
-            FNR_KEEP=1 FNR_MODS="$set" tools/ci/fn_replace_check.sh launcher/target/debug/horizon-launcher.exe prebuilt fnr-scratch > "refusal-${set// /_}.log" 2>&1 && { echo "$set built"; exit 1; } || true
+            FNR_KEEP=1 FNR_MODS="$set" tools/ci/fn_replace_check.sh launcher/target/release/horizon-launcher.exe prebuilt fnr-scratch > "refusal-${set// /_}.log" 2>&1 && { echo "$set built"; exit 1; } || true
             grep -E 'E_[A-Z_]+' "refusal-${set// /_}.log" | head -5 | tee -a "$GITHUB_STEP_SUMMARY"
           done
       - uses: actions/upload-artifact@v4

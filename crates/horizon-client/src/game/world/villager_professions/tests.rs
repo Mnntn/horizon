@@ -517,7 +517,7 @@ fn villager_game_load_resolves_saved_names_for_both_species_without_reroll() {
                 let mob = &game.mobs[index];
                 assert!(matches!(
                     mob.extra.profession,
-                    horizon_client::mobs::villager::ProfessionState::Registered(_)
+                    horizon_client::mobs::villager::ProfessionState::Registered { .. }
                 ));
                 assert_eq!(
                     game.stations()

@@ -316,12 +316,7 @@ impl Game<'_> {
                     // handleUseItemOn: a consuming useItemOn triggers
                     // ANY_BLOCK_USE with the hand's stack as it now is.
                     if consumed && !g.use_failed {
-                        let stack = g
-                            .with_hand(hand, |g| g.held().cloned())
-                            .unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
-                        horizon_client::spans::time("use_advancements", || {
-                            g.trigger_any_block_use(hit.pos, &stack);
-                        });
+                        g.finish_block_use(hit.pos, hand);
                     }
                     (g.forced_hit, g.guest_use) = saved;
                     reset_use_attack_strength(&mut g.attack_ticks, swings, g.swings_started);

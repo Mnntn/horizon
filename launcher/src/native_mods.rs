@@ -871,7 +871,6 @@ pub fn version_for(
         hash.update(target.name().as_bytes());
         hash.update([0]);
     }
-    // Private rows derive from the pinned SDK and internals declarations, all salted/hashed here.
     // bundles() reads folders in path order, which with their manifests decides trait dispatch
     // order: hashed in that order, a different order is another build.
     for b in bundles {

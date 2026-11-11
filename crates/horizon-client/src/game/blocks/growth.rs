@@ -116,12 +116,11 @@ impl Game<'_> {
             self.sculk_actor(),
             Some(max_age),
         );
+        self.trigger_block("minecraft:item_used_on_block", pos, stack);
         self.damage_held(1);
         // ItemStack.useOn: an item interaction counts as a use.
         self.award_stat("used", &stack.item, 1);
         self.swing_arm();
-        // ServerPlayerGameMode.useItemOn: a consuming useOn reports it.
-        self.trigger_block("minecraft:item_used_on_block", pos, stack);
         Ok(true)
     }
 }

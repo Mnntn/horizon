@@ -10,6 +10,9 @@ impl Game<'_> {
         let result = self.use_hand(Some(hit));
         self.guest_use = None;
         if result? {
+            if !self.use_failed {
+                self.finish_block_use(hit.pos, self.hand);
+            }
             return Ok(true);
         }
         self.use_hand(None)

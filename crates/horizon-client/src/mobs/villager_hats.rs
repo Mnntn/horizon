@@ -1,10 +1,11 @@
 //! VillagerProfessionLayer's cached texture metadata and type-layer head visibility.
+#[cfg(test)]
 use super::anim::Poses;
 use horizon_assets::resource_source::ResourceSource;
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-enum Hat {
+pub(crate) enum Hat {
     #[default]
     None,
     Partial,
@@ -48,17 +49,19 @@ impl VillagerHats {
         Self(hats)
     }
 
+    pub(crate) fn policy(&self, folder: &str, group: &str, name: &str) -> Hat {
+        let (namespace, path) = name.split_once(':').unwrap_or(("minecraft", name));
+        self.0
+            .get(&format!("{namespace}:{folder}/{group}/{path}"))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
     pub fn apply(&self, folder: &str, variant: &str, profession: &str, poses: &mut Poses) {
-        let hat = |group, name: &str| {
-            let (namespace, path) = name.split_once(':').unwrap_or(("minecraft", name));
-            self.0
-                .get(&format!("{namespace}:{folder}/{group}/{path}"))
-                .copied()
-                .unwrap_or_default()
-        };
-        let visible = match hat("profession", profession) {
+        let visible = match self.policy(folder, "profession", profession) {
             Hat::None => true,
-            Hat::Partial => hat("type", variant) != Hat::Full,
+            Hat::Partial => self.policy(folder, "type", variant) != Hat::Full,
             Hat::Full => false,
         };
         // VillagerModel.createNoHatModel clears the head and every child.
@@ -198,3 +201,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "villager_client_hat_tests.rs"]
+mod profession_tests;

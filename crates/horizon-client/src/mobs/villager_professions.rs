@@ -374,7 +374,7 @@ impl ResolvedProfessions {
             super::ProfessionState::None => Some(0),
             super::ProfessionState::Vanilla(i) => (usize::from(*i) < 15).then_some(usize::from(*i)),
             super::ProfessionState::Unresolved(id) => self.resolve(id),
-            super::ProfessionState::Registered(id) => self.resolve(id),
+            super::ProfessionState::Registered { id, .. } => self.resolve(id),
         }
     }
     pub fn state(&self, index: usize) -> Option<super::ProfessionState> {
@@ -382,7 +382,10 @@ impl ResolvedProfessions {
             if index < 15 {
                 super::ProfessionState::from_index(index as u8)
             } else {
-                super::ProfessionState::Registered(p.id.as_str().into())
+                super::ProfessionState::Registered {
+                    id: p.id.as_str().into(),
+                    slot: u16::try_from(index).expect("profession slot"),
+                }
             }
         })
     }

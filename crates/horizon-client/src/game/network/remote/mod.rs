@@ -70,23 +70,7 @@ use {
 
 mod client_level_tick;
 
-type BuiltinCache = Vec<(std::path::PathBuf, Arc<Builtin>)>;
-static BUILTIN: std::sync::Mutex<BuiltinCache> = std::sync::Mutex::new(Vec::new());
-
-/// The prepared resources' `registries.json`, parsed once per root: the
-/// file never changes while the game runs, and parsing it took about 3 ms
-/// of the frame that joins a server (or opens a single-player world).
-/// `None` when it is missing or invalid (not cached: a fixed install can
-/// join again).
-pub(super) fn builtin_registries(root: &std::path::Path) -> Option<Arc<Builtin>> {
-    let mut cache = BUILTIN.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, builtin)) = cache.iter().find(|(cached, _)| cached == root) {
-        return Some(builtin.clone());
-    }
-    let builtin = Arc::new(Builtin::find(root).and_then(|p| Builtin::load(&p).ok())?);
-    cache.push((root.to_owned(), builtin.clone()));
-    Some(builtin)
-}
+pub(super) use super::villager_client::builtin_registries;
 
 /// `ChatType`'s two decorations: how a message shows in the chat, and what
 /// the narrator says of it.
@@ -514,6 +498,7 @@ enum OwnProfile {
 }
 
 pub(super) struct Remote {
+    pub(super) professions: Arc<horizon_client::mobs::villager::ResolvedProfessions>,
     pub session: Session,
     pub brand: String,
     pub(super) recipe_viewer: crate::game::recipe_book::ViewerChannels,
@@ -1151,6 +1136,7 @@ impl Game<'_> {
                 };
             });
         self.remote = Some(Remote {
+            professions: self.client_professions()?,
             session,
             brand: "unknown".into(),
             recipe_viewer: Default::default(),
@@ -1391,6 +1377,7 @@ impl Game<'_> {
         let services_keys = Arc::new(std::sync::Mutex::new(ServicesKeys::Ready(Vec::new())));
 
         self.remote = Some(Remote {
+            professions: self.client_professions()?,
             session,
             brand: "horizon-studio".into(),
             recipe_viewer: Default::default(),

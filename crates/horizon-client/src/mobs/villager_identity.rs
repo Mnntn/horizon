@@ -25,7 +25,7 @@ pub fn command_name(mob: &Mob) -> crate::text::Text {
 
 pub fn seen_profession_name(mob: &Mob, is_villager: bool) -> Option<Arc<str>> {
     match &mob.extra.profession {
-        villager::ProfessionState::Registered(id) if is_villager => Some(id.clone()),
+        villager::ProfessionState::Registered { id, .. } if is_villager => Some(id.clone()),
         _ => None,
     }
 }

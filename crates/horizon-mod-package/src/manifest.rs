@@ -234,10 +234,24 @@ impl Internal {
 
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
+        let both = || {
+            format!(
+                "{MANIFEST}: a mod is [native] or [wasm], not both; only [native] tables \
+                 compile game code, so a wasm mod has no mixin, bridge, state or module"
+            )
+        };
+        // A wasm manifest whose only fault is its `[native]` table is told that, not which
+        // pin a half-written `[native]` lacks. Any other error stays the one reported.
         let m: Manifest = toml::from_str(text).map_err(|e| {
-            match toml::from_str::<toml::Table>(text) {
-                Ok(t) if t.contains_key("native") && t.contains_key("wasm") => format!("{MANIFEST}: a mod is [native] or [wasm], not both; only [native] tables compile game code, so a wasm mod has no mixin, bridge, state or module"),
-                _ => format!("{MANIFEST}: {e}"),
+            let native_alone = toml::from_str::<toml::Table>(text).is_ok_and(|mut table| {
+                table.contains_key("wasm")
+                    && table.remove("native").is_some()
+                    && table.try_into::<Manifest>().is_ok()
+            });
+            if native_alone {
+                both()
+            } else {
+                format!("{MANIFEST}: {e}")
             }
         })?;
         Internal::check_all(&m.internals)?;
@@ -306,14 +320,14 @@ impl Manifest {
                 .map(|entry| &entry.id)
                 .chain(native.bridge.iter().chain(&native.state).map(|row| &row.id))
             {
-                if id.is_empty() || !ids.insert(id) {
+                if id.trim().is_empty() || !ids.insert(id) {
                     return Err(format!(
                         "{MANIFEST}: empty or duplicate mixin, bridge or state id"
                     ));
                 }
             }
             for module in &native.module {
-                if module.id.is_empty() || !ids.insert(&module.id) {
+                if module.id.trim().is_empty() || !ids.insert(&module.id) {
                     return Err(format!("{MANIFEST}: empty or duplicate module id"));
                 }
                 if !plain_path(&module.file) {
