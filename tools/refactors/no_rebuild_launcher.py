@@ -20,3 +20,21 @@ for relative in ['launcher/src/storage.rs', 'launcher/src/storage/inventory.rs',
         ('BuildCache::' + name in line) or ('Self::' + name + ' =>' in line) or line.strip() == name + ','
         for name in names
     )).replace('[BuildCache; 13]', '[BuildCache; 9]'))
+
+# Remove translations belonging to deleted launcher code, not unrelated unused keys.
+import json
+import subprocess
+baseline = '3dec9ba153'
+changed = subprocess.check_output(['git', 'diff', '--name-only', baseline, '--', 'launcher/src'], text=True).splitlines()
+old_source = '\n'.join(subprocess.check_output(['git', 'show', f'{baseline}:{name}'], text=True) for name in changed)
+source = '\n'.join(p.read_text() for p in (root / 'launcher/src').rglob('*.rs'))
+for p in (root / 'launcher/lang').glob('*.json'):
+    kept = []
+    for line in p.read_text().splitlines(keepends=True):
+        if line.startswith('  "'):
+            key = json.JSONDecoder().raw_decode(line.lstrip())[0]
+            literal = json.dumps(key, ensure_ascii=False)[1:-1]
+            if literal in old_source and literal not in source:
+                continue
+        kept.append(line)
+    p.write_text(''.join(kept))
