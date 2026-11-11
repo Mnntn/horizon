@@ -416,7 +416,7 @@ def line_intro(kind, version, previous):
             f"`horizon-server update --version {version}`.")
 
 
-def notes(kind, version, prs, issues, previous=None):
+def notes(kind, version, prs, issues, previous=None, repository="horizon-rust/horizon"):
     """(title, body) of a release. previous: the release before it, for a line's first release."""
     shown = [pr for pr in prs if pr["paths"] and "skip-release" not in pr["labels"]]
     new = [pr for pr in shown if "feature" in pr["labels"]]
@@ -425,8 +425,12 @@ def notes(kind, version, prs, issues, previous=None):
         title = f"Horizon {version.removeprefix(GAME_PREFIX)}" + (f": {summary(new, fixed)}" if shown else "")
     else:
         title = f"Horizon launcher {version.removeprefix(OLD_LAUNCHER_PREFIX).removeprefix(LAUNCHER_PREFIX)}"
-    intro = line_intro(kind, version, previous)
+    fork_launcher = kind == "launcher" and repository == "arismoko/horizon"
+    intro = None if fork_launcher else line_intro(kind, version, previous)
     parts = [PLAYERS] if kind == "game" else []
+    if fork_launcher:
+        title = f"Horizon Fork Launcher (arismoko) {version}"
+        parts.append((ROOT / "packaging/fork-launcher-release-notes.md").read_text().replace("{tag}", version).strip())
     if intro:
         parts.append(intro)
     if not shown:
@@ -440,7 +444,7 @@ def notes(kind, version, prs, issues, previous=None):
     contributors = sorted({pr["author"] for pr in shown if pr["author"] and pr["author"] != MAINTAINER})
     if contributors:
         parts.append("### Contributors\nThanks to " + ", ".join(f"@{name}" for name in contributors) + ".")
-    if kind == "launcher":
+    if kind == "launcher" and not fork_launcher:
         parts.append(LAUNCHER_FOOTER)
     if kind == "game":
         parts.append(PLAYERS_FOOTER)
@@ -532,7 +536,7 @@ def gate_jobs_passed(run_id, required):
             and all(job["status"] == "completed" and job["conclusion"] == "success" for job in jobs))
 
 
-def green_main_head(parity=False):
+def green_main_head(parity=False, eligible=None):
     """The newest commit on main whose checks passed: what an automatic release builds. With parity (game
     releases), the newest commit parity-main passed on whose checks passed too: parity-main runs on batches of
     merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing. A
@@ -549,6 +553,8 @@ def green_main_head(parity=False):
                 if entry["head_branch"] != "main" or entry["event"] != "push" or sha in seen:
                     continue
                 seen.add(sha)
+                if eligible is not None and not eligible(sha):
+                    continue
                 if not gate_jobs_passed(entry["id"], {"lint", "verify", "launcher", "pool-watch"}):
                     continue
                 fixtures = gh_json("api", "--paginate", "--slurp",
@@ -629,7 +635,7 @@ def main():
     if args.command == "notes":
         version = args.tag or "unreleased"
         previous = last["tag_name"] if last and last["tag_name"] != version else None
-        title, body = notes(args.kind, version, prs, known_issues(), previous=previous)
+        title, body = notes(args.kind, version, prs, known_issues(), previous=previous, repository=REPO)
         if args.out:
             args.out.mkdir(parents=True, exist_ok=True)
             (args.out / "title.txt").write_text(title + "\n")

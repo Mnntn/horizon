@@ -142,4 +142,4 @@ the mod list. The scaffold does not create a default icon.
 
 ## Native game changes
 
-Use `[[mixin]]` rows with `id`, `target`, `kind` and `helper`. See [Native mixins](../mixins.md) for function replacement and the native support tables.
+Use `[[native.mixin]]` rows with `id`, `target`, `kind` and `helper`. See [Native mixins](../mixins.md) for function replacement and the native support tables.

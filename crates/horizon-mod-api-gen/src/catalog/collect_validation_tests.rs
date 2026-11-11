@@ -20,6 +20,7 @@ fn validators_are_paths_and_only_apply_to_global_collectors() {
         json!({"contract":"listen", "collect_validator":"crate::validate"}),
         json!({"contract":"collect", "out":"items", "scope":"item", "key":"stack", "collect_validator":"crate::validate"}),
         json!({"contract":"collect", "out":"items", "collect_validator":"not a path; panic!()"}),
+        json!({"contract":"collect", "out":"items", "answered_by":"mod", "collect_validator":"crate::validate"}),
     ] {
         assert!(parse(api).is_err());
     }

@@ -57,7 +57,7 @@ pub(super) fn tool_manifest(bundle: &Bundle) -> Result<(), String> {
         )])),
     );
     for (name, rows) in [
-        ("injection", toml::Value::try_from(&bundle.manifest.mixin)),
+        ("injection", toml::Value::try_from(&bundle.native().mixin)),
         ("bridge", toml::Value::try_from(&bundle.native().bridge)),
         ("state", toml::Value::try_from(&bundle.native().state)),
     ] {
@@ -103,7 +103,7 @@ pub(super) fn copy_tool_input(bundle: &Bundle, to: &Path) -> Result<(), String> 
         to,
         checked_files(bundle)?.into_iter().filter(|(name, _)| {
             manifest::source_file(name)
-                || bundle.manifest.mixin.iter().any(|row| row.helper == *name)
+                || bundle.native().mixin.iter().any(|row| row.helper == *name)
         }),
     )
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Function replacement end to end (fn-replace): two native mods' `[[mixin]]` rows built by the
+# Function replacement end to end (fn-replace): two native mods' `[[native.mixin]]` rows built by the
 # launcher's normal native build against a PREBUILT game, with no game rebuild, then run on a
 # dedicated server.
 #   [FNR_MODS="alpha beta"] tools/ci/fn_replace_check.sh LAUNCHER SDK SCRATCH [RESOURCES]

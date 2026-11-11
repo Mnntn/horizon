@@ -440,6 +440,9 @@ jobs:
       - name: Test Rust documentation examples
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable test $JOBS --workspace --doc
+      - name: Validate replacement-slot source staging
+        if: needs.changes.outputs.rust_required != 'false'
+        run: python3 tools/ci/stage_replacements.py
       - name: Report test compiler cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"

@@ -12,7 +12,7 @@ game = "26.3"
 horizon = "HEAD"
 mixins = "MIXINS"
 
-[[mixin]]
+[[native.mixin]]
 id = "overwrite"
 target = "horizon_client::game::commands::misc::millis"
 kind = "OVERWRITE"

@@ -12,7 +12,7 @@ game = "26.3"
 horizon = "HEAD"
 mixins = "MIXINS"
 
-[[mixin]]
+[[native.mixin]]
 id = "plus_one"
 target = "horizon_client::game::autosave::Game<'_>::next_autosave_interval"
 kind = "MODIFY_EXPRESSION_VALUE"
@@ -23,7 +23,7 @@ priority = 100
 helper = "src/mixins/plus_one.rs"
 bindings = [{ name = "value", ty = "i64", value = "$value" }]
 
-[[mixin]]
+[[native.mixin]]
 id = "wrapped"
 target = "horizon_client::game::autosave::Game<'_>::next_autosave_interval"
 kind = "WRAP_OPERATION"
@@ -36,7 +36,7 @@ bindings = [
   { name = "operation", ty = "impl FnOnce(f32) -> i64", value = "$operation" },
 ]
 
-[[mixin]]
+[[native.mixin]]
 id = "before"
 target = "horizon_client::game::autosave::Game<'_>::on_tick_rate_changed"
 kind = "BEFORE_CALL"

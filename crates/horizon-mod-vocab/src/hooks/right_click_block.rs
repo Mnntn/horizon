@@ -6,7 +6,8 @@ pub trait Hooks {
     /// `PlayerInteractEvent.RightClickBlock`): once per hand, where
     /// `useItemOn` starts, on the clicking client and on the server (`click`
     /// says which, with the block, the hit, the hand and its stack, and the
-    /// player). Before the block's own use (a chest, a door, a lever) and the
+    /// player), for a spectator too (the server then only lets one open a
+    /// menu). Before the block's own use (a chest, a door, a lever) and the
     /// item's (`Item.useOn`, `native_use_on`).
     ///
     /// `use_block` forces the block's use off (`False`) or on even while
@@ -16,6 +17,8 @@ pub trait Hooks {
     /// `Pass` (the default) goes on to the item's own use (`Item.use`) and
     /// then the other hand, `Fail` ends the click, and `Success`,
     /// `SuccessServer` or `Consume` end it as used, with the swing they name.
+    /// A spectator never reaches item use after a `Pass`; the client goes
+    /// straight to the other hand instead.
     /// A mod that keeps players out of land cancels with `Fail`.
     #[hook(
         side = "both",

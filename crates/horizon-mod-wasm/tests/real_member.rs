@@ -160,5 +160,27 @@ fn real_member() {
             entity.nbt.get(&"counter".into()),
             Some(&mod_api::Tag::Int(17))
         );
+        // An answered collect run by the wasm guest: its entry comes back named after it.
+        let mut types = Vec::new();
+        {
+            use mod_api::__private::game::RegistrationContextNew;
+            mod_api::dispatch_register_json_animation_types(
+                &mod_api::RegistrationContext::new(),
+                &mut types,
+            );
+        }
+        let named: Vec<_> = types
+            .iter()
+            .map(|entry| (entry.answer.clone(), entry.mod_id))
+            .collect();
+        assert_eq!(
+            named,
+            [(
+                mod_api::JsonAnimationType::Target(
+                    mod_api::Identifier::parse("wasm_fixture:pulse").unwrap()
+                ),
+                "wasm_fixture"
+            )]
+        );
     });
 }

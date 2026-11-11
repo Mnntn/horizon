@@ -24,7 +24,7 @@ kind = "GET_MUT"
 target = "horizon_client::game::Game"
 member = "ticks_until_autosave"
 
-[[mixin]]
+[[native.mixin]]
 id = "head"
 target = "horizon_client::game::autosave::Game<'_>::on_tick_rate_changed"
 kind = "HEAD"

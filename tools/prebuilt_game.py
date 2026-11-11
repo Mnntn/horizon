@@ -248,7 +248,7 @@ def build(out: Path, server: bool) -> None:
         "rustflags": rustflags,
         "link_args": link_args,
         "facade_crates": eligible,
-        # The game crate's features: a `[[mixin]]` build compiles functions copied out of its source
+        # The game crate's features: a `[[native.mixin]]` build compiles functions copied out of its source
         # under the same cfgs (function replacement).
         "game_features": sorted(next(
             message["features"] for message in artifacts

@@ -58,6 +58,12 @@ struct Controls {
     hands: Option<Vec<Hand>>,
     use_block: TriState,
     use_item: TriState,
+    /// Cancel `right_click_block` with this answer.
+    click_answer: Option<Answer>,
+    /// How many `right_click_block` events fired.
+    clicks: usize,
+    click_hands: Vec<Hand>,
+    use_item_packets: usize,
 }
 
 #[derive(Clone, Default)]
@@ -82,8 +88,24 @@ impl Hooks for Observer {
             r.item_part(item, self.clone());
         }
     }
+    fn client_packet_send(
+        &self,
+        _: &dyn mod_api::ClientHost,
+        event: &mut mod_api::ClientPacketSendEvent<'_>,
+    ) -> Flow {
+        if event.packet.id.path() == "use_item" {
+            self.0.lock().unwrap().use_item_packets += 1;
+        }
+        Flow::Continue
+    }
     fn right_click_block(&self, _: HostSide<'_>, event: &mut RightClickBlockEvent<'_>) -> Flow {
-        let state = self.0.lock().unwrap();
+        let mut state = self.0.lock().unwrap();
+        state.clicks += 1;
+        state.click_hands.push(event.click.hand);
+        if let Some(answer) = state.click_answer {
+            *event.cancellation_result = answer;
+            return Flow::Cancel;
+        }
         *event.use_block = state.use_block;
         *event.use_item = state.use_item;
         Flow::Continue
@@ -571,6 +593,124 @@ fn canceled_item_results_keep_the_stack_wrappers_side_effects() {
                 }
             });
         }
+    });
+}
+
+/// A spectator's click fires `right_click_block` on the client like anyone's, and a cancel
+/// answers in place of the server's menu turn: SUCCESS swings and ends the click, FAIL ends it,
+/// PASS goes on to the other hand.
+#[test]
+#[ignore = "requires prepared game resources"]
+fn a_spectator_fires_right_click_block_on_the_client_and_its_cancel_answers() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "spectator_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            game.set_mode_id(3);
+            assert!(game.spectator());
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 64, 0, stone).unwrap();
+            game.forced_hit = Some(hit());
+            // Nobody answers: the event fired, and the spectator's click ends there, no swing.
+            *observer.0.lock().unwrap() = Controls::default();
+            let swings = game.swings_started;
+            assert!(game.remote_use_item_on(Hand::Main));
+            assert_eq!(observer.0.lock().unwrap().clicks, 1);
+            assert_eq!(game.swings_started, swings);
+            for (answer, ends, swings_by) in [
+                (Answer::Success, true, 1),
+                (Answer::Consume, true, 0),
+                (Answer::Fail, true, 0),
+                (Answer::Pass, false, 0),
+            ] {
+                *observer.0.lock().unwrap() = Controls {
+                    click_answer: Some(answer),
+                    ..Controls::default()
+                };
+                let swings = game.swings_started;
+                assert_eq!(game.remote_use_item_on(Hand::Main), ends, "{answer:?}");
+                assert_eq!(game.swings_started - swings, swings_by, "{answer:?}");
+                assert_eq!(observer.0.lock().unwrap().clicks, 1, "{answer:?}");
+            }
+        });
+    });
+}
+
+/// A cancelled block PASS tries both hands, but neither may send or predict item use.
+#[test]
+#[ignore = "requires prepared game resources"]
+fn a_spectators_passing_block_click_skips_item_use_for_both_hands() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "spectator_pass_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            game.set_mode_id(3);
+            assert!(game.spectator());
+            game.offhand = Some(ItemStack::new("minecraft:shield", 1));
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 64, 0, stone).unwrap();
+            game.forced_hit = Some(hit());
+            *observer.0.lock().unwrap() = Controls {
+                click_answer: Some(Answer::Pass),
+                // Let an erroneous item event reach the Part, which would consume the click.
+                part_answer: Some(Answer::Success),
+                ..Controls::default()
+            };
+            let swings = game.swings_started;
+            // The real target turn precedes remote_use_hands' item/off-hand sequence.
+            assert!(!game.remote_use_item_on(Hand::Main));
+            game.remote_use_hands(mod_api::InteractionAttempt::Press);
+            let state = observer.0.lock().unwrap();
+            assert_eq!(state.clicks, 2);
+            assert_eq!(state.click_hands, [Hand::Main, Hand::Off]);
+            assert_eq!(state.use_item_packets, 0);
+            assert_eq!(
+                state
+                    .steps
+                    .iter()
+                    .filter(|s| matches!(s, Step::Air(_, Hand::Main)))
+                    .count(),
+                0
+            );
+            assert_eq!(
+                state
+                    .steps
+                    .iter()
+                    .filter(|s| matches!(s, Step::Air(_, Hand::Off)))
+                    .count(),
+                0
+            );
+            assert_eq!(
+                state
+                    .steps
+                    .iter()
+                    .filter(|s| matches!(s, Step::ItemPart))
+                    .count(),
+                0
+            );
+            assert_eq!(game.swings_started - swings, 0);
+            assert!(game.using.is_none());
+        });
     });
 }
 

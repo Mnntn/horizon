@@ -1,4 +1,5 @@
 pub use client::keyframe_animation::{
-    AnimationChannel, AnimationHolder, AnimationState, AnimationTarget, Interpolation, Keyframe,
-    KeyframeAnimation,
+    AnimationChannel, AnimationError, AnimationHolder, AnimationState, AnimationTarget,
+    AnimationTypes, Interpolation, JsonAnimationType, Keyframe, KeyframeAnimation,
+    RegisteredAnimationType, TypedKeyframeAnimation,
 };

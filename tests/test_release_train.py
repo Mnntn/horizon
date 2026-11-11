@@ -369,10 +369,15 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertIn("filter=latest", path)
             return [{"jobs": jobs[ident][:2]}, {"jobs": jobs[ident][2:]}]
         with mock.patch.object(train, "REPO", "arismoko/horizon"), \
-                mock.patch.object(train, "gh_json", side_effect=api):
+                mock.patch.object(train, "gh_json", side_effect=api) as requests:
             self.assertEqual(train.green_main_head(parity=True), "good")
             fixture_sha["new"] = "new"
             self.assertEqual(train.green_main_head(), "new", "non-gate failure must not reject a build")
+            requests.reset_mock()
+            self.assertEqual(train.green_main_head(eligible=lambda sha: sha == "good"), "good")
+            paths = [call.args[3] for call in requests.call_args_list]
+            self.assertFalse(any("/runs/3/jobs" in path or "head_sha=new&" in path for path in paths))
+            self.assertTrue(any("/runs/4/jobs" in path for path in paths))
             for status, conclusion in [("queued", None), ("in_progress", "success"),
                                        ("completed", "skipped"), ("completed", "cancelled"),
                                        ("completed", "failure"), ("completed", None),
@@ -457,6 +462,27 @@ class ReleaseTrainTests(unittest.TestCase):
         self.assertNotIn(train.PLAYERS, body)
         self.assertNotIn(train.PLAYERS_FOOTER, body)
         self.assertIn("Your launcher updates itself.", body)
+
+    def test_fork_launcher_notes_use_supported_downloads_and_exact_verifier_tag(self):
+        import shlex
+        tag = "launcher@0.3.0"
+        title, body = train.notes("launcher", tag, [pr(3, "Fix launcher updates")], [],
+                                 previous="launcher-v0.17.0", repository="arismoko/horizon")
+        self.assertEqual(title, f"Horizon Fork Launcher (arismoko) {tag}")
+        self.assertTrue(body.startswith("# Horizon Fork Launcher (arismoko)\n"))
+        self.assertIn("### Fixed\n- Fix launcher updates (#3)", body)
+        self.assertNotIn(train.LAUNCHER_FOOTER, body)
+        self.assertNotIn("macOS", body)
+        self.assertNotIn("numbered with the game", body)
+        command = next(line for line in body.splitlines() if line.startswith("cargo run "))
+        self.assertEqual(shlex.split(command), [
+            "cargo", "run", "--locked", "-p", "horizon-release-sign", "--", "verify",
+            "--repository", "arismoko/horizon", "--tag", tag, "--publishing",
+            "/absolute/path/to/downloads",
+        ])
+        clone = next(line for line in body.splitlines() if line.startswith("git clone "))
+        self.assertEqual(shlex.split(clone)[3], tag)
+        self.assertNotIn("{tag}", body)
 
     def test_a_game_release_opens_with_the_way_to_the_launcher(self):
         # GitHub's latest is a game release: whoever lands on it is sent to the launcher first (#1647).

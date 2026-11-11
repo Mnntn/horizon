@@ -13,28 +13,28 @@ horizon = "HEAD"
 mixins = "MIXINS"
 
 # A hook function: hooks are not points, so it has no replacement slot.
-[[mixin]]
+[[native.mixin]]
 id = "hook"
 target = "horizon_client::game::native_hooks::base::Game<'_>::native_use_item"
 kind = "HEAD"
 helper = "src/mixins/head.rs"
 
 # A function below the game crate.
-[[mixin]]
+[[native.mixin]]
 id = "lower"
 target = "horizon_client_lib::clock::FixedStep::advance"
 kind = "HEAD"
 helper = "src/mixins/head.rs"
 
 # No such function.
-[[mixin]]
+[[native.mixin]]
 id = "missing"
 target = "horizon_client::game::autosave::Game<'_>::no_such_function"
 kind = "HEAD"
 helper = "src/mixins/head.rs"
 
 # A body using a macro the game crate doesn't export.
-[[mixin]]
+[[native.mixin]]
 id = "local_macro"
 target = "horizon_client::game::commands::Game<'_>::teleport_stops"
 kind = "HEAD"
