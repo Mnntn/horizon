@@ -77,8 +77,8 @@ impl From<std::io::Error> for CatalogError {
 
 /// Verify a prebuilt archive and cache only its root internals JSON file.
 ///
-/// The caller owns transport and the cache directory capability. Both files are checked
-/// before either is published; no game code or other archive member is unpacked.
+/// The caller owns transport and the cache directory capability. The file is checked before
+/// it is published; no game code or other archive member is unpacked.
 /// Existing internals declarations are returned for the mod tools' signature comparison.
 /// `name` is diagnostic text, never a filesystem path.
 pub fn cache_catalogs(
@@ -133,17 +133,13 @@ fn cache_with_limit(
                 file: CATALOG,
                 source,
             })?;
-        for (name, text) in [(CATALOG, catalogs.internals)] {
-            let partial = format!("{name}.{unique}.partial");
-            cache.write(&partial, text)?;
-            cache.rename(&partial, cache, name)?;
-        }
+        let partial = format!("{CATALOG}.{unique}.partial");
+        cache.write(&partial, catalogs.internals)?;
+        cache.rename(&partial, cache, CATALOG)?;
         Ok(entries)
     })();
     let _ = cache.remove_file(&archive);
-    for name in [CATALOG] {
-        let _ = cache.remove_file(format!("{name}.{unique}.partial"));
-    }
+    let _ = cache.remove_file(format!("{CATALOG}.{unique}.partial"));
     result
 }
 
@@ -187,7 +183,7 @@ mod tests {
     use super::*;
     const JSON: &str = r#"[{"path":"Example","kind":"struct","signature":"struct Example","hash":"abc","compiler_owned":{"ref":"Example::field"}}]"#;
 
-    fn archive(path: &str, kind: tar::EntryType, contents: &str, _points: Option<&str>) -> Vec<u8> {
+    fn archive(path: &str, kind: tar::EntryType, contents: &str) -> Vec<u8> {
         let gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         let mut archive = tar::Builder::new(gzip);
         let unrelated = ("bin/game", tar::EntryType::Regular, "not code");
@@ -207,12 +203,7 @@ mod tests {
 
     #[test]
     fn reads_only_regular_root_catalogs() {
-        let bytes = archive(
-            "./internals.json",
-            tar::EntryType::Regular,
-            JSON,
-            Some("{}"),
-        );
+        let bytes = archive("./internals.json", tar::EntryType::Regular, JSON);
         let found = catalogs_from_archive(bytes.as_slice()).unwrap();
         assert_eq!(found.internals, JSON);
         for path in [
@@ -220,33 +211,29 @@ mod tests {
             "../internals.json",
             "/internals.json",
         ] {
-            let bytes = archive(path, tar::EntryType::Regular, JSON, Some("{}"));
+            let bytes = archive(path, tar::EntryType::Regular, JSON);
             assert!(matches!(
                 catalogs_from_archive(bytes.as_slice()),
                 Err(CatalogError::Missing { file: CATALOG })
             ));
         }
         let mut oversized = format!("[{}]", " ".repeat((64 << 20) - 1));
-        let bytes = archive(CATALOG, tar::EntryType::Regular, &oversized, Some("{}"));
+        let bytes = archive(CATALOG, tar::EntryType::Regular, &oversized);
         assert!(matches!(
             catalogs_from_archive(bytes.as_slice()),
             Err(CatalogError::CatalogTooLarge { file: CATALOG })
         ));
         oversized.remove(1);
-        let bytes = archive(CATALOG, tar::EntryType::Regular, &oversized, Some("{}"));
+        let bytes = archive(CATALOG, tar::EntryType::Regular, &oversized);
         assert!(catalogs_from_archive(bytes.as_slice()).is_ok());
-        for (bytes, expected) in [(
-            archive(CATALOG, tar::EntryType::Symlink, JSON, Some("{}")),
-            "not a file",
-        )] {
-            assert!(
-                catalogs_from_archive(bytes.as_slice())
-                    .err()
-                    .unwrap()
-                    .to_string()
-                    .contains(expected)
-            );
-        }
+        let bytes = archive(CATALOG, tar::EntryType::Symlink, JSON);
+        assert!(
+            catalogs_from_archive(bytes.as_slice())
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("not a file")
+        );
     }
 
     #[test]
@@ -256,7 +243,7 @@ mod tests {
             .join(std::process::id().to_string());
         std::fs::create_dir_all(&path).unwrap();
         let dir = Dir::open_ambient_dir(&path, cap_std::ambient_authority()).unwrap();
-        let mut bytes = archive(CATALOG, tar::EntryType::Regular, JSON, Some("{}"));
+        let mut bytes = archive(CATALOG, tar::EntryType::Regular, JSON);
         bytes.resize(4 * 1024 + 1, 0);
         let hash = format!("{:x}", Sha256::digest(&bytes));
         let mut reader = std::io::Cursor::new(bytes.as_slice());
@@ -265,15 +252,15 @@ mod tests {
             Err(CatalogError::ArchiveTooLarge { .. })
         ));
         assert_eq!(reader.position(), 4 * 1024 + 1);
-        let bytes = archive(CATALOG, tar::EntryType::Regular, JSON, Some("{}"));
+        let bytes = archive(CATALOG, tar::EntryType::Regular, JSON);
         assert!(
             cache_catalogs(&dir, "game.tar.gz", bytes.as_slice(), "wrong")
                 .unwrap_err()
                 .to_string()
                 .contains("checksum")
         );
-        for (text, points) in [("not JSON", "{}"), ("{}", "{}")] {
-            let invalid = archive(CATALOG, tar::EntryType::Regular, text, Some(points));
+        for text in ["not JSON", "{}"] {
+            let invalid = archive(CATALOG, tar::EntryType::Regular, text);
             let hash = format!("{:x}", Sha256::digest(&invalid));
             assert!(cache_catalogs(&dir, "game.tar.gz", invalid.as_slice(), &hash).is_err());
         }
@@ -295,7 +282,6 @@ mod tests {
             "Example"
         );
         assert_eq!(dir.read_to_string(CATALOG).unwrap(), JSON);
-        assert_eq!(dir.read_to_string(POINTS).unwrap(), "{}");
         assert_eq!(
             std::fs::read_to_string(outside.join("sentinel")).unwrap(),
             "protected"
@@ -303,13 +289,12 @@ mod tests {
         assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 1);
         assert_eq!(
             dir.entries().unwrap().count(),
-            if cfg!(unix) { 3 } else { 2 }
+            if cfg!(unix) { 2 } else { 1 }
         );
-        let invalid = archive(CATALOG, tar::EntryType::Regular, JSON, Some("not JSON"));
+        let invalid = archive(CATALOG, tar::EntryType::Regular, "not JSON");
         let hash = format!("{:x}", Sha256::digest(&invalid));
         assert!(cache_catalogs(&dir, "game.tar.gz", invalid.as_slice(), &hash).is_err());
         assert_eq!(dir.read_to_string(CATALOG).unwrap(), JSON);
-        assert_eq!(dir.read_to_string(POINTS).unwrap(), "{}");
         drop(dir);
         std::fs::remove_dir_all(path).unwrap();
         std::fs::remove_dir_all(outside).unwrap();

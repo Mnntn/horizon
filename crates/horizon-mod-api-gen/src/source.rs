@@ -42,7 +42,7 @@ type Pending = (String, PathBuf, PathBuf, Vec<String>);
 
 /// The files of the module `module`, read from `path` (its children in `dir`), following `mod`
 /// declarations (and `#[path]`s, and inline modules that declare files). With `every_build`, a
-/// module behind a `cfg` is left out with everything under it (the points: functions every build
+/// module behind a `cfg` is left out with everything under it (the replaceable functions: those every build
 /// compiles); without, it is kept with its conditions (the internals, listed with the builds they
 /// exist in). Test-only modules are always left out, including files gated by inner attributes.
 pub(crate) fn module_files(
