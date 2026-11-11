@@ -146,7 +146,9 @@ impl StateFacts {
     }
 }
 /// Compact, owned behaviour inputs retained until the normal behaviour startup stage.
-/// No borrowed gameplay JSON or process-wide cache survives the fact loader.
+/// No borrowed gameplay JSON survives the fact loader. Test-owned frozen fixtures
+/// may retain a decoded projection and clone its independently mutable views.
+#[derive(Clone)]
 pub struct GameplayProjection {
     flags: u16,
     emission: u64,
@@ -254,6 +256,7 @@ impl GameplayStateSource for GameplayProjection {
     }
 }
 
+#[derive(Clone)]
 pub struct BlockFacts {
     pub states: Vec<StateFacts>,
     pub air: BlockStateId,
