@@ -2359,7 +2359,7 @@ impl Hub {
                             if !g.left_reason.is_empty() {
                                 return false;
                             }
-                            g.inbox.push_back((*packet, bytes));
+                            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(*packet, bytes));
                             g.inbox_bytes += bytes;
                             // Bound queued work when a client exceeds its budget.
                             if g.inbox.len() > INBOX_LIMIT || g.inbox_bytes > INBOX_BYTES {
@@ -2444,7 +2444,7 @@ impl Hub {
                 | S::KeepAlive(_)
                 | S::Pong(_) => {
                     bytes += size;
-                    self.guests.update(i, |g| g.inbox.push_back((packet, size)));
+                    self.guests.update(i, |g| g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(packet, size)));
                 }
                 _ => {}
             }
@@ -6396,7 +6396,7 @@ mod tests {
 
     /// One tick of the hub that handles a single packet from the guest.
     fn tick_packet(hub: &mut Hub, world: &mut World, packet: S) {
-        hub.guests.inbox_mut(0).unwrap().push_back((packet, 0));
+        hub.guests.inbox_mut(0).unwrap().push_back(horizon_client::lan::guest::InboxItem::synthetic(packet, 0));
         let mut next_entity = 2;
         let border = crate::worldborder::WorldBorder::default();
         let mut ctx = TickCtx {
@@ -7118,7 +7118,7 @@ mod tests {
             streaming: None,
         };
         for action in [3, 4] {
-            hub.guests.inbox_mut(0).unwrap().push_back((
+            hub.guests.inbox_mut(0).unwrap().push_back(horizon_client::lan::guest::InboxItem::synthetic(
                 S::PlayerCommand(play::PlayerCommand {
                     id: 1,
                     action,
@@ -7312,9 +7312,9 @@ mod tests {
             hub.guests.update(0, |g| g.load_timeout = value);
         }
         let inbox = hub.guests.inbox_mut(0).unwrap();
-        inbox.push_back((S::Attack(play::Attack { id: 7 }), 0));
-        inbox.push_back((S::Punch(horizon_protocol::packets::Empty), 0));
-        inbox.push_back((
+        inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(S::Attack(play::Attack { id: 7 }), 0));
+        inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(S::Punch(horizon_protocol::packets::Empty), 0));
+        inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
             S::MovePlayerRot(play::MovePlayerRot {
                 yaw: 90.0,
                 pitch: 0.0,
@@ -7372,7 +7372,7 @@ mod tests {
         hub.guests.update(0, |guest| {
             guest.load_timeout = 0;
             let inbox = &mut guest.inbox;
-            inbox.push_back((
+            inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
                 S::PlayerAction(play::PlayerAction {
                     action,
                     pos: [0; 3],
@@ -7381,7 +7381,7 @@ mod tests {
                 }),
                 0,
             ));
-            inbox.push_back((
+            inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
                 S::MovePlayerPos(play::MovePlayerPos {
                     x: before.0[0] + 0.3,
                     y: before.0[1],
