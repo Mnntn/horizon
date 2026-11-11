@@ -11,5 +11,5 @@ crates/horizon-client/src/mobs/animal_brain.rs 3137
 crates/horizon-client/src/mobs/goals.rs 3227
 crates/horizon-client/src/title/tests.rs 3044
 crates/horizon-items/src/items.rs 3015
-crates/horizon-world/src/level/tests.rs 4951
+crates/horizon-world/src/level/tests.rs 4952
 launcher/src/main.rs 5668
