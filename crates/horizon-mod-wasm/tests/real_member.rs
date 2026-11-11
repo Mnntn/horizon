@@ -26,6 +26,8 @@ impl mod_api::prelude::ItemsHost for Quiet {
 }
 impl mod_api::ServerHost for Quiet {}
 mod_api::impl_server_host_areas!(Quiet, except(projectiles));
+impl mod_api::ClientHost for Quiet {}
+mod_api::impl_client_host_areas!(Quiet);
 static OWNER_LAUNCH_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 impl mod_api::prelude::ProjectilesServerHost for Quiet {
     fn spawn_projectile_from_rotation(
@@ -151,6 +153,40 @@ fn real_member() {
         mod_api::dispatch_block_entity_tick(&mut Quiet, [0, 64, 0], &mut entity);
         assert_eq!(entity.data, [23]);
         mod_api::__private::resolve_items(["minecraft:snowball"]).unwrap();
+        let item = mod_api::__private::item_key_by_identifier(
+            &mod_api::Identifier::parse("minecraft:snowball").unwrap(),
+        )
+        .unwrap();
+        let stack = mod_api::ItemStack::new(item, 1).unwrap();
+        // Real wasm, not a model of the engine countdown: verify the guest's
+        // cancellation and replacement values reach both host-side callers.
+        for client in [false, true] {
+            for hand in [mod_api::Hand::Main, mod_api::Hand::Off] {
+                for (input, expected, cancelled) in [
+                    (32, 32, true),
+                    (31, 0, false),
+                    (30, 1, false),
+                    (29, -7, false),
+                    (28, 28, false),
+                ] {
+                    let (mut duration, mut canceled) = (input, false);
+                    let mut host = Quiet;
+                    mod_api::dispatch_living_entity_use_item_tick(
+                        if client {
+                            mod_api::HostSide::Client(&mut host)
+                        } else {
+                            mod_api::HostSide::Server(&mut host)
+                        },
+                        &stack,
+                        None,
+                        hand,
+                        &mut duration,
+                        &mut canceled,
+                    );
+                    assert_eq!((duration, canceled), (expected, cancelled));
+                }
+            }
+        }
         let mut launch =
             mod_api::ModBlockEntity::new("wasm_fixture:owner_launch".into(), Default::default());
         mod_api::dispatch_block_entity_tick(&mut Quiet, [0, 64, 0], &mut launch);

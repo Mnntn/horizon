@@ -2,26 +2,27 @@
 // catalog-order: 0132
 
 pub trait Hooks {
-    /// NeoForge's `LivingEntityUseItemEvent.Tick`: each tick `entity` uses
-    /// `stack` in `hand`, where `LivingEntity.updatingUsingItem` starts,
-    /// `duration` the ticks left. `entity` is as in
-    /// `native_living_entity_use_item_start`. Change `duration` to move the
-    /// end (consumables, potions, spyglasses and mods' items count to it,
-    /// and so do a client's eating crumbs and first person pose, as the
-    /// started duration of `native_living_entity_use_item_start` does). A
-    /// cancel sets it to -1. Once a mod set it, the use goes on
-    /// only while it is above 0: at 0 or less, by a cancel or set, the
-    /// item's tick is skipped and the server finishes the use
-    /// (`completeUsingItem`: `finishUsingItem`, the food eaten,
-    /// `native_living_entity_use_item_finish`), while an item used on
-    /// release (a crossbow) stays frozen until let go. NeoForge's javadoc
-    /// says a cancel stops the use, but its code finishes it; this follows
-    /// the code. On a server's client a run-out use stays in use, frozen,
-    /// so letting go still tells the server. Both sides, as vanilla's
-    /// `updatingUsingItem`: answer the same on both, and change the world
-    /// only on the server (`native_window` is false there), not on a
-    /// server's client. Runs every tick of every use:
-    /// check the item first.
+    /// Each living tick that `entity` may still use `stack` in `hand`.
+    /// `entity` is as in `native_living_entity_use_item_start`; `duration`
+    /// replaces the remaining-ticks counter, not the original use duration.
+    /// The order is the may-still-use check, this event, the per-tick effects
+    /// only while the counter is above 0, then the decrement and server finish.
+    ///
+    /// On the server, canceling (which leaves -1), or setting 0 or below,
+    /// finishes the use after the decrement: food is eaten, potions applied,
+    /// `native_living_entity_use_item_finish` fires, and the use is cleared.
+    /// Setting 1 runs the effects and finishes in this same tick. This path
+    /// never calls release-using: a bow fires nothing. A use-on-release item
+    /// (a crossbow) does not finish here; its counter goes negative until release.
+    /// On the client a cancel skips that tick's effects and ignores its duration
+    /// replacement; the existing counter decrements and the use waits for
+    /// server completion or release.
+    ///
+    /// In contrast, canceling Start prevents the use beginning (duration 0
+    /// does begin it); canceling Stop skips only release-using. Finish is not
+    /// cancellable, but its result stack may be replaced. Both sides: change
+    /// the world only on the server, not on a server's client. Runs every tick
+    /// of every use; check the item first.
     #[hook(
         side = "both",
         contract = "cancel",

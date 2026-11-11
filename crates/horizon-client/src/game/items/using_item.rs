@@ -97,22 +97,40 @@ impl Game<'_> {
         if self.using != Some((slot, ticks)) {
             return;
         }
-        // a mod's tick ran the use out: finished now, or frozen until let go
-        // for an item used on release (CrossbowItem.useOnRelease).
+        // updateUsingItem decrements even when the event suppressed the effects.
         if !going_on {
-            if &*stack.item != "minecraft:crossbow" {
+            self.using = Some((slot, ticks.saturating_add(1)));
+            if self.use_ticks_set && &*stack.item != "minecraft:crossbow" {
                 self.complete_using_item(slot, &stack, &info);
             }
             return;
         }
-        if self.blocks_attacks(&stack).is_some() {
+        self.tick_used_item_effects(slot, ticks, &stack, &info);
+        // Re-read the counter after onUseTick: a Part can extend or shorten
+        // the use through LivingRef. Never release a bow on this path.
+        if item_use::ticks_left(self.use_duration, ticks.saturating_add(1)) == 0
+            && self.using == Some((slot, ticks.saturating_add(1)))
+            && &*stack.item != "minecraft:crossbow"
+        {
+            self.complete_using_item(slot, &stack, &info);
+        }
+    }
+    /// `ItemStack.onUseTick` and the ordinary item-specific countdown.
+    fn tick_used_item_effects(
+        &mut self,
+        slot: usize,
+        ticks: u32,
+        stack: &ItemStack,
+        info: &horizon_client::items::ItemInfo,
+    ) {
+        if self.blocks_attacks(stack).is_some() {
             // ShieldItem: used for 72000 ticks, i.e. until released.
-            if self.item_on_use_tick(&stack, ticks) {
+            if self.item_on_use_tick(stack, ticks) {
                 self.using = Some((slot, ticks + 1));
             }
             return;
         }
-        if self.tick_drinking(slot, ticks, &stack) {
+        if self.tick_drinking(slot, ticks, stack) {
             return;
         }
         if &*stack.item == "minecraft:bow" {
@@ -120,7 +138,7 @@ impl Game<'_> {
             return;
         }
         if &*stack.item == "minecraft:crossbow" {
-            self.tick_crossbow(slot, ticks, &stack);
+            self.tick_crossbow(slot, ticks, stack);
             return;
         }
         // TridentItem and EnderEyeItem: used until released (an eye's
@@ -131,7 +149,7 @@ impl Game<'_> {
         }
         // ItemStack.onUseTick: a spear stabs what its speed allows, until released.
         if horizon_client::spear::Kinetic::of(&stack.item).is_some() {
-            self.spear_tick(&stack, ticks);
+            self.spear_tick(stack, ticks);
             self.using = Some((slot, ticks + 1));
             return;
         }
@@ -140,39 +158,28 @@ impl Game<'_> {
             // completeUsingItem: finishUsingItem lowers it, and the finish hook.
             match item_use::count_down(ticks, self.use_duration) {
                 Some(ticks) => self.using = Some((slot, ticks)),
-                None => self.complete_using_item(slot, &stack, &info),
+                None => self.complete_using_item(slot, stack, info),
             }
             return;
         }
-        if let Some(duration) = self
-            .res
-            .items()
-            .instrument(&stack)
-            .map(|i| i.use_ticks().max(0) as u32)
-        {
-            // InstrumentItem.getUseDuration: held up that long. When it runs
-            // out, LivingEntity.stopUsingItem ends the use and causes the
-            // interaction vibration; letting go of the button already does.
-            if ticks + 1 < duration {
-                self.using = Some((slot, ticks + 1));
-            } else {
-                self.stop_using_item(&stack);
-            }
+        if self.res.items().instrument(stack).is_some() {
+            // The shared updateUsingItem countdown, including a mod's replacement.
+            self.using = Some((slot, ticks + 1));
             return;
         }
         if &*stack.item == "minecraft:brush" {
-            self.tick_brush(&stack, slot, ticks);
+            self.tick_brush(stack, slot, ticks);
             return;
         }
         if info.bundle {
             self.tick_bundle(slot, ticks);
             return;
         }
-        if self.mod_use(&stack) {
-            self.tick_mod_use(slot, ticks, &stack);
+        if self.mod_use(stack) {
+            self.tick_mod_use(slot, ticks, stack);
             return;
         }
-        let Some(consumable) = stack.consumable(Some(&info)) else {
+        let Some(consumable) = stack.consumable(Some(info)) else {
             self.using = None;
             return;
         };
@@ -181,27 +188,26 @@ impl Game<'_> {
         // the duration is getUseDuration's when the use started, as a mod's
         // Start and Tick left it.
         let remaining = self.use_duration - ticks as i32;
-        if consumable.should_emit(remaining) {
-            self.emit_consume(consumable, &stack, 5);
+        if remaining > 0 && consumable.should_emit(remaining) {
+            self.emit_consume(consumable, stack, 5);
         }
-        if !self.item_on_use_tick(&stack, ticks) {
+        if !self.item_on_use_tick(stack, ticks) {
             return;
         }
         match item_use::count_down(ticks, self.use_duration) {
             Some(ticks) => self.using = Some((slot, ticks)),
-            None => self.complete_using_item(slot, &stack, &info),
+            None => self.complete_using_item(slot, stack, info),
         }
     }
-    /// `BundleItem.onUseTick` and `getUseDuration` (200): the first tick and
-    /// then every second tick from the 11th on drop one stack out of the
-    /// bundle in `slot`; the use ends after 200 ticks.
+    /// `BundleItem.onUseTick`: the first tick and then every second tick
+    /// from the 11th on drops a stack. `updateUsingItem` owns completion.
     pub(super) fn tick_bundle(&mut self, slot: usize, ticks: u32) {
-        const USE_DURATION: u32 = 200;
-        let remaining = USE_DURATION - ticks.min(USE_DURATION);
-        if ticks == 0 || (remaining < USE_DURATION - 10 && remaining.is_multiple_of(2)) {
+        const USE_DURATION: i32 = 200;
+        let remaining = item_use::ticks_left(self.use_duration, ticks);
+        if remaining == USE_DURATION || (remaining < USE_DURATION - 10 && remaining % 2 == 0) {
             self.drop_bundle_content(slot);
         }
-        self.using = (ticks + 1 < USE_DURATION).then_some((slot, ticks + 1));
+        self.using = Some((slot, ticks + 1));
     }
     /// `LivingEntity.releaseUsingItem` (`Item.releaseUsing`) for `stack`,
     /// used for `ticks`, its hand acting: a bow or a trident lets go (not

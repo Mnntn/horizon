@@ -958,11 +958,11 @@ impl Game<'_> {
         }
         // the duration the use started with (32, as a mod's Start or Tick left it).
         let duration = self.use_duration;
+        let remaining = duration.saturating_sub_unsigned(ticks);
         let ticks = ticks + 1;
-        let remaining = duration.saturating_sub_unsigned(ticks).max(0);
         let eye = self.eye_position().unwrap_or_default();
         // Consumable.emitParticlesAndSounds: the drink sound every 4 ticks near the end.
-        if remaining <= 25 && remaining % 4 == 0 {
+        if remaining > 0 && remaining <= 25 && remaining % 4 == 0 {
             let pitch = self.world.random.next_float() * 0.1 + 0.9;
             self.audio
                 .play("minecraft:entity.generic.drink", Some(eye), 0.5, pitch);

@@ -21,6 +21,28 @@ pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn living_entity_use_item_tick(
+        &self,
+        _: mod_api::HostSide,
+        event: &mut mod_api::LivingEntityUseItemTickEvent<'_>,
+    ) -> mod_api::Flow {
+        match event.duration {
+            32 => mod_api::Flow::Cancel,
+            31 => {
+                event.duration = 0;
+                mod_api::Flow::Continue
+            }
+            30 => {
+                event.duration = 1;
+                mod_api::Flow::Continue
+            }
+            29 => {
+                event.duration = -7;
+                mod_api::Flow::Continue
+            }
+            _ => mod_api::Flow::Continue,
+        }
+    }
     fn register_json_animation_types(
         &self,
         _: &mod_api::RegistrationContext,

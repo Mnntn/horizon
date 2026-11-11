@@ -71,18 +71,16 @@ impl Game<'_> {
                 return;
             }
         }
-        let elapsed = ticks + 1;
+        let elapsed = (USE_DURATION as i32)
+            .wrapping_sub(super::item_use::ticks_left(self.use_duration, ticks))
+            .wrapping_add(1);
         // The last tick before the backswing.
         if elapsed % 10 == 5 {
             self.brush_stroke(&hit, slot);
         }
-        // The use ends after USE_DURATION; stopUsingItem causes the vibration
-        // (vanilla's tickUsingItem), the held button starts it again.
-        if elapsed < USE_DURATION {
-            self.using = Some((slot, elapsed));
-        } else {
-            self.stop_using_item(stack);
-        }
+        // updateUsingItem owns the countdown and completion, including a
+        // replacement remaining counter from the Tick event.
+        self.using = Some((slot, ticks + 1));
     }
 
     /// One stroke on the block aimed at: dust (this window only), the brush

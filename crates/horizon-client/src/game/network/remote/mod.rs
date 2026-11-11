@@ -9749,11 +9749,12 @@ impl Game<'_> {
         if self.mod_use_tick(slot, ticks, !self.right || !in_hand) {
             return;
         }
-        // updatingUsingItem runs here too: a use a mod's tick ran out stays
-        // frozen until let go (RELEASE_USE_ITEM) or the server finishes it.
+        // A client cancellation skips this tick's effects, not the countdown
+        // or the release packet; only the server completes the use.
         if let Some(s) = stack.as_ref().filter(|_| in_hand)
             && !self.use_item_ticked(s, ticks)
         {
+            self.using = Some((slot, ticks.saturating_add(1)));
             return;
         }
         // BrushItem.onUseTick: with no block aimed the use ends (the server
@@ -9762,7 +9763,9 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|s| &*s.item == "minecraft:brush")
         {
-            let elapsed = ticks + 1;
+            let elapsed = 200i32
+                .wrapping_sub(super::item_use::ticks_left(self.use_duration, ticks))
+                .wrapping_add(1);
             let hit = self.pick().filter(|_| in_hand);
             if let Some(hit) = &hit
                 && elapsed % 10 == 5
@@ -9777,7 +9780,7 @@ impl Game<'_> {
                     sequence: 0,
                 }));
             }
-            self.using = hit.and(Some((slot, elapsed))).filter(|_| elapsed < 200);
+            self.using = hit.and(Some((slot, ticks + 1)));
             return;
         }
         // BundleItem.getUseDuration: 200 ticks, the server drops the contents.
@@ -9785,7 +9788,7 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|s| self.items().get(&s.item).is_some_and(|i| i.bundle))
         {
-            self.using = (in_hand && ticks + 1 < 200).then_some((slot, ticks + 1));
+            self.using = in_hand.then_some((slot, ticks + 1));
             return;
         }
         // A drawn bow, a charging crossbow, a raised shield...: held until
@@ -9798,12 +9801,11 @@ impl Game<'_> {
             return;
         }
         // A goat horn is held up for its instrument's use duration.
-        if let Some(duration) = stack
+        if stack
             .as_ref()
-            .and_then(|s| self.res.items().instrument(s))
-            .map(|i| i.use_ticks().max(0) as u32)
+            .is_some_and(|s| self.res.items().instrument(s).is_some())
         {
-            self.using = (in_hand && ticks + 1 < duration).then_some((slot, ticks + 1));
+            self.using = in_hand.then_some((slot, ticks + 1));
             return;
         }
         let consumable = stack
@@ -9832,7 +9834,7 @@ impl Game<'_> {
         // only on the server) until the server's USE_ITEM_COMPLETE.
         // getUseItemRemainingTicks: the duration this use started with.
         let remaining = self.use_duration - ticks as i32;
-        if consumable.should_emit(remaining) {
+        if remaining > 0 && consumable.should_emit(remaining) {
             // `emit_consume` plays the eat sound and spawns the bites (when the
             // item has consume particles), as `tick_used_item` does on the
             // player's own server.
@@ -16819,5 +16821,90 @@ mod level_facts_tests {
         assert!(sane_facts(&facts));
         facts.monster_spawn_block_light_limit = 16;
         assert!(!sane_facts(&facts));
+    }
+}
+
+#[cfg(test)]
+mod item_use_tick_tests {
+    use horizon_client::items::ItemStack;
+    use mod_api::{Flow, Hooks, HostSide, LivingEntityUseItemTickEvent, ModEntry, Mods};
+    use std::sync::{Arc, Mutex};
+
+    struct Effects(Arc<Mutex<Vec<i32>>>);
+    #[mod_api::horizon_part]
+    impl mod_api::ItemPart for Effects {
+        fn on_use_tick(&self, _: HostSide, event: &mut mod_api::OnUseTickEvent<'_>) {
+            self.0.lock().unwrap().push(event.remaining);
+        }
+    }
+
+    struct Tick {
+        answer: Arc<Mutex<Option<(bool, i32)>>>,
+        heard: Arc<Mutex<Vec<i32>>>,
+        effects: Arc<Mutex<Vec<i32>>>,
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for Tick {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            let apple = r.item_key("minecraft:apple");
+            r.item_part(apple, Effects(self.effects.clone()));
+        }
+        fn living_entity_use_item_tick(
+            &self,
+            _: HostSide,
+            event: &mut LivingEntityUseItemTickEvent<'_>,
+        ) -> Flow {
+            self.heard.lock().unwrap().push(event.duration);
+            if let Some((cancel, remaining)) = self.answer.lock().unwrap().take() {
+                event.duration = remaining;
+                if cancel {
+                    return Flow::Cancel;
+                }
+            }
+            Flow::Continue
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_tick_cancellation_skips_one_tick_and_countdown_continues() {
+        let answer = Arc::new(Mutex::new(None));
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let effects = Arc::new(Mutex::new(Vec::new()));
+        let mods: Mods = vec![ModEntry::new(
+            "client_tick",
+            Box::new(Tick { answer: answer.clone(), heard: heard.clone(), effects: effects.clone() }),
+        )].into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_client_game(|game| {
+                for (cancel, replacement, after_first, after_second) in [
+                    (true, 5, 31, 30),
+                    (false, 0, -1, -2),
+                    (false, 1, 0, -1),
+                    (false, -7, -8, -9),
+                ] {
+                    heard.lock().unwrap().clear();
+                    effects.lock().unwrap().clear();
+                    *answer.lock().unwrap() = Some((cancel, replacement));
+                    game.inventory[game.selected] = Some(ItemStack::new("minecraft:apple", 2));
+                    game.using = Some((game.selected, 0));
+                    game.use_duration = 32;
+                    game.use_ticks_set = false;
+                    game.right = true;
+                    game.remote_tick_using();
+                    assert_eq!(game.using, Some((game.selected, 1)));
+                    assert_eq!(crate::game::item_use::ticks_left(game.use_duration, 1), after_first);
+                    game.remote_tick_using();
+                    assert_eq!(game.using, Some((game.selected, 2)));
+                    assert_eq!(crate::game::item_use::ticks_left(game.use_duration, 2), after_second);
+                    assert_eq!(*heard.lock().unwrap(), [32, after_first]);
+                    let expected_effects = if cancel { vec![31] } else if replacement == 1 { vec![1] } else { vec![] };
+                    assert_eq!(*effects.lock().unwrap(), expected_effects);
+                    // No client-side completion or consumption.
+                    assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 2);
+                }
+            });
+        });
     }
 }
