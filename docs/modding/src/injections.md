@@ -675,8 +675,12 @@ These call kinds are not available to wasm mods.
 
 ## From mixins and legacy kinds
 
-Each Mixin injector, and each kind of the removed `[[native.injection]]` helper form, has one
-`[[inject]]` form. Two rules come first:
+The table below maps Mixin operations and the removed `[[native.injection]]` helper kinds to
+`[[inject]]` forms; it is not a promise of full SpongePowered or horizon-mixins coverage.
+Interior caller cancellation, lexical local capture, slices and exact `require` match counts
+have no form here. `modify_local` changes one binding at a call boundary, not every STORE or
+LOAD; expression selectors cover the reads described below, not arbitrary expressions.
+Two rules come first:
 
 - **A hook function is not a point: implement the hook.** Where the catalog has a hook for the
   moment, a mixin there becomes a `mod_api::Hooks` method, not an injection. `native_*` functions are
@@ -705,7 +709,7 @@ Each callback's types come from the mod's facade (`internals::raw`).
 | `@ModifyExpressionValue` on a field read | `MODIFY_EXPRESSION_VALUE` | `kind = "expression"` | [constants and field reads](#constants-and-field-reads) |
 | `@WrapOperation`, `@Redirect` | `WRAP_OPERATION` | `kind = "wrap_call"` | [wrap_call](#wrap_call) |
 | `@WrapWithCondition` | `WrapWithCondition` | `kind = "wrap_if"` | [wrap_if](#wrap_if) |
-| `@Unique` fields | state fields | `kind = "field"` (pending: #2582) | [state](#state) |
+| `@Unique` fields | transient state fields | `kind = "field"` (native internals source only) | [state](#state) |
 | support classes | support modules | `[[native.module]]` | [support classes](#support-classes) |
 | `@Shadow`, `@Accessor`, `@Invoker` | `bindings` | declared `internals` | [bindings](#bindings) |
 
@@ -899,9 +903,12 @@ pub fn play(receiver: Receiver<'_, '_>, args: &Args) -> bool {
 
 ### state
 
-A `@Unique` field becomes `kind = "field"`, an extension field on a listed type. It lands with
-#2582; until then it is refused with a typed reason. For data a mod keeps on game objects today,
-use attachments.
+A `@Unique` field becomes `kind = "field"`, a namespaced transient field on a supported named
+struct, added by a native `internals` source rebuild. Constructors initialize it with
+`Default::default()`; supported clone implementations preserve it. It is never saved or synced:
+serde skips it and deserialization defaults it. Unsupported layouts, derives and field types
+are refused rather than silently changing persistence. API, wasm and prebuilt-slot routes are
+refused; use attachments for API access, persistence or sync.
 
 ### support classes
 
