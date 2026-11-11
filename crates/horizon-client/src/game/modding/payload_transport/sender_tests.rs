@@ -151,9 +151,14 @@ fn published_tcp_attributes_players_and_orders_actions() {
                     .unwrap();
                 }
             }
+            let reply_deadline = Instant::now() + Duration::from_secs(60);
             for (peer, c) in peers.iter_mut().enumerate() {
                 for slot in [2, 3] {
                     loop {
+                        assert!(
+                            Instant::now() < reply_deadline,
+                            "raw reply deadline: peer {peer}, slot {slot}"
+                        );
                         let (id, body) = c.recv().unwrap();
                         match play::Clientbound::decode(id, &body).unwrap() {
                             play::Clientbound::CustomPayload(p) if p.channel == CHANNEL => {
@@ -194,6 +199,9 @@ fn connect_peer(port: u16, name: &str) -> Connection {
         payload_negotiation::Control,
     };
     let mut c = Connection::connect("127.0.0.1", port, Duration::from_secs(10)).unwrap();
+    // One budget covers the entire login/configuration/play handshake, including
+    // streams that keep producing unrelated packets without reaching the next phase.
+    let handshake_deadline = Instant::now() + Duration::from_secs(60);
     c.reader
         .set_read_timeout(Some(Duration::from_secs(30)))
         .unwrap();
@@ -216,6 +224,10 @@ fn connect_peer(port: u16, name: &str) -> Connection {
     )
     .unwrap();
     loop {
+        assert!(
+            Instant::now() < handshake_deadline,
+            "login deadline: {name}"
+        );
         let (id, body) = c.recv().unwrap();
         match login::Clientbound::decode(id, &body).unwrap() {
             login::Clientbound::Compression(p) => c.set_compression(p.threshold),
@@ -240,6 +252,10 @@ fn connect_peer(port: u16, name: &str) -> Connection {
     let mut offered = false;
     let mut queried = false;
     while known.is_none() || !offered {
+        assert!(
+            Instant::now() < handshake_deadline,
+            "payload negotiation deadline: {name}"
+        );
         let (id, body) = c.recv().unwrap();
         match cfg::Clientbound::decode(id, &body).unwrap() {
             cfg::Clientbound::SelectKnownPacks(p) => known = Some(p),
@@ -275,6 +291,10 @@ fn connect_peer(port: u16, name: &str) -> Connection {
     c.send(&cfg::Serverbound::SelectKnownPacks(known.unwrap()).encode())
         .unwrap();
     loop {
+        assert!(
+            Instant::now() < handshake_deadline,
+            "configuration finish deadline: {name}"
+        );
         let (id, body) = c.recv().unwrap();
         match cfg::Clientbound::decode(id, &body).unwrap() {
             cfg::Clientbound::FinishConfiguration(_) => break,
@@ -286,6 +306,10 @@ fn connect_peer(port: u16, name: &str) -> Connection {
         .unwrap();
     let mut logged_in = false;
     loop {
+        assert!(
+            Instant::now() < handshake_deadline,
+            "play teleport deadline: {name}"
+        );
         let (id, body) = c.recv().unwrap();
         match play::Clientbound::decode(id, &body).unwrap() {
             play::Clientbound::Login(_) => {
