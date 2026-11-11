@@ -10,7 +10,7 @@ use super::{
     chunks::ChunkEncoder,
     data::SyncData,
     entity::{Entities, EntityState},
-    guest::{Guest, SentEffect, stack_to_network},
+    guest::{Guest, InboxItem, SentEffect, stack_to_network},
 };
 use crate::{
     chunk::Chunk,
@@ -151,6 +151,8 @@ pub struct TickCtx<'a> {
 
 /// What the gameplay code has to do for a guest.
 pub enum HostEvent {
+    /// Release input reservations only after this segment has finished in Game.
+    InputCredits(Vec<crate::net::ingress::ReceiveLease<NetEvent>>),
     RawPayload(Box<crate::raw_payloads::Delivery>),
     /// A guest entered the world; load their saved state.
     Joined(u32),
@@ -314,7 +316,14 @@ fn take_tracking(
     }
 }
 
+struct PacketDrain {
+    conns: Vec<u32>,
+    next: usize,
+    started: bool,
+}
+
 pub struct Hub {
+    packet_drain: Option<PacketDrain>,
     /// Main-thread world identity used to bind typed network-context player handles.
     pub payload_player_epoch: Option<mod_api::WorldEpoch>,
     /// Clicks on and closings of native mods' menus, for the game.
@@ -826,6 +835,7 @@ impl Hub {
             mod_commands: (serde_json::Value::Null, None),
             native_menu_events: Vec::new(),
             chunk_watches: ChunkWatchLog::default(),
+            packet_drain: None,
             pending_kicks: Vec::new(),
             transfers: None,
             native_tracking: Vec::new(),
@@ -2316,8 +2326,12 @@ impl Hub {
     pub fn tick(&mut self, ctx: &mut TickCtx) -> Vec<HostEvent> {
         let mut events = self.poll(ctx);
         events.extend(self.drain_packets(ctx));
-        events.extend(self.tick_level(ctx));
-        self.end_tick();
+        // A caller that consumes raw events must resume the inbox before
+        // running level/maintenance work. Game uses the split methods.
+        if !self.packets_paused() {
+            events.extend(self.tick_level(ctx));
+            self.end_tick();
+        }
         events
     }
 
@@ -2329,12 +2343,24 @@ impl Hub {
         self.anticheat_tick(ctx.tick_rate);
         let mut events = std::mem::take(&mut self.pending_kicks);
         self.expire_arrivals(&mut events);
-        for event in self.lan.poll() {
+        let mut credits = Vec::new();
+        for receipt in self.lan.poll() {
+            let (event, credit) = receipt.into_parts();
             match event {
                 NetEvent::RawPayload(delivery) => {
-                    events.push(HostEvent::RawPayload(delivery));
+                    if let Some(conn) = delivery.conn {
+                        self.update_guest(conn, |g| {
+                            if g.left_reason.is_empty() {
+                                g.inbox.push_back(InboxItem::Raw(delivery, credit));
+                            }
+                        });
+                    } else {
+                        events.push(HostEvent::RawPayload(delivery));
+                        credits.push(credit);
+                    }
                 }
                 NetEvent::Joined(j) => {
+                    credits.push(credit);
                     while let Some(i) = self
                         .guests
                         .iter()
@@ -2346,38 +2372,22 @@ impl Hub {
                     events.push(HostEvent::Joined(conn));
                 }
                 NetEvent::Left(conn, reason) => {
+                    credits.push(credit);
                     if let Some(i) = self.guests.iter().position(|g| g.conn == conn) {
                         let g = self.remove_guest(i, &reason);
                         events.push(HostEvent::Left(Box::new(g)));
                     }
                 }
                 NetEvent::Packet(conn, packet, bytes) => {
-                    let exceeded =
-                        self.update_guest(conn, |g| {
-                            g.sender.undrained.taken(bytes);
-                            // A kicked player's packets wait for nothing.
-                            if !g.left_reason.is_empty() {
-                                return false;
-                            }
-                            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(*packet, bytes));
-                            g.inbox_bytes += bytes;
-                            // Bound queued work when a client exceeds its budget.
-                            if g.inbox.len() > INBOX_LIMIT || g.inbox_bytes > INBOX_BYTES {
-                                events.push(HostEvent::Warn(format!(
-                                "{} sent more packets than the server handles ({} waiting, {} kB)",
-                                g.name, g.inbox.len(), g.inbox_bytes >> 10
-                            )));
-                                g.inbox = Default::default();
-                                g.inbox_bytes = 0;
-                                return true;
-                            }
-                            false
-                        });
-                    if exceeded == Some(true) {
-                        self.kick(conn, translatable("disconnect.exceeded_packet_rate", &[]));
-                    }
+                    self.update_guest(conn, |g| {
+                        g.sender.undrained.taken(bytes);
+                        if g.left_reason.is_empty() {
+                            g.inbox.push_back(InboxItem::Packet(*packet, Some(credit)));
+                        }
+                    });
                 }
                 NetEvent::Duplicate(uuid) => {
+                    credits.push(credit);
                     let conns: Vec<u32> = self
                         .guests
                         .iter()
@@ -2414,6 +2424,7 @@ impl Hub {
                 self.kick(conn, translatable("disconnect.timeout", &[]));
             }
         }
+        events.push(HostEvent::InputCredits(credits));
         events
     }
 
@@ -2426,15 +2437,20 @@ impl Hub {
     /// and its next message after the freeze would not validate otherwise.
     pub(crate) fn keep_acknowledgements(&mut self, i: usize, events: &mut Vec<HostEvent>) {
         let inbox = self.guests.update(i, |g| std::mem::take(&mut g.inbox));
-        let mut bytes = 0;
-        for (packet, size) in inbox {
+        let mut credits = Vec::new();
+        let mut inbox = inbox.into_iter();
+        while let Some(entry) = inbox.next() {
+            let InboxItem::Packet(packet, credit) = entry else {
+                // Never filter or acknowledge past a raw callback boundary.
+                self.guests.update(i, |g| {
+                    g.inbox.push_back(entry);
+                    g.inbox.extend(inbox);
+                });
+                break;
+            };
             match &packet {
-                S::Chat(c) => {
-                    self.apply_last_seen(i, &c.last_seen, events);
-                }
-                S::ChatCommandSigned(c) => {
-                    self.apply_last_seen(i, &c.last_seen, events);
-                }
+                S::Chat(c) => self.apply_last_seen(i, &c.last_seen, events),
+                S::ChatCommandSigned(c) => self.apply_last_seen(i, &c.last_seen, events),
                 S::ChatAck(c) => self.chat_ack(i, c.offset, events),
                 S::AcceptTeleportation(_)
                 | S::PlayerLoaded(_)
@@ -2443,16 +2459,15 @@ impl Hub {
                 | S::ClientTickEnd(_)
                 | S::KeepAlive(_)
                 | S::Pong(_) => {
-                    bytes += size;
-                    self.guests.update(i, |g| g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(packet, size)));
+                    self.guests
+                        .update(i, |g| g.inbox.push_back(InboxItem::Packet(packet, credit)));
+                    continue;
                 }
                 _ => {}
             }
+            credits.extend(credit);
         }
-        {
-            let value = bytes;
-            self.guests.update(i, |guest| guest.inbox_bytes = value);
-        }
+        events.push(HostEvent::InputCredits(credits));
     }
 
     /// Handle the players in this level's packets (`ServerGamePacketListenerImpl`
@@ -2462,39 +2477,51 @@ impl Hub {
     /// changed.
     pub fn drain_packets(&mut self, ctx: &mut TickCtx) -> Vec<HostEvent> {
         let mut events = Vec::new();
-        let timed = crate::spans::recording_here();
-        for i in 0..self.guests.len() {
-            if self.here(&self.guests[i]) {
-                let frozen = self.guests[i].handover.is_some();
-                if frozen {
-                    // Frozen for a hand-over: it answers the server and nothing more.
-                    self.keep_acknowledgements(i, &mut events);
-                }
-                let started = timed.then(std::time::Instant::now);
-                let waiting = self.guests[i].inbox.len();
-                self.process_inbox(i, ctx, &mut events);
-                // Its moves are dropped, so whether the last one left it floating is
-                // stale: a player frozen in a jump is not kicked for flying.
-                if !frozen {
-                    self.tick_floating(i, &mut events);
-                }
-                // A slow tick's line says whose packets took it (`spans::note`).
-                if let Some(started) = started {
-                    let g = &self.guests[i];
-                    crate::spans::note(started.elapsed().as_secs_f32() * 1000.0, || {
-                        let handled = waiting.saturating_sub(g.inbox.len());
-                        format!("{}'s {handled} packets", g.name)
-                    });
-                }
-            } else if self.guests[i].held && self.watches(&self.guests[i]) {
-                // A held player only answers what the server asked of it: its
-                // acknowledgements keep the chunks coming. Whatever else it sends
-                // (moves, clicks, commands) is not for the world.
-                self.keep_acknowledgements(i, &mut events);
-                self.process_inbox(i, ctx, &mut events);
+        let mut pass = self.packet_drain.take().unwrap_or_else(|| PacketDrain {
+            conns: self
+                .guests
+                .iter()
+                .filter(|g| self.here(g) || (g.held && self.watches(g)))
+                .map(|g| g.conn)
+                .collect(),
+            next: 0,
+            started: false,
+        });
+        while let Some(&conn) = pass.conns.get(pass.next) {
+            let Some(i) = self.guests.iter().position(|g| g.conn == conn) else {
+                pass.next += 1;
+                pass.started = false;
+                continue;
+            };
+            if !self.here(&self.guests[i])
+                && !(self.guests[i].held && self.watches(&self.guests[i]))
+            {
+                pass.next += 1;
+                pass.started = false;
+                continue;
             }
+            let frozen = self.guests[i].handover.is_some() || self.guests[i].held;
+            if frozen {
+                self.keep_acknowledgements(i, &mut events);
+            }
+            if self.process_inbox(i, ctx, &mut events, !pass.started) {
+                pass.started = true;
+                self.packet_drain = Some(pass);
+                return events;
+            }
+            if !frozen && self.here(&self.guests[i]) {
+                self.tick_floating(i, &mut events);
+            }
+            pass.next += 1;
+            pass.started = false;
         }
         events
+    }
+
+    /// A raw boundary must finish in Game before continuing this same level pass.
+    /// Resuming drains only the frozen inbox turn: no poll, maintenance or world tick.
+    pub fn packets_paused(&self) -> bool {
+        self.packet_drain.is_some()
     }
 
     /// The level in place's part of the tick (`ServerLevel.tick`'s chunk
@@ -4273,7 +4300,10 @@ impl Hub {
     /// A move still queued for guest `i`, which a packet the game handles
     /// after this pass must not overtake.
     fn move_queued(&self, i: usize) -> bool {
-        self.guests[i].inbox.iter().any(|(p, _)| {
+        self.guests[i].inbox.iter().any(|entry| {
+            let InboxItem::Packet(p, _) = entry else {
+                return false;
+            };
             matches!(
                 p,
                 S::MovePlayerPos(_)
@@ -4297,33 +4327,56 @@ impl Hub {
         });
     }
 
-    fn process_inbox(&mut self, i: usize, ctx: &mut TickCtx, events: &mut Vec<HostEvent>) {
+    fn process_inbox(
+        &mut self,
+        i: usize,
+        ctx: &mut TickCtx,
+        events: &mut Vec<HostEvent>,
+        begin: bool,
+    ) -> bool {
+        let mut credits = Vec::new();
         // ServerGamePacketListenerImpl.tickPlayer ran between the last
         // tick's packets and these: resetPosition, and the moves it counted.
-        self.guests.update(i, |g| {
-            g.first_good = g.position;
-            g.known_moves = g.received_moves;
-            // ServerPlayer.tick: tickClientLoadTimeout.
-            g.load_timeout = g.load_timeout.saturating_sub(1);
-        });
-        let mut budget = PACKETS_PER_TICK;
+        if begin {
+            self.guests.update(i, |g| {
+                g.first_good = g.position;
+                g.known_moves = g.received_moves;
+                // ServerPlayer.tick: tickClientLoadTimeout.
+                g.load_timeout = g.load_timeout.saturating_sub(1);
+            });
+        }
         // An action the game runs after this pass has a move queued behind it: the
         // move waits for the next tick, but the arm swing the client sent right after
         // the action is still handled with it, as vanilla handles both in this tick
         // (the swing starts the attack strength again, #7817).
         let mut held = false;
-        while budget > 0 {
-            if held && !matches!(self.guests[i].inbox.front(), Some((S::Punch(_), _))) {
+        loop {
+            if held
+                && !matches!(
+                    self.guests[i].inbox.front(),
+                    Some(InboxItem::Packet(S::Punch(_), _) | InboxItem::Raw(_, _))
+                )
+            {
                 break;
             }
-            let Some(packet) = self.guests.update(i, |g| {
-                let (packet, bytes) = g.inbox.pop_front()?;
-                g.inbox_bytes -= bytes;
-                Some(packet)
-            }) else {
+            let Some(entry) = self.guests.update(i, |g| g.inbox.pop_front()) else {
                 break;
             };
-            budget -= 1;
+            if !self.guests[i].left_reason.is_empty() {
+                break;
+            }
+            let packet = match entry {
+                InboxItem::Raw(delivery, credit) => {
+                    credits.push(credit);
+                    events.push(HostEvent::RawPayload(delivery));
+                    events.push(HostEvent::InputCredits(credits));
+                    return true;
+                }
+                InboxItem::Packet(packet, credit) => {
+                    credits.extend(credit);
+                    packet
+                }
+            };
             let conn = self.guests[i].conn;
             // ServerPlayer.resetLastActionTime: every handler of a player's
             // own action resets it, movement only when it moved
@@ -4668,6 +4721,8 @@ impl Hub {
                 other => events.push(HostEvent::Packet(conn, Box::new(other))),
             }
         }
+        events.push(HostEvent::InputCredits(credits));
+        false
     }
 
     /// ServerGamePacketListenerImpl.handleMovePlayer.
@@ -5498,11 +5553,10 @@ fn wrap_degrees(degrees: f32) -> f32 {
 
 /// The packets of one player handled in a tick; the rest wait for the next.
 const PACKETS_PER_TICK: usize = 400;
-/// The packets a player may have waiting (a second of its budget) before it is
-/// disconnected, as vanilla's rate-limit does: no real client gets near it.
+/// Legacy ordinary-packet transport counter, still used by conn::Undrained.
+/// Hub retention uses provider byte credit instead; raw input never uses this cap.
 pub(crate) const INBOX_LIMIT: usize = 20 * PACKETS_PER_TICK;
-/// The same in bytes on the wire: 8000 full books would hold gigabytes. A
-/// real client's largest packets (a 100-page book) are a few hundred kB.
+/// Legacy ordinary-packet transport wire counter, not a Hub inbox quota.
 pub(crate) const INBOX_BYTES: usize = 16 << 20;
 
 /// The `minecraft:gravity` attribute of a player.
@@ -5631,6 +5685,7 @@ fn listed_properties(
 
 #[cfg(test)]
 mod tests {
+    mod ordered_inbox_tests;
     mod sound_tests;
     use super::*;
     use crate::fast_hash::FxHashSet;
@@ -6396,7 +6451,10 @@ mod tests {
 
     /// One tick of the hub that handles a single packet from the guest.
     fn tick_packet(hub: &mut Hub, world: &mut World, packet: S) {
-        hub.guests.inbox_mut(0).unwrap().push_back(horizon_client::lan::guest::InboxItem::synthetic(packet, 0));
+        hub.guests
+            .inbox_mut(0)
+            .unwrap()
+            .push_back(horizon_client::lan::guest::InboxItem::uncredited(packet));
         let mut next_entity = 2;
         let border = crate::worldborder::WorldBorder::default();
         let mut ctx = TickCtx {
@@ -7118,15 +7176,15 @@ mod tests {
             streaming: None,
         };
         for action in [3, 4] {
-            hub.guests.inbox_mut(0).unwrap().push_back(horizon_client::lan::guest::InboxItem::synthetic(
-                S::PlayerCommand(play::PlayerCommand {
-                    id: 1,
-                    action,
-                    data: 75,
-                }),
-                4,
-            ));
-            hub.guests.update(0, |g| g.inbox_bytes += 4);
+            hub.guests.inbox_mut(0).unwrap().push_back(
+                horizon_client::lan::guest::InboxItem::uncredited(S::PlayerCommand(
+                    play::PlayerCommand {
+                        id: 1,
+                        action,
+                        data: 75,
+                    },
+                )),
+            );
             let events = hub.tick(&mut ctx);
             let reached = events.iter().any(|event| {
                 matches!(event, HostEvent::Packet(1, packet) if matches!(&**packet, S::PlayerCommand(c) if c.action == action && c.data == 75))
@@ -7312,15 +7370,18 @@ mod tests {
             hub.guests.update(0, |g| g.load_timeout = value);
         }
         let inbox = hub.guests.inbox_mut(0).unwrap();
-        inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(S::Attack(play::Attack { id: 7 }), 0));
-        inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(S::Punch(horizon_protocol::packets::Empty), 0));
-        inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
+        inbox.push_back(horizon_client::lan::guest::InboxItem::uncredited(
+            S::Attack(play::Attack { id: 7 }),
+        ));
+        inbox.push_back(horizon_client::lan::guest::InboxItem::uncredited(S::Punch(
+            horizon_protocol::packets::Empty,
+        )));
+        inbox.push_back(horizon_client::lan::guest::InboxItem::uncredited(
             S::MovePlayerRot(play::MovePlayerRot {
                 yaw: 90.0,
                 pitch: 0.0,
                 flags: 1,
             }),
-            0,
         ));
         let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
         let mut next_entity = 2;
@@ -7357,7 +7418,7 @@ mod tests {
         assert!(
             matches!(
                 hub.guests[0].inbox.iter().collect::<Vec<_>>()[..],
-                [(S::MovePlayerRot(_), _)]
+                [InboxItem::Packet(S::MovePlayerRot(_), _)]
             ),
             "the turn did not wait for the next tick"
         );
@@ -7372,23 +7433,21 @@ mod tests {
         hub.guests.update(0, |guest| {
             guest.load_timeout = 0;
             let inbox = &mut guest.inbox;
-            inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
+            inbox.push_back(horizon_client::lan::guest::InboxItem::uncredited(
                 S::PlayerAction(play::PlayerAction {
                     action,
                     pos: [0; 3],
                     direction: 0,
                     sequence: 0,
                 }),
-                0,
             ));
-            inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
+            inbox.push_back(horizon_client::lan::guest::InboxItem::uncredited(
                 S::MovePlayerPos(play::MovePlayerPos {
                     x: before.0[0] + 0.3,
                     y: before.0[1],
                     z: before.0[2],
                     flags: 1,
                 }),
-                0,
             ));
         });
         let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
@@ -7435,7 +7494,7 @@ mod tests {
         assert!(
             matches!(
                 hub.guests[0].inbox.iter().collect::<Vec<_>>()[..],
-                [(S::MovePlayerPos(_), _)]
+                [InboxItem::Packet(S::MovePlayerPos(_), _)]
             ),
             "the move did not wait for the next tick"
         );
