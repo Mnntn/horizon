@@ -12,7 +12,7 @@ mod use_item;
 
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
 use super::render_tick::{mob_tracking_body, player_tracking_body};
-use super::{Dim, Game, Mining, Screen, level_sounds::LevelSound};
+use super::{Dim, Game, Mining, Screen, item_use::ticks_left, level_sounds::LevelSound};
 use crate::game::api_values::TryIntoApi;
 use horizon_client::actions::Action;
 use horizon_client::first_person::{Hand, SwingAnimation};
@@ -9749,8 +9749,7 @@ impl Game<'_> {
         if self.mod_use_tick(slot, ticks, !self.right || !in_hand) {
             return;
         }
-        // A client cancellation skips this tick's effects, not the countdown
-        // or the release packet; only the server completes the use.
+        // A client cancel skips this tick's effects; the countdown and release continue.
         if let Some(s) = stack.as_ref().filter(|_| in_hand)
             && !self.use_item_ticked(s, ticks)
         {
@@ -9763,9 +9762,7 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|s| &*s.item == "minecraft:brush")
         {
-            let elapsed = 200i32
-                .wrapping_sub(super::item_use::ticks_left(self.use_duration, ticks))
-                .wrapping_add(1);
+            let elapsed = 201i32.wrapping_sub(ticks_left(self.use_duration, ticks));
             let hit = self.pick().filter(|_| in_hand);
             if let Some(hit) = &hit
                 && elapsed % 10 == 5

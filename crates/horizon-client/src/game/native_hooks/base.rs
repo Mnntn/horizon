@@ -3568,9 +3568,8 @@ impl Game<'_> {
     /// Setting 1 runs the effects and finishes in this same tick. This path
     /// never calls release-using: a bow fires nothing. A use-on-release item
     /// (a crossbow) does not finish here; its counter goes negative until release.
-    /// On the client a cancel skips that tick's effects and ignores its duration
-    /// replacement; the existing counter decrements and the use waits for
-    /// server completion or release.
+    /// On the client cancellation skips this tick's effects and ignores its duration
+    /// replacement; the existing counter decrements until server completion or release.
     ///
     /// In contrast, canceling Start prevents the use beginning (duration 0
     /// does begin it); canceling Stop skips only release-using. Finish is not
