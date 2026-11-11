@@ -9,7 +9,6 @@ description = "Horizon's mod files: content mods, modpacks and the registry inde
 [dependencies]
 horizon-mod-vocab = { path = "../horizon-mod-vocab" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
-horizon-mod-point-shape = { path = "../horizon-mod-point-shape" }
 horizon-core = { path = "../horizon-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

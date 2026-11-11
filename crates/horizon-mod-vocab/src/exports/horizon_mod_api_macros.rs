@@ -58,4 +58,4 @@ pub use horizon_mod_api_macros::point as __point;
 /// #[mod_api::horizon_mod] impl Hooks for A {}
 /// #[mod_api::horizon_mod] impl Hooks for B {}
 /// ```
-pub use horizon_mod_api_macros::{horizon_mod, horizon_part, if_installed, no_point};
+pub use horizon_mod_api_macros::{horizon_mod, horizon_part, if_installed};

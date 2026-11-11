@@ -7,7 +7,6 @@ build = "../../../../crates/horizon-mod-wasm/tests/points/build.rs"
 
 [dependencies]
 horizon-mod-api = { path = "../../../../crates/horizon-mod-api" }
-horizon-mod-points = { path = "../../../../crates/horizon-mod-points" }
 
 [build-dependencies]
 horizon-mod-api-gen = { path = "../../../../crates/horizon-mod-api-gen" }

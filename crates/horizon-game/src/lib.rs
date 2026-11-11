@@ -26,5 +26,5 @@ pub const GAME_IDENTITY: [u8; horizon_mod_package::game_identity::MARK.len()] =
 pub fn main() {
     let startup = horizon_client::entry::prepare();
     std::hint::black_box(&horizon_mod_package::holder::CAPABILITY);
-    horizon_mod_host::main_with(Vec::new(), &[], &[], startup);
+    horizon_mod_host::main_with(Vec::new(), &[], startup);
 }

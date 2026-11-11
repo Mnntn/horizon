@@ -132,7 +132,6 @@ fn main() {
     let startup = horizon_client::entry::prepare();
     horizon_mod_host::main_with(
         vec![ModEntry::new("dimprobe", Box::<DimProbe>::default())],
-        &[],
         BUILT,
         startup,
     );

@@ -11,7 +11,6 @@ name = "mod_render"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 horizon-mod-api = { path = "../horizon-mod-api" }
-horizon-mod-points = { path = "../horizon-mod-points" }
 wgpu = { version = "30.0.1", default-features = false, features = ["std"] }
 glam = "0.30"
 bytemuck = { version = "1.24", features = ["derive"] }

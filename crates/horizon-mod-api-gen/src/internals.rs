@@ -51,7 +51,7 @@ struct Source {
 
 impl Source {
     fn offset(&self, position: proc_macro2::LineColumn) -> usize {
-        crate::points::offset(&self.text, &self.lines, position)
+        crate::source::offset(&self.text, &self.lines, position)
     }
 
     fn annotate(&mut self, attrs: &[syn::Attribute], start: Span, kind: &str, path: &str) {
@@ -195,11 +195,11 @@ struct Pass {
 }
 
 /// Crates whose types are the mod API's own: their fields stay private in every build.
-const API_CRATES: &[&str] = &["mod_api", "mod_points", "point_shape"];
+const API_CRATES: &[&str] = &["mod_api"];
 
 // Only test-only declarations are excluded. Other cfgs keep their spelling and visibility, and
 // each entry records them: changing visibility doesn't select an OS or feature for the build.
-use crate::points::{conditions, test_only};
+use crate::source::{conditions, test_only};
 
 /// The attributes a layout's signature keeps: which fields exist, and whether another crate may
 /// build it.
@@ -395,7 +395,7 @@ impl Shapes {
             if !name.starts_with("horizon-") || !package.join("Cargo.toml").is_file() {
                 continue;
             }
-            let (_, lib) = crate::points::crate_root(root, name)?;
+            let (_, lib) = crate::source::crate_root(root, name)?;
             if !lib.is_file() {
                 continue;
             }
@@ -425,7 +425,7 @@ impl Shapes {
         };
         let dir = lib.parent().expect("source parent");
         let files =
-            crate::points::module_files(krate.to_owned(), lib.clone(), dir.to_owned(), false)?;
+            crate::source::module_files(krate.to_owned(), lib.clone(), dir.to_owned(), false)?;
         self.loaded.insert(krate.to_owned());
         for file in files {
             let text = fs::read_to_string(&file.path)
@@ -1056,7 +1056,7 @@ impl Pass {
         let parsed: syn::Path = syn::parse_str(path).map_err(|e| format!("invalid path: {e}"))?;
         let mut segments = parsed.segments.iter();
         let crate_name = segments.next().ok_or("empty path")?.ident.to_string();
-        let (_, lib) = crate::points::crate_root(root, &crate_name)?;
+        let (_, lib) = crate::source::crate_root(root, &crate_name)?;
         let mut file = self.load(&lib)?;
         let mut dir = self.sources[file]
             .path
@@ -1356,7 +1356,7 @@ impl Pass {
 
 /// Widen game internals and the declared lower-crate items in a staged source copy.
 /// Fails before writing anything if a declaration in `internals.txt` cannot be resolved.
-/// A listed lower-crate point is an internal too: its raw listener names the function's types.
+/// A listed replaceable lower-crate function is an internal too: its copy names the function's types.
 pub fn widen(root: &Path) -> Result<Widened, String> {
     stage(root, false)
 }
@@ -1410,9 +1410,9 @@ fn collect(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<Pas
         ..Pass::default()
     };
     let src = root.join("crates/horizon-client/src");
-    for source in crate::points::game_files(&src, false)?
+    for source in crate::source::game_files(&src, false)?
         .into_iter()
-        .chain(std::iter::once(crate::points::GameFile {
+        .chain(std::iter::once(crate::source::GameFile {
             module: "horizon_client::entry".into(),
             path: src.join("entry.rs"),
             cfg: Vec::new(),
@@ -1436,29 +1436,9 @@ fn collect(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<Pas
             }
         }
     }
-    let slots =
-        crate::sites::slots(&root.join(crate::sites::DIRECTORY)).map_err(|e| e.to_string())?;
-    for (path, origin) in slots.functions.iter().chain(
-        slots
-            .calls
-            .iter()
-            .filter(|d| !d.target.starts_with("horizon_client::"))
-            .map(|d| (&d.target, &d.origin)),
-    ) {
-        pass.lower(root, path)
+    for (origin, path) in crate::replace::listed(root)? {
+        pass.lower(root, &path)
             .map_err(|e| format!("{origin}: {path}: {e}"))?;
-    }
-    // A canonical lower-crate callee needs a typed catalog entry, not an extra
-    // function point. Lexical selectors remain resolved from their enclosing scope.
-    for declaration in &slots.calls {
-        if let Some((krate, _)) = declaration.selector.split_once("::")
-            && krate != "horizon_client"
-            && crate::points::crate_root(root, krate).is_ok()
-        {
-            pass.lower(root, &declaration.selector).map_err(|error| {
-                format!("{}: {}: {error}", declaration.origin, declaration.selector)
-            })?;
-        }
     }
     pass.shapes(root)?;
     if discovery {
@@ -1470,7 +1450,7 @@ fn collect(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<Pas
             .map(str::to_owned)
             .collect();
         for krate in crates {
-            let (_, lib) = crate::points::crate_root(root, &krate)?;
+            let (_, lib) = crate::source::crate_root(root, &krate)?;
             let file = pass.load(&lib)?;
             let start = pass.sources[file]
                 .parsed
@@ -1542,34 +1522,6 @@ mod tests {
     }
 
     #[test]
-    fn listed_callee_is_catalogued_without_creating_a_function_point() {
-        let fixture = Fixture::new("fn run(s: &str) -> usize { lower::size(s) }");
-        fixture.lower();
-        fixture.put(
-            "crates/lower/src/lib.rs",
-            "fn size(s: &str) -> usize { s.len() }",
-        );
-        fixture.put(
-            "crates/horizon-mod-api-gen/slots/port.txt",
-            "horizon_client::game::run | lower::size | 0 |\n",
-        );
-        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
-        assert!(entries.iter().any(|entry| entry.path == "lower::size"));
-        let declarations = crate::sites::slots(&fixture.0.join(crate::sites::DIRECTORY)).unwrap();
-        assert!(declarations.functions.is_empty());
-        let (_, sites) = crate::sites::rewrite::rewrite(
-            &fixture.game(),
-            "horizon_client::game",
-            &entries,
-            &declarations.calls,
-        )
-        .unwrap();
-        assert_eq!(sites.len(), 1);
-        assert_eq!(sites[0].call, "lower::size");
-        assert_eq!(sites[0].args[0].1, "& 'a str");
-    }
-
-    #[test]
     fn catalog_is_read_only_and_staging_output_keeps_its_goldens() {
         fn files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
             let mut result = BTreeMap::new();
@@ -1615,7 +1567,7 @@ mod tests {
     }
 
     #[test]
-    fn file_inner_conditions_filter_points_and_internals() {
+    fn file_inner_conditions_filter_files_and_internals() {
         let fixture = Fixture::new("mod test_only; mod optional; mod runtime;");
         fixture.put(
             "crates/horizon-client/src/game/test_only.rs",
@@ -1628,7 +1580,7 @@ mod tests {
         fixture.put("crates/horizon-client/src/game/runtime.rs", "fn live() {}");
         let src = fixture.0.join("crates/horizon-client/src");
         for every_build in [false, true] {
-            let files = crate::points::game_files(&src, every_build).unwrap();
+            let files = crate::source::game_files(&src, every_build).unwrap();
             assert!(
                 !files
                     .iter()
@@ -1663,7 +1615,7 @@ mod tests {
     }
 
     #[test]
-    fn game_area_moves_preserve_internals_and_points() {
+    fn game_area_moves_preserve_internals_and_modules() {
         let source = "struct Game; mod feature;";
         let module = "use super::Game; impl Game { fn action(&self) -> u8 { 7 } }";
         let before = Fixture::new(source);
@@ -1680,14 +1632,14 @@ mod tests {
             "crates/horizon-client/src/game/runtime/feature/shared.rs",
             module,
         );
-        fn points(root: &Path) -> BTreeSet<String> {
-            crate::points::game_files(&root.join("crates/horizon-client/src"), true)
+        fn modules(root: &Path) -> BTreeSet<String> {
+            crate::source::game_files(&root.join("crates/horizon-client/src"), true)
                 .unwrap()
                 .into_iter()
                 .map(|file| file.module)
                 .collect()
         }
-        assert_eq!(points(&before.0), points(&after.0));
+        assert_eq!(modules(&before.0), modules(&after.0));
         assert_eq!(
             widen_with(&before.0, &[]).unwrap().entries,
             widen_with(&after.0, &[]).unwrap().entries
@@ -1730,76 +1682,13 @@ mod tests {
         fs::rename(&fixture.0, &moved).unwrap();
         fixture.0 = moved;
         let files =
-            crate::points::game_files(&fixture.0.join("crates/horizon-client/src"), true).unwrap();
+            crate::source::game_files(&fixture.0.join("crates/horizon-client/src"), true).unwrap();
         assert!(files.iter().all(|file| file.path.starts_with(&fixture.0)));
         let modules: BTreeSet<_> = files.iter().map(|file| file.module.as_str()).collect();
         assert!(modules.contains("horizon_client::game::feature"));
         assert!(modules.contains("horizon_client::game::native_hooks::area"));
         assert!(modules.contains("horizon_client::game::lan_actions::turns"));
         assert_eq!(before, widen_with(&fixture.0, &[]).unwrap().entries);
-    }
-
-    #[test]
-    fn lan_action_areas_preserve_helpers_internals_and_point_contracts() {
-        let before = Fixture::new("struct Game; mod lan_actions;");
-        before.put(
-            "crates/horizon-client/src/game/lan_actions.rs",
-            "struct State; impl Game { fn vehicle_has_other_viewers() -> bool { true } fn action(&self, value: u8) -> u8 { value } }",
-        );
-        let after = Fixture::new("struct Game; mod lan_actions;");
-        let directory = "crates/horizon-client/src/game/lan_actions";
-        after.put(
-            &format!("{directory}/mod.rs"),
-            "include!(concat!(env!(\"OUT_DIR\"), \"/lan_action_modules.rs\"));\ninclude!(\"shared.rs\");",
-        );
-        after.put(
-            &format!("{directory}/shared.rs"),
-            "struct State; impl Game { fn vehicle_has_other_viewers() -> bool { true } }",
-        );
-        after.put(
-            &format!("{directory}/turns.rs"),
-            "impl Game { pub(super) fn action(&self, value: u8) -> u8 { value } }",
-        );
-        for fixture in [&before, &after] {
-            fixture.put("crates/horizon-mod-api-gen/slots/horizon.txt", "");
-            fixture.put("crates/horizon-mod-api-gen/internals.txt", "");
-            fixture.put(
-                "crates/horizon-mod-points/Cargo.toml",
-                "[package]\nname = 'horizon-mod-points'\nversion = '0.1.0'\n",
-            );
-        }
-        fn inventory(root: &Path) -> Vec<serde_json::Value> {
-            crate::points::game_points(root)
-                .unwrap()
-                .into_iter()
-                .map(|point| {
-                    let json = serde_json::to_string(&point)
-                        .unwrap()
-                        .replace("::turns", "");
-                    serde_json::from_str(&json).unwrap()
-                })
-                .collect()
-        }
-        assert_eq!(inventory(&before.0), inventory(&after.0));
-        let old = discover(&before.0).unwrap();
-        let new = discover(&after.0).unwrap();
-        let normalize = |entries: Vec<Internal>| {
-            entries
-                .into_iter()
-                .filter(|entry| !entry.path.ends_with("::turns"))
-                .map(|entry| {
-                    (
-                        entry.path.replace("::turns", ""),
-                        (entry.signature, entry.hash),
-                    )
-                })
-                .collect::<BTreeMap<_, _>>()
-        };
-        assert_eq!(normalize(old.entries), normalize(new.entries));
-        widen_with(&after.0, &[]).unwrap();
-        let staged = fs::read_to_string(after.0.join(format!("{directory}/mod.rs"))).unwrap();
-        assert!(staged.contains("pub mod turns;"));
-        assert!(!staged.contains("lan_action_modules.rs"));
     }
 
     fn shapes_fixture(game: &str) -> Fixture {
@@ -1947,48 +1836,6 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
     }
 
     #[test]
-    fn called_path_imports_resolve_sites_without_changing_signature_hashes() {
-        let fixture = Fixture::new(
-            "mod child { pub fn add(value: u32) -> u32 { value } pub struct Block; impl Block { fn make(value: u32) -> u32 { value } } } use child::{add as imported, Block as Alias}; struct Game; impl Game { fn make(value: u32) -> u32 { value } fn run(&self) { imported(1); Alias::make(1); Self::make(1); } }",
-        );
-        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
-        let enclosing = entries
-            .iter()
-            .find(|e| e.path.ends_with("Game::run"))
-            .unwrap();
-        assert_eq!(
-            enclosing.refs["imported"],
-            "horizon_client::game::child::add"
-        );
-        assert_eq!(
-            enclosing.refs["Alias::make"],
-            "horizon_client::game::child::Block::make"
-        );
-        let rule = crate::crossing::Rule::new(&entries);
-        let sig = syn::parse_quote!(fn run(&self));
-        let lexical = crate::sites::analysis::Scope::scan(&sig, None);
-        for call in ["imported(1)", "Alias::make(1)", "Self::make(1)"] {
-            let expr = syn::parse_str(call).unwrap();
-            crate::sites::resolve::resolve(&expr, enclosing, &sig, &lexical, &entries, &rule)
-                .unwrap();
-        }
-        let old_hash = enclosing.hash.clone();
-        fixture.put(
-            "crates/horizon-client/src/game.rs",
-            "struct Game; impl Game { fn run(&self) {} }",
-        );
-        let changed = widen_with(&fixture.0, &[]).unwrap().entries;
-        assert_eq!(
-            changed
-                .iter()
-                .find(|e| e.path.ends_with("Game::run"))
-                .unwrap()
-                .hash,
-            old_hash
-        );
-    }
-
-    #[test]
     fn signatures_keep_field_and_variant_configuration() {
         let fixture = Fixture::new(
             r#"
@@ -2024,39 +1871,6 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
                 "{signature}"
             );
         }
-    }
-
-    #[test]
-    fn source_owned_call_expands_reachable_private_aliases() {
-        let fixture = shapes_fixture(
-            "fn take(pos: horizon_items::aliases::Pos, value: horizon_items::aliases::Stack) {} fn run(value: horizon_items::ItemStack) { take((1, 2, 3), value); }",
-        );
-        fixture.put(
-            "crates/horizon-items/src/items.rs",
-            "mod item_stack; mod kinds; pub mod aliases; pub use item_stack::ItemStack;",
-        );
-        fixture.put("crates/horizon-items/src/aliases.rs", "use super::ItemStack as StackItem; pub type Stack = StackItem; pub type Pos = (i32, i32, i32);");
-        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
-        let request = crate::sites::Declaration {
-            target: "horizon_client::game::run".into(),
-            selector: "horizon_client::game::take".into(),
-            ordinal: Some(0),
-            ctx: String::new(),
-            origin: "alias:call".into(),
-        };
-        let (_, sites) = crate::sites::rewrite::rewrite(
-            &fixture.game(),
-            "horizon_client::game",
-            &entries,
-            &[request],
-        )
-        .unwrap();
-        assert!(sites[0].once);
-        assert_eq!(sites[0].args[0].1, "(i32 , i32 , i32 ,)");
-        assert_eq!(
-            sites[0].args[1].1,
-            ":: horizon_items :: item_stack :: ItemStack"
-        );
     }
 
     #[test]
@@ -2614,30 +2428,22 @@ const LABEL: &str = "é"; struct AfterUnicode;
     }
 
     #[test]
-    fn slot_functions_and_calls_are_widened() {
-        for declaration in [
-            "lower::hidden::inner::Thing::run",
-            "lower::hidden::inner::Thing::run | helper | 0 |",
-        ] {
-            let fixture = Fixture::new("struct Game;\n");
-            fixture.lower();
-            fixture.put(
-                "crates/horizon-mod-api-gen/slots/test.txt",
-                &format!("{declaration}\n"),
-            );
-            let result = widen_with(&fixture.0, &[]).unwrap();
-            assert!(
-                result
-                    .entries
-                    .iter()
-                    .any(|entry| entry.path == "lower::hidden::inner::Thing::run")
-            );
-            assert!(
-                fs::read_to_string(fixture.0.join("crates/lower/src/other.rs"))
-                    .unwrap()
-                    .contains("pub fn run")
-            );
-        }
+    fn listed_replaceable_functions_are_widened() {
+        let fixture = Fixture::new("struct Game;\n");
+        fixture.lower();
+        fixture.put(crate::replace::LIST, "lower::hidden::inner::Thing::run\n");
+        let result = widen_with(&fixture.0, &[]).unwrap();
+        assert!(
+            result
+                .entries
+                .iter()
+                .any(|entry| entry.path == "lower::hidden::inner::Thing::run")
+        );
+        assert!(
+            fs::read_to_string(fixture.0.join("crates/lower/src/other.rs"))
+                .unwrap()
+                .contains("pub fn run")
+        );
     }
 
     #[test]
@@ -2645,16 +2451,16 @@ const LABEL: &str = "é"; struct AfterUnicode;
         let fixture = Fixture::new("struct Game;\n");
         fixture.lower();
         fixture.put(
-            "crates/horizon-mod-api-gen/slots/horizon.txt",
+            crate::replace::LIST,
             "# comment\nlower::hidden::inner::Thing::missing\n",
         );
-        // The error names the slot list and its own line, not the preceding internals list.
+        // The error names the replaceable list and its own line, not the preceding internals list.
         let error =
             widen_with(&fixture.0, &[("internals.txt", "# one\n# two\n".into())]).unwrap_err();
         assert!(
             error
                 .replace('\\', "/")
-                .contains("slots/horizon.txt:2: lower::hidden::inner::Thing::missing"),
+                .contains("replaceable.txt:2: lower::hidden::inner::Thing::missing"),
             "{error}"
         );
         assert_eq!(fixture.game(), "struct Game;\n");

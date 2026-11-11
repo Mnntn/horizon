@@ -21,7 +21,6 @@ horizon-hooks = { path = "../horizon-hooks" }
 horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 horizon-mod-render = { path = "../horizon-mod-render" }
 horizon-mod-api = { path = "../horizon-mod-api" }
-horizon-mod-points = { path = "../horizon-mod-points" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
 horizon-assets = { path = "../horizon-assets" }
@@ -170,7 +169,7 @@ path = "tests/mod_api_hooks.rs"
 workspace = true
 
 [dev-dependencies]
-horizon-mod-wasm = { path = "../horizon-mod-wasm", features = ["runtime-fixture", "listener-fixture"] }
+horizon-mod-wasm = { path = "../horizon-mod-wasm", features = ["runtime-fixture"] }
 wat = "1.261"
 tempfile = "3"
 horizon-mod-runtime = { path = "../horizon-mod-runtime", features = ["test-work-count"] }

@@ -127,7 +127,7 @@ pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
 /// traverse it. Uses the same source view as point discovery and internals widening, without
 /// widening visibility, adding points or requiring an OUT_DIR. Never pass a downloaded cache.
 pub fn materialize_game_modules(root: &Path) -> Result<(), String> {
-    for file in crate::points::game_files(&root.join("crates/horizon-client/src"), false)? {
+    for file in crate::source::game_files(&root.join("crates/horizon-client/src"), false)? {
         let source =
             fs::read_to_string(&file.path).map_err(|e| format!("{}: {e}", file.path.display()))?;
         let expanded = expand(&file.path, &source)?;
@@ -139,7 +139,7 @@ pub fn materialize_game_modules(root: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn parse(path: &Path, source: &str) -> Result<syn::File, String> {
-    crate::interface_cache::parse(path, &expand(path, source)?)
+    syn::parse_file(&expand(path, source)?).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 #[cfg(test)]
@@ -257,7 +257,7 @@ mod tests {
         ] {
             assert!(code.contains(&format!("{visibility} mod {name};")));
         }
-        let files = crate::points::game_files(&src, true).unwrap();
+        let files = crate::source::game_files(&src, true).unwrap();
         let game_tests = "horizon_client::game::game_tests";
         assert!(files.iter().any(|file| file.module == game_tests));
     }
@@ -286,7 +286,7 @@ mod tests {
             "// game-module-visibility: pub(crate)\n",
         )
         .unwrap();
-        let files = crate::points::game_files(&root, false).unwrap();
+        let files = crate::source::game_files(&root, false).unwrap();
         let names: Vec<_> = files.iter().map(|file| file.module.as_str()).collect();
         assert!(names.contains(&"horizon_client::game::remote::child"));
         assert!(names.contains(&"horizon_client::game::game_tests"));

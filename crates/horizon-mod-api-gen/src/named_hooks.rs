@@ -4,7 +4,7 @@ use super::*;
 pub(super) fn resolve(root: &Path, target: &str, name: &str) -> Result<syn::ItemFn, String> {
     let native = format!("native_{name}");
     let mut found = Vec::new();
-    for file in points::game_files(&root.join("crates/horizon-client/src"), false)? {
+    for file in source::game_files(&root.join("crates/horizon-client/src"), false)? {
         let source = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
         let parsed = syn::parse_file(&source).map_err(|e| e.to_string())?;
         collect(&parsed.items, &file.module, &file.cfg, &native, &mut found);

@@ -1,6 +1,6 @@
-//! Render hook points for native mods (docs/modding/src/how-to/native-mods.md): empty functions the renderer calls at
-//! fixed places of a frame, which a mod's mixins hook like those of
-//! `horizon-client/src/game/native_hooks.rs`, and declared with them in `hooks/`.
+//! Render functions for native mods (docs/modding/src/how-to/native-mods.md): empty functions the
+//! renderer calls at fixed places of a frame, which a mod's mixins replace, declared with the
+//! hooks in `hooks/`.
 
 use glam::{DVec3, Mat4};
 mod generated {
@@ -11,13 +11,18 @@ pub use generated::{
 };
 pub use wgpu;
 
-/// Whether the raw world draw place has an installed listener.
+/// Whether a mixin build installed a patched copy of the free function `$function` of this
+/// module. The prebuilt game's staging pass answers it from the function's replacement slot; a
+/// build without replacement slots has no patched functions.
+macro_rules! replaced {
+    ($function:ident) => {
+        false
+    };
+}
+
+/// Whether a mixin replaced the raw world draw function.
 pub fn world_drawn_hooked() -> bool {
-    mod_points::__private::POINTS[mod_points::PointId::ModRenderRenderWorldDrawn as usize]
-        .load(std::sync::atomic::Ordering::Relaxed)
-        || mod_points::__private::POINTS
-            [mod_points::PointId::ModRenderRenderWorldDrawnReturn as usize]
-            .load(std::sync::atomic::Ordering::Relaxed)
+    replaced!(world_drawn)
 }
 
 /// What a mod can draw with once the world is drawn: after the sky, terrain, entities,
@@ -258,14 +263,10 @@ pub fn world_view_drawn(view: &mut WorldViewDrawn<'_>) {
     let _ = view;
 }
 
-/// Whether the world views place has an installed listener: while none has, the renderer does
-/// not ask.
+/// Whether a mixin replaced the world views function: while none has, the renderer does not
+/// ask.
 pub fn world_views_hooked() -> bool {
-    mod_points::__private::POINTS[mod_points::PointId::ModRenderRenderWorldViews as usize]
-        .load(std::sync::atomic::Ordering::Relaxed)
-        || mod_points::__private::POINTS
-            [mod_points::PointId::ModRenderRenderWorldViewsReturn as usize]
-            .load(std::sync::atomic::Ordering::Relaxed)
+    replaced!(world_views)
 }
 
 /// The views of those asked for ([`world_views`]) that can be drawn on a device whose textures

@@ -487,7 +487,5 @@ pub fn fluid_state(
 
 #[path = "__private/ingredient_parser.rs"]
 pub mod ingredient_parser;
-#[path = "__private/points.rs"]
-pub mod points;
 
 include!(concat!(env!("OUT_DIR"), "/mod_api_exports_private.rs"));

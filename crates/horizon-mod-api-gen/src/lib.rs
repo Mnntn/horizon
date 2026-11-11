@@ -3,9 +3,6 @@ mod catalog;
 mod dispatch_fixtures;
 mod exports;
 mod game_modules;
-mod interface_cache;
-#[cfg(test)]
-mod interface_cache_tests;
 pub mod sdk_catalog;
 #[doc(hidden)]
 pub use dispatch_fixtures::layout as dispatch_fixture_layout;
@@ -639,14 +636,13 @@ pub(crate) fn rerun_if_changed(path: &impl std::fmt::Display) {
 }
 pub use wire::generate_host as generate_wire_host;
 pub mod internals;
-pub mod internals_table;
 pub mod internals_view;
 pub mod notes;
 pub mod patch;
-pub mod points;
-pub mod sites;
+pub mod replace;
+pub(crate) mod source;
 pub mod staging;
-pub use build::{generate, generate_points, generate_render, write_if_changed};
+pub use build::{generate, generate_render, write_if_changed};
 pub use notes::generate as generate_hook_notes;
 mod staged;
 pub use staged::{MODS_STAGE, staged_mods};

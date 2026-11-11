@@ -30,7 +30,7 @@ fn main() {
     std::thread::Builder::new()
         .name("wind-burst-fixture".into())
         .stack_size(64 * 1024 * 1024)
-        .spawn(move || horizon_mod_host::main_with(mods, &[], &[], startup))
+        .spawn(move || horizon_mod_host::main_with(mods, &[], startup))
         .expect("start wind fixture")
         .join()
         .expect("wind fixture panicked");
