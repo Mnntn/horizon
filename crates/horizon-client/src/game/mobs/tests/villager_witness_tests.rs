@@ -1,6 +1,5 @@
 //! Actual murder notification, with no server or world tick.
 use super::*;
-use horizon_core::random::LegacyRandom;
 
 #[test]
 #[ignore = "requires explicit isolated prepared resources"]
@@ -26,10 +25,10 @@ fn murder_uses_only_the_victims_sensor_memory() {
         );
         let snapshot: Vec<_> = game.mobs.iter().map(|m| m.seen(None)).collect();
         let world = game.mob_world_base(&snapshot);
-        let mut random = LegacyRandom::new(0);
+        let mut level = horizon_client::health::TestLevel::new(0);
         let mut events = Vec::new();
         for _ in 0..20 {
-            villager_brain::tick(&mut victim, &world, &mut random, &mut events);
+            villager_brain::tick(&mut victim, &world, &mut level.level(), &mut events);
         }
         assert_eq!(
             villager_brain::murder_witnesses(&mut victim, &world),

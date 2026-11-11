@@ -21,7 +21,7 @@ fn portal_contact_and_waiting_handoff_match_vanilla_counters() {
         &settings,
         std::time::Instant::now(),
         false,
-        execution_role::ExecutionRole::IntegratedServer,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )

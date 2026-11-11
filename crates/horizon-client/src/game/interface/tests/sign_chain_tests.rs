@@ -78,6 +78,7 @@ fn click_sign(
     *game.held_mut() = Some(ItemStack::new("minecraft:oak_hanging_sign", 2));
     game.audio.capture = Some(Vec::new());
     let hit = Hit {
+        inside: false,
         pos: [0, 70, 0],
         face,
         point: [

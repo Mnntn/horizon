@@ -305,7 +305,8 @@ fn a_teleporting_shulker_leaves_its_rider_behind() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_teleporting_shulker_posts_teleport_where_it_stood() {
     let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-    let mut game = floored_game(&root);
+    let mut resources = None;
+    let mut game = floored_game(&mut resources, &root);
     game.build_registries();
     game.set_allow_commands(true);
     // A sensor just above the shulker hears the vibration where it stands.

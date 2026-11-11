@@ -2199,6 +2199,7 @@ mod tests {
             }
             preserve_arrival_cooldown(&mut tag);
             let arrival = Arrival {
+                transferred: None,
                 plan: Plan::end_portal(Dim::Overworld, BlockPos::new(0, 64, 0), 1.375, 0.5625),
                 tag,
             };

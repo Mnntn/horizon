@@ -2636,6 +2636,7 @@ mod capacity_tests {
             world.block_entities.insert((x, 64, 0), entity);
         }
         let c = Containers {
+            mobs: &[],
             world: &world,
             behaviours: &behaviours,
             items: &items,

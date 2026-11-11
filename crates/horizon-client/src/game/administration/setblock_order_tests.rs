@@ -121,7 +121,8 @@ fn a_torch_that_stays_connects_the_wire_in_a_line_and_powers_it() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_test_block_reads_the_state_mode_for_its_own_signal() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     run(&mut game, &["setblock 5 100 2 test_block[mode=start]"]);
     assert!(game.run_command("data merge block 5 100 2 {mode:\"fail\",powered:1b}"));
     let pos = BlockPos::new(5, 100, 2);

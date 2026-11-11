@@ -5364,7 +5364,7 @@ pub(super) mod particle_count_tests {
                 .add(&ParticleOptions::simple(ParticleType::Flame), at, [0.0; 3]);
         }
         let bursts = vec![FireworkExplosion::default(); 4];
-        game.particles.fireworks(at, [0.0; 3], bursts, at);
+        game.particles.fireworks(at, [0.0; 3], bursts, at, true);
         let v = Vec3::new(at[0], at[1], at[2]);
         game.add_pickup_toward(Taken::Orb(Box::new(orb(v))), Collector::Player, at);
         game.particles.elder_guardian();

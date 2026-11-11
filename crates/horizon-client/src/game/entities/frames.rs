@@ -903,6 +903,8 @@ mod game_event_tests {
 
     fn frame(id: u32, pos: [i32; 3], item: Option<ItemStack>) -> ItemFrame {
         ItemFrame {
+            attachment_lifetime: Default::default(),
+            join: Default::default(),
             id,
             pos,
             facing: 3,
@@ -938,7 +940,7 @@ mod game_event_tests {
     fn putting_and_rotating_a_frame_item_posts_block_change() {
         let mut resources = None;
         let mut game = server_game(&mut resources);
-        game.item_frames = vec![frame(1, [0, 64, 1], None)];
+        game.item_frames = vec![frame(1, [0, 64, 1], None)].into_iter().collect();
         let center = [0.5, 64.5, 1.03125];
         *game.held_mut() = Some(ItemStack::new("minecraft:stick", 3));
 
@@ -966,7 +968,9 @@ mod game_event_tests {
             1,
             [0, 64, 1],
             Some(ItemStack::new("minecraft:stick", 1)),
-        )];
+        )]
+        .into_iter()
+        .collect();
         let center = [0.5, 64.5, 1.03125];
         // A player looking straight at the frame's centre from two blocks away
         // (eye height 1.62 above the feet).
@@ -1006,7 +1010,7 @@ mod game_event_tests {
         let mut f = frame(1, [0, 64, 1], None);
         // BlockAttachedEntity.tick checks every 100 ticks.
         f.check_interval = 99;
-        game.item_frames = vec![f];
+        game.item_frames = vec![f].into_iter().collect();
         let center = [0.5, 64.5, 1.03125];
 
         reset();

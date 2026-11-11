@@ -2319,7 +2319,9 @@ mod shulker_lock_drop_tests {
             .unwrap();
         assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
         assert!(
-            game.ui.rules.bool("block_drops"),
+            game.ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS),
             "actual drop rule must be enabled"
         );
         game.creative = false;

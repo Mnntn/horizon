@@ -29,7 +29,7 @@ fn campfire_game(resources: &mut Option<Arc<crate::game::Resources>>, pos: [i32;
         .default_state("minecraft:campfire")
         .unwrap();
     game.world.set(pos[0], pos[1], pos[2], state).unwrap();
-    game.world.block_entities.put(
+    game.world.block_entities.insert(
         (pos[0], pos[1], pos[2]),
         BlockEntity::Campfire(Box::default()),
     );
@@ -48,6 +48,7 @@ fn campfire_game(resources: &mut Option<Arc<crate::game::Resources>>, pos: [i32;
     game.creative = false;
     *game.held_mut() = Some(ItemStack::new("minecraft:beef", 4));
     game.forced_hit = Some(Hit {
+        inside: false,
         pos,
         face: [0, 1, 0],
         point: [

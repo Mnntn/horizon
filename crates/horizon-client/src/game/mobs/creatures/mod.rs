@@ -10611,7 +10611,7 @@ mod breeding_tests {
                 let result = tick_breeding(game, "minecraft:wolf", "minecraft:wolf", seed, true);
                 assert_eq!(result.child.extra.variant, coat);
                 assert_eq!(result.child.extra.sound_variant, Some(voice));
-                assert_eq!(result.experience, BreedExperience::Drawn(Some(xp)));
+                assert_eq!(result.experience, BreedExperience::Drawn(Some(xp as u32)));
                 assert_eq!(result.next_random, expected.next_int());
             }
         });
