@@ -1666,6 +1666,7 @@ impl B {
                         partner: id,
                         equine: None,
                         parent_variant: None,
+                        wolf_voice: None,
                         experience: super::BreedExperience::Deferred,
                     });
                     if brain_mut(m).kind == Kind::Sniffer {

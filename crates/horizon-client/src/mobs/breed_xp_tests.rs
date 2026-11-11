@@ -20,10 +20,11 @@ fn llama_events(drops: bool) -> Option<Vec<MobEvent>> {
         let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
         m.extra.in_love = 600;
         m.extra.tame = true;
-        let mut lr = LegacyRandom::new(0);
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut events = Vec::new();
         for _ in 0..600 {
-            crate::mobs::ai::tick(&mut m, w, &mut lr, &mut events);
+            crate::mobs::ai::tick(&mut m, w, level, &mut events);
             if events
                 .iter()
                 .any(|e| matches!(e, MobEvent::Breed { parent: 1, .. }))
@@ -55,8 +56,8 @@ fn shelf(world: &mut crate::world::World, registry: &horizon_world::registry::Bl
 
 /// `finalizeSpawnChildFromBreeding` makes the experience draw only inside
 /// the `mob_drops` check, from the breeding parent's own random: the
-/// breed goal pushes one 1-7 orb with the rule on, none with it off, and
-/// the pair breeds either way.
+/// breed goal carries one 1-7 orb with the rule on, no orb with it off,
+/// and the pair breeds either way.
 #[test]
 fn the_breed_xp_follows_the_mob_drops_rule() {
     let Some(on) = llama_events(true) else {
@@ -67,7 +68,10 @@ fn the_breed_xp_follows_the_mob_drops_rule() {
     };
     let orb = |events: &[MobEvent]| {
         events.iter().find_map(|e| match e {
-            MobEvent::Experience { amount, .. } => Some(*amount),
+            MobEvent::Breed {
+                experience: crate::mobs::BreedExperience::Drawn(amount),
+                ..
+            } => *amount,
             _ => None,
         })
     };
@@ -77,6 +81,16 @@ fn the_breed_xp_follows_the_mob_drops_rule() {
         orb(&on)
     );
     assert!(orb(&off).is_none(), "mob_drops off: no experience draw");
+    assert!(
+        off.iter().any(|e| matches!(
+            e,
+            MobEvent::Breed {
+                experience: crate::mobs::BreedExperience::Drawn(None),
+                ..
+            }
+        )),
+        "mob_drops off: the already-decided reward is empty, not deferred"
+    );
     assert!(
         on.iter()
             .any(|e| matches!(e, MobEvent::Breed { parent: 1, .. })),

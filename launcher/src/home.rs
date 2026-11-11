@@ -3,7 +3,7 @@
 //! what's new and joining a friend.
 use super::*;
 use crate::plate::alpha;
-use crate::shell::{Action, action, c, label};
+use crate::shell::{action, c, label, Action};
 use theme::night;
 
 impl Launcher {

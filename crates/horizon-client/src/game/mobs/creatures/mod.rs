@@ -3803,9 +3803,17 @@ impl Game<'_> {
                     partner,
                     equine,
                     parent_variant,
+                    wolf_voice,
                     experience,
                 } => {
-                    let child = self.breed(parent, partner, equine, parent_variant, experience);
+                    let child = self.breed(
+                        parent,
+                        partner,
+                        equine,
+                        parent_variant,
+                        wolf_voice,
+                        experience,
+                    );
                     self.native_entity_breed(parent, partner, child);
                 }
                 MobEvent::LockGaze { mob, partner } => {
@@ -4173,6 +4181,7 @@ impl Game<'_> {
         partner: u32,
         equine: Option<Box<horizon_client::mobs::equine::Offspring>>,
         parent_variant: Option<bool>,
+        wolf_voice: Option<u8>,
         experience: horizon_client::mobs::BreedExperience,
     ) -> Option<u32> {
         let p = self.mobs.iter().find(|m| m.id == parent).cloned()?;
@@ -4396,13 +4405,14 @@ impl Game<'_> {
                     );
                     child.extra.color = mixed;
                 }
-                let voices = horizon_client::mobs::finalize::sound_variants(Species::Wolf);
-                child.extra.sound_variant = self
-                    .mobs
-                    .iter_mut()
-                    .find(|m| m.id == parent)
-                    .and_then(|m| m.random.next_int_bound(voices.len() as i32).ok())
-                    .map(|i| i as u8);
+                child.extra.sound_variant = wolf_voice.or_else(|| {
+                    let voices = horizon_client::mobs::finalize::sound_variants(Species::Wolf);
+                    self.mobs
+                        .iter_mut()
+                        .find(|m| m.id == parent)
+                        .and_then(|m| m.random.next_int_bound(voices.len() as i32).ok())
+                        .map(|i| i as u8)
+                });
                 break 'offspring;
             }
             // Panda.getBreedOffspring: genes from both parents.
@@ -10690,12 +10700,20 @@ mod breeding_tests {
     #[ignore = "needs prepared resources"]
     fn wolf_breeding_selects_either_coat_from_the_parent_stream() {
         super::super::native_entity_refs::tests::with_game(|game| {
-            // Different coats, both nextBoolean outcomes, followed by nextInt(7).
-            for (seed, coat, xp, next) in [(42, 1, 6, -1_360_544_799), (4096, 2, 4, -916_162_618)] {
+            for seed in [42, 4096] {
+                let mut expected = horizon_core::random::LegacyRandom::new(seed);
+                let coat = if expected.next_boolean() { 1 } else { 2 };
+                let voice = expected
+                    .next_int_bound(
+                        horizon_client::mobs::finalize::sound_variants(Species::Wolf).len() as i32,
+                    )
+                    .unwrap() as u8;
+                let xp = expected.next_int_bound(7).unwrap() + 1;
                 let result = tick_breeding(game, "minecraft:wolf", "minecraft:wolf", seed, true);
                 assert_eq!(result.child.extra.variant, coat);
+                assert_eq!(result.child.extra.sound_variant, Some(voice));
                 assert_eq!(result.experience, BreedExperience::Drawn(Some(xp)));
-                assert_eq!(result.next_random, next);
+                assert_eq!(result.next_random, expected.next_int());
             }
         });
     }
@@ -10784,6 +10802,7 @@ mod breeding_tests {
                     base + 2,
                     None,
                     None,
+                    None,
                     horizon_client::mobs::BreedExperience::Deferred,
                 );
                 assert_eq!(child, Some(base + 3));
@@ -10862,6 +10881,7 @@ mod breeding_tests {
                     fox_base + 2,
                     None,
                     None,
+                    None,
                     horizon_client::mobs::BreedExperience::Deferred,
                 );
                 assert_eq!(fox_child, Some(fox_base + 3));
@@ -10887,6 +10907,7 @@ mod breeding_tests {
                     base + 2,
                     None,
                     Some(choice),
+                    None,
                     horizon_client::mobs::BreedExperience::Deferred,
                 );
                 assert_eq!(child, None);

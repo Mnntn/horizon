@@ -1563,3 +1563,38 @@ mod crafter_drop_name_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod destroyed_motion_tests {
+    use crate::game::native_entity_refs::tests::with_game;
+    use horizon_client::items::ItemStack;
+    use horizon_core::{geometry::Vec3, random::RandomSource};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn spilled_stacks_use_item_randoms_without_drawing_from_the_world() {
+        with_game(|game| {
+            let at = Vec3::new(8.5, 70.0, 8.5);
+            for seed in [11, 2_000_003] {
+                game.world.random = horizon_core::random::LegacyRandom::new(seed);
+                let mut expected = game.world.random.clone();
+                game.dropped.clear();
+                let stacks = ["minecraft:stone", "minecraft:dirt", "minecraft:glass"]
+                    .into_iter()
+                    .map(|id| (ItemStack::new(id, 1), at))
+                    .collect();
+                game.spawn_destroyed_contents(stacks);
+                assert_eq!(game.dropped.len(), 3);
+                for item in &game.dropped {
+                    assert_eq!(item.velocity.y, 0.2);
+                    assert!((-0.1..0.1).contains(&item.velocity.x));
+                    assert!((-0.1..0.1).contains(&item.velocity.z));
+                }
+                assert_ne!(game.dropped[0].velocity, game.dropped[1].velocity);
+                assert_ne!(game.dropped[1].velocity, game.dropped[2].velocity);
+                assert_eq!(game.world.random.next_double(), expected.next_double());
+                assert_eq!(game.world.random.next_double(), expected.next_double());
+            }
+        });
+    }
+}

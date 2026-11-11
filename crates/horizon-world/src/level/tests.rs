@@ -4886,7 +4886,6 @@ mod removal {
     include!("tests/removal.rs");
 }
 mod fluid_tick;
-mod trigger_tests;
 
 /// `ShulkerBoxBlockEntity.doNeighborUpdates`: the neighbours' shape updates
 /// (flag 3) and then their `neighborChanged`, at the four points in

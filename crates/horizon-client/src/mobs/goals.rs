@@ -2516,6 +2516,10 @@ impl Goal for Breed {
             let equine = super::equine::breed_offspring(m, &p).map(Box::new);
             let parent_variant =
                 super::draws_parent_variant(m.species()).then(|| m.random.next_boolean());
+            let wolf_voice = (m.species() == Species::Wolf).then(|| {
+                let voices = super::finalize::sound_variants(Species::Wolf);
+                m.random.next_int_bound(voices.len() as i32).unwrap() as u8
+            });
             let experience = if (equine.is_some() || parent_variant.is_some())
                 && !cx.w.asks_baby_spawn
                 && !super::orb_after_child(m.species())
@@ -2539,6 +2543,7 @@ impl Goal for Breed {
                 partner: p.id,
                 equine,
                 parent_variant,
+                wolf_voice,
                 experience,
             });
         }
@@ -3318,32 +3323,24 @@ mod breeding_variant_tests {
                             _ => None,
                         })
                         .expect("the animals breed");
-                    assert_eq!(choice, Some(true), "{id}");
-                    assert_eq!(
-                        experience,
-                        if ask_mods || id == "minecraft:fox" {
-                            BreedExperience::Deferred
-                        } else {
-                            BreedExperience::Drawn(mob_drops.then_some(3))
-                        },
-                        "{id}"
-                    );
-                    assert_eq!(
-                        parent.random.state(),
-                        if !ask_mods && mob_drops && id != "minecraft:fox" {
-                            234_029_835_660_143
-                        } else {
-                            205_749_139_540_596
-                        },
-                        "{id}"
-                    );
-                    if !ask_mods && mob_drops && id != "minecraft:fox" {
-                        assert_eq!(
-                            parent.random.next_int(),
-                            1_033_096_058,
-                            "{id}: same-tick later draw"
-                        );
+                    let mut expected = horizon_core::random::LegacyRandom::new(0);
+                    assert_eq!(choice, Some(expected.next_boolean()), "{id}");
+                    if id == "minecraft:wolf" {
+                        expected
+                            .next_int_bound(
+                                crate::mobs::finalize::sound_variants(Species::Wolf).len() as i32,
+                            )
+                            .unwrap();
                     }
+                    let reward = if !ask_mods && id != "minecraft:fox" {
+                        BreedExperience::Drawn(
+                            mob_drops.then(|| expected.next_int_bound(7).unwrap() + 1),
+                        )
+                    } else {
+                        BreedExperience::Deferred
+                    };
+                    assert_eq!(experience, reward, "{id}");
+                    assert_eq!(parent.random.state(), expected.state(), "{id}");
                 }
             }
         }));
