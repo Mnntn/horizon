@@ -10,6 +10,8 @@ pub use endpoint::{Endpoint, Prepared};
 mod executor;
 #[cfg(test)]
 mod executor_tests;
+#[cfg(test)]
+mod wasm_tests;
 pub use executor::dispatch;
 mod main_queue;
 pub use main_queue::MainQueue;

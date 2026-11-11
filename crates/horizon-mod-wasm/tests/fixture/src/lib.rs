@@ -5,9 +5,9 @@ static ENTITY_PRE_CALLS: AtomicU32 = AtomicU32::new(0);
 static ENTITY_POST_CALLS: AtomicU32 = AtomicU32::new(0);
 
 pub mod area_macros;
+pub mod game_payload;
 pub mod matrix;
 pub mod projectile_owner;
-pub mod payload;
 pub mod replace;
 pub mod turn;
 pub use matrix::{mirrors, sum_return};
@@ -61,7 +61,7 @@ impl Hooks for Mod {
     }
 
     fn register(&self, registrar: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
-        payload::register(registrar);
+        game_payload::register(registrar);
         if cx.mods().get("refuse_registration").is_some() {
             registrar.declare_fluid("before_refusal");
             let kind = registrar

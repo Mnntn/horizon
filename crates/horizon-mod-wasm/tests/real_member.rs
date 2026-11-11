@@ -7,8 +7,6 @@ mod matrix;
 mod matrix_checks;
 #[path = "support/no_hooks.rs"]
 mod no_hooks;
-#[path = "support/raw_payload.rs"]
-mod raw_payload;
 #[path = "fixture/src/replace.rs"]
 mod replace;
 #[path = "fixture/src/shutdown.rs"]

@@ -1,0 +1,113 @@
+//! Actual compiled guest against the real bounded server provider and Outbox.
+use super::*;
+use crate::lan::{NetEvent, PlayerSender};
+
+#[test]
+#[ignore = "requires compiled HORIZON_WASM_FIXTURE and HORIZON_WASM_STD"]
+fn compiled_guest_observes_physical_provider_pressure() {
+    // Only this test initializes points in this process. Run explicitly by exact name.
+    use horizon_mod_package::manifest::Package;
+    let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
+    let path = std::path::Path::new(&path);
+    let manifest = Package::read(path).unwrap().manifest;
+    let info = mod_api::PackageInfo::new(
+        manifest.id.clone(),
+        manifest.version.clone(),
+        mod_api::PackageKind::Code,
+        mod_api::Side::Both,
+        vec![manifest.id.clone()],
+        vec![],
+    );
+    let loaded = horizon_mod_wasm::load(
+        &std::fs::read(std::env::var("HORIZON_WASM_STD").unwrap()).unwrap(),
+        vec![horizon_mod_wasm::WasmPackage {
+            manifest,
+            module: Package::read_wasm(path).unwrap(),
+        }],
+    );
+    assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
+    loaded.initialize(&[info]).unwrap();
+    mod_api::testing::with_mods(loaded.mods.into(), || {
+        mod_api::__private::part_tests::install_parts_fixture(mod_api::__private::mods()).unwrap();
+        let transport = Transport::capture(Side::Server).unwrap();
+        transport
+            .accept(transport.local.manifest.entries())
+            .unwrap();
+        transport.finish_configuration().unwrap();
+        let (sender, out) = PlayerSender::payload_executor_test_sender(transport.clone());
+        let endpoint = Endpoint::server(sender);
+        let (events, _receiver) = crate::lan::event_channel_with_capacity(
+            horizon_mod_runtime::byte_channel::message_overhead::<NetEvent>(),
+        );
+        let incoming = Incoming::new(
+            &transport,
+            negotiation::Phase::Play,
+            horizon_protocol::packets::custom_payload::CustomPayload {
+                channel: "wasm_fixture:pressure".into(),
+                data: vec![1],
+            },
+        )
+        .unwrap();
+        let credit = Arc::downgrade(&incoming.lease);
+        dispatch(
+            incoming,
+            endpoint.clone(),
+            MainQueue::Server {
+                events: events.clone(),
+                endpoint,
+                conn: Some(1),
+            },
+        );
+        assert!(
+            !transport.closed(),
+            "guest must return success only after observing actual Backpressure"
+        );
+        assert!(out().is_empty(), "no disconnect or reply may be published");
+        assert_eq!(events.stats().queued_items, 0);
+        assert_eq!(events.stats().reserved_bytes, 0);
+        assert!(
+            credit.upgrade().is_none(),
+            "actual ingress credit is released after refusal"
+        );
+        let (events, _receiver) = crate::lan::event_channel();
+        let (sender, out) = PlayerSender::payload_executor_test_sender(transport.clone());
+        let endpoint = Endpoint::server(sender);
+        let body: Vec<u8> = (0..1 << 20).map(|i| (i % 251) as u8).collect();
+        let expected = body.clone();
+        let (_, counts) = horizon_threads::allocation_probe::measure(|| {
+            let incoming = Incoming::new(
+                &transport,
+                negotiation::Phase::Play,
+                horizon_protocol::packets::custom_payload::CustomPayload {
+                    channel: "wasm_fixture:measure".into(),
+                    data: body,
+                },
+            )
+            .unwrap();
+            dispatch(
+                incoming,
+                endpoint.clone(),
+                MainQueue::Server {
+                    events,
+                    endpoint,
+                    conn: Some(1),
+                },
+            );
+        });
+        let expected_packet = encode(
+            negotiation::Phase::Play,
+            Side::Server,
+            &PayloadId("wasm_fixture:measure".into()),
+            PayloadBytes(expected),
+        );
+        assert_eq!(out(), [expected_packet]);
+        assert!(!transport.closed());
+        eprintln!(
+            "1 MiB actual guest ingress -> NETWORK callback -> physical Outbox allocation requests: {counts:?}; includes realloc requests, excludes input construction and output snapshot"
+        );
+        assert!(
+            counts.large_calls > 0,
+            "measurement must observe the actual wire body allocations"
+        );
+    });
+}

@@ -19,6 +19,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphic
 [features]
 # Counts live heap bytes by startup step and thread (`CensusAllocator`); for measuring only.
 alloc-census = []
+# Test-only synchronous allocation accounting; never enabled by game builds.
+test-allocation-probe = []
 
 [lints]
 workspace = true

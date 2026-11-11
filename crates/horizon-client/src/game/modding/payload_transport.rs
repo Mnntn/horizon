@@ -101,6 +101,8 @@ impl Game<'_> {
             lease,
             work_lease,
         } = incoming;
+        #[cfg(test)]
+        let wasm_health_before = wasm_tests::health(self, &endpoint);
         let seal = self.transaction_open();
         let mut context = MainContext {
             game: self,
@@ -122,6 +124,13 @@ impl Game<'_> {
         let reason = context.disconnect.take();
         let failure = context.failure.take().or_else(|| result.err());
         context.game.transaction_close(&seal, failure.is_none());
+        #[cfg(test)]
+        wasm_tests::observe(
+            wasm_health_before,
+            context.game,
+            &endpoint,
+            failure.is_none(),
+        );
         if let Some(error) = failure {
             endpoint.disconnect(Text::translate(
                 "disconnect.genericReason",
@@ -228,3 +237,6 @@ mod sender_tests;
 #[cfg(test)]
 #[path = "payload_transport/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "payload_transport/wasm_tests.rs"]
+mod wasm_tests;
