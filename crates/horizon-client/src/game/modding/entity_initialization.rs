@@ -79,6 +79,9 @@ impl Game<'_> {
     }
 
     pub(super) fn forget_entity_initialization(&mut self, holder: Holder) {
+        if let Holder::Entity(id) = holder {
+            self.combat.death_weapons.remove(&id);
+        }
         self.entity_initialization.initialized.remove(&holder);
     }
 

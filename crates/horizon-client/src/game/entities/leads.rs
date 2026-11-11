@@ -508,6 +508,7 @@ impl Game<'_> {
         };
         let mut drops = vec![ItemStack::new("minecraft:lead", 1)];
         let context = LootDrops::from(mod_api::__private::built::LootDrops {
+            weapon: None,
             damage_source: None,
             table: "",
             dimension: self.dim.id(),

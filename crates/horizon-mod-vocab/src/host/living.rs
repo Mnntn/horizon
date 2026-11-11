@@ -191,6 +191,11 @@ pub trait LivingBackend {
     #[access(WorldOnly)]
     fn living_hand_item(&self, living: LivingRef, hand: Hand) -> Option<ItemStack>;
     /// Side: server.
+    /// DamageSource.getWeaponItem on a living attacker: the active auto-spin
+    /// stack for a player, otherwise its live main hand. None if unavailable.
+    #[access(WorldOnly)]
+    fn living_weapon_item(&self, living: LivingRef) -> Option<ItemStack>;
+    /// Side: server.
     /// `TamableAnimal.isTame`, `AbstractHorse.isTamed`: None for a kind that
     /// can't be tamed or a stale handle. API @API:living_refs@.
     #[access(WorldOnly)]

@@ -25,6 +25,8 @@ pub trait Hooks {
     /// `context.tool` is None (the entity context has no TOOL). Resolve the causing
     /// ID through `host.entity` and `host.living` to read its main hand live with
     /// `living.hand_item(host, Hand::Main)`, including earlier listeners' changes.
+    /// `context.weapon_item(host)` reads the recorded projectile weapon or the
+    /// live melee weapon, including a player's active auto-spin stack.
     /// Block and use drops retain their tool meaning.
     /// Server-side, for every player.
     #[hook(

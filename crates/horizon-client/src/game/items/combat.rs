@@ -56,6 +56,8 @@ impl CombatTracker {
 }
 #[derive(Default)]
 pub(super) struct CombatTracker {
+    pub(super) death_weapons:
+        std::collections::HashMap<u32, (&'static str, Option<horizon_client::items::ItemStack>)>,
     /// The arrows and bee stingers stuck in the body.
     pub(super) stuck: Stuck,
     entries: Vec<Entry>,

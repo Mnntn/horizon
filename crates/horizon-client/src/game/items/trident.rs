@@ -525,6 +525,7 @@ impl Game<'_> {
                 self.hurt_held_without_breaking(1);
             }
             // trident_spin_attack_strength: 1.5 + 0.75 per level above the first.
+            let spin_stack = self.held().cloned();
             let strength = 1.5 + 0.75 * (riptide as f32 - 1.0);
             let d = view_vector(self.yaw, self.pitch);
             if let Some(p) = self.player.as_mut() {
@@ -536,6 +537,7 @@ impl Game<'_> {
                 // Player.startAutoSpinAttack(20, 8, stack).
                 p.auto_spin_attack_ticks = 20;
                 p.auto_spin_attack_dmg = 8.0;
+                p.auto_spin_attack_item = spin_stack;
             }
             // `player.move(SELF, (0, 1.1999999, 0))` when on the ground: the lift
             // stops at a ceiling.
@@ -1054,6 +1056,11 @@ impl Game<'_> {
                             .map_or(self.own_entity_id() as u32, |s| s.0);
                         let damage =
                             self.evaluate_weapon_damage(&t.stack, Some((attacker, id)), ctx, 8.0);
+                        self.capture_projectile_weapon(
+                            Who::Mob(id),
+                            "minecraft:trident",
+                            Some(&t.stack),
+                        );
                         t.dealt_damage = true;
                         let mut hurt_at = None;
                         let aim = self.attacker_aim(Some(Who::Player));
