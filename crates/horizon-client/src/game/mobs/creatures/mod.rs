@@ -5690,6 +5690,7 @@ impl Game<'_> {
                         )
                     }),
                 };
+                self.capture_projectile_weapon(who, p, hurt);
                 let outcome = if hurt {
                     self.shot_post_attack(p, who, "minecraft:trident", "minecraft:trident");
                     EntityHit::Hurt
@@ -5806,6 +5807,7 @@ impl Game<'_> {
                         hurt
                     }
                 };
+                self.capture_projectile_weapon(who, p, hurt);
                 self.burning_arrow_primes(p, who);
                 // doKnockback: Punch pushes along the flight, less the target's
                 // knockback resistance.

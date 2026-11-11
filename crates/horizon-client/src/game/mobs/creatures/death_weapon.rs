@@ -5,16 +5,38 @@ impl Game<'_> {
     pub(in crate::game) fn capture_projectile_weapon(
         &mut self,
         who: Who,
-        kind: &'static str,
-        stack: Option<&ItemStack>,
+        shot: &Projectile,
+        accepted: bool,
     ) {
-        if mod_api::__private::listened(mod_api::HookId::LootDrops) {
-            let id = match who {
-                Who::Mob(id) => id,
-                Who::Player => self.own_entity_id() as u32,
-            };
-            self.combat.death_weapons.insert(id, (kind, stack.cloned()));
+        if !accepted || !mod_api::__private::listened(mod_api::HookId::LootDrops) {
+            return;
         }
+        // Keep only the accepted lethal source. A refused second hit must not
+        // replace the weapon of the hit that killed the victim.
+        let Who::Mob(id) = who else { return };
+        if !self.mobs.iter().any(|m| m.id == id && !m.alive()) {
+            self.combat.death_weapons.remove(&id);
+            return;
+        }
+        let trident = matches!(shot.kind, ProjectileKind::Trident);
+        let stack = shot.arrow.as_ref().and_then(|a| {
+            if trident {
+                Some(a.pickup_item.clone())
+            } else {
+                a.fired_from_weapon.clone()
+            }
+        });
+        self.combat.death_weapons.insert(
+            id,
+            (
+                if trident {
+                    "minecraft:trident"
+                } else {
+                    "minecraft:arrow"
+                },
+                stack,
+            ),
+        );
     }
     /// What an arrow or a thrown trident hits an entity of type `victim`
     /// for (`AbstractArrow.onHitEntity`, `ThrownTrident.onHitEntity`): a
@@ -38,15 +60,6 @@ impl Game<'_> {
                 a.fired_from_weapon.clone()
             }
         });
-        self.capture_projectile_weapon(
-            who,
-            if trident {
-                "minecraft:trident"
-            } else {
-                "minecraft:arrow"
-            },
-            weapon.as_ref(),
-        );
         let Some(weapon) = weapon else {
             return if trident {
                 base

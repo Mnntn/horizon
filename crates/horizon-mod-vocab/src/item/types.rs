@@ -156,22 +156,13 @@ impl LootDrops<'_> {
     /// Returns None for non-death drops or an absent or unavailable weapon.
     pub fn weapon_item(&self, host: &dyn Host) -> Option<ItemStack> {
         let source = self.damage_source?;
-        if matches!(source.damage_type, "minecraft:arrow" | "minecraft:trident") {
-            return self.weapon.cloned();
+        if let Some(weapon) = self.weapon {
+            return Some(weapon.clone());
         }
-        if matches!(
-            source.damage_type,
-            "minecraft:fireball"
-                | "minecraft:unattributed_fireball"
-                | "minecraft:wither_skull"
-                | "minecraft:mob_projectile"
-                | "minecraft:thrown"
-                | "minecraft:wind_charge"
-                | "minecraft:fireworks"
-        ) {
-            return None;
-        }
-        let entity = host.entity(u32::try_from(source.causing).ok().filter(|id| *id != 0)?)?;
+        // Only the direct living entity can supply a live weapon. A causing
+        // entity (for example a potion thrower) is not the direct attacker.
+        let direct = u32::try_from(source.direct).ok().filter(|id| *id != 0)?;
+        let entity = host.entity(direct)?;
         let living = host.living(entity)?;
         backend_of(host)?.living_weapon_item(living)
     }

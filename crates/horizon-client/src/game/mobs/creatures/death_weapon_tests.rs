@@ -69,6 +69,17 @@ impl mod_api::Hooks for WeaponProbe {
 }
 
 fn weapon_case(item: &str, enchantment: &str, level: u32, projectile: bool, swap: bool) {
+    weapon_case_recorded(item, enchantment, level, projectile, swap, true);
+}
+
+fn weapon_case_recorded(
+    item: &str,
+    enchantment: &str,
+    level: u32,
+    projectile: bool,
+    swap: bool,
+    recorded: bool,
+) {
     if isolated() {
         return;
     }
@@ -127,7 +138,7 @@ fn weapon_case(item: &str, enchantment: &str, level: u32, projectile: bool, swap
         let mods = vec![mod_api::ModEntry::new(
             "weapon_probe",
             Box::new(WeaponProbe {
-                expected: Some(expected),
+                expected: recorded.then_some(expected),
                 swap: swap.then_some(axe),
                 seen: seen.clone(),
             }),
@@ -169,7 +180,7 @@ fn weapon_case(item: &str, enchantment: &str, level: u32, projectile: bool, swap
                 if trident {
                     arrow.pickup_item = weapon;
                 } else {
-                    arrow.fired_from_weapon = Some(weapon);
+                    arrow.fired_from_weapon = recorded.then_some(weapon);
                 }
                 game.mobs
                     .iter_mut()
@@ -178,7 +189,24 @@ fn weapon_case(item: &str, enchantment: &str, level: u32, projectile: bool, swap
                     .extra
                     .set_main_hand_stack(Some(ItemStack::new("minecraft:stick", 1)));
                 // Use the production projectile path before the projectile leaves the world.
-                game.shot_damage(&mut shot, Some("minecraft:zombie"), Who::Mob(70));
+                game.mobs.push(victim.clone());
+                game.capture_projectile_weapon(Who::Mob(70), &shot, true);
+                // A refused later projectile must not overwrite the lethal source.
+                shot.arrow.as_mut().unwrap().fired_from_weapon = None;
+                game.capture_projectile_weapon(Who::Mob(70), &shot, false);
+                let saved = game.combat.death_weapons.get(&70).cloned();
+                assert_eq!(
+                    saved
+                        .as_ref()
+                        .and_then(|(_, stack)| stack.as_ref())
+                        .is_some(),
+                    recorded
+                );
+                game.mobs.iter_mut().find(|m| m.id == 70).unwrap().health = 10.0;
+                game.capture_projectile_weapon(Who::Mob(70), &shot, true);
+                assert!(!game.combat.death_weapons.contains_key(&70));
+                game.combat.death_weapons.insert(70, saved.unwrap());
+                game.mobs.retain(|m| m.id != 70);
                 drop(shot);
             }
             game.mob_died(&victim);
@@ -258,4 +286,26 @@ fn death_weapon_e_fall_has_no_weapon() {
         });
         assert_eq!(*seen.lock().unwrap(), 1);
     });
+}
+
+#[test]
+fn indirect_sources_do_not_expose_the_causing_hand() {
+    for kind in [
+        "minecraft:indirect_magic",
+        "minecraft:thrown",
+        "minecraft:arrow",
+        "minecraft:explosion",
+        "minecraft:magic",
+    ] {
+        let source = death_hurt_source(kind, 41);
+        assert_eq!(source.causing, 41);
+        assert_eq!(source.direct, 0);
+    }
+    assert_eq!(death_hurt_source("minecraft:mob_attack", 41).direct, 41);
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn death_weapon_projectile_without_recorded_weapon_has_no_live_fallback() {
+    weapon_case_recorded("minecraft:bow", "minecraft:power", 2, true, false, false);
 }
