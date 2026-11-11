@@ -35,7 +35,7 @@ fn output(rx: &mpsc::Receiver<Out>) -> Vec<C> {
 }
 
 fn pass(game: &mut Game<'_>, conn: u32, packet: S) {
-    let (packet, bytes) = decode(packet);
+    let (packet, _bytes) = decode(packet);
     if let S::PingRequest(p) = &packet {
         println!(
             "actual decoded play PingRequest conn={conn} value={} bits={:016x}",
@@ -57,8 +57,9 @@ fn pass(game: &mut Game<'_>, conn: u32, packet: S) {
         .hub
         .guests
         .update_connection(conn, |guest| {
-            guest.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(packet, bytes));
-            guest.inbox_bytes += bytes;
+            guest
+                .inbox
+                .push_back(horizon_client::lan::guest::InboxItem::uncredited(packet));
         })
         .unwrap();
     // Already registered connections: this is a second level pass, without polling sockets.

@@ -1278,22 +1278,21 @@ mod hub_tests {
         let before = hub.guests.update(0, |g| {
             g.unacknowledged = 3;
             let before = g.position;
-            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
-                Serverbound::MovePlayerPos(MovePlayerPos {
-                    x: before[0] + 40.0,
-                    y: before[1],
-                    z: before[2],
-                    flags: 1,
-                }),
-                10,
-            ));
-            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
-                Serverbound::ChunkBatchReceived(ChunkBatchReceived {
-                    chunks_per_tick: 12.0,
-                }),
-                5,
-            ));
-            g.inbox_bytes = 15;
+            g.inbox
+                .push_back(horizon_client::lan::guest::InboxItem::uncredited(
+                    Serverbound::MovePlayerPos(MovePlayerPos {
+                        x: before[0] + 40.0,
+                        y: before[1],
+                        z: before[2],
+                        flags: 1,
+                    }),
+                ));
+            g.inbox
+                .push_back(horizon_client::lan::guest::InboxItem::uncredited(
+                    Serverbound::ChunkBatchReceived(ChunkBatchReceived {
+                        chunks_per_tick: 12.0,
+                    }),
+                ));
             before
         });
         let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
@@ -1305,7 +1304,6 @@ mod hub_tests {
         assert_eq!(g.position, before, "a held player does not move");
         assert_eq!(g.unacknowledged, 2, "its acknowledgement was handled");
         assert_eq!(g.chunks_per_tick, 12.0);
-        assert_eq!(g.inbox_bytes, 0);
     }
 
     const UUID: &str = "123e4567-e89b-12d3-a456-426614174000";
@@ -1818,22 +1816,21 @@ mod hub_tests {
         let before = hub.guests[i].position;
         hub.guests.update(i, |g| {
             g.unacknowledged = 2;
-            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
-                Serverbound::MovePlayerPos(MovePlayerPos {
-                    x: before[0] + 30.0,
-                    y: before[1],
-                    z: before[2],
-                    flags: 1,
-                }),
-                10,
-            ));
-            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
-                Serverbound::ChunkBatchReceived(ChunkBatchReceived {
-                    chunks_per_tick: 9.0,
-                }),
-                5,
-            ));
-            g.inbox_bytes = 15;
+            g.inbox
+                .push_back(horizon_client::lan::guest::InboxItem::uncredited(
+                    Serverbound::MovePlayerPos(MovePlayerPos {
+                        x: before[0] + 30.0,
+                        y: before[1],
+                        z: before[2],
+                        flags: 1,
+                    }),
+                ));
+            g.inbox
+                .push_back(horizon_client::lan::guest::InboxItem::uncredited(
+                    Serverbound::ChunkBatchReceived(ChunkBatchReceived {
+                        chunks_per_tick: 9.0,
+                    }),
+                ));
         });
         let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
         let border = crate::worldborder::WorldBorder::default();
@@ -1935,27 +1932,27 @@ mod hub_tests {
             g.last_seen
                 .add_pending(&[7; horizon_protocol::secure_chat::SIGNATURE_BYTES]);
             g.inbox
-                .push_back(horizon_client::lan::guest::InboxItem::synthetic(Serverbound::ChatAck(ChatAck { offset: 1 }), 2));
-            g.inbox.push_back(horizon_client::lan::guest::InboxItem::synthetic(
-                Serverbound::Chat(Chat {
-                    message: "hello".into(),
-                    timestamp: 0,
-                    salt: 0,
-                    signature: None,
-                    last_seen: LastSeenUpdate {
-                        offset: 0,
-                        acknowledged: [0, 0, 0b1000],
-                        checksum: 0,
-                    },
-                }),
-                10,
-            ));
-            g.inbox_bytes = 12;
+                .push_back(horizon_client::lan::guest::InboxItem::uncredited(
+                    Serverbound::ChatAck(ChatAck { offset: 1 }),
+                ));
+            g.inbox
+                .push_back(horizon_client::lan::guest::InboxItem::uncredited(
+                    Serverbound::Chat(Chat {
+                        message: "hello".into(),
+                        timestamp: 0,
+                        salt: 0,
+                        signature: None,
+                        last_seen: LastSeenUpdate {
+                            offset: 0,
+                            acknowledged: [0, 0, 0b1000],
+                            checksum: 0,
+                        },
+                    }),
+                ));
         });
         hub.keep_acknowledgements(i, &mut Vec::new());
         // Both were handled here, in the order they came; nothing is left for the inbox.
         assert!(hub.guests[i].inbox.is_empty());
-        assert_eq!(hub.guests[i].inbox_bytes, 0);
         assert!(hub.guests[i].left_reason.is_empty(), "not kicked");
         assert_eq!(hub.guests[i].last_seen.tracked_count(), 20);
     }
