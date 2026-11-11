@@ -17,9 +17,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-# Finish running main checks; keep only the newest pending push. Obsolete PR runs still cancel.
+# Keep one push fixture per main SHA. Manual events cannot replace its pending evidence;
+# obsolete PR runs still cancel within their own namespace.
 concurrency:
-  group: wasm-mods-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main') || github.sha }}
+  group: wasm-fixture-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   fixture:
@@ -31,6 +32,8 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Configure persistent build targets
         shell: bash
         run: |

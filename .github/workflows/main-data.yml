@@ -1,12 +1,90 @@
 name: main-data
+run-name: ${{ github.event.head_commit.message || github.workflow }}
+# Independent data queue: never serialize or replace a fast-gate run.
+# Scheduled events use only a hosted dispatcher because Dyna rejects schedule events.
 on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 3 * * *'
   workflow_dispatch:
+    inputs:
+      github-fallback:
+        description: Report missing data coverage without using the Dyna pool
+        type: boolean
+        default: false
+      prepare-output-check:
+        description: Check the prepared output digest instead of the data suite
+        type: boolean
+        default: false
 permissions:
   contents: read
+concurrency:
+  # GitHub keeps active A and replaces pending B with newer C. A dispatcher must
+  # not replace pending data while it waits to create the actual dispatch run.
+  group: main-data-${{ github.event_name == 'schedule' && 'dispatcher' || 'coverage' }}
+  cancel-in-progress: false
 env:
   HORIZON_TELEMETRY_URL: "off"
   CARGO_INCREMENTAL: 0
 jobs:
+  nightly-dispatch:
+    if: github.repository == 'arismoko/horizon' && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run main-data.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+  changes:
+    if: github.event_name != 'schedule' && !inputs.prepare-output-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      self_hosted: ${{ !inputs.github-fallback && steps.runner.outputs.self_hosted || 'false' }}
+      routing_reason: ${{ steps.runner.outputs.routing_reason }}
+      forced_github: ${{ inputs.github-fallback && 'true' || 'false' }}
+      ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VARS_ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
+          VARS_LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
+          EVENT: ${{ github.event_name }}
+          SAME_REPO: 'true'
+        run: bash tools/ci/dyna_ci_route.sh
+      - id: matrix
+        run: python3 tools/ci/ignored_shards.py --matrix --all >> "$GITHUB_OUTPUT"
+
+  # The gate's pool-watch only watches its own attempt. Give data its own
+  # watcher without creating a second fast-gate context named pool-watch.
+  data-pool-watch:
+    needs: changes
+    if: needs.changes.outputs.self_hosted == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/dyna_ci_pool_watch.py
+
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
@@ -30,6 +108,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Check Dyna dependencies (install fallback without root)
         run: bash tools/ci/dyna_ci_deps.sh
@@ -121,9 +200,13 @@ jobs:
           REASON: ${{ needs.changes.outputs.routing_reason }}
           CHANGES: ${{ needs.changes.result }}
           FORCED_GITHUB: ${{ needs.changes.outputs.forced_github }}
+          TESTED_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           {
             echo "## Prepared-data coverage"
+            echo "Triggering SHA: $TESTED_SHA"
+            echo "Run: $RUN_URL"
             echo "Shard result: $RESULT; changes: $CHANGES; self-hosted: $ROUTE; forced GitHub: $FORCED_GITHUB"
             echo "Routing: $REASON"
             if [ "$RESULT" = skipped ]; then
@@ -144,6 +227,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Check Dyna dependencies (install fallback without root)
         run: bash tools/ci/dyna_ci_deps.sh
@@ -179,11 +263,13 @@ jobs:
   vanilla-parity:
     if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch' && !inputs.prepare-output-check && !inputs.github-fallback
     runs-on: dyna-large
+    timeout-minutes: 330
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Check Dyna dependencies (install fallback without root)
         run: bash tools/ci/dyna_ci_deps.sh

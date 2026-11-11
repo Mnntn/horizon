@@ -1,9 +1,9 @@
 name: dyna-checks
 run-name: ${{ github.event.pull_request.title || github.event.head_commit.message || github.workflow }}
-# Upstream-style checks on pull requests; fork-only extras on main pushes and dispatches.
-# Keep upstream's workflows byte-identical; disable checks (ci.yml) in the fork's Actions
-# settings after this workflow's verify passes on main.
-# Scheduled events run only the hosted dispatcher; the dispatched run uses Dyna.
+# Fast gates only. Prepared-data coverage has its own queue in main-data.yml.
+# Preserve daily fast-gate coverage; each workflow has a hosted nightly dispatcher.
+# Keep the exact gate job names here: the main picker reads latest-attempt jobs, not
+# whole-workflow success. The same-SHA fixture remains in wasm-mods.yml.
 on:
   push:
     branches: [main]
@@ -17,16 +17,12 @@ on:
         description: Force GitHub-hosted runners after a boat runner outage
         type: boolean
         default: false
-      prepare-output-check:
-        description: Check the prepared output digest
-        type: boolean
-        default: false
 permissions:
   contents: read
 concurrency:
-  # A new push to a pull request replaces its running checks. Main runs are never cancelled: a run in
-  # progress finishes, and only the newest waiting push runs next, so main is always checked.
-  group: dyna-checks-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main') || github.sha }}
+  # Every main SHA keeps its own push gate. PR updates replace only that PR;
+  # manual events cannot create a zero-job replacement for push evidence.
+  group: dyna-gate-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
@@ -34,7 +30,8 @@ env:
   # sccache (shared per Dyna host) cannot cache incremental compiles, so every Rust job builds non-incremental.
   CARGO_INCREMENTAL: 0
 jobs:
-  # Dyna runners accept dispatches, not scheduled events.
+  # Dyna accepts dispatches, not scheduled events. This keeps the existing
+  # nightly fast gate without coupling its concurrency to the data dispatcher.
   nightly-dispatch:
     if: github.repository == 'arismoko/horizon' && github.event_name == 'schedule'
     runs-on: ubuntu-latest
@@ -49,7 +46,7 @@ jobs:
   # GitHub's external-contributor approval is the third lock.
   # A draft pull request skips every check below (they all need this job); it runs when marked ready.
   changes:
-    if: github.event_name != 'schedule' && !inputs.prepare-output-check && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -63,8 +60,6 @@ jobs:
       sample_required: ${{ steps.selection.outputs.sample_required || 'false' }}
       self_hosted: ${{ !inputs.github-fallback && steps.hosted.outputs.forced_github != 'true' && steps.runner.outputs.self_hosted || 'false' }}
       routing_reason: ${{ steps.runner.outputs.routing_reason }}
-      # Every ignored-tests shard on main pushes and dispatches; empty on pull requests.
-      ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
       # Where lint and verify run when they don't go to Dyna's pool: boat-large for listed outside contributors
       # while vars.BOAT_CI is on (boat refuses a public repository's run unless both its author and the user who
       # started it are on boat's own list, so the same list lives in vars.BOAT_CI_USERS), else GitHub's runner.
@@ -72,6 +67,8 @@ jobs:
       forced_github: ${{ steps.hosted.outputs.forced_github }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Fetch this commit's history for selection
         if: github.event_name == 'pull_request'
         run: git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"
@@ -127,10 +124,6 @@ jobs:
           AUTHOR: ${{ github.event.pull_request.user.login || github.actor }}
           ACTOR: ${{ github.triggering_actor }}
         run: python3 tools/ci/boat_health.py
-      - name: The ignored-tests shard matrix
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        id: matrix
-        run: python3 tools/ci/ignored_shards.py --matrix --all >> "$GITHUB_OUTPUT"
 
   # Fork PR tokens cannot dispatch or cancel runs. The trusted default-branch
   # boat-recovery workflow cancels/reruns outages; changes reads the previous attempt.
@@ -145,6 +138,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - env:
           GH_TOKEN: ${{ github.token }}
           RECOVERY_REF: ${{ github.head_ref || github.ref_name }}
@@ -160,6 +155,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - env:
           GH_TOKEN: ${{ github.token }}
         run: python3 tools/ci/dyna_ci_pool_watch.py
@@ -189,6 +186,8 @@ jobs:
         run: echo 'Rust lint is not selected; repository hygiene still runs.'
       # Not diff-selected: any tracked file can contain a captured tool notice.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Check repository artifacts and workflow YAML
         run: python3 tools/ci/check_repository_hygiene.py
       - name: Check mod API boundary
@@ -327,6 +326,8 @@ jobs:
         if: needs.changes.result != 'success'
         run: exit 1
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       # Only this commit's own history (rust_changes.py's merge base, check_public_tree.py's range and HEAD
       # ancestry), not every branch and tag: a full checkout fetched them all and took over a minute.
       - name: Fetch this commit's history
@@ -467,6 +468,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Check Dyna dependencies (install fallback without root)
         if: needs.changes.outputs.launcher_required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
