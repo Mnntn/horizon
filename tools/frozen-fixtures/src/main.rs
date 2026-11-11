@@ -103,6 +103,11 @@ impl<'a> Visit<'a> for Scan<'_> {
                 }
                 if bound != STANDARD && bound != CLIENT {
                     reasons.push("unresolved, custom, relative or local binding".into());
+                } else if name != STANDARD && name != CLIENT {
+                    // Keep every imported spelling untouched. Rewriting its uses
+                    // can orphan grouped/aliased imports; retaining the caller
+                    // avoids requiring whole-program import-use analysis.
+                    reasons.push("resolved imported spelling retained with its import".into());
                 }
                 let mut calls = Calls {
                     names: BTreeSet::new(),
@@ -285,8 +290,24 @@ mod tests {
         let (r, n) = discover(
             "use crate::game::native_entity_refs::tests::{with_game as fixture, with_client_game}; fn test(){fixture(|g|g.tick());with_client_game(|g|g.tick());}",
         );
-        assert_eq!(n, 2);
+        assert_eq!(n, 0);
         assert_eq!(r.len(), 2);
+        assert_eq!(r[0]["binding"], STANDARD);
+        assert_eq!(r[1]["binding"], CLIENT);
+        assert!(r.iter().all(|call| {
+            call["skip_reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "resolved imported spelling retained with its import")
+        }));
+    }
+    #[test]
+    fn rewrites_only_absolute_inline_calls() {
+        let (_, n) = discover(
+            "fn test(){crate::game::native_entity_refs::tests::with_game(|g|g.tick());crate::game::native_entity_refs::tests::with_client_game(|g|g.tick());}",
+        );
+        assert_eq!(n, 2);
     }
     #[test]
     fn refuses_local_shadows_globs_custom_and_indirect() {
