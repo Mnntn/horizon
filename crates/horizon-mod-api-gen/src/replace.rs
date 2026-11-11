@@ -87,29 +87,55 @@ pub fn installer(trait_name: Option<&syn::Ident>, name: &syn::Ident) -> syn::Ide
 
 /// The trait of `block` when its methods can be replaced: a trait one of the game's own crates
 /// declares (`traits`, by name), written without generic arguments, implemented safely for a
-/// type its own crate declares (`types`, by name: the installer is an inherent function of the
-/// type). Another crate's trait (`Ord`, `Iterator`, `Drop`) is the caller's contract with that
-/// crate, and often a hot path.
+/// type its own crate declares: the installer is an inherent function of the type. The type is
+/// written as one name, which the crate declares (`types`) and the file does not import from
+/// another crate (`foreign`). Another crate's trait (`Ord`, `Iterator`, `Drop`) is the caller's
+/// contract with that crate, and often a hot path.
 pub fn replaceable_trait<'a>(
     block: &'a syn::ItemImpl,
     traits: &BTreeSet<String>,
     types: &BTreeSet<String>,
+    foreign: &BTreeSet<String>,
 ) -> Option<&'a syn::Ident> {
     let (negative, path, _) = block.trait_.as_ref()?;
     let last = path.segments.last()?;
     let Type::Path(owner) = &*block.self_ty else {
         return None;
     };
+    let [owner] = owner.path.segments.iter().collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    let owner = owner.ident.to_string();
     (negative.is_none()
         && block.unsafety.is_none()
         && last.arguments.is_none()
         && traits.contains(&last.ident.to_string())
-        && owner
-            .path
-            .segments
-            .last()
-            .is_some_and(|segment| types.contains(&segment.ident.to_string())))
+        && types.contains(&owner)
+        && !foreign.contains(&owner))
     .then_some(&last.ident)
+}
+
+/// The names `items`' `use`s bring in from other crates: paths that don't start at `crate`,
+/// `self` or `super`.
+pub fn foreign_imports(items: &[Item]) -> BTreeSet<String> {
+    fn leaves(tree: &syn::UseTree, out: &mut BTreeSet<String>) {
+        match tree {
+            syn::UseTree::Path(path) => leaves(&path.tree, out),
+            syn::UseTree::Name(name) => drop(out.insert(name.ident.to_string())),
+            syn::UseTree::Rename(rename) => drop(out.insert(rename.rename.to_string())),
+            syn::UseTree::Group(group) => group.items.iter().for_each(|tree| leaves(tree, out)),
+            syn::UseTree::Glob(_) => {}
+        }
+    }
+    let mut out = BTreeSet::new();
+    for item in items {
+        if let Item::Use(item) = item
+            && !matches!(&item.tree, syn::UseTree::Path(path) if path.ident == "crate" || path.ident == "self" || path.ident == "super")
+        {
+            leaves(&item.tree, &mut out);
+        }
+    }
+    out
 }
 
 /// The names of the types `items` declare, inline modules included.
@@ -317,6 +343,7 @@ fn functions<'a>(
     types: &BTreeSet<String>,
     out: &mut Vec<Found<'a>>,
 ) {
+    let foreign = foreign_imports(items);
     for item in items {
         match item {
             Item::Mod(inline) if !source::gated(&inline.attrs) => {
@@ -349,7 +376,7 @@ fn functions<'a>(
                     && lifetimes_only(&block.generics)
                     && matches!(&*block.self_ty, Type::Path(ty) if ty.qself.is_none()) =>
             {
-                let trait_name = replaceable_trait(block, traits, types);
+                let trait_name = replaceable_trait(block, traits, types, &foreign);
                 if block.trait_.is_some() && trait_name.is_none() {
                     continue;
                 }
@@ -853,13 +880,14 @@ mod tests {
 
     #[test]
     fn a_method_of_the_games_own_trait_gets_a_slot_on_its_type() {
-        let source = "struct Wander; struct Raw;\nimpl Goal for Wander { fn start(&mut self, mob: &Mob) -> bool { true } fn kind(&self) -> Self::Kind { Kind } }\nimpl Goal<u8> for Wander { fn start(&mut self) {} }\nunsafe impl Goal for Raw { fn start(&mut self) {} }\nimpl Goal for Vec3 { fn start(&mut self) {} }\n";
+        let source = "use engine::Style; struct Wander; struct Raw; mod other { struct Style; }\nimpl Goal for Style { fn start(&mut self) {} } impl Goal for engine::Raw { fn start(&mut self) {} } impl Goal for Wander { fn start(&mut self, mob: &Mob) -> bool { true } fn kind(&self) -> Self::Kind { Kind } }\nimpl Goal<u8> for Wander { fn start(&mut self) {} }\nunsafe impl Goal for Raw { fn start(&mut self) {} }\nimpl Goal for Vec3 { fn start(&mut self) {} }\n";
         let traits = BTreeSet::from(["Goal".to_owned()]);
         let file = syn::parse_file(source).unwrap();
         let mut types = BTreeSet::new();
         declared_types(&file.items, &mut types);
         // A signature naming the trait's associated type, a trait written with arguments, an
-        // unsafe impl and another crate's type are left as the game wrote them.
+        // unsafe impl and another crate's type (imported under a name the crate also declares,
+        // written by path, or not declared here at all) are left as the game wrote them.
         assert_eq!(
             targets("k", &file, &traits, &types),
             ["k::<Wander as Goal>::start"]
@@ -874,7 +902,7 @@ mod tests {
             "{out}"
         );
         let staged = syn::parse_file(&out).unwrap();
-        let Item::Impl(added) = &staged.items[3] else {
+        let Some(Item::Impl(added)) = staged.items.get(7) else {
             panic!("{out}")
         };
         assert!(added.trait_.is_none());
