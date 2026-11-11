@@ -25,5 +25,5 @@ Hooks are sorted by `id` and describe `side`, nullable `scope` (Part `kind` and
 The build generator owns this catalog. Output has no timestamps or absolute
 paths. A format change requires a schema version change; tools should use the
 catalog accompanying the build they target. CI regenerates the catalog in-test and compares the two documents for determinism.
-The full file ships in the SDK, developer source build and fork Nightly release;
+The full file ships in the prebuilt SDK and fork Nightly release;
 no committed fingerprint needs refreshing when independently authored hooks land.

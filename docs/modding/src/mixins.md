@@ -16,6 +16,14 @@ helper = "src/longer.rs"
 
 Native draw functions such as `horizon_mod_render::render::world_drawn`, `hand_drawn` and `world_views` are reached with a HEAD mixin. Engine hook functions named `native_*` are replaceable too. Mixins operate on native Rust values, including live mutable references, not API copies.
 
-The `[native]` support tables are `[[native.bridge]]`, `[[native.state]]` and `[[native.module]]`. They provide access bridges, state and support modules. Declare private engine items through the fingerprinted `internals` list. Pin the game and tool revisions in the manifest and rebuild the mod when those pins change.
+The patch-library support tables are `[[native.bridge]]` and `[[native.module]]`. They do not
+compile game crates. Unsupported bridge or module declarations are refused by name.
+`[[native.state]]` is refused with `E_MIXIN_STATE_LAYOUT`: the prebuilt game's layout is fixed;
+use attachments for per-object mod data. Declare private engine items through the fingerprinted
+`internals` list. Pin the game and tool revisions and rebuild the mod when those pins change.
+
+The pinned commit needs a published SDK (`E_NATIVE_NO_RELEASE`) for a supported host
+(`E_NATIVE_HOST`). A mod's own build script is `E_NATIVE_BUILD_SCRIPT`; ship generated source
+instead. Custom mod or SDK feature selections are `E_NATIVE_FEATURES`; use the SDK's feature set.
 
 Prefer a hook request when the behaviour should also work on wasm. A native mixin is trusted code, not a sandbox.
