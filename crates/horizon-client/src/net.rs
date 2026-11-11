@@ -1787,11 +1787,16 @@ mod tests {
             reader
                 .set_read_timeout(Some(Duration::from_secs(10)))
                 .unwrap();
+            // configure queues its final ACK asynchronously. Keep its writer alive
+            // until the peer has received that ACK, just as the real connection
+            // retains it for play; dropping the last owner closes the pipe.
+            let shared_writer = Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap())));
+            let client_writer = shared_writer.clone();
             let thread = std::thread::spawn(move || {
                 let (send, _events) = event_channel();
                 configure(
                     &mut reader,
-                    &Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap()))),
+                    &client_writer,
                     &Arc::new(AtomicBool::new(true)),
                     &Language::new(),
                     &send,
@@ -1867,6 +1872,7 @@ mod tests {
                 .join()
                 .unwrap()
                 .unwrap_or_else(|reason| panic!("configuration failed: {}", reason.text));
+            drop(shared_writer);
             std::fs::remove_dir_all(root).unwrap();
         }
     }
