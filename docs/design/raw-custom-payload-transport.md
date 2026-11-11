@@ -1,0 +1,93 @@
+# Registered raw custom payload transport
+
+This is the raw transport below the typed payload work in #813, implementing
+#2882. The codec prerequisite is #2951. Names and contracts are based on
+NeoForge 26.3's public payload API and the room's written clean-room specification;
+no NeoForge implementation source was read by this implementation's author.
+
+## One transport and one registration boundary
+
+Replace `horizon:mod_net`, its broadcast hooks, old send methods, brand gate,
+30,000-byte envelope bound and 32-message counters outright. Application packets
+use their declared namespaced custom-payload channel and exact opaque body bytes.
+There is no Horizon application envelope and no second path for typed payloads.
+Existing attachment synchronization is outside this raw transport migration.
+
+Registration runs in dependency order during mod loading. `PayloadRegistrar`
+provides play, configuration and common registrations, each ToClient, ToServer or
+Bidirectional. `optional`, `versioned` and `executesOn` return modified registrar
+views; required and main-thread handling are the defaults. Validate namespace
+ownership, nonblank versions, duplicate protocol/id registrations and receiving
+handlers once, then freeze. A common registration occupies both protocols.
+Dispatch selects the one registered owner, not every loaded mod.
+
+Native and wasm expose the same declarations, handlers and results. API aggregates
+explicitly derive Wire; registration-only trait-object storage is not an API data
+value. The raw body crosses Wire as a length followed by contiguous bytes.
+
+## Connection admission and identity
+
+Negotiate a bounded configuration manifest and compatible intersection. Required
+one-sided declarations, versions or directions that disagree refuse admission,
+naming the id and reason. Optional extras are absent from the agreed set. A vanilla
+peer is admitted when all local requirements are optional; sending an absent
+optional payload returns UnsupportedPeer without a packet. Empty registries emit
+no manifest and do no per-tick mod work.
+
+A connection owns its negotiated table, protocol and incarnation epoch. Application
+messages never supply a player identity. A server handler resolves the authenticated
+connection to its current PlayerRef; a client handler gets that connection's local
+player. Queued work from an old epoch cannot affect a replacement connection.
+Unnegotiated owned ids and malformed registered payloads fail the session with named
+errors. Unrelated vanilla and plugin channels retain their existing behavior.
+Generic packet sending cannot bypass the registered-channel checks.
+
+## Limits are codec- and connection-aware
+
+The unknown-id discard fallback retains vanilla's 32,767 serverbound and 1,048,576
+clientbound body limits. These do **not** bound registered payloads. A frozen local
+codec snapshot is supplied explicitly to packet readers and checked encoders; no
+process-global or thread-local registration context selects the connection's codec.
+
+Registered payloads have no generic body cap. A network packet, including its packet
+id and payload channel framing, must fit `frame::MAX_FRAME` (2,097,151 bytes). With
+compression enabled it must also fit `frame::MAX_UNCOMPRESSED` (8,388,608 bytes)
+before compression, and its compressed contents must still fit MAX_FRAME. A memory
+connection has no network framing cap. No automatic splitting is needed for Farmer's
+Delight's four bodies, whose sizes are 0, 1, 2 and 8 bytes.
+
+The mod send service returns a structured, named frame refusal before any bytes are
+written. This deliberately differs from vanilla's encode-failure disconnect. Frame
+preparation must be reused for writing, not recompressed just to validate it.
+
+## Bounded delivery and transactions
+
+A per-connection byte budget covers queued data and nonzero per-message bookkeeping,
+including zero-byte messages. Locally saturated sends return Backpressure before
+acceptance; there is no per-tick message count limit. Every actual ingress and
+in-process transit queue must remain bounded, not only a downstream payload list.
+Accepted means queued, not acknowledged; later session failure invalidates pending
+work. Flood tests must demonstrate bounded retained memory and progress after drain.
+
+Preserve order with ordinary gameplay ingress. Default handlers run on the logical
+receiving main thread. IPayloadContext supplies player, reply, disconnect and
+enqueueWork. Root transaction commit publishes sends; abort publishes none. Replies
+cannot execute inline across the connection and are received on a subsequent turn.
+Single-player and split-screen use their real connect_local sessions, not direct
+callback shortcuts.
+
+## Acceptance and the amendment to #813
+
+Replace #813's proposed 32-per-tick cap and its “33 sends” acceptance row: vanilla
+has no such cap. The replacement checks byte-bounded pressure, explicit local
+Backpressure, bounded flood memory and progress for more than 32 legal messages.
+Its registered-body limit wording must distinguish discard limits from the actual
+connection framing bounds above.
+
+Exercise integrated single-player, split-screen, two remote players, LAN and
+dedicated paths. Check sender attribution, ordering, next-turn replies, rollback,
+epoch invalidation, optional vanilla admission, required mismatch, duplicate load
+refusal, generic-send bypass and named decode failures. Native and wasm must both
+exercise the real transport. Measure allocations for a 1 MiB wasm transfer; do not
+claim zero-copy across Wire. The author supplies prepared-data self-check evidence;
+review is static. The lane lead separately orders independent network test commands.

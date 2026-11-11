@@ -52,7 +52,12 @@ pub enum Direction {
 
 /// A malformed or unsupported packet.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Error(pub String, Option<packets::custom_payload::PayloadTooLarge>);
+pub struct Error(pub String, Option<SizeRefusal>);
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SizeRefusal {
+    Payload(packets::custom_payload::PayloadTooLarge),
+    Frame(frame::FrameTooLarge),
+}
 impl Error {
     const TIMED_OUT: &str = "Timed out";
     const END_OF_STREAM: &str = "Connection closed by the server";
@@ -68,12 +73,29 @@ impl Error {
         };
         Self(
             format!("PayloadTooLarge {{ id: {id}, size: {size}, limit: {limit} }}"),
-            Some(detail),
+            Some(SizeRefusal::Payload(detail)),
         )
     }
     /// Structured size refusal, retained for callers that expose their own error vocabulary.
     pub fn payload_limit(&self) -> Option<&packets::custom_payload::PayloadTooLarge> {
-        self.1.as_ref()
+        match &self.1 {
+            Some(SizeRefusal::Payload(detail)) => Some(detail),
+            _ => None,
+        }
+    }
+    /// A packet cannot fit the connection's framing or compression pipeline.
+    pub fn frame_too_large(detail: frame::FrameTooLarge) -> Self {
+        Self(
+            format!("FrameTooLarge {detail:?}"),
+            Some(SizeRefusal::Frame(detail)),
+        )
+    }
+    /// Structured whole-packet refusal, before any bytes are written.
+    pub fn frame_limit(&self) -> Option<&frame::FrameTooLarge> {
+        match &self.1 {
+            Some(SizeRefusal::Frame(detail)) => Some(detail),
+            _ => None,
+        }
     }
     /// The read timeout passed with nothing received (netty's
     /// `ReadTimeoutException`, which `Connection.exceptionCaught` reports as

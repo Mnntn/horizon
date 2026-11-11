@@ -1,5 +1,11 @@
 //! Directional discard-fallback limits for configuration and play custom payloads.
 //! Existing registered engine channels retain their own codec constraints.
+mod registry;
+pub use registry::{PayloadCodecs, PayloadFlow, PayloadProtocol};
+#[cfg(test)]
+#[path = "custom_payload/registry_tests.rs"]
+mod registry_tests;
+
 use crate::{
     Error, Result,
     buf::{Codec, Ident, Reader, Writer},
@@ -59,13 +65,17 @@ fn uses_registered_payload_codec(channel: &str, play: bool, clientbound: bool) -
 }
 
 impl<const CLIENTBOUND: bool, const PLAY: bool> PayloadCodec<CLIENTBOUND, PLAY> {
-    fn check(channel: &str, size: usize) -> Result<()> {
+    fn check(channel: &str, size: usize, codecs: Option<&PayloadCodecs>) -> Result<()> {
         let limit = if CLIENTBOUND {
             CLIENTBOUND_LIMIT
         } else {
             SERVERBOUND_LIMIT
         };
-        if !uses_registered_payload_codec(channel, PLAY, CLIENTBOUND) && size > limit {
+        let registered = codecs.map_or_else(
+            || uses_registered_payload_codec(channel, PLAY, CLIENTBOUND),
+            |codecs| codecs.contains(channel, PLAY, CLIENTBOUND),
+        );
+        if !registered && size > limit {
             return Err(Error::payload_too_large(channel, size, limit));
         }
         Ok(())
@@ -91,7 +101,7 @@ impl<const CLIENTBOUND: bool, const PLAY: bool> Codec<CustomPayload>
     fn read(r: &mut Reader) -> Result<CustomPayload> {
         let channel = Ident::read(r)?;
         let size = r.remaining();
-        Self::check(&channel, size)?;
+        Self::check(&channel, size, r.payload_codecs())?;
         let body = r.rest();
         Self::validate_body(&channel, body)?;
         Ok(CustomPayload {
@@ -101,7 +111,12 @@ impl<const CLIENTBOUND: bool, const PLAY: bool> Codec<CustomPayload>
     }
 
     fn validate(v: &CustomPayload) -> Result<()> {
-        Self::check(&v.channel, v.data.len())?;
+        Self::check(&v.channel, v.data.len(), None)?;
+        Self::validate_body(&v.channel, &v.data)
+    }
+
+    fn validate_with_payload_codecs(v: &CustomPayload, codecs: &PayloadCodecs) -> Result<()> {
+        Self::check(&v.channel, v.data.len(), Some(codecs))?;
         Self::validate_body(&v.channel, &v.data)
     }
 
@@ -201,8 +216,8 @@ mod tests {
                 !uses_registered_payload_codec(channel, false, false),
                 "{channel}"
             );
-            assert!(ServerboundPayload::check(channel, 32_768).is_err());
-            assert!(ClientboundPayload::check(channel, 1_048_577).is_err());
+            assert!(ServerboundPayload::check(channel, 32_768, None).is_err());
+            assert!(ClientboundPayload::check(channel, 1_048_577, None).is_err());
         }
     }
 

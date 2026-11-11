@@ -31,10 +31,29 @@ pub fn check_network_nbt(tag: &Tag) -> Result<()> {
 pub struct Reader<'a> {
     data: &'a [u8],
     pos: usize,
+    payload_codecs: Option<&'a crate::packets::custom_payload::PayloadCodecs>,
 }
 impl<'a> Reader<'a> {
     pub fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
+        Self {
+            data,
+            pos: 0,
+            payload_codecs: None,
+        }
+    }
+    /// Read using this connection's frozen custom-payload codecs.
+    pub fn with_payload_codecs(
+        data: &'a [u8],
+        codecs: &'a crate::packets::custom_payload::PayloadCodecs,
+    ) -> Self {
+        Self {
+            data,
+            pos: 0,
+            payload_codecs: Some(codecs),
+        }
+    }
+    pub(crate) fn payload_codecs(&self) -> Option<&crate::packets::custom_payload::PayloadCodecs> {
+        self.payload_codecs
     }
     pub fn remaining(&self) -> usize {
         self.data.len() - self.pos
@@ -338,6 +357,13 @@ pub trait Codec<T> {
     /// Validate a value before allocating its encoded body.
     fn validate(_v: &T) -> Result<()> {
         Ok(())
+    }
+    /// Validate using this connection's frozen custom-payload codecs.
+    fn validate_with_payload_codecs(
+        v: &T,
+        _codecs: &crate::packets::custom_payload::PayloadCodecs,
+    ) -> Result<()> {
+        Self::validate(v)
     }
 }
 macro_rules! primitive {

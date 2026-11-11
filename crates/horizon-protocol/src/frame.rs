@@ -12,6 +12,26 @@ pub const MAX_FRAME: usize = (1 << 21) - 1;
 /// CompressionDecoder.MAXIMUM_UNCOMPRESSED_LENGTH.
 pub const MAX_UNCOMPRESSED: usize = 8_388_608;
 
+/// Which whole-packet boundary refused an outgoing packet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameSize {
+    /// Packet contents after the compression header and optional compression.
+    Encoded,
+    /// Packet bytes before compression, including the packet id.
+    Uncompressed,
+}
+
+/// A named pre-write refusal, not a registered-payload body limit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrameTooLarge {
+    /// Which stage's bound was exceeded.
+    pub stage: FrameSize,
+    /// Actual whole-packet byte count at that stage.
+    pub size: usize,
+    /// Inclusive maximum at that stage.
+    pub limit: usize,
+}
+
 /// Build the frame for one packet body (`id` + payload already concatenated):
 /// length prefix, and with compression enabled the uncompressed-length
 /// field (0 when below the threshold).
@@ -22,6 +42,18 @@ pub fn encode(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
 /// What [`encode`] puts after the length prefix: the same for every
 /// connection with the same threshold.
 pub fn contents(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
+    let (stage, limit) = if threshold.is_some() {
+        (FrameSize::Uncompressed, MAX_UNCOMPRESSED)
+    } else {
+        (FrameSize::Encoded, MAX_FRAME)
+    };
+    if body.len() > limit {
+        return Err(Error::frame_too_large(FrameTooLarge {
+            stage,
+            size: body.len(),
+            limit,
+        }));
+    }
     let inner = match threshold {
         None => body.to_vec(),
         Some(t) if body.len() < t => {
@@ -40,10 +72,11 @@ pub fn contents(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
         }
     };
     if inner.len() > MAX_FRAME {
-        return Err(Error::new(format!(
-            "packet too large: {} bytes",
-            inner.len()
-        )));
+        return Err(Error::frame_too_large(FrameTooLarge {
+            stage: FrameSize::Encoded,
+            size: inner.len(),
+            limit: MAX_FRAME,
+        }));
     }
     Ok(inner)
 }
@@ -170,6 +203,10 @@ pub fn body(frame: &[u8], threshold: Option<usize>, inflater: &mut Inflater) -> 
         .inflate(&frame[r.position()..], size)
         .map(Body::Inflated)
 }
+
+#[cfg(test)]
+#[path = "frame/limits_tests.rs"]
+mod limits_tests;
 
 #[cfg(test)]
 mod tests {
