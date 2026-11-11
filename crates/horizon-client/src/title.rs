@@ -4931,6 +4931,8 @@ mod classic_tests {
 
     #[test]
     fn classic_main_menu_icons_route_mods_language_and_accessibility() {
+        // Join a Friend needs a resolver (title/tests.rs tests the icon without one).
+        crate::net::JOINS_FRIENDS_IN_TEST.set(true);
         let mut title = Title::new(
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
