@@ -627,7 +627,7 @@ fn rewrite(
             }
             #[doc(hidden)]
             #[inline]
-            #[allow(dead_code, clippy::all)]
+            #[allow(dead_code, non_snake_case, clippy::all)]
             pub fn #installer(replacement: #ty) -> bool {
                 crate::__REPLACE[#slot]
                     .compare_exchange(
@@ -810,6 +810,50 @@ mod tests {
         assert_eq!(
             pointer_type(&free.sig).to_string(),
             quote!(fn(f32) -> i64).to_string()
+        );
+    }
+
+    #[test]
+    fn trait_installers_compile_with_warnings_denied() {
+        let source = "pub struct Example; pub trait GameTrait { fn value(&self) -> u32; } impl GameTrait for Example { fn value(&self) -> u32 { 7 } }";
+        let file = syn::parse_file(source).unwrap();
+        let mut found = Vec::new();
+        functions(
+            "k",
+            &file.items,
+            &BTreeSet::from(["GameTrait".to_owned()]),
+            &BTreeSet::from(["Example".to_owned()]),
+            &mut found,
+        );
+        let mut count = 0;
+        let mut out = rewrite(Path::new("k.rs"), source, &found, &mut count)
+            .unwrap()
+            .unwrap();
+        assert_eq!(count, 1);
+        out.push_str(" pub static __REPLACE: [std::sync::atomic::AtomicPtr<()>; 1] = [std::sync::atomic::AtomicPtr::new(std::ptr::null_mut())];");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target")
+            .join(format!("fnr-trait-lint-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("fixture.rs");
+        fs::write(&input, out).unwrap();
+        let result = std::process::Command::new("rustc")
+            .args([
+                "--edition=2024",
+                "--crate-type=lib",
+                "--emit=metadata",
+                "-Dwarnings",
+            ])
+            .arg(&input)
+            .arg("--out-dir")
+            .arg(&dir)
+            .output()
+            .unwrap();
+        fs::remove_dir_all(dir).unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
         );
     }
 
