@@ -160,7 +160,7 @@ mod tests {
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+            with_game(|game| {
                 let id = game
                     .spawn_mob_spawned(
                         "cow",
@@ -212,7 +212,7 @@ mod tests {
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+            with_game(|game| {
                 let id = game
                     .spawn_mob_spawned(
                         "cow",
@@ -291,7 +291,7 @@ mod tests {
             )]
             .into();
             mod_api::testing::with_mods(mods, || {
-                crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+                with_game(|game| {
                     use horizon_client::mobs::path::{Evaluator, Finder, PathType};
                     game.world
                         .chunks

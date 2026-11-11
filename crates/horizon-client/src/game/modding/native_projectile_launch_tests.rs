@@ -8,7 +8,7 @@ use mod_api::Identifier;
 #[test]
 #[ignore = "needs prepared resources and HORIZON_TEST_SEEDS=1"]
 fn owner_launch_sets_owner_before_insertion_and_uses_projectile_random() {
-    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+    with_game(|game| {
         let kind = game
             .res
             .mob_types()

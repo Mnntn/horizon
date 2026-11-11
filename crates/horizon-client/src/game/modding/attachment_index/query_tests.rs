@@ -24,7 +24,7 @@ fn values(game: &Game<'_>) -> Vec<u32> {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn query_snapshot_dimension_and_stale_writes() {
-    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+    with_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         assert!(values(game).is_empty());

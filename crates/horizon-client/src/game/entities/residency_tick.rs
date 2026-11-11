@@ -37,7 +37,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_tick_drains_actual_bound_owner_events_without_a_lookup() {
-        crate::game::native_entity_refs::tests::with_frozen_client_game(|game| {
+        with_client_game(|game| {
             let (client, server) = horizon_protocol::connection::Pipe::pair();
             game.connect_local(client, "residency-client").unwrap();
             game.remote.as_mut().unwrap().logged_in = true;

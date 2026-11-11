@@ -7,7 +7,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn disconnect_discards_properties_before_reconnect() {
-        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+        with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
             let (client, _server) = Pipe::pair();
             game.connect_local(client, "PropertiesA").unwrap();

@@ -4,7 +4,7 @@ use horizon_core::geometry::Vec3;
 #[test]
 #[ignore = "needs prepared resources"]
 fn relative_item_teleports_keep_only_relative_horizontal_motion() {
-    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+    with_game(|game| {
         game.ui.registries.permission = 4;
         game.spawn_item_own(
             horizon_client::items::ItemStack::new("minecraft:stone", 1),

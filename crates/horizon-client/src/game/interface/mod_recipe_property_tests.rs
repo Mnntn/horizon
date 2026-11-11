@@ -33,7 +33,7 @@ mod tests {
         crate::game::api_values::install_parts(&mods).unwrap();
         crate::entry::install_client_hooks();
         mod_api::testing::with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_frozen_client_game(|game| {
+            with_client_game(|game| {
                 let (client, _server) = Pipe::pair();
                 game.connect_local(client, "PropertyPrediction").unwrap();
                 let item = mod_api::__private::item_key("minecraft:emerald").unwrap();

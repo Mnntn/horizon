@@ -49,7 +49,7 @@ fn a_living_handle_dispatches_custom_kinds_with_same_kind_recursion_refused() {
         ModEntry::new("second", Box::new(Second(trace.clone()))),
     ];
     mod_api::testing::with_mods(mods.into(), || {
-        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+        with_game(|game| {
             let mut items = game.items().clone();
             for (item, kind) in [
                 ("minecraft:pufferfish", "first:effect"),

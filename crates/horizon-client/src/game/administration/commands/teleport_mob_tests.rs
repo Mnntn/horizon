@@ -5,7 +5,7 @@ use horizon_core::geometry::Vec3;
 #[test]
 #[ignore = "needs prepared resources"]
 fn command_stops_navigation_and_dismounts() {
-    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+    with_game(|game| {
         let kind = game
             .res
             .mob_types()

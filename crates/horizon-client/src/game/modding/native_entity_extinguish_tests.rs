@@ -22,7 +22,7 @@ const PITCH: u32 = 0x3fe09a90;
 #[test]
 #[ignore = "needs prepared resources"]
 fn extinguish_fire_uses_mob_kind_immunity_and_own_random_unlike_silent_clear() {
-    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+    with_game(|game| {
         let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
         game.mobs
             .push(Mob::new(21, kind, Vec3::new(3.0, 64.0, 5.0), 0.0));
