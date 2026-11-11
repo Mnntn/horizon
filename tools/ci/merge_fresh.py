@@ -95,10 +95,10 @@ def conflict(main_files, pr_files):
     return None
 
 
-def provenance(record, run, number, head):
+def provenance(record, run, number, head, source_attempt):
     require(isinstance(record, dict), 'missing source record')
     for key, expected in [('schema_version', 1), ('pr', number), ('run_id', run['id']),
-                          ('attempt', run['run_attempt'])]:
+                          ('attempt', source_attempt)]:
         require(type(record.get(key)) is int and record[key] == expected, 'source mismatch: ' + key)
     for key in ('base', 'head', 'merge'):
         sha(record.get(key))
@@ -126,9 +126,20 @@ def check(api, number):
         require(gates[0].get('status') == 'completed' and gates[0].get('conclusion') in allowed,
                 'gate pending or unsuccessful: ' + name)
     artifacts = api.pages(f"actions/runs/{run['id']}/artifacts", 'artifacts')
-    sources = [a for a in artifacts if a.get('name') == f'gate-source-{attempt}' and not a.get('expired')]
-    require(len(sources) == 1, 'missing or ambiguous attempt source artifact')
-    source = provenance(api.source(sources[0]), run, number, head)
+    sources = {}
+    for artifact in artifacts:
+        match = re.fullmatch(r'gate-source-([1-9][0-9]*)', artifact.get('name', ''))
+        if not match or artifact.get('expired'):
+            continue
+        source_attempt = int(match[1])
+        require(source_attempt <= attempt, 'source artifact from a future attempt')
+        require(source_attempt not in sources, 'ambiguous attempt source artifacts')
+        sources[source_attempt] = provenance(api.source(artifact), run, number, head, source_attempt)
+    require(sources, 'missing source artifact')
+    source = sources[max(sources)]
+    require(all(tuple(record[key] for key in ('base', 'head', 'merge')) ==
+                tuple(source[key] for key in ('base', 'head', 'merge')) for record in sources.values()),
+            'inconsistent same-run source triples')
     if main == source['base']:
         reason = None
     else:

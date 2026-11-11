@@ -15,11 +15,15 @@ The newest dyna-ci pull-request run associated with this PR and its current head
 must have successful latest-attempt `lint` and `verify` jobs. `launcher` and
 `pool-watch` must be completed successfully or deliberately skipped. Missing,
 ambiguous, pending, failed, and cancelled records cannot establish freshness.
-A main push or manual dispatch cannot substitute. The exact attempt's unique,
+A main push or manual dispatch cannot substitute. The latest available unique,
 unexpired `gate-source-<attempt>` artifact must contain `gate-source.json` with
 schema version 1, integer `pr`, `run_id`, and `attempt`, and 40-character lowercase
 hexadecimal `base`, `head`, and `merge`. Its identities must match the selected
-PR, run, attempt, and current head. No older attempt's artifact is borrowed.
+PR, run, artifact attempt, and current head. A rerun that reuses the successful
+source producer may reuse an earlier attempt's metadata from this same run;
+all available source artifacts must agree on the immutable base/head/merge
+triple and no source attempt may exceed the run's current attempt. This is not
+permission to borrow older successful gate outcomes.
 
 When current main equals the recorded base, valid green evidence is FRESH even
 for a PR editing shared contracts. Otherwise main must descend from that base.
