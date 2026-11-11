@@ -9,9 +9,11 @@ use horizon_protocol::{
 };
 use mod_api::{PayloadFrameStage, PayloadId, PayloadSendError};
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+
+use std::thread::JoinHandle;
 
 const CAPACITY: usize = 16 * 1024 * 1024;
 // Covers the pending transaction journal record as well as the queue's own node.
@@ -19,15 +21,27 @@ const PUBLICATION_OVERHEAD: usize = 512;
 enum WriteJob {
     Packet(Vec<u8>),
     Contents(Vec<u8>),
+    Disconnect(Vec<u8>),
 }
 
-pub(super) struct QueuedWriter {
-    sender: Sender<WriteJob>,
+#[derive(Clone)]
+pub(crate) struct QueuedWriter(Arc<Inner>);
+pub(crate) struct Inner {
+    sender: Mutex<Option<Sender<WriteJob>>>,
+    worker: Mutex<Option<JoinHandle<ConnWriter>>>,
     framing: Framing,
     closer: Arc<Closer>,
     alive: Arc<AtomicBool>,
+    retired: AtomicBool,
+    terminal: AtomicBool,
     version: ServerVersion,
     secure_chat: Box<dyn Fn() -> Option<bool> + Send + Sync>,
+}
+impl std::ops::Deref for QueuedWriter {
+    type Target = Inner;
+    fn deref(&self) -> &Inner {
+        &self.0
+    }
 }
 
 /// Prepared once, charged immediately, invisible to the writer until root commit.
@@ -47,7 +61,7 @@ impl PreparedPayload {
     }
 }
 impl QueuedWriter {
-    pub(super) fn new(mut writer: ConnWriter) -> Result<Self> {
+    pub(crate) fn new(mut writer: ConnWriter) -> Result<Self> {
         let framing = writer.framing();
         let closer = Arc::new(writer.closer()?);
         let alive = Arc::new(AtomicBool::new(true));
@@ -55,57 +69,108 @@ impl QueuedWriter {
         let secure_chat = Box::new(writer.legacy_secure_chat_observer());
         let (sender, receiver) = byte_channel::channel(CAPACITY).expect("nonzero writer capacity");
         let running = alive.clone();
-        std::thread::Builder::new()
+        let worker = std::thread::Builder::new()
             .name("horizon-net-write".into())
             .spawn(move || {
                 while let Ok(job) = receiver.recv() {
+                    let disconnect = matches!(&job, WriteJob::Disconnect(_));
                     let result = match job {
-                        WriteJob::Packet(body) => writer.send(&body),
+                        WriteJob::Packet(body) | WriteJob::Disconnect(body) => writer.send(&body),
                         WriteJob::Contents(contents) => writer.send_contents(&contents),
                     };
-                    if result.is_err() {
+                    if result.is_err() || disconnect {
+                        running.store(false, Ordering::Release);
+                        writer.shutdown();
                         break;
                     }
                 }
-                running.store(false, Ordering::Release);
-                writer.shutdown();
+                writer
             })
             .map_err(|error| Error::new(format!("cannot start client writer: {error}")))?;
-        Ok(Self {
-            sender,
+        Ok(Self(Arc::new(Inner {
+            sender: Mutex::new(Some(sender)),
+            worker: Mutex::new(Some(worker)),
+            retired: AtomicBool::new(false),
+            terminal: AtomicBool::new(false),
             framing,
             closer,
             alive,
             version,
             secure_chat,
-        })
+        })))
     }
-    pub(super) fn server_version(&self) -> ServerVersion {
+    /// Stop acceptance, cancel unpublished reservations and drain published writes.
+    pub(crate) fn drain_and_take(&self) -> Result<ConnWriter> {
+        let mut sender = self.sender.lock().unwrap();
+        self.retired.store(true, Ordering::Release);
+        sender.take();
+        drop(sender);
+        let worker = self
+            .worker
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or_else(|| Error::new("writer already taken"))?;
+        let writer = worker.join().map_err(|_| Error::new("writer panicked"))?;
+        if !self.alive.swap(false, Ordering::AcqRel) {
+            return Err(Error::new("writer disconnected"));
+        }
+        Ok(writer)
+    }
+    pub(crate) fn is_terminal(&self) -> bool {
+        self.terminal.load(Ordering::Acquire)
+    }
+    pub(crate) fn framing(&self) -> Framing {
+        self.framing
+    }
+    pub(crate) fn server_version(&self) -> ServerVersion {
         self.version
     }
-    pub(super) fn legacy_secure_chat_enforcement(&self) -> Option<bool> {
+    pub(crate) fn legacy_secure_chat_enforcement(&self) -> Option<bool> {
         (self.secure_chat)()
     }
-    pub(super) fn shutdown(&self) {
+    pub(crate) fn shutdown(&self) {
+        if self.retired.load(Ordering::Acquire) {
+            return;
+        }
         self.alive.store(false, Ordering::Release);
-        self.closer.close();
+        if !self.retired.load(Ordering::Acquire) {
+            self.closer.close();
+        }
+        self.sender.lock().unwrap().take();
     }
-    pub(super) fn send(&self, body: &[u8]) -> Result<()> {
+    pub(crate) fn send(&self, body: &[u8]) -> Result<()> {
         if !self.alive.load(Ordering::Acquire) {
             return Err(Error::new("client writer disconnected"));
         }
         let owned = body.to_vec();
         let capacity = owned.capacity();
-        match self.sender.try_send(WriteJob::Packet(owned), capacity) {
+        let sender = self.sender.lock().unwrap();
+        let Some(sender) = sender.as_ref() else {
+            return Err(Error::new("writer retired"));
+        };
+        match sender.try_send(WriteJob::Packet(owned), capacity) {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(_)) => {
-                self.shutdown();
+                self.alive.store(false, Ordering::Release);
+                self.closer.close();
                 Err(Error::new("client writer backpressure"))
             }
             Err(TrySendError::Disconnected(_)) => Err(Error::new("client writer disconnected")),
         }
     }
-    pub(super) fn prepare_payload(
+    pub(crate) fn disconnect(&self, body: Vec<u8>) {
+        let mut sender = self.sender.lock().unwrap();
+        self.terminal.store(true, Ordering::Release);
+        let Some(queue) = sender.take() else {
+            return;
+        };
+        let bytes = body.capacity();
+        if queue.try_send(WriteJob::Disconnect(body), bytes).is_err() {
+            self.closer.close();
+        }
+    }
+    pub(crate) fn prepare_payload(
         &self,
         body: Vec<u8>,
         id: &PayloadId,
@@ -128,8 +193,10 @@ impl QueuedWriter {
                 PayloadSendError::EncodeFailed(error.to_string())
             }
         })?;
-        let permit = self
-            .sender
+        let sender = self.sender.lock().unwrap();
+        let permit = sender
+            .as_ref()
+            .ok_or(PayloadSendError::Disconnected)?
             .reserve(contents.capacity() + PUBLICATION_OVERHEAD)
             .map_err(|error| match error {
                 ReserveError::Full => PayloadSendError::Backpressure,
@@ -145,8 +212,10 @@ impl QueuedWriter {
 #[cfg(test)]
 mod tests;
 
-impl Drop for QueuedWriter {
+impl Drop for Inner {
     fn drop(&mut self) {
-        self.shutdown();
+        if !self.retired.load(Ordering::Acquire) && !self.terminal.load(Ordering::Acquire) {
+            self.closer.close();
+        }
     }
 }

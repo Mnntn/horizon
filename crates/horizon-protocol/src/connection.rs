@@ -562,6 +562,20 @@ impl Framing {
     }
 }
 impl ConnWriter {
+    /// Remove this exact writer, leaving an explicitly disconnected placeholder.
+    pub fn take(&mut self) -> Self {
+        let placeholder = Self {
+            memory: self.memory,
+            stream: Stream::Detached,
+            encrypt: None,
+            threshold: None,
+            counters: self.counters.clone(),
+            adapter: None,
+            older_client: None,
+        };
+        std::mem::replace(self, placeholder)
+    }
+
     /// An independent shutdown handle for this writer.
     pub fn closer(&self) -> Result<Closer> {
         Ok(Closer(self.stream.try_clone()?))
