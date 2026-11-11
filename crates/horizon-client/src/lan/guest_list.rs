@@ -132,9 +132,7 @@ impl GuestList {
     pub fn inbox_mut(
         &mut self,
         index: usize,
-    ) -> Option<
-        &mut std::collections::VecDeque<super::guest::InboxItem>,
-    > {
+    ) -> Option<&mut std::collections::VecDeque<super::guest::InboxItem>> {
         Some(&mut self.rows.get_mut(index)?.inbox)
     }
 
