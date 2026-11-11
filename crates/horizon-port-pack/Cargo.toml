@@ -20,6 +20,9 @@ ureq = { version = "2", default-features = false, features = ["tls", "socks-prox
 url = "2"
 zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 
+[dev-dependencies]
+mod_api = { package = "horizon-mod-api", path = "../horizon-mod-api" }
+
 [build-dependencies]
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 

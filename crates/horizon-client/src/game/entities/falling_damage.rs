@@ -247,8 +247,8 @@ mod tests {
     use horizon_client::{items::ItemStack, motion::PlayerMotion};
     use horizon_core::{equipment_slot::EquipmentSlot, geometry::Vec3};
     use mod_api::{
-        ArmorHurtEvent, Flow, Hooks, ItemDamagedEvent, LevelRandomHost, LivingIncomingDamageEvent,
-        ServerHost,
+        ArmorHurtEvent, DamageItemEvent, Flow, Hooks, ItemPart, LevelRandomHost,
+        LivingIncomingDamageEvent, Registrar, RegistrationContext, ServerHost,
     };
     use std::sync::{Arc, Mutex};
 
@@ -263,12 +263,17 @@ mod tests {
         incoming: u32,
         /// `armor_hurt`: each call's slots and vanilla damage.
         armor: Vec<Vec<(EquipmentSlot, f32)>>,
-        /// `item_damaged`: the points, and whether its host names the acting player.
+        /// `damage_item` of the iron helmet: the points, and whether its host names the acting player.
         worn: Vec<(i32, bool)>,
     }
+    #[derive(Clone)]
     struct Probe(Arc<Mutex<Log>>);
     #[mod_api::__subscriptions]
     impl Hooks for Probe {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            let helmet = r.item_key("minecraft:iron_helmet");
+            r.item_part(helmet, self.clone());
+        }
         fn living_incoming_damage(
             &self,
             _: &mut dyn LevelRandomHost,
@@ -297,11 +302,10 @@ mod tests {
                 Flow::Continue
             }
         }
-        fn item_damaged(
-            &self,
-            host: &mut dyn ServerHost,
-            event: &mut ItemDamagedEvent<'_>,
-        ) -> Flow {
+    }
+    #[mod_api::horizon_part]
+    impl ItemPart for Probe {
+        fn damage_item(&self, host: &mut dyn ServerHost, event: &mut DamageItemEvent<'_>) -> Flow {
             let acting = host.players().acting_player().is_some();
             self.0.lock().unwrap().worn.push((event.amount, acting));
             Flow::Continue
@@ -316,7 +320,8 @@ mod tests {
             Box::new(Probe(log.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_api::testing::with_mods(mods.clone(), || {
+            crate::game::api_values::install_parts(&mods).unwrap();
             with_game(|game| {
                 game.lan_acting_uuid = Some(123);
                 game.lan_acting_entity = Some(20);

@@ -205,6 +205,33 @@ pub trait RenderAssets {
             crate::world::phase::LoadAccess::PublishedResources,
         )
     }
+    /// Side: client.
+    /// Published asset/data read: available in Setup, Reloading and World.
+    /// Resolve a pipeline registered in `register_render_pipelines` once in `client_setup` and
+    /// again in `client_resources_reloaded`, not each frame. `Unknown` for an id no mod
+    /// registered, `Invalid` for one whose shader the current resources don't give or that
+    /// didn't compile. Nothing is read or compiled here.
+    fn render_pipeline(&self, id: &Identifier) -> Result<RenderPipelineRef, RenderPipelineError> {
+        crate::world::phase::unprovided(
+            "RenderAssets::render_pipeline",
+            "render_pipeline",
+            crate::world::phase::LoadAccess::PublishedResources,
+        )
+    }
+    /// Side: client.
+    /// Published asset/data read: available in Setup, Reloading and World.
+    /// The keyframe animation `id`, from `assets/<namespace>/neoforge/animations/entity/<path>.json`
+    /// in the mod's or a pack's resources (NeoForge's `Model.getAnimation`), as the latest resource
+    /// load read it; `None` when no file gives it or the file failed to load. Get and
+    /// [`AnimationHolder::bake`] it (or [`AnimationHolder::bake_with`] when it names registered
+    /// types) once in `client_setup` and again in `client_resources_reloaded`, not each frame.
+    fn animation(&self, id: &Identifier) -> Option<AnimationHolder> {
+        crate::world::phase::unprovided(
+            "RenderAssets::animation",
+            "animation",
+            crate::world::phase::LoadAccess::PublishedResources,
+        )
+    }
 }
 
 /// Client-side persistent copies of resolved models.

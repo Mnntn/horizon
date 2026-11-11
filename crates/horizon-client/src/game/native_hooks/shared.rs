@@ -1,6 +1,14 @@
+#[path = "shared/book_screen.rs"]
+mod book_screen;
+#[path = "shared/item_fallthrough.rs"]
+mod item_fallthrough;
+#[path = "shared/loot.rs"]
+mod loot;
+
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 use horizon_client::containers::ModBlockEntity as EngineBlockEntity;
+use screen_chars::chars_to_type;
 
 struct ContentsChangedGuard<'a, 'game> {
     game: &'a mut Game<'game>,
@@ -12,19 +20,9 @@ impl Drop for ContentsChangedGuard<'_, '_> {
     }
 }
 
-/// `view` as the screen `id` (an overlay or a title screen, which shows over
-/// the whole window with no menu).
-fn screen_view_with_id<'a>(view: &ScreenView<'a>, id: &'static str) -> ScreenView<'a> {
-    ScreenView::from(mod_api::__private::built::ScreenView {
-        id,
-        menu: view.menu,
-        title: view.title,
-        rect: view.rect,
-        slots: view.slots,
-        mouse: view.mouse,
-        partial_tick: view.partial_tick,
-    })
-}
+#[path = "shared/screen_view.rs"]
+mod screen_view;
+use screen_view::screen_view_with_id;
 
 /// What `decide_screen` says the hooks answered to a change of screen.
 enum ScreenDecision {
@@ -102,7 +100,7 @@ impl Game<'_> {
         if self.screen == screen && owner.is_none() {
             return;
         }
-        self.apply_screen(screen, owner);
+        self.apply_screen_with_mod_book(screen, owner);
     }
     /// Whether a change of screen asks the screen hooks: a mod listens to
     /// `screen_opening` or `screen_closing`, on a client's own `Game` (not a
@@ -546,6 +544,7 @@ fn shake_pose(shake: Shake) -> glam::Mat4 {
 /// the server sent them, and what the server sent before the menu opened
 /// (`horizon:menu_extra`), when it did.
 pub(super) struct OpenNativeScreen {
+    pub(super) layout_revision: u64,
     key: Pos,
     window: i32,
     block: String,
@@ -778,19 +777,6 @@ fn screen_text_hooked(text: &str, mut canceled: impl FnMut(char) -> bool) -> Opt
     Some(left)
 }
 
-/// What of a key press's text is characters for the
-/// `ScreenEvent.CharacterTyped.Pre` hook: control ones are gone (the key's own
-/// handling takes those, and vanilla fires no `charTyped` for them).
-/// With the edit modifier held the key is a shortcut and its characters are
-/// not text (`types_text`): no hook hears them, as vanilla's `textInput`
-/// gets none for Ctrl+A.
-fn chars_to_type(text: &str, types_text: bool) -> String {
-    if !types_text {
-        return String::new();
-    }
-    text.chars().filter(|c| !c.is_control()).collect()
-}
-
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
     /// The single admission point for all toast families. Producers decide the
@@ -923,11 +909,17 @@ impl Game<'_> {
     /// drawn this frame, which `ScreenView.id` comes from. Borrowed:
     /// nothing is copied per frame.
     pub(super) fn screen_view(&self, batch: &HudBatch, screen: Screen) -> ScreenView<'_> {
+        self.screen_view_at(screen, self.screen_rect(batch, screen))
+    }
+    /// `screen_view` with the panel `rect` the caller is laying out: the
+    /// container build tells a mod the panel it is about to draw, not the one
+    /// the previous frame drew.
+    pub(super) fn screen_view_at(&self, screen: Screen, rect: [f32; 4]) -> ScreenView<'_> {
         ScreenView::from(mod_api::__private::built::ScreenView {
             id: screen.id(),
             menu: self.remote_menu_type().filter(|m| !m.is_empty()),
             title: self.remote.as_ref().and_then(|r| r.menu_title_snapshot()),
-            rect: self.screen_rect(batch, screen),
+            rect,
             slots: self.slot_count(),
             mouse: self.cursor(),
             partial_tick: self.clock.fraction() as f32,
@@ -1692,8 +1684,8 @@ pub(super) fn level_sound_playable(at: [f64; 3], volume: f32, pitch: f32) -> boo
 }
 
 /// Whether a native mod's particles can be sent. Block particle types need
-/// a known state (`state_ok`); item, trail and vibration particles aren't
-/// supported by the network dispatch; a mod's own type must be namespaced.
+/// a known state (`state_ok`), item particles a validated stack; trail and vibration
+/// aren't supported by the network dispatch. A mod's own type must be namespaced.
 pub(super) fn mod_particles_ok(
     options: &ParticleOptions,
     state: Option<BlockStateId>,
@@ -1717,7 +1709,7 @@ pub(super) fn mod_particles_ok(
         T::Block | T::BlockMarker | T::FallingDust | T::DustPillar | T::BlockCrumble => {
             state.is_some_and(state_ok)
         }
-        T::Item | T::Trail | T::Vibration => false,
+        T::Item | T::Trail | T::Vibration => crate::game::item_particle_send::supported(options),
         T::Geyser | T::GeyserPlume | T::GeyserBase | T::GeyserPoof => options
             .geyser
             .is_some_and(|(_, impulse)| impulse.is_finite()),
@@ -1918,7 +1910,7 @@ impl GameLevel<'_> {
         changed
     }
     /// `Level.removeBlock`: replace a block with its fluid's legacy block.
-    pub(super) fn native_remove_block(
+    pub(super) fn remove_block_write(
         &mut self,
         ticks: &mut Ticks,
         pos: [i32; 3],
@@ -2118,32 +2110,6 @@ impl Game<'_> {
             })
             .collect()
     }
-    /// Sets the stack of item entity `id` in the server level `dimension`, as
-    /// a hopper's `addItem` leaves what it couldn't take (`ItemEntity.setItem`);
-    /// an empty stack (count 0) removes the entity (`setItem(EMPTY)`, then
-    /// `discard`). Players see it on their next tracker update. False when the
-    /// level in place has no such item entity, or on a client.
-    pub(super) fn native_set_item_entity(
-        &mut self,
-        dimension: &str,
-        id: u32,
-        stack: ItemStack,
-    ) -> bool {
-        if (self.serving.is_none() && self.options.dedicated.is_none())
-            || dimension != self.dim.id()
-        {
-            return false;
-        }
-        let Some(i) = self.dropped.iter().position(|e| e.id == id) else {
-            return false;
-        };
-        if stack.count == 0 {
-            self.remove_dropped(i);
-        } else {
-            self.dropped[i].stack = stack;
-        }
-        true
-    }
     /// Runs `change` on the mod block entity at `pos` (a generator charging
     /// the machine beside it) and returns what it returns; none for any
     /// other block entity, and for the one ticking now, which is out of the
@@ -2297,32 +2263,16 @@ impl Game<'_> {
         let size = self.window.as_ref()?.inner_size();
         Some([size.width, size.height])
     }
-    /// The areas the game itself draws beside the open screen's window.
+    /// The areas the game itself draws beside the open screen's window: the
+    /// container build's, or the frame's own arithmetic with no build yet.
     fn screen_own_exclusion(&self, batch: &HudBatch) -> Vec<[f32; 4]> {
-        let mut areas = Vec::new();
-        match self.screen {
-            Screen::Creative => {
-                let image = self.container_image(batch);
-                let (x, y, w, h) = (
-                    image.left as f32,
-                    image.top as f32,
-                    image.width as f32,
-                    image.height as f32,
-                );
-                areas.push([x, y - Creative::TAB_ROW_DEPTH, w, Creative::TAB_ROW_DEPTH]);
-                areas.push([x, y + h, w, Creative::TAB_ROW_DEPTH]);
-                areas.extend(self.inventory_effects_rect(batch, [x, y], w));
-            }
-            Screen::Inventory if self.title.is_none() => {
-                areas.extend(self.recipe_book_rect(batch));
-                if self.container.is_none() && self.craft_size == 2 && !self.mount_active() {
-                    let (x, y) = self.inventory_origin(batch);
-                    areas.extend(self.inventory_effects_rect(batch, [x, y], 176.0));
-                }
-            }
-            _ => {}
+        if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
+            return Vec::new();
         }
-        areas
+        match self.built_container(batch) {
+            Some(layout) => layout.exclusion(),
+            None => self.container_layout(batch).exclusion(),
+        }
     }
     /// The player, in a world.
     pub(super) fn native_player(&self) -> Option<NativePlayer> {
@@ -2669,8 +2619,8 @@ impl Game<'_> {
         Some(result)
     }
     /// `ItemStack.onItemUseFirst` for a click on a block: the broadcast
-    /// event's `ItemBeforeBlock` phase, then the held item's Part. The first
-    /// to answer ends the click; a `Pass` goes on to the block.
+    /// event's `ItemBeforeBlock` phase, then the held item's Part. Canceling skips that Part.
+    /// Only `Pass` continues to the block.
     pub(super) fn item_use_first(
         &mut self,
         hit: &super::Hit,
@@ -2690,48 +2640,6 @@ impl Game<'_> {
         let mut answer = None;
         self.native_on_item_use_first(&snapshot, &click, &mut answer);
         answer.filter(|answer| *answer != mod_api::InteractionResult::Pass)
-    }
-    /// Air use only: a passing block or entity keeps its target, rather than
-    /// becoming a `RightClickItem` interaction. `block_aimed` is the click's
-    /// own decided block target (the one `use_item_on_block` was asked about),
-    /// not a fresh ray cast.
-    pub(super) fn right_click_item(
-        &mut self,
-        hand: Hand,
-        stack: &ItemStack,
-        block_aimed: bool,
-    ) -> Option<mod_api::InteractionResult> {
-        if !mod_api::__private::listened(mod_api::HookId::RightClickItem)
-            || self.entity_targeted()
-            || block_aimed
-        {
-            return None;
-        }
-        let pos = self
-            .target_position(super::commands::Target::Player)?
-            .map(|v| v.floor() as i32);
-        let (player, player_entity_id) = self.native_clicker();
-        let snapshot = stack.try_into_api().ok()?;
-        let click = ItemClick::from(mod_api::__private::built::ItemClick {
-            side: if self.remote.is_some() {
-                LogicalSide::Client
-            } else {
-                LogicalSide::Server
-            },
-            dimension: self.dim.level(),
-            pos,
-            hand,
-            stack: &snapshot,
-            player,
-            player_entity_id,
-        });
-        let instant = self.use_duration(stack) <= 0;
-        let (mut result, mut canceled) = (mod_api::InteractionResult::Pass, false);
-        self.native_right_click_item(&click, &mut result, &mut canceled);
-        if canceled && instant && result.consumes_action() {
-            self.with_hand(hand, |game| game.apply_after_use_components(stack));
-        }
-        canceled.then_some(result)
     }
     /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
     /// (`GameRules.set` with a server).
@@ -2789,83 +2697,7 @@ impl Game<'_> {
     pub(super) fn native_acting_id(&mut self) -> u128 {
         horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid())
     }
-    /// The mods' say on a broken block's drops (`native_loot_drops`).
-    pub(super) fn native_block_loot(
-        &mut self,
-        pos: [i32; 3],
-        state: BlockStateId,
-        player: Option<u128>,
-        tool: Option<&ItemStack>,
-        explosion: Option<f32>,
-        drops: &mut Vec<ItemStack>,
-    ) {
-        if !mod_api::__private::listened(mod_api::HookId::LootDrops) {
-            return;
-        }
-        let Ok(snapshot) = tool.try_into_api() else {
-            return;
-        };
-        let items = match &self.world_tables {
-            Some(tables) => &tables.items,
-            None => self.res.items(),
-        };
-        let table = items.block_loot_table(self.pack.assets.registry, state);
-        let Ok(state) = state.try_into_api() else {
-            return;
-        };
-        let context = LootDrops::from(mod_api::__private::built::LootDrops {
-            table: table.as_deref().unwrap_or_default(),
-            dimension: self.dim.id(),
-            origin: pos.map(|c| f64::from(c) + 0.5),
-            block: Some((pos, state)),
-            entity: None,
-            player,
-            tool: snapshot.as_ref(),
-            explosion,
-            used: false,
-        });
-        self.native_loot_drops(&context, drops);
-        drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
-    }
-    /// The mods' say on what a use drops (`LootDrops::used`): `table`
-    /// is the loot table rolled, if any, and `player` the user, none for a
-    /// dispenser.
-    pub(super) fn native_use_drops(
-        &mut self,
-        table: &str,
-        origin: [f64; 3],
-        block: Option<([i32; 3], BlockStateId)>,
-        entity: Option<(u32, &str)>,
-        player: Option<u128>,
-        tool: Option<&ItemStack>,
-        drops: &mut Vec<ItemStack>,
-    ) {
-        if !mod_api::__private::listened(mod_api::HookId::LootDrops) {
-            return;
-        }
-        let Ok(snapshot) = tool.try_into_api() else {
-            return;
-        };
-        let Ok(block) = block
-            .map(|(pos, state)| state.try_into_api().map(|state| (pos, state)))
-            .transpose()
-        else {
-            return;
-        };
-        let context = LootDrops::from(mod_api::__private::built::LootDrops {
-            table,
-            dimension: self.dim.id(),
-            origin,
-            block,
-            entity,
-            player,
-            tool: snapshot.as_ref(),
-            explosion: None,
-            used: true,
-        });
-        self.native_loot_drops(&context, drops);
-        drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
-    }
+
     /// Whether a native mod keeps the acting player from taking `stack`.
     pub(super) fn native_pickup_refused(&mut self, stack: &ItemStack) -> bool {
         let player = self.native_acting_id();
@@ -3195,81 +3027,6 @@ impl Game<'_> {
         let c = self.world.block_entities.mod_container(state)?;
         mod_menu(c.menu.as_deref()?).map(|(menu, _)| menu)
     }
-    /// The container slots (of `size`) that the mod's screen for the block at
-    /// `pos` does not show: the server's menu does not have them either, so a
-    /// shift-click never moves an item where the player cannot see it.
-    pub(super) fn native_hidden_slots(&self, pos: Pos, size: usize) -> Vec<usize> {
-        if self.mod_menu_at(pos).is_none() {
-            return Vec::new();
-        }
-        let block = self
-            .res
-            .facts()
-            .get(self.world.block(pos.0, pos.1, pos.2))
-            .name
-            .to_string();
-        let mut screen = None;
-        self.native_screen(&block, &mut screen);
-        let Some(screen) = screen else {
-            return Vec::new();
-        };
-        (0..size)
-            .filter(|&i| screen.slots.get(i).is_none_or(Option::is_none))
-            .collect()
-    }
-    /// A menu opened on this client with its slots under `key`, on block
-    /// `target`: a mod block's is laid out by its mod (`native_screen`).
-    /// `extra` is what the server sent for this window first.
-    pub(super) fn open_native_screen(
-        &mut self,
-        key: Pos,
-        target: Option<Pos>,
-        window: i32,
-        menu: &str,
-        extra: Option<horizon_protocol::menu_extra::Message>,
-    ) {
-        self.mod_screen = None;
-        let Some(t) = target else {
-            return;
-        };
-        let block = self
-            .res
-            .facts()
-            .get(self.world.block(t.0, t.1, t.2))
-            .name
-            .to_string();
-        if block.starts_with("minecraft:") {
-            return;
-        }
-        // Only when this is the menu the clicked block opens: `target` outlives the
-        // use that set it, so another menu opened later (a command's, another
-        // mod's) would otherwise get the last clicked machine's screen. Asked
-        // here, as the window's world has no mod containers.
-        let mut container = None;
-        self.native_block_entity_container(&block, &mut container);
-        let opens = container.and_then(|c| mod_menu(c.menu.as_deref()?).map(|(m, _)| m));
-        if opens != Some(menu) {
-            return;
-        }
-        let mut screen = None;
-        self.native_screen(&block, &mut screen);
-        if let Some(screen) = screen {
-            self.mod_screen = Some(OpenNativeScreen {
-                key,
-                window,
-                block,
-                screen,
-                data: Vec::new(),
-                extra,
-            });
-        }
-    }
-    /// The mod screen showing now, if any.
-    fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
-        self.mod_screen
-            .as_ref()
-            .filter(|s| self.screen == Screen::Inventory && self.container == Some(s.key))
-    }
     /// A data slot of window `window`'s menu (`ContainerSetData`); false
     /// when no mod screen is showing for that window.
     pub(super) fn native_screen_data(&mut self, window: i32, id: i16, value: i16) -> bool {
@@ -3279,16 +3036,6 @@ impl Game<'_> {
         self.mod_screen
             .as_mut()
             .is_some_and(|s| s.set_data(window, id, value))
-    }
-    /// Whether a mod's screen is open for the current menu: it places its own
-    /// container slots and the player's inventory, so the stock layout of the
-    /// vanilla menu underneath stands back (`slot_position`).
-    pub(super) fn native_screen_shown(&self) -> bool {
-        self.shown_native_screen().is_some()
-    }
-    /// The open mod screen's height.
-    pub(super) fn native_screen_height(&self) -> Option<f32> {
-        self.shown_native_screen().map(|s| s.screen.height)
     }
     /// Where the open mod screen puts container slot `slot`.
     pub(super) fn native_screen_slot(&self, slot: usize) -> Option<(f32, f32)> {
@@ -3391,6 +3138,7 @@ impl Game<'_> {
         };
         // An empty id marks its place while the mod has it.
         let mut taken = std::mem::take(&mut **m);
+        let placeholder_identity = m.revision().identity();
         let state = self.world.block(pos.0, pos.1, pos.2).0;
         let slots = self
             .world
@@ -3407,15 +3155,26 @@ impl Game<'_> {
             let items = horizon_client::save::encode_items(&std::mem::take(&mut taken.items));
             taken.nbt.insert("Items".into(), items);
         }
+        let parent = (
+            self.block_entity_tick_key
+                .replace(super::block_entity_tick_items::Key {
+                    pos,
+                    placeholder_identity,
+                    failure_generation: self.wasm_dispatch_failures.get(),
+                    transaction_depth: self.transactions.len(),
+                    unbalanced: false,
+                }),
+            self.block_entity_tick_items.take(),
+        );
         self.api_block_entity_tick([pos.0, pos.1, pos.2], &mut taken);
-        self.put_back_mod_block_entity(pos, taken, &items);
+        self.finish_tick_item_writeback(pos, taken, &items, parent);
     }
     /// Puts back a mod block entity taken out for a call, unless the call
     /// removed or replaced it, with what its `setChanged` does.
     pub(super) fn put_back_mod_block_entity(
         &mut self,
         pos: Pos,
-        mut taken: EngineBlockEntity,
+        taken: EngineBlockEntity,
         items: &[Option<ItemStack>],
     ) {
         if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&pos)
@@ -3429,17 +3188,8 @@ impl Game<'_> {
             if moved {
                 self.container_changed(pos);
             }
-        } else if taken.items.iter().any(Option::is_some) {
-            // The mod removed or replaced its own block during the call. Vanilla
-            // ticks it in the world and drops a container's contents on removal.
-            let lost = std::mem::take(&mut taken.items);
-            let at = BlockPos {
-                x: pos.0,
-                y: pos.1,
-                z: pos.2,
-            };
-            self.with_level(|_, level, _| level.drop_lost_contents(at, lost));
-            self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));
+        } else {
+            self.drop_unreturned_mod_contents(pos, taken);
         }
     }
     /// Menu button `id` on the mod container at `pos` (`clickMenuButton`),
@@ -3648,25 +3398,6 @@ impl Game<'_> {
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
             page.settings = settings;
         }
-    }
-    /// `ClientHooks.onClickInput`: tells `native_interaction_key_mapping_triggered` that
-    /// `key` is about to act with `hand`. `None` when the action goes on; when a mod
-    /// cancelled it, `Some` of whether the hand swings.
-    pub(super) fn native_interaction(
-        &mut self,
-        key: InteractionKey,
-        hand: Hand,
-        attempt: InteractionAttempt,
-    ) -> Option<bool> {
-        let (mut swing_hand, mut canceled) = (true, false);
-        self.native_interaction_key_mapping_triggered(
-            key,
-            hand,
-            attempt,
-            &mut swing_hand,
-            &mut canceled,
-        );
-        canceled.then_some(swing_hand)
     }
     /// A client mod's command (the `command` hook); a server never asks.
     pub(super) fn client_mod_command(&mut self, command: &str) -> bool {
@@ -5047,6 +4778,7 @@ mod tests {
     #[test]
     fn mod_screen_data_is_its_windows_only() {
         let mut s = super::OpenNativeScreen {
+            layout_revision: 0,
             key: (0, 0, 0),
             window: 4,
             block: "gtmod:machine".into(),
@@ -5079,8 +4811,8 @@ mod tests {
     fn native_loot_kinds_stay_hookable() {
         let source = include_str!("../../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
         for hook in [
-            "pub fn native_loot_function(",
-            "pub fn native_loot_condition(",
+            "pub fn native_invoke_loot_function(",
+            "pub fn native_invoke_loot_condition(",
         ] {
             let at = source
                 .find(hook)

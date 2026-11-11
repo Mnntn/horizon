@@ -33,6 +33,20 @@ pub(super) struct PreparedWorld {
     pub owner_migration: Option<(u128, u128)>,
 }
 
+/// The dedicated server's `Main` takes level.dat_old without asking
+/// (`getUnfixedDataTagWithFallback`): there is no world list to recover from. The integrated
+/// server's world opens from that list, which offers the recovery instead, whatever the launch
+/// configuration says.
+fn fall_back_to_level_dat_old_without_asking(
+    role: execution_role::ExecutionRole,
+    save_root: &std::path::Path,
+    folder: &str,
+) {
+    if role.is_dedicated_server() && horizon_client::save::fall_back_to_level_dat_old(save_root) {
+        log::warn!("Horizon: level.dat of \"{folder}\" did not read; level.dat_old took its place");
+    }
+}
+
 impl WorldRequest {
     pub fn new(
         folder: &str,
@@ -125,15 +139,7 @@ impl WorldRequest {
         // openWorldLoadLevelData: level data that does not read is RecoverWorldDataScreen's to
         // handle (the title screen shows it); a world opened another way must not become a
         // new one with a random seed under the same name.
-        // The dedicated server's `Main` takes level.dat_old without asking
-        // (`getUnfixedDataTagWithFallback`): there is no world list to recover from.
-        if options.dedicated.is_some()
-            && horizon_client::save::fall_back_to_level_dat_old(&save_root)
-        {
-            log::warn!(
-                "Horizon: level.dat of \"{folder}\" did not read; level.dat_old took its place"
-            );
-        }
+        fall_back_to_level_dat_old_without_asking(options.execution_role, &save_root, &folder);
         if let Some(issue) = horizon_client::save::level_data_needs_recovery(&save_root) {
             let why = match issue {
                 horizon_client::save::DatIssue::Missing => "level.dat is missing".to_owned(),
@@ -1232,6 +1238,46 @@ pub(super) fn make_streaming(
 mod tests {
     use super::*;
 
+    /// A world whose level.dat does not read but whose level.dat_old does: only the
+    /// dedicated server restores it unasked. Every role here carries the launch configuration
+    /// (`options.dedicated`) a dedicated server and the integrated server thread both have, so
+    /// it cannot be what decides.
+    #[test]
+    fn only_the_dedicated_role_takes_level_dat_old_unasked() {
+        use execution_role::ExecutionRole::{Client, DedicatedServer, IntegratedServer};
+        for (role, restored) in [
+            (DedicatedServer, true),
+            (IntegratedServer, false),
+            (Client, false),
+        ] {
+            let dir = std::env::temp_dir().join(format!(
+                "horizon-level-dat-old-{role:?}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            Level {
+                name: "Recovered".into(),
+                ..Level::default()
+            }
+            .write(&dir)
+            .unwrap();
+            std::fs::copy(dir.join("level.dat"), dir.join("level.dat_old")).unwrap();
+            std::fs::write(dir.join("level.dat"), b"not a level").unwrap();
+            let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+            options.dedicated = Some(Vec::new());
+            options.execution_role = role;
+
+            fall_back_to_level_dat_old_without_asking(options.execution_role, &dir, "world");
+
+            assert_eq!(
+                horizon_client::save::level_dat_issue(&dir, false).is_none(),
+                restored,
+                "{role:?}"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
     #[test]
     fn a_levels_sea_level_comes_from_its_mod_or_its_noise_settings() {
         use horizon_client::datapack::worldgen_overrides_over;
@@ -1321,6 +1367,161 @@ mod tests {
         assert_eq!(
             GameRules::load_with_registry(&dir, &[], registry).get("example:enabled"),
             Some(Value::Bool(false))
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// NeoForge's `ModMismatchEvent`: a world saved with version 1 of a mod and
+    /// opened with version 2 fires `mod_mismatch` once with both versions, a
+    /// mod no longer loaded with no current version; the mod that marks its
+    /// own mismatch resolved gets no warning while the missing one does. The
+    /// save records the loaded list, so the reopened world fires nothing, as a
+    /// world without the list doesn't.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_world_saved_with_other_mod_versions_fires_mod_mismatch() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::save::{
+            Level,
+            level_mods::{ModRecord, set_loaded},
+        };
+        use mod_api::{Hooks, HostSide, ModEntry, ModMismatch, ModMismatchEvent};
+        use std::sync::{Arc, Mutex};
+
+        struct Migrating(Arc<Mutex<Vec<Vec<ModMismatch>>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Migrating {
+            fn mod_mismatch(&self, _: HostSide, event: &mut ModMismatchEvent<'_>) {
+                self.0.lock().unwrap().push(event.mismatches.to_vec());
+                event.resolved.push("mismatch_test".to_owned().into());
+            }
+        }
+        struct Erasing;
+        #[mod_api::__subscriptions]
+        impl Hooks for Erasing {
+            fn mod_mismatch(&self, _: HostSide, event: &mut ModMismatchEvent<'_>) {
+                assert_eq!(event.resolved[0].resolver, "mismatch_test");
+                event.resolved.clear();
+            }
+        }
+        struct Observing;
+        #[mod_api::__subscriptions]
+        impl Hooks for Observing {
+            fn mod_mismatch(&self, _: HostSide, event: &mut ModMismatchEvent<'_>) {
+                assert_eq!(event.resolved[0].resolver, "mismatch_test");
+            }
+        }
+        let dir = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!("mod-mismatch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        horizon_client::logging::init(&dir, "main");
+        let record = |id: &str, version: &str| ModRecord {
+            id: id.into(),
+            version: version.into(),
+        };
+        let mismatch = |mod_id: &str, saved: &str, current: Option<&str>| ModMismatch {
+            mod_id: mod_id.into(),
+            saved_version: saved.into(),
+            current_version: current.map(str::to_owned),
+        };
+        let request = |root: &std::path::Path| {
+            let mut request = WorldRequest::new(
+                "test",
+                Some("test"),
+                Some(1),
+                true,
+                None,
+                Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
+            )
+            .unwrap();
+            request.save_root = root.to_owned();
+            request
+        };
+        let warnings = || -> Vec<String> {
+            horizon_client::logging::recent_lines()
+                .into_iter()
+                .filter(|line| line.contains("Horizon: mod "))
+                .collect()
+        };
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let level = || Level {
+            name: "test".into(),
+            ..Level::default()
+        };
+        // The loaded list is the whole process's: the test's goes away when it ends, even
+        // when it fails, so the tests after it save no list.
+        struct Restore(Option<Vec<ModRecord>>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                set_loaded(self.0.take());
+            }
+        }
+        // Before the loaded mods are known: a world without the list.
+        let _restore = Restore(set_loaded(None));
+        let plain = dir.join("plain");
+        level().write(&plain).unwrap();
+        assert_eq!(Level::read(&plain).unwrap().saved_mods, None);
+        // Saved with version 1 of the mod, and with one since gone.
+        let changed = dir.join("changed");
+        set_loaded(Some(vec![
+            record("mismatch_test", "1.0.0"),
+            record("gone", "0.5.0"),
+        ]));
+        level().write(&changed).unwrap();
+        set_loaded(Some(vec![record("mismatch_test", "2.0.0")]));
+        mod_api::testing::with_mods(
+            vec![
+                ModEntry::new("mismatch_test", Box::new(Migrating(heard.clone()))),
+                ModEntry::new("erasing", Box::new(Erasing)),
+                ModEntry::new("observing", Box::new(Observing)),
+            ]
+            .into(),
+            || {
+                with_game(|game| {
+                    game.load_world(request(&changed)).unwrap();
+                    let lines = warnings();
+                    assert_eq!(
+                        *heard.lock().unwrap(),
+                        vec![vec![
+                            mismatch("mismatch_test", "1.0.0", Some("2.0.0")),
+                            mismatch("gone", "0.5.0", None),
+                        ]]
+                    );
+                    assert!(
+                        lines.iter().any(|line| line.contains(
+                            "Horizon: mod gone was 0.5.0 when the world was saved, now missing"
+                        )),
+                        "{lines:?}"
+                    );
+                    assert!(
+                        !lines.iter().any(|line| line.contains("mod mismatch_test")),
+                        "{lines:?}"
+                    );
+                    game.save_game_with(true).unwrap();
+                });
+                assert_eq!(
+                    Level::read(&changed).unwrap().saved_mods,
+                    Some(vec![record("mismatch_test", "2.0.0")])
+                );
+                // An unchanged list still fires.
+                with_game(|game| {
+                    game.load_world(request(&changed)).unwrap();
+                    assert_eq!(heard.lock().unwrap().len(), 2);
+                });
+                // A world without the list fires nothing and gets the list on its save.
+                with_game(|game| {
+                    game.load_world(request(&plain)).unwrap();
+                    assert_eq!(heard.lock().unwrap().len(), 2);
+                    game.save_game_with(true).unwrap();
+                });
+                assert_eq!(
+                    Level::read(&plain).unwrap().saved_mods,
+                    Some(vec![record("mismatch_test", "2.0.0")])
+                );
+            },
         );
         let _ = std::fs::remove_dir_all(dir);
     }

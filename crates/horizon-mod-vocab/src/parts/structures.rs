@@ -12,7 +12,7 @@ impl dyn Registrar + '_ {
     /// once at startup: a data pack structure with `"type": "modid:tower"`
     /// then generates by `ty`'s code — its own start and pieces, placed by the
     /// game's own spacing, biome and terrain-adaptation checks. The type's id
-    /// is in the calling mod's namespace (`mymod:tower`); another mod's
+    /// is in a namespace owned by the calling mod's manifest (`mymod:tower`); another mod's
     /// namespace, an empty name and an id registered twice refuse the mods at
     /// startup, naming the mod. `ty`'s `load_piece` is its saved pieces'
     /// loader: keep the type for as long as the game runs.
@@ -29,7 +29,7 @@ pub mod tests {
     #[cfg(test)]
     use crate::*;
 
-    /// A structure type twice, one in another mod's namespace and one without
+    /// A structure type twice, one in an unowned namespace and one without
     /// a name: every registration is refused at startup, naming the mod.
     #[test]
     pub(crate) fn duplicate_and_foreign_structure_types_refuse_registration() {
@@ -82,7 +82,7 @@ pub mod tests {
         assert_eq!(errors.len(), 3);
         assert!(errors[0].contains("test registered structure type test:tower twice"));
         assert!(errors[1].contains("namespace"));
-        assert!(errors[2].contains("no name"));
+        assert!(errors[2].contains("invalid identifier \"test:\""));
     }
 }
 
@@ -97,19 +97,14 @@ pub trait StructuresRegistrar {
 
 impl StructuresRegistrar for PartRegistrar {
     fn add_structure_type(&mut self, name: &str, ty: Arc<dyn crate::StructureType>) {
-        let (namespace, path) = name.split_once(':').unwrap_or((self.mod_id, name));
-        let id = format!("{}:{}", self.mod_id, path);
-        let refusal = if namespace != self.mod_id {
-            Some(format!(
-                "{} registered structure type {name:?} in the namespace {namespace:?}, which is not its own",
-                self.mod_id
-            ))
-        } else if path.is_empty() {
-            Some(format!(
-                "{} registered a structure type with no name",
-                self.mod_id
-            ))
-        } else {
+        let id = match self.owned_declaration_id(name) {
+            Ok(id) => id,
+            Err(reason) => {
+                self.refused.push(reason);
+                return;
+            }
+        };
+        let refusal = {
             self.structure_types
                 .iter()
                 .any(|t| *t.id == *id)

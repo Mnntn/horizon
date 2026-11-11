@@ -23,11 +23,17 @@ struct Stick;
 
 #[mod_api::horizon_part]
 impl ItemPart for Stick {
-    fn use_item(&self, host: &mut dyn ServerHost, event: &mut UseItemEvent<'_>) -> Flow {
-        let item = event.stack.item().id(host);
-        host.messages()
-            .broadcast(Text::literal(format!("a {item} was used")));
-        Flow::Continue
+    fn use_item(
+        &self,
+        host: HostSide<'_>,
+        event: &mut UseItemEvent<'_>,
+    ) -> Option<mod_api::InteractionResult> {
+        if let HostSide::Server(host) = host {
+            let item = event.stack.item().id(host);
+            host.messages()
+                .broadcast(Text::literal(format!("a {item} was used")));
+        }
+        None
     }
 }
 

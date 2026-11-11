@@ -129,6 +129,9 @@ impl Hooks for DimProbe {
 }
 
 fn main() {
+    if let Some(code) = horizon_mod_host::compile_child(std::env::args_os().skip(1)) {
+        std::process::exit(code);
+    }
     let startup = horizon_client::entry::prepare();
     horizon_mod_host::main_with(
         vec![ModEntry::new("dimprobe", Box::<DimProbe>::default())],

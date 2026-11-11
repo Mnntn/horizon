@@ -67,8 +67,10 @@ pub fn package_errors(paths: impl IntoIterator<Item = PathBuf>) -> Vec<(String, 
             if text.len() as u64 > crate::manifest::MAX_MANIFEST {
                 return None;
             }
-            let manifest = crate::Manifest::parse(&text).ok()?;
-            Some((manifest.id, error))
+            // Invalid manifests still need an identity for the player-visible refusal.
+            let manifest: toml::Table = toml::from_str(&text).ok()?;
+            let id = manifest.get("id")?.as_str()?;
+            crate::manifest::valid_mod_id(id).then(|| (id.to_owned(), error))
         })
         .collect()
 }

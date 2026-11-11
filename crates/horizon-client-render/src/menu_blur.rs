@@ -406,7 +406,7 @@ mod tests {
     /// blurs the same.
     #[test]
     fn blurs_the_same_after_its_targets_were_released() {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = crate::gfx::test_gpu::instance();
         let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
             return;
         };
@@ -427,7 +427,7 @@ mod tests {
     /// frame much as at full size: stripes two pixels wide turn to an even grey.
     #[test]
     fn the_half_size_blur_blurs_like_the_full_size_one() {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = crate::gfx::test_gpu::instance();
         let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
             return;
         };

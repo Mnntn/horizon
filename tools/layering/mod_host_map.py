@@ -1,4 +1,4 @@
-"""The generated tables of docs/layering/mod-host-map.md, from scan_engine_mod_edges.py's result."""
+"""The tables docs/layering/mod-host-map.md describes, from scan_engine_mod_edges.py's result (generated, not committed)."""
 
 from collections import Counter, defaultdict
 import itertools
@@ -6,6 +6,9 @@ from pathlib import Path
 import re
 
 STRANDS = ["loading", "host", "slots", "attachments", "content_render", "hooks"]
+# How each strand is resolved (#2534): phases 2 and 4 are dropped (owner, 2026-11-10); phase 6 is not built.
+LABEL = {"loading": "phase 1", "host": "stays in the engine", "slots": "phase 3",
+         "attachments": "stays in the engine", "content_render": "phase 5", "hooks": "phase 6, not built"}
 HOST_AREAS = ("crates/horizon-client/src/game/modding/", "crates/horizon-client/src/game/native_hooks/")
 # What a hook-firing engine file needs of mod_api, from least to most.
 DISPATCH = re.compile(r"^mod_api::(HookId|Flow|Hooks|__subscriptions|InteractionResult|\w+(Event|Call|Result)"
@@ -102,7 +105,7 @@ def render(result):
         out.append(f"\n- **{t}** items, by files using them: {common}")
     out.append(f"\nOutside the host areas, {test_only['test code']} `mod_api` references are in test code; "
                f"{test_only['testing items']} of them name `testing`, `part_tests` or `with_test_packages`.")
-    out.append("\n### The move set by phase (files under game/modding/ and game/native_hooks/)\n")
+    out.append("\n### The host areas by strand (files under game/modding/ and game/native_hooks/)\n")
     out.append("`inherent impls`: `impl Game`/`impl GameLevel` blocks, which can't leave horizon-client as they "
                "are. `foreign trait impls`: impls of a mod crate's trait, which horizon-mod-host may not write for "
                "an engine type (orphan rule). `to make public`: distinct engine-private functions, `Game` fields "
@@ -112,7 +115,7 @@ def render(result):
         fs = {p: v for p, v in files.items() if v["strand"] == s}
         public = set(itertools.chain(*[v["outbound"] for v in fs.values()]))
         inb = [e for e in inbound if e["strand"] == s and not e["test"]]
-        rows.append((f"{s} (phase {STRANDS.index(s) + 1})", len(fs), sum(v["lines"] for v in fs.values()),
+        rows.append((f"{s} ({LABEL[s]})", len(fs), sum(v["lines"] for v in fs.values()),
                      sum(v["inherent_impls"] for v in fs.values()), sum(v["foreign_trait_impls"] for v in fs.values()),
                      len(public), len(inb), len({e["file"] for e in inb})))
     out.append(table(["strand", "files", "lines", "inherent impls", "foreign trait impls", "to make public",

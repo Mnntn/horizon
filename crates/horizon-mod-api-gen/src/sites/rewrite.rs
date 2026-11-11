@@ -72,24 +72,6 @@ fn call_context(body: &syn::Block, expr: &Expr) -> String {
 }
 
 pub(crate) fn name(declaration: &Declaration, ordinal: usize) -> String {
-    if let Some(expression) = &declaration.expression {
-        return format!(
-            "S{}",
-            digest(format!(
-                "{}|expression {}|{ordinal}|{}",
-                declaration.target, declaration.selector, expression.ty
-            ))
-        );
-    }
-    if let Some(local) = &declaration.local {
-        return format!(
-            "S{}",
-            digest(format!(
-                "{}|{}|{ordinal}|{}|{}|{}",
-                declaration.target, declaration.selector, local.binding, local.ty, local.after
-            ))
-        );
-    }
     format!(
         "S{}",
         digest(format!(
@@ -101,12 +83,16 @@ pub(crate) fn name(declaration: &Declaration, ordinal: usize) -> String {
 
 /// Rewrite one source file. Missing targets are left for the coordinator to check across files;
 /// every matched target must resolve its call, and overlapping declarations are refused.
+///
+/// An unsubscribed call keeps the existing listed-site cost: one relaxed atomic load and
+/// a branch, with no argument record or allocation. An optimized i9-13900H author run
+/// measured 1.44 ns plain versus 1.93 ns listed (+0.49 ns; six alternating 50-million-call
+/// samples with an opaque subscription flag). This is not a zero-overhead plain call.
 pub fn rewrite(
     source: &str,
     module: &str,
     entries: &[Internal],
     declarations: &[Declaration],
-    private: bool,
 ) -> Result<(String, Vec<Site>), Error> {
     let parsed = syn::parse_file(source)?;
     let mut functions = Vec::new();
@@ -114,13 +100,7 @@ pub fn rewrite(
         module,
         &parsed.items,
         &|_| true,
-        &|attrs, sig| {
-            if private {
-                crate::points::source::eligible(attrs, sig)
-            } else {
-                point_shape::eligible(attrs, sig)
-            }
-        },
+        &point_shape::eligible,
         &mut functions,
     );
     let rule = Rule::new(entries);
@@ -131,8 +111,7 @@ pub fn rewrite(
         .chain(source.match_indices('\n').map(|(i, _)| i + 1))
         .collect();
     let offset = |at| crate::points::offset(source, &lines, at);
-    let mut declarations = declarations.iter().collect::<Vec<_>>();
-    declarations.sort_by_key(|d| d.local.is_some());
+    let declarations = declarations.iter().collect::<Vec<_>>();
     for declaration in declarations {
         let enclosing = match super::identity::enclosing(&declaration.target, entries, &rule) {
             Ok(entry) => entry,
@@ -148,92 +127,7 @@ pub fn rewrite(
         {
             let build = || -> Result<_, Error> {
                 let mut lexical = super::analysis::Scope::scan(found.sig, Some(found.body));
-                if let Some(expression) = &declaration.expression {
-                    if !private {
-                        return Err(Cause::Source(
-                            "expression requires native source rebuilding".into(),
-                        )
-                        .into());
-                    }
-                    let selector = super::expression::spelling(&declaration.selector)?;
-                    let reads = super::expression::candidates(found.body, &selector);
-                    let contexts = reads
-                        .iter()
-                        .map(|expr| digest(call_context(found.body, expr)))
-                        .collect::<Vec<_>>();
-                    let ordinal = declaration.ordinal.unwrap_or(0);
-                    let identities = contexts
-                        .iter()
-                        .enumerate()
-                        .map(|(nth, ctx)| CallIdentity {
-                            call: &selector,
-                            nth,
-                            ctx,
-                        })
-                        .collect::<Vec<_>>();
-                    // Empty contexts are only for tool discovery, as for calls.
-                    let ctx = if declaration.ctx.is_empty() {
-                        contexts
-                            .get(ordinal)
-                            .ok_or(Cause::Missing("expr matched no read at that nth"))?
-                    } else {
-                        &declaration.ctx
-                    };
-                    let index = match select(&identities, &selector, ordinal, ctx) {
-                        Selection::Selected(index) => index,
-                        Selection::Moved(nth) => {
-                            return Err(Cause::Identity(Refusal::Moved(nth)).into());
-                        }
-                        // A lost read names every candidate, so the declaration can be fixed
-                        // without staging the game by hand.
-                        Selection::Lost | Selection::Ambiguous => {
-                            let found = contexts
-                                .iter()
-                                .enumerate()
-                                .map(|(nth, ctx)| format!("nth = {nth}, ctx = \"{ctx}\""))
-                                .collect::<Vec<_>>();
-                            return Err(Cause::Source(format!(
-                                "E_INJECT_LOST: expr `{selector}` at nth = {ordinal} with that \
-                                 ctx is gone or ambiguous; reads now: {}",
-                                if found.is_empty() {
-                                    "none".into()
-                                } else {
-                                    found.join("; ")
-                                }
-                            ))
-                            .into());
-                        }
-                    };
-                    let expr = reads[index];
-                    let ty = super::expression::checked_type(expr, expression)?;
-                    let name = name(declaration, ordinal);
-                    let (raw, replacement) =
-                        super::expression::lower(&name, expr, &ty, &mut lexical);
-                    let record = format_ident!("__{name}Args");
-                    let listener = format_ident!("__{name}Listener");
-                    let site = Site {
-                        local: None,
-                        expression: Some(expression.clone()),
-                        name,
-                        target: declaration.target.clone(),
-                        selector: declaration.selector.clone(),
-                        ordinal,
-                        hash: digest(format!(
-                            "{}|{}|{}",
-                            enclosing.signature,
-                            selector,
-                            call_context(found.body, expr)
-                        )),
-                        call: selector,
-                        ctx: contexts[index].clone(),
-                        listener: format!("{}::{listener}", found.module),
-                        record: format!("{}::{record}", found.module),
-                        receiver: "()".into(),
-                        args: vec![("value".into(), ty.to_token_stream().to_string())],
-                        output: ty.to_token_stream().to_string(),
-                    };
-                    return Ok((expr.span(), raw.to_string(), replacement.to_string(), site));
-                }
+
                 let written = super::analysis::calls(found.body, &declaration.selector);
                 let paths = written
                     .iter()
@@ -300,65 +194,8 @@ pub fn rewrite(
                         return Err(Cause::Identity(Refusal::Lost).into());
                     }
                 };
-                if private && declaration.selector != path {
-                    return Err(
-                        Cause::Signature("source requests require the canonical callee").into(),
-                    );
-                }
                 let expr = calls[index];
-                if let Some(local) = &declaration.local {
-                    if !private {
-                        return Err(Cause::Source(
-                            "modify_local requires native source rebuilding".into(),
-                        )
-                        .into());
-                    }
-                    let binding = super::local::validate(found.sig, found.body, expr, local)?;
-                    let ty: Type = syn::parse_str(&local.ty)?;
-                    let name = name(declaration, ordinal);
-                    let variant = format_ident!("{name}");
-                    let record = format_ident!("__{name}Args");
-                    let listener = format_ident!("__{name}Listener");
-                    let receiver = format_ident!("__{name}Receiver");
-                    let output = format_ident!("__{name}Output");
-                    let args = lexical.fresh("__local_args");
-                    let wrap = lexical.fresh("__local_wrap");
-                    let raw = quote! {
-                        pub struct #record;
-                        pub type #receiver<'g, 'r> = &'r mut #ty;
-                        pub type #output = ();
-                        pub type #listener = fn(&mut #ty, &mut #record, &mut dyn FnMut(&mut #ty, &mut #record));
-                    };
-                    let dispatch = quote! {
-                        if ::mod_points::__private::TABLE.active_site(::mod_points::SiteId::#variant as usize) {
-                            let mut #args = #record;
-                            ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver, #record, #output, &mut #binding, #args, |_: &mut #ty, _: &mut #record| ())
-                        }
-                    };
-                    let result = lexical.fresh("__local_result");
-                    let replacement = if local.after {
-                        quote!({ let #result = #expr; #dispatch #result })
-                    } else {
-                        quote!({ #dispatch #expr })
-                    };
-                    let site = Site {
-                        expression: None,
-                        local: Some(local.clone()),
-                        name,
-                        target: declaration.target.clone(),
-                        selector: declaration.selector.clone(),
-                        ordinal,
-                        hash: digest(call_context(found.body, expr)),
-                        call: path,
-                        ctx: contexts[index].clone(),
-                        listener: format!("{}::{listener}", found.module),
-                        record: format!("{}::{record}", found.module),
-                        receiver: quote!(&mut #ty).to_string(),
-                        args: vec![],
-                        output: "()".into(),
-                    };
-                    return Ok((expr.span(), raw.to_string(), replacement.to_string(), site));
-                }
+
                 let Resolved {
                     callee,
                     signature,
@@ -368,6 +205,7 @@ pub fn rewrite(
                     fields,
                     types,
                     output,
+                    once,
                 } = resolve(expr, enclosing, found.sig, &lexical, entries, &rule)?;
                 let name = name(declaration, ordinal);
                 let record = format_ident!("__{name}Args");
@@ -421,30 +259,98 @@ pub fn rewrite(
                             .parse()
                             .map_err(|_| Cause::Signature("invalid native type spelling").into())
                     };
+                let types = types
+                    .iter()
+                    .map(|ty| {
+                        local(ty.to_token_stream())
+                            .and_then(|tokens| syn::parse2::<Type>(tokens).map_err(Into::into))
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?;
                 let receiver_type = local(receiver_type)?;
                 let output = local(output)?;
                 let mut alias_type: Type = syn::parse2(receiver_type.clone())?;
                 if let Type::Reference(reference) = &mut alias_type {
                     reference.lifetime = Some(syn::parse_quote!('r));
                 }
-                let raw = quote! {
-                    pub struct #record { #(pub #fields: #types,)* }
-                    pub type #receiver_alias<'g, 'r> = #alias_type;
-                    pub type #output_alias = #output;
-                    pub type #listener = for<'g> fn(#receiver_type, &mut #record, &mut dyn FnMut(#receiver_type, &mut #record) -> #output) -> #output;
+                let borrows = types.iter().any(|ty| matches!(ty, Type::Reference(_)));
+                let inner_borrow = types
+                    .iter()
+                    .any(|ty| ty.to_token_stream().to_string().contains("'g"));
+                let lifetime = if inner_borrow {
+                    Some(quote!(<'g, 'a>))
+                } else {
+                    borrows.then(|| quote!(<'a>))
                 };
+                let record_type = quote!(#record #lifetime);
+                let macro_record = if inner_borrow {
+                    quote!(#record::<'g, 'a>)
+                } else if borrows {
+                    quote!(#record::<'a>)
+                } else {
+                    quote!(#record)
+                };
+                let inferred_record = if inner_borrow {
+                    quote!(#record<'_, '_>)
+                } else if borrows {
+                    quote!(#record<'_>)
+                } else {
+                    quote!(#record)
+                };
+                let listener_lifetimes = if borrows {
+                    quote!(for<'g, 'a>)
+                } else {
+                    quote!(for<'g>)
+                };
+                let original_type = format_ident!("__{name}Original");
+                let raw = if once {
+                    quote! {
+                        pub struct #record #lifetime { #(pub #fields: #types,)* }
+                        pub type #receiver_alias<'g, 'r> = #alias_type;
+                        pub type #output_alias = #output;
+                        /// A call-scoped, single-use forwarding capability for this native call.
+                        pub struct #original_type<'g, 'a, 'next> {
+                            next: &'next mut dyn FnMut(#receiver_type, #record_type) -> #output,
+                            scope: ::std::marker::PhantomData<(&'g (), &'a ())>,
+                        }
+                        impl<'g, 'a, 'next> #original_type<'g, 'a, 'next> {
+                            fn new(next: &'next mut dyn FnMut(#receiver_type, #record_type) -> #output) -> Self {
+                                Self { next, scope: ::std::marker::PhantomData }
+                            }
+                            /// Consume this capability and the argument record, forwarding exactly once.
+                            pub fn call(self, receiver: #receiver_type, args: #record_type) -> #output {
+                                (self.next)(receiver, args)
+                            }
+                        }
+                        pub type #listener = for<'g, 'a, 'next> fn(#receiver_type, #record_type, #original_type<'g, 'a, 'next>) -> #output;
+                    }
+                } else {
+                    quote! {
+                        pub struct #record #lifetime { #(pub #fields: #types,)* }
+                        pub type #receiver_alias<'g, 'r> = #alias_type;
+                        pub type #output_alias = #output;
+                        pub type #listener = #listener_lifetimes fn(#receiver_type, &mut #record_type, &mut dyn FnMut(#receiver_type, &mut #record_type) -> #output) -> #output;
+                    }
+                };
+                let dispatch = if once {
+                    quote!(
+                        ::horizon_mod_api_macros::site_once!(#wrap, #variant, #listener, #receiver_alias, #macro_record, #output_alias, #original_type, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: #inferred_record| #original)
+                    )
+                } else {
+                    quote!(
+                        ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver_alias, #macro_record, #output_alias, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: &mut #inferred_record| #original)
+                    )
+                };
+                let mutable = (!once).then(|| quote!(mut));
                 let replacement = quote! {
                     if ::mod_points::__private::TABLE.active_site(::mod_points::SiteId::#variant as usize) {
                         #binding
-                        let mut #args = #record { #(#fields: #arguments,)* };
-                        ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver_alias, #record, #output_alias, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: &mut #record| #original)
+                        let #mutable #args = #record { #(#fields: #arguments,)* };
+                        #dispatch
                     } else { #expr }
                 };
                 let nth = ordinal;
                 let same = calls.len();
                 let site = Site {
-                    expression: None,
-                    local: None,
                     name,
                     target: declaration.target.clone(),
                     selector: declaration.selector.clone(),
@@ -460,6 +366,7 @@ pub fn rewrite(
                     call: path,
                     ctx: contexts[index].clone(),
                     listener: format!("{}::{listener}", found.module),
+                    once,
                     record: format!("{}::{record}", found.module),
                     receiver: receiver_type.to_string(),
                     args: fields
@@ -475,20 +382,9 @@ pub fn rewrite(
                 .map_err(|e| e.at(format!("{}: {}", declaration.origin, declaration.target)))?;
             let start = offset(span.start());
             let end = offset(span.end());
-            if let Some(other) = claimed.insert((start, end), declaration.origin.clone())
-                && declaration.local.is_none()
-            {
+            if let Some(other) = claimed.insert((start, end), declaration.origin.clone()) {
                 return Err(Error::from(Cause::Conflict(other)).at(declaration.origin.clone()));
             }
-            let replacement = if declaration.local.is_some() {
-                let original = source[start..end].to_owned();
-                let spelling = syn::parse_str::<Expr>(&original)?
-                    .to_token_stream()
-                    .to_string();
-                replacement.replace(&spelling, edits.get(&(start, end)).unwrap_or(&original))
-            } else {
-                replacement
-            };
             edits.insert((start, end), replacement);
             edits
                 .entry((offset(found.end), offset(found.end)))

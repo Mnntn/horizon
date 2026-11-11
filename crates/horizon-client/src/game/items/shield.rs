@@ -40,12 +40,24 @@ impl Game<'_> {
             &mut self.inventory[slot]
         }
     }
-    /// The stack's `blocks_attacks`: its own component, else its item's.
+    /// The stack's `blocks_attacks`: its own component, else its item's, as the stack's item
+    /// parts allow (`minecraft:shield_block`): a stack they grant the ability to blocks with the
+    /// component's defaults when it has none, and one they deny it blocks with nothing.
     pub(super) fn blocks_attacks(
         &self,
         stack: &ItemStack,
     ) -> Option<std::borrow::Cow<'_, horizon_client::items::BlocksAttacks>> {
-        horizon_client::items::BlocksAttacks::of_stack(stack, self.items().get(&stack.item))
+        let component =
+            horizon_client::items::BlocksAttacks::of_stack(stack, self.items().get(&stack.item));
+        let ability = super::item_abilities::ability::SHIELD_BLOCK;
+        let blocks = self.stack_can_perform(stack, ability, component.is_some());
+        match component {
+            Some(component) if blocks => Some(component),
+            None if blocks => Some(std::borrow::Cow::Borrowed(
+                horizon_client::items::BlocksAttacks::bare(),
+            )),
+            _ => None,
+        }
     }
     /// `ShieldItem.use` (ItemUtils.startUsingInstantly) for the hand at `slot`;
     /// false when that hand holds no blocking item or it is on cooldown.
@@ -181,7 +193,15 @@ impl Game<'_> {
             if let Some((from, disable)) = self.combat.player_attacker {
                 let fully = outcome.fully_blocked;
                 let attacker = ([from[0], from[2]], disable);
-                self.blocked_by_attacker(&component, attacker, fully, at, source, attack);
+                self.blocked_by_attacker(
+                    &component,
+                    attacker,
+                    fully,
+                    at,
+                    source,
+                    attack,
+                    outcome.blocked,
+                );
             }
             return;
         };
@@ -226,7 +246,15 @@ impl Game<'_> {
             let _ = self.handle_mob_events(events);
             return;
         }
-        self.blocked_by_attacker(&component, ([mx, mz], disable), fully, at, source, attack);
+        self.blocked_by_attacker(
+            &component,
+            ([mx, mz], disable),
+            fully,
+            at,
+            source,
+            attack,
+            outcome.blocked,
+        );
     }
 
     /// What a blocked melee hit does to the defender once the shield took
@@ -241,12 +269,13 @@ impl Game<'_> {
         at: Option<[f64; 3]>,
         source: HurtSource<'_>,
         attack: &Attack,
+        damage: f32,
     ) {
         // LivingEntity.blockedByItem: defender.knockback(0.5, defender - attacker,
         // source), which moves the defender along -(xd, zd).
         if !fully && let Some(p) = self.player.as_ref() {
             let (xd, zd) = (p.position.x - mx, p.position.z - mz);
-            self.knock_back_player(0.5, xd, zd, source, attack);
+            self.knock_back_player(0.5, xd, zd, source, attack, damage);
         }
         // BlocksAttacks.disable: item cooldown and stopUsingItem.
         let ticks = disable * component.disable_scale;
@@ -331,6 +360,47 @@ mod durability_tests {
             );
             assert!(game.offhand.is_none());
             assert!(game.using.is_none());
+        });
+    }
+
+    /// The wear a raised shield takes from a blocked hit (8 points here), through the part of the
+    /// shield: halved to 4, canceled to none, and as vanilla (8) for the part-less item next to it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+    fn a_damage_item_part_changes_the_wear_of_a_blocking_shield() {
+        use crate::game::damage_item_tests::{Rule, with_wear_part};
+        with_wear_part("minecraft:shield", Rule::Halve, |game, wear| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let block = |game: &mut Game<'_>| {
+                game.offhand = Some(ItemStack::new("minecraft:shield", 1));
+                game.using = Some((OFFHAND_SLOT, 20));
+                game.after_block(
+                    BlockOutcome {
+                        hurt: false,
+                        blocked: 0.0,
+                        shield_damage: 8,
+                        fully_blocked: true,
+                        sound: false,
+                        knockback: false,
+                        canceled: false,
+                        dealt: 0.0,
+                    },
+                    (None, false),
+                    HurtSource {
+                        damage_type: "minecraft:generic",
+                        causing: 0,
+                        direct: 0,
+                        position: None,
+                    },
+                    &horizon_client::health::NO_ATTACK,
+                );
+                game.offhand.as_ref().unwrap().damage
+            };
+            assert_eq!(block(game), 4);
+            assert_eq!(wear.take_asked(), [8]);
+            wear.set(Rule::Cancel);
+            assert_eq!(block(game), 0);
+            assert_eq!(wear.take_asked(), [8]);
         });
     }
 }

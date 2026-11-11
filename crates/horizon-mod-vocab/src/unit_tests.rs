@@ -160,16 +160,24 @@ fn server_services_forward_commands_messages_and_player_identity() {
 }
 
 #[test]
-fn render_hand_chains_pose_until_cancelled() {
+fn render_hand_chains_pose_and_draw_until_cancelled() {
     struct HandMod {
         offset: f32,
         cancel: bool,
+    }
+    /// Counts the pushes the mods make on the one draw they share.
+    struct Draw(u32);
+    impl BlockEntityDrawContext for Draw {
+        fn push(&mut self) {
+            self.0 += 1;
+        }
     }
     #[mod_api::__subscriptions]
     impl Hooks for HandMod {
         fn render_hand(&self, _host: &dyn ClientHost, event: &mut RenderHandEvent<'_, '_>) -> Flow {
             assert_eq!((event.render.player, event.render.player_entity_id), (7, 9));
             event.render.translation[0] += self.offset;
+            event.draw.push();
             if self.cancel {
                 Flow::Cancel
             } else {
@@ -217,9 +225,12 @@ fn render_hand_chains_pose_until_cancelled() {
         scale: 1.0,
     };
     let mut canceled = false;
-    dispatch_render_hand(&host, &mut render, &mut canceled);
+    let mut draw = Draw(0);
+    dispatch_render_hand(&host, &mut render, &mut draw, &mut canceled);
     assert!(canceled);
     assert_eq!(render.translation, [3.0, 0.0, 0.0]);
+    // The mod that cancelled drew too; the one after it was not asked.
+    assert_eq!(draw.0, 2);
 }
 
 /// Installs one mod, `id`, that attaches `part` to sticks.
@@ -582,6 +593,134 @@ fn an_inventory_tick_reaches_only_the_parts_of_the_ticked_item() {
 }
 
 #[test]
+fn a_damage_reaches_only_the_parts_of_the_worn_item_and_changes_its_wear() {
+    #[derive(Clone)]
+    struct Worn(Arc<Mutex<Vec<i32>>>, i32, bool);
+    #[mod_api::horizon_part]
+    impl ItemPart for Worn {
+        fn damage_item(&self, _: &mut dyn ServerHost, event: &mut DamageItemEvent<'_>) -> Flow {
+            self.0.lock().unwrap().push(event.amount);
+            event.amount *= self.1;
+            if self.2 { Flow::Cancel } else { Flow::Continue }
+        }
+    }
+    struct Both(Worn, Worn);
+    #[mod_api::__subscriptions]
+    impl Hooks for Both {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+            let (stick, stone) = (r.item_key("minecraft:stick"), r.item_key("minecraft:stone"));
+            r.item_part(stick, self.0.clone());
+            r.item_part(stone, self.1.clone());
+        }
+    }
+    // Another test installs parts with tags: a dispatch must run on a game thread.
+    mark_game_thread();
+    // The stick's part triples the wear and the stone's cancels it.
+    let sticks = Worn(Default::default(), 3, false);
+    let stones = Worn(Default::default(), 1, true);
+    let mods: Mods = vec![ModEntry::new(
+        "wearers",
+        Box::new(Both(sticks.clone(), stones.clone())),
+    )]
+    .into();
+    install(mods.clone());
+    install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    let mut host = FakeHost::new();
+    let stone = crate::parts::tests::stack("minecraft:stone", 1, 0);
+    let diamond = crate::parts::tests::stack("minecraft:diamond", 1, 0);
+    let mut wear = |stack: &ItemStack, points: i32| {
+        let (mut amount, mut canceled) = (points, false);
+        dispatch_damage_item(&mut host, stack, &mut amount, &mut canceled);
+        (amount, canceled)
+    };
+    assert_eq!(wear(&stick(), 4), (12, false));
+    assert_eq!(wear(&stone, 7), (7, true));
+    assert_eq!(wear(&diamond, 5), (5, false));
+    assert_eq!(wear(&stick(), 1), (3, false));
+    assert_eq!(*sticks.0.lock().unwrap(), [4, 1]);
+    assert_eq!(*stones.0.lock().unwrap(), [7]);
+    assert!(crate::__private::item_listens(
+        HookId::DamageItem,
+        "minecraft:stick"
+    ));
+    assert!(!crate::__private::item_listens(
+        HookId::DamageItem,
+        "minecraft:diamond"
+    ));
+}
+
+#[test]
+fn an_item_update_reaches_only_the_parts_of_the_ticked_item_and_cancels_for_its_own() {
+    #[derive(Clone)]
+    struct Updated(Arc<Mutex<Vec<EntityRef>>>, bool);
+    #[mod_api::horizon_part]
+    impl ItemPart for Updated {
+        fn on_entity_item_update(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut OnEntityItemUpdateEvent<'_>,
+        ) -> Flow {
+            self.0.lock().unwrap().push(event.item.entity());
+            if self.1 { Flow::Cancel } else { Flow::Continue }
+        }
+    }
+    struct Both(Updated, Updated);
+    #[mod_api::__subscriptions]
+    impl Hooks for Both {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+            let (stick, stone) = (r.item_key("minecraft:stick"), r.item_key("minecraft:stone"));
+            r.item_part(stick, self.0.clone());
+            r.item_part(stone, self.1.clone());
+        }
+    }
+    // Another test installs parts with tags: a dispatch must run on a game thread.
+    mark_game_thread();
+    let sticks = Updated(Default::default(), true);
+    let stones = Updated(Default::default(), false);
+    let mods: Mods = vec![ModEntry::new(
+        "updaters",
+        Box::new(Both(sticks.clone(), stones.clone())),
+    )]
+    .into();
+    install(mods.clone());
+    install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    let mut host = FakeHost::new();
+    let stone = crate::parts::tests::stack("minecraft:stone", 1, 0);
+    let diamond = crate::parts::tests::stack("minecraft:diamond", 1, 0);
+    let entity = |id| EntityRef::new(WorldEpoch::new(1), id);
+    let mut update = |stack: &ItemStack, id| {
+        let mut canceled = false;
+        dispatch_on_entity_item_update(
+            &mut host,
+            crate::__private::OnEntityItemUpdateCall {
+                stack,
+                item: ItemEntityRef::new(entity(id)),
+                canceled: &mut canceled,
+            },
+        );
+        canceled
+    };
+    assert!(update(&stick(), 11));
+    assert!(!update(&stone, 12));
+    assert!(!update(&diamond, 13));
+    assert!(update(&stick(), 14));
+    assert_eq!(*sticks.0.lock().unwrap(), [entity(11), entity(14)]);
+    assert_eq!(*stones.0.lock().unwrap(), [entity(12)]);
+    assert!(crate::__private::item_listens(
+        HookId::OnEntityItemUpdate,
+        "minecraft:stick"
+    ));
+    assert!(!crate::__private::item_listens(
+        HookId::OnEntityItemUpdate,
+        "minecraft:diamond"
+    ));
+    assert!(!crate::__private::item_listens(
+        HookId::InventoryTick,
+        "minecraft:diamond"
+    ));
+}
+
+#[test]
 #[should_panic(expected = "Commands::run_command")]
 fn an_unexpected_host_call_names_the_method() {
     /// A mod's own double, with only the services the hook reaches.
@@ -926,4 +1065,126 @@ fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
     let (mut rod_damage, mut cancel) = (2, false);
     dispatch_item_fished(&mut host, 7, 3, &fished, &mut rod_damage, &mut cancel);
     assert_eq!((rod_damage, cancel), (4, false));
+}
+
+#[test]
+fn an_ability_question_reaches_only_the_parts_of_the_asked_item_and_names_the_ability() {
+    /// Grants `granted` and denies everything else `denied` names; keeps what it is not asked about.
+    #[derive(Clone)]
+    struct Abilities {
+        granted: &'static str,
+        denied: &'static str,
+        asked: Arc<Mutex<Vec<String>>>,
+    }
+    #[mod_api::horizon_part]
+    impl ItemPart for Abilities {
+        fn can_perform_action(&self, _: &dyn Host, event: &mut CanPerformActionEvent<'_>) {
+            self.asked.lock().unwrap().push(event.ability.to_owned());
+            if event.ability == self.granted {
+                event.can_perform = true;
+            } else if event.ability == self.denied {
+                event.can_perform = false;
+            }
+        }
+    }
+    struct Both(Abilities, Abilities);
+    #[mod_api::__subscriptions]
+    impl Hooks for Both {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+            let (stick, stone) = (r.item_key("minecraft:stick"), r.item_key("minecraft:stone"));
+            r.item_part(stick, self.0.clone());
+            r.item_part(stone, self.1.clone());
+        }
+    }
+    // Another test installs parts with tags: a dispatch must run on a game thread.
+    mark_game_thread();
+    let sticks = Abilities {
+        granted: "minecraft:shield_block",
+        denied: "minecraft:shears_carve",
+        asked: Default::default(),
+    };
+    let stones = Abilities {
+        granted: "my_mod:chop",
+        denied: "my_mod:chop_not",
+        asked: Default::default(),
+    };
+    let mods: Mods = vec![ModEntry::new(
+        "abilities",
+        Box::new(Both(sticks.clone(), stones.clone())),
+    )]
+    .into();
+    install(mods.clone());
+    install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    let host = FakeHost::new();
+    let stone = crate::parts::tests::stack("minecraft:stone", 1, 0);
+    let diamond = crate::parts::tests::stack("minecraft:diamond", 1, 0);
+    let ask = |stack: &ItemStack, ability: &str, vanilla: bool| {
+        let mut can_perform = vanilla;
+        dispatch_can_perform_action(&host, stack, ability, &mut can_perform);
+        can_perform
+    };
+    // The part answers per ability: a grant, a denial and what it leaves alone.
+    assert!(ask(&stick(), "minecraft:shield_block", false));
+    assert!(!ask(&stick(), "minecraft:shears_carve", true));
+    assert!(ask(&stick(), "minecraft:shears_harvest", true));
+    assert!(!ask(&stick(), "minecraft:shears_harvest", false));
+    // Another item's part hears only its own item, a part-less item keeps vanilla's answer.
+    assert!(ask(&stone, "my_mod:chop", false));
+    assert!(!ask(&stone, "minecraft:shield_block", false));
+    assert!(ask(&diamond, "minecraft:shears_carve", true));
+    assert!(!ask(&diamond, "minecraft:shield_block", false));
+    assert_eq!(
+        *sticks.asked.lock().unwrap(),
+        [
+            "minecraft:shield_block",
+            "minecraft:shears_carve",
+            "minecraft:shears_harvest",
+            "minecraft:shears_harvest"
+        ]
+    );
+    assert_eq!(
+        *stones.asked.lock().unwrap(),
+        ["my_mod:chop", "minecraft:shield_block"]
+    );
+}
+
+#[test]
+fn player_level_and_dimension_reads() {
+    use crate::host::entities::EntitiesHost;
+    use crate::host::players::PlayersHost;
+    let mut host = FakeHost::new();
+    let overworld = host.level("minecraft:overworld").unwrap();
+    let nether = crate::LevelRef::new(overworld.epoch(), crate::DimensionKey::NETHER);
+    host.join(1, 10);
+    host.join(2, 20).level = nether;
+    let p1 = host.player(1).unwrap();
+    let p2 = host.player(2).unwrap();
+    let unknown = crate::__private::game::player_ref(p1.entity(), 99);
+    let stale = crate::__private::game::player_ref(
+        crate::EntityRef::new(
+            crate::WorldEpoch::new(p1.entity().epoch().get() + 1),
+            p1.entity().id(),
+        ),
+        p1.uuid(),
+    );
+    let replaced = crate::__private::game::player_ref(p2.entity(), p1.uuid());
+    for invalid in [unknown, stale, replaced] {
+        assert_eq!(invalid.level(&host), None);
+        assert_eq!(invalid.dimension(&host), None);
+    }
+    assert_eq!(p1.level(&host), Some(overworld));
+    assert_eq!(
+        p1.dimension(&host),
+        Some(crate::Identifier::parse("minecraft:overworld").unwrap())
+    );
+    assert_eq!(p2.level(&host), Some(nether));
+    assert_eq!(
+        p2.dimension(&host),
+        Some(crate::Identifier::parse("minecraft:the_nether").unwrap())
+    );
+    host.players = Default::default();
+    for disconnected in [p1, p2] {
+        assert_eq!(disconnected.level(&host), None);
+        assert_eq!(disconnected.dimension(&host), None);
+    }
 }

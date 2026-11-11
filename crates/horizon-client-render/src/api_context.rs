@@ -49,6 +49,10 @@ impl LoopReader<'_> {
     }
 }
 impl mod_api::LoopReader for LoopReader<'_> {
+    fn mod_recipe_property_contains(&self, set: &str, item: mod_api::ItemKey) -> bool {
+        mod_api::__private::item_key_id(item)
+            .is_some_and(|name| self.0.mod_recipe_property_contains(set, name))
+    }
     fn registry(&self, name: &str) -> Option<Arc<[String]>> {
         self.0.registry(name)
     }
@@ -56,6 +60,9 @@ impl mod_api::LoopReader for LoopReader<'_> {
         self.0.setting(mod_id, key)
     }
 }
+
+#[cfg(test)]
+mod recipe_properties_tests;
 
 #[cfg(test)]
 mod tests {

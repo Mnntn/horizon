@@ -32,6 +32,7 @@ class PreparedCacheTest(unittest.TestCase):
             (work / "tools/ci").mkdir(parents=True)
             shutil.copyfile(ROOT / "tools/prepare_output.py", work / "tools/prepare_output.py")
             shutil.copyfile(ROOT / "tools/ci/seed_prepared_extras.py", work / "tools/ci/seed_prepared_extras.py")
+            shutil.copyfile(ROOT / "tools/ci/preparation_step.py", work / "tools/ci/preparation_step.py")
             target = work / "target/release"
             target.mkdir(parents=True)
             prepare = target / "horizon-prepare"

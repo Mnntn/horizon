@@ -50,6 +50,9 @@ pub trait KeysBackend {
     /// The canonical effect id retained by the load-owned registration slot.
     #[access(Metadata)]
     fn effect_key_id(&self, key: EffectKey) -> String;
+    /// Side: both. Registered MobEffect.getCategory(); unavailable before registry completion.
+    #[access(Metadata)]
+    fn effect_category(&self, key: EffectKey) -> Option<EffectCategory>;
     /// Side: both.
     /// The canonical fluid id of a key from the completed registry, `minecraft:water`. An
     /// invalid slot is a boundary error, including when a wasm guest supplies it.

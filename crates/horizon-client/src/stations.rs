@@ -23,6 +23,7 @@ pub struct StationData {
     pub recipes: StationRecipes,
     pub brewing: crate::brewing::Brewing,
     pub trades: crate::merchant::Trades,
+    pub professions: Arc<crate::mobs::villager::ResolvedProfessions>,
     pub banners: crate::banner::Banners,
     /// Every recipe's learnability and display count (the server recipe book).
     pub recipe_index: crate::recipe_book::RecipeIndex,
@@ -57,6 +58,7 @@ impl StationData {
                 brewing
             },
             trades: crate::merchant::Trades::load(root, overlay),
+            professions: Arc::new(crate::mobs::villager::ResolvedProfessions::vanilla()),
             banners: crate::banner::Banners::load(root, defaults),
             recipe_index: crate::recipe_book::RecipeIndex::load(root, overlay),
         }
@@ -977,7 +979,7 @@ fn trim_material(
 }
 /// `SmithingTrimRecipe.applyTrim`: none when the material provides no trim
 /// or the base already has this one.
-fn apply_trim(
+pub fn apply_trim(
     e: &Enchantments,
     base: &ItemStack,
     material: &ItemStack,
@@ -1841,9 +1843,9 @@ mod tests {
         for p in crate::mobs::villager::profession_table()
             .entries()
             .iter()
-            .filter_map(|p| p.trade_set)
+            .filter_map(|p| p.trade_set.as_deref())
         {
-            let set = crate::merchant::Trades::set_for(p, 1);
+            let set = data.trades.set_for(p, 1);
             let mut random = crate::merchant::sequence_random(
                 12345,
                 &format!(

@@ -697,8 +697,8 @@ mod tests {
                 let mut types = super::Types::new(crate::index::Index::new(&root, &included)).unwrap();
                 let module = types.index.module("horizon_core", &["identifier".into()]).unwrap();
                 if exposed {
-                    // Native internals lowering exposes types and members for injected
-                    // source listeners. That changes access, not the API's wire contract.
+                    // Native internals lowering exposes types and members to internals
+                    // listeners. That changes access, not the API's wire contract.
                     for item in &mut types.index.modules[module].items {
                         if let syn::Item::Struct(record) = item {
                             record.vis = syn::parse_quote!(pub);

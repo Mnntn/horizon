@@ -28,11 +28,14 @@ pub struct Batch<'a> {
     /// lines through walls: each slice holds its stages in frame order, and what follows the
     /// last end is the last stage's. All zero, everything draws at the last stage.
     pub stage_ends: [[u32; 4]; STAGES - 1],
+    /// The quads mods draw with their own pipelines (`gfx::mod_pipelines`), with their stages.
+    pub pipelines: super::mod_pipelines::Batch<'a>,
 }
 
 impl Batch<'_> {
     pub fn is_empty(&self) -> bool {
-        self.quads.is_empty()
+        self.pipelines.runs.is_empty()
+            && self.quads.is_empty()
             && self.quads_through.is_empty()
             && self.lines.is_empty()
             && self.lines_through.is_empty()
@@ -66,6 +69,8 @@ pub struct WorldPrimitives {
     counts: [u32; 4],
     /// The batch's `stage_ends`, clamped to `counts`.
     stage_ends: [[u32; 4]; STAGES - 1],
+    /// Mods' own pipelines and their quads, drawn after each stage's primitives.
+    pipelines: super::mod_pipelines::ModPipelines,
 }
 
 struct AtlasGroup {
@@ -237,6 +242,7 @@ impl WorldPrimitives {
             index_data: Vec::new(),
             counts: [0; 4],
             stage_ends: [[0; 4]; STAGES - 1],
+            pipelines: super::mod_pipelines::ModPipelines::new(device, color_format),
         }
     }
 
@@ -263,6 +269,11 @@ impl WorldPrimitives {
             quads as u64 * 4 * std::mem::size_of::<Vertex>() as u64,
         );
         grow(&mut self.lines, lines as u64 * 32);
+        self.reserve_indices(device, upload, quads);
+    }
+
+    /// Reserves the shared quad indices for `quads` quads; growth uploads the full array.
+    fn reserve_indices(&mut self, device: &wgpu::Device, upload: Upload<'_>, quads: u32) {
         if quads > self.index_quads {
             let capacity = quads.next_power_of_two();
             self.index_data.extend(
@@ -270,7 +281,14 @@ impl WorldPrimitives {
             );
             self.index_quads = capacity;
             let bytes: &[u8] = bytemuck::cast_slice(&self.index_data);
-            grow(&mut self.indices, bytes.len() as u64);
+            if self.indices.size() < bytes.len() as u64 {
+                self.indices = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("World primitives"),
+                    size: (bytes.len() as u64).next_power_of_two(),
+                    usage: self.indices.usage(),
+                    mapped_at_creation: false,
+                });
+            }
             upload(&self.indices, bytes);
         }
     }
@@ -292,11 +310,16 @@ impl WorldPrimitives {
         let lines = [batch.lines, batch.lines_through].map(|l| l.len() as u32);
         self.counts = [quads[0], quads[1], lines[0], lines[1]];
         self.stage_ends = clamped_ends(batch.stage_ends, self.counts);
+        // Before the empty check: a new load's pipelines are built here, not when first drawn.
+        let pipeline_quads =
+            self.pipelines
+                .prepare(device, upload, &batch.pipelines, view_proj, viewport);
         if batch.is_empty() {
             return false;
         }
         let total_quads = quads[0] + quads[1];
         self.reserve(device, upload, total_quads, lines[0] + lines[1]);
+        self.reserve_indices(device, upload, pipeline_quads);
         if total_quads > 0 {
             self.quad_vertices.clear();
             for q in [batch.quads, batch.quads_through] {
@@ -346,8 +369,9 @@ impl WorldPrimitives {
     /// Draws the stages from `*next` to `stage` that [`Self::prepare`] uploaded into a pass
     /// over the world's colour and depth, and moves `next` past them: a stage the frame did
     /// not reach in this pass draws here, after those before it. Within the stages, the
-    /// depth-tested quads and lines, then those seen through walls over everything. Leaves
-    /// the pass with its own pipeline, bind group 0 and buffers.
+    /// depth-tested quads and lines, then those seen through walls over everything, then the
+    /// mods' pipeline quads in the order queued. Leaves the pass with its own pipeline, bind
+    /// group 0 and buffers.
     pub fn draw_through(&self, pass: &mut wgpu::RenderPass<'_>, next: &mut usize, stage: usize) {
         let (first, last) = (*next, stage.min(STAGES - 1));
         if first > last {
@@ -359,14 +383,13 @@ impl WorldPrimitives {
         };
         let [quads, quads_through, lines, lines_through] =
             spans(self.counts, &self.stage_ends, first, last);
-        if quads.is_empty()
+        if !(quads.is_empty()
             && quads_through.is_empty()
             && lines.is_empty()
-            && lines_through.is_empty()
+            && lines_through.is_empty())
         {
-            return;
+            pass.set_bind_group(0, group, &[]);
         }
-        pass.set_bind_group(0, group, &[]);
         for (through, (quad_range, line_range)) in [(quads, lines), (quads_through, lines_through)]
             .into_iter()
             .enumerate()
@@ -383,6 +406,7 @@ impl WorldPrimitives {
                 pass.draw(0..4, line_range);
             }
         }
+        self.pipelines.draw(pass, &self.indices, first, last);
     }
 }
 

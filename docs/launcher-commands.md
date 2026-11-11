@@ -2,7 +2,9 @@
 
 <!-- Generated from launcher/src/cli.rs by cli_tools::markdown(); a test fails when this file is out of date. Update it with: HORIZON_WRITE_DOCS=1 cargo test --manifest-path launcher/Cargo.toml the_launcher_reference -->
 
-Every command of `horizon-launcher`, and the tool `horizon-launcher mcp` offers for it. A tool's arguments are the command's, in snake_case. A tool runs the command with `--json` and returns what it printed. The tools that change the player's things for good need `confirm: true`. The tools that send something or reach other people say "only when the player asks". The game's own tools, `game_*`, are in [horizon-ctl-commands.md](horizon-ctl-commands.md). With No AI on, `mcp` and `agent-config` are hidden and refuse; every other command stays. See [agent-control.md](agent-control.md#no-ai).
+Every command of `horizon-launcher`, and the tool `horizon-launcher mcp` offers for it. A tool's arguments are the command's, in snake_case. A tool runs the command with `--json` and returns what it printed. The tools that change the player's things for good need `confirm: true`. The tools that send something or reach other people say "only when the player asks". The game's own tools, `game_*`, are in [horizon-ctl-commands.md](horizon-ctl-commands.md). For unsigned developer installations only, `HORIZON_LAUNCHER_DEVELOPER_OFFLINE=1` enables account-free Play. Only the exact value `1` enables it. The installed base must have persisted developer provenance, and the selected game must advertise `--developer-single-player` through `--launch-api`; older games must be rebuilt and reinstalled. Signed releases, Nightlies and their native descendants keep the account check. This mode supplies no session, blocks normal external connections and LAN hosting, and preserves managed launch leases, instance settings and unsigned labels. It is not a sandbox for native mods.
+
+With No AI on, `mcp` and `agent-config` are hidden and refuse; every other command stays. See [agent-control.md](agent-control.md#no-ai).
 
 ## `horizon-launcher completions`
 
@@ -34,6 +36,21 @@ Download and install a release (a tag such as v2026.10.13, or "latest").
 
 MCP: `install`.
 
+## `horizon-launcher developer-install`
+
+Install a local unsigned developer build from a trusted checkout.
+
+    horizon-launcher developer-install --program <PROGRAM> --trust-unsigned <CHECKOUT>
+
+- `CHECKOUT`: The trusted clean Horizon checkout to package
+- `--program`: The real horizon-client executable built from that committed checkout
+- `--trust-unsigned`: Allow executing this checkout's build code and unsigned game with your rights
+
+Example: horizon-launcher developer-install CHECKOUT --program CHECKOUT/target/debug/horizon-client --trust-unsigned
+This executes the checkout's build code and an unsigned game with your rights. Trust both before continuing.
+
+MCP: none: the player's switch.
+
 ## `horizon-launcher remove`
 
 Remove an installed version.
@@ -46,7 +63,7 @@ MCP: `remove`, needs `confirm: true`.
 
 ## `horizon-launcher import-build`
 
-Install a game program you have, such as a horizon-client built on your fork's Actions, as its own version on an installed release or Nightly's game files, and select it. Nothing signed it: it runs with your rights, and updates never replace it.
+Install a game program you have, such as a horizon-client built on your fork's Actions, as its own version on an installed base's game files, and select it. A local unsigned developer base is allowed only when explicitly selected or named with --version. Nothing signed it: it runs with your rights, and updates never replace it.
 
     horizon-launcher import-build <PATH>
 
@@ -108,6 +125,17 @@ Show disposable storage by category as JSON. Builds must be idle.
 - `--clear`: Request cleanup of build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all rows; game-accessible caches refuse cleanup without enforceable lifetime exclusion
 
 MCP: `storage`.
+
+## `horizon-launcher native-lock`
+
+Generate the registry-only Cargo.lock for one native mod, without executing mod code.
+
+    horizon-launcher native-lock <FOLDER>
+
+- `FOLDER`
+- `--update-lock`: Explicitly replace an existing lock with newly resolved registry pins
+
+MCP: `native_lock`.
 
 ## `horizon-launcher native-build`
 

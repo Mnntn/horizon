@@ -15,7 +15,7 @@ impl Game<'_> {
             return false;
         };
         if info.food.is_some()
-            && (self.player.is_none() || !self.can_eat(&stack, info.can_always_eat))
+            && (self.player.is_none() || !self.can_eat(Some(&stack), info.can_always_eat))
         {
             return false;
         }

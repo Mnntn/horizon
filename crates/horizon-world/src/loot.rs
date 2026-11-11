@@ -8,7 +8,10 @@
 //! maps are kept as found (structure search is not run); conditions that
 //! need an entity, tool or damage source fail when the context has none, as
 //! they do for containers.
+#[path = "loot/tags.rs"]
+mod loot_tags;
 use horizon_core::random::{LegacyRandom, RandomSource};
+pub use loot_tags::LootTags;
 use serde_json::Value;
 use std::{
     cell::RefCell,
@@ -86,13 +89,14 @@ impl<'a> PackOverlay<'a> {
 /// namespace outside `minecraft:`, and the roll kept it for this call.
 /// The kind, the JSON, the context and the stack to change are here.
 #[inline(never)]
-pub fn native_loot_function(
+pub fn native_invoke_loot_function(
     kind: &str,
     data: &Value,
     ctx: &LootContext<'_>,
     stack: &mut LootStack,
+    tags: &dyn LootTags,
 ) {
-    crate::native_load_hooks::loot_function(kind, data, ctx, stack);
+    crate::native_load_hooks::loot_function(kind, data, ctx, stack, tags);
 }
 
 /// A loot condition of a mod's own kind: the entry named a `type` in a
@@ -100,8 +104,14 @@ pub fn native_loot_function(
 /// whether it holds are here (`holds` starts `false`; a mod that claims
 /// the kind sets it).
 #[inline(never)]
-pub fn native_loot_condition(kind: &str, data: &Value, ctx: &LootContext<'_>, holds: &mut bool) {
-    crate::native_load_hooks::loot_condition(kind, data, ctx, holds);
+pub fn native_invoke_loot_condition(
+    kind: &str,
+    data: &Value,
+    ctx: &LootContext<'_>,
+    holds: &mut bool,
+    tags: &dyn LootTags,
+) {
+    crate::native_load_hooks::loot_condition(kind, data, ctx, holds, tags);
 }
 
 /// The tool a loot context names: its item id and enchantments.
@@ -878,6 +888,8 @@ impl LootData {
         let mut tags = HashMap::new();
         for registry in [
             "item",
+            "block",
+            "fluid",
             "enchantment",
             "instrument",
             "entity_type",
@@ -1036,29 +1048,7 @@ impl LootData {
     /// Tag members in tag order (nested tags expanded in place, duplicates
     /// dropped).
     fn tag(&self, registry: &str, name: &str) -> Vec<String> {
-        fn visit(data: &LootData, registry: &str, name: &str, out: &mut Vec<String>, depth: u32) {
-            if depth > 16 {
-                return;
-            }
-            let Some(values) = data.tags.get(&(registry.to_owned(), name.to_owned())) else {
-                return;
-            };
-            for v in values {
-                let id = match v {
-                    Value::String(s) => s.as_str(),
-                    Value::Object(o) => o.get("id").and_then(Value::as_str).unwrap_or(""),
-                    _ => continue,
-                };
-                match id.strip_prefix('#') {
-                    Some(tag) => visit(data, registry, tag, out, depth + 1),
-                    None if !out.iter().any(|x| x == id) => out.push(id.to_owned()),
-                    None => {}
-                }
-            }
-        }
-        let mut out = Vec::new();
-        visit(self, registry, name, &mut out, 0);
-        out
+        loot_tags::members(&self.tags, registry, name)
     }
     /// A HolderSet: "#tag", "id" or a list of ids.
     fn holder_set(&self, registry: &str, v: &Value) -> Vec<String> {
@@ -1580,7 +1570,8 @@ impl<R: RandomSource> Context<'_, R> {
                 // minecraft's own and an unknown one fails.
                 k if k.contains(':') && !k.starts_with("minecraft:") => {
                     let mut holds = false;
-                    native_loot_condition(k, c, &self.native_ctx(), &mut holds);
+                    let tags = self.data;
+                    native_invoke_loot_condition(k, c, &self.native_ctx(), &mut holds, tags);
                     holds
                 }
                 // An unknown type fails, as in items.rs `condition`.
@@ -2104,7 +2095,8 @@ impl<R: RandomSource> Context<'_, R> {
             }
             // A mod's own kind: the hook changes the stack.
             k if k.contains(':') && !k.starts_with("minecraft:") => {
-                native_loot_function(k, f, &self.native_ctx(), &mut stack);
+                let tags = self.data;
+                native_invoke_loot_function(k, f, &self.native_ctx(), &mut stack, tags);
             }
             // Lore and other data without random draws.
             _ => {}

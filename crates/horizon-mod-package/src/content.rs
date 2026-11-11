@@ -70,11 +70,6 @@ pub(crate) fn check_namespace(name: &str, manifest: &Manifest) -> Result<(), Str
             "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, or to vanilla's atlases"
         ));
     }
-    if !own && top == "data" && rest.starts_with("horizon/") {
-        return Err(format!(
-            "{name}: blocks, items, mob effects, entity types and menu types are declared in data/{id}/horizon/"
-        ));
-    }
 
     Ok(())
 }
@@ -505,7 +500,8 @@ struct CreativeTabFile {
     items: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, horizon_mod_api_macros::Wire)]
+#[wire(crate = ::mod_vocab::wire)]
 #[serde(deny_unknown_fields)]
 struct FluidFile {
     sprite: Option<String>,
@@ -516,7 +512,8 @@ struct FluidFile {
 /// What makes a fluid exist in the world: a block holding it, as `minecraft:water`'s does, and
 /// how it flows. Each value defaults to water's, in `data/<id>/horizon/fluid/` as in code
 /// (`Registrar::declare_world_fluid`).
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[wire(crate = ::mod_vocab::wire)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorldFluid {
     /// Game ticks between two flow steps (`Fluid.getTickDelay`), 1 or more.
@@ -561,7 +558,8 @@ impl WorldFluid {
 /// How a fluid the mod names looks on the client (`data/<id>/horizon/fluid/`), as
 /// NeoForge's `IClientFluidTypeExtensions`: `getStillTexture` and `getTintColor`.
 /// The fluid needs no block, so it can be a fluid only a tank holds.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[wire(crate = ::mod_vocab::wire)]
 pub struct FluidLook {
     /// `<mod id>:<path>`.
     pub id: String,
@@ -737,84 +735,9 @@ pub const LIVING_TEMPLATES: [&str; 3] = [
     "minecraft:zombie",
 ];
 
-/// an entity type the mod adds: a copy of a vanilla template's. A thrown one
-/// is thrown from `item` and drawn as it; a living one is its template's mob
-/// with other `attributes`.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct EntityType {
-    /// `<mod id>:<path>`.
-    #[serde(skip)]
-    pub id: String,
-    /// one of [`ENTITY_TEMPLATES`].
-    pub template: String,
-    /// a thrown type's: one of the mod's own items, which throws it. A
-    /// living type has none.
-    #[serde(default)]
-    pub item: Option<String>,
-    /// a thrown type's: what a hit deals to an entity, as `thrown` damage.
-    #[serde(default)]
-    pub damage: f32,
-    /// a living type's default attribute values that differ from its
-    /// template's, by attribute id (`minecraft:max_health`): the template's
-    /// own attributes only, checked against its row in `entity-types.json`
-    /// when the content root builds.
-    #[serde(default)]
-    pub attributes: BTreeMap<String, f64>,
-    /// passenger attachment points (`passenger_attachments`).
-    #[serde(default, deserialize_with = "deserialize_passenger_attachments")]
-    pub passenger_attachments: Vec<[f32; 3]>,
-}
-
-fn deserialize_passenger_attachments<'de, D: serde::Deserializer<'de>>(
-    d: D,
-) -> Result<Vec<[f32; 3]>, D::Error> {
-    use serde_json::Value;
-    match Value::deserialize(d)? {
-        Value::Number(n) => Ok(vec![[0.0, n.as_f64().unwrap_or(0.0) as f32, 0.0]]),
-        Value::Array(a) if a.len() == 3 && a.iter().all(|v| v.is_number()) => {
-            let p = [
-                a[0].as_f64().unwrap_or(0.0) as f32,
-                a[1].as_f64().unwrap_or(0.0) as f32,
-                a[2].as_f64().unwrap_or(0.0) as f32,
-            ];
-            Ok(vec![p])
-        }
-        Value::Array(a) => a
-            .into_iter()
-            .map(|v| match v {
-                Value::Number(n) => Ok([0.0, n.as_f64().unwrap_or(0.0) as f32, 0.0]),
-                Value::Array(coords) if coords.len() == 3 => Ok([
-                    coords[0]
-                        .as_f64()
-                        .ok_or_else(|| serde::de::Error::custom("expected float"))?
-                        as f32,
-                    coords[1]
-                        .as_f64()
-                        .ok_or_else(|| serde::de::Error::custom("expected float"))?
-                        as f32,
-                    coords[2]
-                        .as_f64()
-                        .ok_or_else(|| serde::de::Error::custom("expected float"))?
-                        as f32,
-                ]),
-                _ => Err(serde::de::Error::custom(
-                    "expected attachment point [x, y, z] or height y",
-                )),
-            })
-            .collect(),
-        _ => Err(serde::de::Error::custom(
-            "expected attachment point or list",
-        )),
-    }
-}
-
-impl EntityType {
-    /// whether the type copies a living mob ([`LIVING_TEMPLATES`]).
-    pub fn is_living(&self) -> bool {
-        LIVING_TEMPLATES.contains(&self.template.as_str())
-    }
-}
+pub mod entity_sounds;
+mod entity_type;
+pub use entity_type::EntityType;
 
 /// A block entity type declared in code, with the blocks it supports.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1074,17 +997,12 @@ impl Content {
     }
 
     /// Adds blocks and items a native mod declares in code (`native_blocks`,
-    /// `native_items`), checked as declaration files are: ids in this mod's
-    /// own namespace (its id, as `data/<id>/horizon/` is) and declared once
+    /// `native_items`), checked as declaration files are: ids in any of this
+    /// mod's owned namespaces (its id and manifest `namespaces`) and declared once
     /// with what it already has, a vanilla template, a crafting remainder
     /// that is vanilla or this mod's. All or nothing: on an error nothing is
     /// added.
     pub fn declare(&mut self, blocks: &[Block], items: &[Item]) -> Result<(), String> {
-        let own = self
-            .namespaces
-            .first()
-            .map(String::as_str)
-            .unwrap_or_default();
         let mut ids: BTreeSet<&str> = self
             .blocks
             .iter()
@@ -1098,12 +1016,19 @@ impl Content {
             .map(|b| b.id.as_str())
             .chain(self.items.iter().map(|i| i.id.as_str()))
             .collect();
-        let in_own =
-            |id: &str| namespaced_id(id) && id.split_once(':').is_some_and(|(ns, _)| ns == own);
+        let in_own = |id: &str| {
+            namespaced_id(id)
+                && id
+                    .split_once(':')
+                    .is_some_and(|(ns, _)| self.namespaces.iter().any(|owned| owned == ns))
+        };
         for block in blocks {
             let id = block.id.as_str();
             if !in_own(id) {
-                return Err(format!("block {id:?} is not an id in {own}:"));
+                return Err(format!(
+                    "block {id:?} is not an id in owned namespaces {:?}",
+                    self.namespaces
+                ));
             }
             check_block(block).map_err(|e| format!("block {id}: {e}"))?;
             if !ids.insert(id) {
@@ -1118,7 +1043,10 @@ impl Content {
         for item in items {
             let id = item.id.as_str();
             if !in_own(id) {
-                return Err(format!("item {id:?} is not an id in {own}:"));
+                return Err(format!(
+                    "item {id:?} is not an id in owned namespaces {:?}",
+                    self.namespaces
+                ));
             }
             check_item(item).map_err(|e| format!("item {id}: {e}"))?;
             if !item_ids.insert(id) {
@@ -1186,9 +1114,9 @@ impl Content {
                 parts.next().unwrap_or(""),
                 parts.next().unwrap_or(""),
             );
-            let own = namespace == id;
+            let owned = manifest.owned_namespaces().any(|owned| owned == namespace);
             check_namespace(name, manifest)?;
-            let Some(decl) = (own && top == "data")
+            let Some(decl) = (owned && top == "data")
                 .then(|| rest.strip_prefix("horizon/"))
                 .flatten()
             else {
@@ -1199,7 +1127,7 @@ impl Content {
                     .strip_prefix(kind)?
                     .strip_prefix('/')?
                     .strip_suffix(".json")?;
-                Some(format!("{id}:{path}"))
+                Some(format!("{namespace}:{path}"))
             };
             if let Some(block) = parse("block") {
                 blocks.push((block, name.clone()));
@@ -1380,6 +1308,7 @@ impl Content {
         for (kind, name) in types {
             let file: EntityType =
                 serde_json::from_slice(&reader.read(&name)?).map_err(|e| format!("{name}: {e}"))?;
+            file.sounds.validate(&kind)?;
             if !ENTITY_TEMPLATES.contains(&file.template.as_str()) {
                 return Err(format!(
                     "{name}: template {:?} is not one of {ENTITY_TEMPLATES:?}",
@@ -1422,12 +1351,7 @@ impl Content {
                     file.template
                 ));
             }
-            if !file.passenger_attachments.is_empty() {
-                return Err(format!(
-                    "{name}: only a living type has passenger attachments (its template is {})",
-                    file.template
-                ));
-            }
+            file.validate_thrown_attachments_and_sounds(&name)?;
             let Some(item) = &file.item else {
                 return Err(format!(
                     "{name}: a thrown type names the item that throws it"
@@ -2134,9 +2058,16 @@ capabilities = ["registries"]
             assert_eq!((c.blocks.len(), c.items.len()), (1, 0), "{e}");
             e
         };
-        assert!(refused(&[block("emerald:gear")], &[]).contains("not an id in ruby:"));
-        assert!(refused(&[block("minecraft:gear")], &[]).contains("not an id in ruby:"));
-        assert!(refused(&[], &[item("ruby")]).contains("not an id in ruby:"));
+        for error in [
+            refused(&[block("emerald:gear")], &[]),
+            refused(&[block("minecraft:gear")], &[]),
+            refused(&[], &[item("ruby")]),
+        ] {
+            assert!(
+                error.contains("owned namespaces") && error.contains("ruby"),
+                "{error}"
+            );
+        }
         assert!(refused(&[block("ruby:gear")], &[]).contains("declared twice"));
         assert!(refused(&[], &[item("ruby:gear")]).contains("block's item"));
         let modded = Block {
@@ -3515,10 +3446,24 @@ capabilities = ["registries"]
         let content = hmod("listed", &manifest, files).unwrap();
         assert_eq!(content.files.len(), 3);
         assert_eq!(content.namespaces, ["ruby", "kaisyn"]);
-        // Declarations stay in the id's namespace.
+        // Files and code share the manifest-owned namespace fence.
         let decl: &[(&str, &[u8])] = &[("data/kaisyn/horizon/block/a.json", BLOCK)];
-        let e = hmod("listed-decl", &manifest, decl).unwrap_err();
-        assert!(e.contains("declared in data/ruby/horizon/"), "{e}");
+        let content = hmod("listed-decl", &manifest, decl).unwrap();
+        assert_eq!(content.blocks[0].id, "kaisyn:a");
+        let mut code = Content::declared("ruby");
+        code.namespaces.push("kaisyn".into());
+        code.declare(&content.blocks, &[]).unwrap();
+        assert_eq!(code.blocks[0].id, "kaisyn:a");
+        let mut foreign = content.blocks[0].clone();
+        foreign.id = "unowned:a".into();
+        let error = code.declare(&[foreign], &[]).unwrap_err();
+        assert!(
+            error.contains("unowned:a")
+                && error.contains("owned namespaces")
+                && error.contains("ruby")
+                && error.contains("kaisyn"),
+            "{error}"
+        );
         // A namespace it does not list is still outside.
         let other: &[(&str, &[u8])] = &[("data/other/structure/a.nbt", b"nbt")];
         assert!(hmod("listed-other", &manifest, other).is_err());
@@ -3598,3 +3543,7 @@ mod context_shape_tests {
         assert!(check_block(&block).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "fluid_wire_tests.rs"]
+mod fluid_wire_tests;

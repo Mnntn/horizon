@@ -132,6 +132,17 @@ class ScanTest(unittest.TestCase):
     def test_the_scan_is_deterministic(self):
         self.assertEqual(json.dumps(self.result, sort_keys=True), json.dumps(scan.scan(), sort_keys=True))
 
+    def test_map_writes_the_tables_to_the_given_file_and_no_committed_page(self):
+        page = self.root / "docs/layering/mod-host-map.md"
+        page.parent.mkdir(parents=True)
+        page.write_text("hand-written\n")
+        out = self.root / "target/layering/tables.md"
+        self.assertEqual(0, scan.main(["--map", str(out)]))
+        tables = out.read_text()
+        self.assertTrue(tables.startswith(f"# Mod-host map tables at {'0' * 40}\n"))
+        self.assertIn("horizon-mod-api", tables)
+        self.assertEqual("hand-written\n", page.read_text())
+
 
 class RustTextTest(unittest.TestCase):
     def test_use_trees_flatten_with_aliases_and_globs(self):

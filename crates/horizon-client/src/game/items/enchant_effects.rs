@@ -11,10 +11,9 @@ use horizon_client::{
     enchant::{EffectContext, Enchantments, level_value},
     items::ItemStack,
     mobs::{Damage, DamageKind, Who},
-    projectiles::Projectile,
     random_source,
 };
-use horizon_core::{position::BlockPos, random::RandomSource};
+use horizon_core::{geometry::Vec3, position::BlockPos, random::RandomSource};
 use horizon_world::{fluid::FluidKind, level::LevelAccess, registry::BlockStateId};
 use serde_json::Value;
 
@@ -77,6 +76,39 @@ impl PlayerSlot {
     }
 }
 
+/// `ApplyEntityImpulse`'s impulse for an entity looking along `yaw` and
+/// `pitch`: the effect's `direction` turned by the look
+/// (`Entity.getLookQuaternion`: pitch about x, then yaw about y), scaled by
+/// `coordinate_scale` and the level's `magnitude`.
+pub(super) fn look_impulse(effect: &Value, level: u32, yaw: f32, pitch: f32) -> Vec3 {
+    let vec3 = |key: &str| [0, 1, 2].map(|i| effect[key][i].as_f64().unwrap_or(0.0));
+    let (d, scale) = (vec3("direction"), vec3("coordinate_scale"));
+    let magnitude = f64::from(level_value(&effect["magnitude"], level));
+    // JOML Quaternionf.rotationY(...).rotateX(...).transform(Vector3d):
+    // quaternion and matrix coefficients round to float before multiplying
+    // the double direction. Do not replace this with double Euler rotation.
+    let half_y = (-yaw * (std::f32::consts::PI / 180.0)) * 0.5;
+    let half_x = (pitch * (std::f32::consts::PI / 180.0)) * 0.5;
+    let sy = f64::from(half_y).sin() as f32;
+    let sx = f64::from(half_x).sin() as f32;
+    let cy = horizon_assets::math::cos_from_sin(sy, half_y);
+    let cx = horizon_assets::math::cos_from_sin(sx, half_x);
+    let (x, y, z, w) = (cy * sx, sy * cx, -sy * sx, cy * cx);
+    let (xx, yy, zz) = (x * x, y * y, z * z);
+    let (xy, xz, yz, xw, yw, zw) = (x * y, x * z, y * z, x * w, y * w, z * w);
+    let matrix = [
+        [1.0 - 2.0 * (yy + zz), 2.0 * (xy - zw), 2.0 * (xz + yw)],
+        [2.0 * (xy + zw), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - xw)],
+        [2.0 * (xz - yw), 2.0 * (yz + xw), 1.0 - 2.0 * (xx + yy)],
+    ];
+    let result = matrix
+        .map(|row| f64::from(row[0]) * d[0] + f64::from(row[1]) * d[1] + f64::from(row[2]) * d[2]);
+    Vec3::new(
+        result[0] * scale[0] * magnitude,
+        result[1] * scale[1] * magnitude,
+        result[2] * scale[2] * magnitude,
+    )
+}
 /// `Player.getDestroySpeed` multiplies by `BLOCK_BREAK_SPEED`; a player
 /// without the attribute keeps the vanilla default of 1.0.
 fn block_break_speed_factor(value: Option<f64>) -> f32 {
@@ -117,8 +149,26 @@ impl Game<'_> {
         }
         (0.2 * (1.0 + total)) as f32
     }
-    /// `EnchantmentHelper.processDurabilityChange` (unbreaking) for `amount` points.
+    /// The wear `ItemStack.hurtAndBreak` goes on to apply for `amount` points:
+    /// what Unbreaking leaves (`EnchantmentHelper.processDurabilityChange`),
+    /// then what the item's parts make of it (`IItemExtension.damageItem`).
     pub(super) fn durability_loss(&mut self, stack: &ItemStack, amount: u32) -> u32 {
+        let loss = self.unbreaking_loss(stack, amount);
+        if loss == 0 || self.remote.is_some() {
+            return loss;
+        }
+        // One table lookup tells whether any part of this item listens; with none,
+        // the stack is not converted and no host is made.
+        if !mod_api::__private::item_listens(mod_api::HookId::DamageItem, &stack.item) {
+            return loss;
+        }
+        let mut points = loss.min(i32::MAX as u32) as i32;
+        let mut canceled = false;
+        self.native_damage_item(stack, &mut points, &mut canceled);
+        if canceled { 0 } else { points.max(0) as u32 }
+    }
+    /// `EnchantmentHelper.processDurabilityChange` (unbreaking) for `amount` points.
+    fn unbreaking_loss(&mut self, stack: &ItemStack, amount: u32) -> u32 {
         let e = &world_stations!(self).enchantments;
         if !e.has_component(stack, "minecraft:item_damage") {
             return amount;
@@ -140,29 +190,13 @@ impl Game<'_> {
     /// `ItemStack.hurtAndBreak` for the player's `stack`: the wear Unbreaking
     /// leaves, and `ItemDurabilityTrigger` when some is left (`applyDamage`).
     pub(super) fn wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
-        let loss = self.modify_wear(stack, amount);
+        let loss = self.durability_loss(stack, amount);
         if loss > 0 {
             self.trigger_item_durability(stack, (stack.damage as i32).wrapping_add(loss as i32));
         }
         loss
     }
 
-    /// Enchantment and mod changes to a positive durability loss, before the
-    /// durability-changed advancement and the stack write.
-    pub(super) fn modify_wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
-        let mut loss = self.durability_loss(stack, amount);
-        // The mods hear a server player's wear once Unbreaking has had its say,
-        // and may change it or stop it.
-        if loss > 0
-            && let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
-        {
-            let mut points = loss as i32;
-            let mut cancel = false;
-            self.native_item_damaged(uuid, &name, &stack.item, &mut points, &mut cancel);
-            loss = if cancel { 0 } else { points.max(0) as u32 };
-        }
-        loss
-    }
     /// `getEnchantedDamage - base`: damage bonus of the held weapon against a mob type.
     pub(super) fn enchant_damage_bonus(&mut self, target: &str, victim: Option<u32>) -> f32 {
         self.enchanted_damage(target, 0.0, victim)
@@ -475,22 +509,7 @@ impl Game<'_> {
             // and the magnitude, added to the velocity (the guest's client
             // is told of it by `guest_hit_by`).
             Some("minecraft:apply_impulse") => {
-                let vec3 = |key: &str| [0, 1, 2].map(|i| effect[key][i].as_f64().unwrap_or(0.0));
-                let (d, scale) = (vec3("direction"), vec3("coordinate_scale"));
-                let magnitude = f64::from(level_value(&effect["magnitude"], level));
-                let (yaw, pitch) = (
-                    f64::from(self.yaw).to_radians(),
-                    f64::from(self.pitch).to_radians(),
-                );
-                let (y1, z1) = (
-                    d[1] * pitch.cos() - d[2] * pitch.sin(),
-                    d[1] * pitch.sin() + d[2] * pitch.cos(),
-                );
-                let impulse = horizon_core::geometry::Vec3::new(
-                    (d[0] * yaw.cos() - z1 * yaw.sin()) * scale[0] * magnitude,
-                    y1 * scale[1] * magnitude,
-                    (d[0] * yaw.sin() + z1 * yaw.cos()) * scale[2] * magnitude,
-                );
+                let impulse = look_impulse(effect, level, self.yaw, self.pitch);
                 if let Some(p) = self.player.as_mut() {
                     p.velocity = p.velocity.add_vector(impulse);
                 }
@@ -1050,55 +1069,6 @@ impl Game<'_> {
             ) == 0.0;
         (power, infinity)
     }
-    /// `EnchantmentHelper.onProjectileSpawned`, which `AbstractArrow`'s
-    /// constructor runs for every arrow fired from a weapon, bow or crossbow:
-    /// the weapon's `projectile_spawned` ignite effects (Flame) spawn the arrow
-    /// burning.
-    pub(super) fn ignite_spawned_arrow(&mut self, weapon: &ItemStack, arrow: &mut Projectile) {
-        if let Some(seconds) = self.projectile_spawned_ignite(weapon)
-            && let Some(a) = arrow.arrow.as_mut()
-        {
-            a.ignite_for_seconds(seconds);
-        }
-    }
-    /// The `projectile_spawned` ignite effects of `weapon` (Flame): the seconds
-    /// the new arrow burns for, the longest when several apply.
-    fn projectile_spawned_ignite(&mut self, weapon: &ItemStack) -> Option<f32> {
-        let ctx = EffectContext {
-            this: Some("minecraft:arrow"),
-            items: Some(world_items!(self)),
-            ..Default::default()
-        };
-        let mut ignite: Option<f32> = None;
-        for (id, level) in weapon.all_enchantments().iter() {
-            let Some(def) = world_stations!(self).enchantments.get(id) else {
-                continue;
-            };
-            for effect in def.effects["minecraft:projectile_spawned"]
-                .as_array()
-                .into_iter()
-                .flatten()
-            {
-                if effect["effect"]["type"] != "minecraft:ignite" {
-                    continue;
-                }
-                let ok = effect.get("requirements").is_none_or(|r| {
-                    world_stations!(self).enchantments.condition(
-                        r,
-                        *level,
-                        &ctx,
-                        &mut self.world.random,
-                    )
-                });
-                if ok {
-                    let seconds =
-                        horizon_client::enchant::level_value(&effect["effect"]["duration"], *level);
-                    ignite = Some(ignite.map_or(seconds, |s: f32| s.max(seconds)));
-                }
-            }
-        }
-        ignite
-    }
     /// Soul Speed (`data/minecraft/enchantment/soul_speed.json`), the parts of
     /// `Enchantment.runLocationChangedEffects` and `tick` that file uses. The
     /// `location_changed` effects run when the player enters a new block, lands,
@@ -1643,6 +1613,51 @@ fn soul_speed_tick(
 
 #[cfg(test)]
 mod tests {
+    use crate::game::damage_item_tests::{Rule, with_wear_part};
+    use horizon_client::mobs::{Mob, finalize};
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+    fn mob_armour_obeys_negative_cancel_and_breaking_answers() {
+        with_wear_part("minecraft:iron_helmet", Rule::Set(-1), |game, wear| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut mob = Mob::new(901, kind, Vec3::ZERO, 0.0);
+            finalize::set_item_stack(&mut mob, 5, ItemStack::new("minecraft:iron_helmet", 1));
+            game.mobs.push(mob);
+            for rule in [Rule::Set(i32::MIN), Rule::Cancel] {
+                wear.set(rule);
+                game.wear_mob_piece(901, 5, 1);
+                assert_eq!(
+                    finalize::item_stack(game.mobs.last().unwrap(), 5)
+                        .unwrap()
+                        .damage,
+                    0
+                );
+                assert_eq!(wear.take_asked(), [1]);
+            }
+            wear.set(Rule::Set(164));
+            game.wear_mob_piece(901, 5, 1);
+            assert_eq!(
+                finalize::item_stack(game.mobs.last().unwrap(), 5)
+                    .unwrap()
+                    .damage,
+                164
+            );
+            wear.set(Rule::Set(i32::MAX));
+            game.wear_mob_piece(901, 5, 1);
+            assert!(finalize::item_stack(game.mobs.last().unwrap(), 5).is_none());
+            assert_eq!(wear.take_asked(), [1, 1]);
+            game.wear_mob_piece(901, 5, 1);
+            assert!(wear.take_asked().is_empty());
+        });
+    }
+
     use super::{armor_changes, block_break_speed_factor, pick_mending_slot, soul_speed_tick};
     use horizon_client::items::ItemStack;
     use horizon_core::random::{LegacyRandom, RandomSource};
@@ -1802,5 +1817,19 @@ mod tests {
         assert_eq!(out, (None, None));
         assert_eq!(l_rng.next_long(), expected_level.next_long());
         assert_eq!(w_rng.next_long(), expected_wearer.next_long());
+    }
+}
+
+#[cfg(test)]
+mod impulse_rounding_tests {
+    #[test]
+    fn impulse_matches_pinned_joml_components() {
+        let effect =
+            serde_json::json!({"direction":[0,0,1],"coordinate_scale":[1,1,1],"magnitude":1});
+        let v = super::look_impulse(&effect, 1, 45.0, 30.0);
+        assert_eq!(
+            [v.x, v.y, v.z],
+            [-0.6123724579811096, -0.4999999701976776, 0.6123723983764648]
+        );
     }
 }

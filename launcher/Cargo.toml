@@ -27,6 +27,7 @@ quote = "1"
 sha1 = "0.10"
 # The mod browser checks Modrinth's SHA-512 before a pack reaches the game folder (browser/download.rs).
 sha2 = "0.10"
+tempfile = "3"
 # The secrets file is encrypted where no keychain answers (account.rs, FileStore).
 chacha20poly1305 = "0.10"
 pulldown-cmark = { version = "0.12", default-features = false }
@@ -117,7 +118,6 @@ winresource = "0.1"
 
 [dev-dependencies]
 libc = "0.2"
-tempfile = "3"
 # Tokenize source strings for the translation completeness test, including multiline calls.
 syn = "2"
 

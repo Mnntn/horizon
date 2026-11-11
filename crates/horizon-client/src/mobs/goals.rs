@@ -857,31 +857,6 @@ impl Mob {
     pub fn refuses_set_target(&self) -> bool {
         super::ai::brain_target(self).is_some()
     }
-    /// `Mob.setTarget` with the species overrides' side effects (#933), for an
-    /// already validated target — what the write handle and a goal tick's
-    /// `set_target` store:
-    /// - `Fox.setTarget`: clearing the target ends its defending.
-    /// - `Enderman.setTarget`: a target opens the mouth (`DATA_CREEPY`) and
-    ///   stamps `targetChangeTime` (the daylight teleport waits 600 ticks from
-    ///   it); none closes the mouth and zeroes it. Its attack speed modifier
-    ///   follows the target itself ([`super::enderman::attacking_speed`]).
-    /// - `ZombifiedPiglin.setTarget`: a first target samples the first-anger
-    ///   sound delay and the alert interval; the AI step samples them, with
-    ///   the anger, on the tick it first sees the target, as for every other
-    ///   way the piglin gains one.
-    pub fn set_target(&mut self, target: Option<Who>) {
-        match self.species() {
-            Species::Fox if target.is_none() => {
-                super::fox::set_flag(self, super::fox::DEFENDING, false);
-            }
-            Species::Enderman => {
-                self.extra.flag = target.is_some();
-                self.extra.counter = if target.is_some() { self.age as i32 } else { 0 };
-            }
-            _ => {}
-        }
-        self.ai.target = target;
-    }
     /// Apply an AI target change after listeners have had a chance to alter it.
     pub fn set_ai_target(&mut self, w: &MobWorld, target: Option<Who>) -> super::TargetChange {
         let is_brain = super::ai::brain_target(self).is_some();

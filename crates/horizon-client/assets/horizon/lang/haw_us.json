@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s no %2$s, a hiki i %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "ʻAʻole pili me Mojang a i ʻole Microsoft",
-  "key.emote": "Huila Emote"
+  "key.emote": "Huila Emote",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

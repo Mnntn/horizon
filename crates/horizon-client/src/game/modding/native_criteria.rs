@@ -84,6 +84,54 @@ impl Game<'_> {
         .ok_or(TriggerCriterionError::PlayerUnavailable)?
     }
 
+    /// Fire only `default_block_use` for a use a mod handled.
+    pub(super) fn player_trigger_block_use(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+    ) -> Result<(), TriggerCriterionError> {
+        self.with_block_use_player(player, pos, |g| {
+            g.trigger_default_block_use(pos);
+        })
+    }
+
+    /// Fire only `item_used_on_block` against the pre-use snapshot.
+    pub(super) fn player_trigger_item_used_on_block(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+        original: &horizon_client::items::ItemStack,
+    ) -> Result<(), TriggerCriterionError> {
+        self.with_block_use_player(player, pos, |g| {
+            g.trigger_block("minecraft:item_used_on_block", pos, original);
+        })
+    }
+
+    /// Resolve the player as `player_trigger_criterion` does, refuse an unloaded chunk, then
+    /// fire in the player's own level, so predicates read where they are.
+    fn with_block_use_player(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+        fire: impl FnOnce(&mut Self),
+    ) -> Result<(), TriggerCriterionError> {
+        if self.remote.is_some() {
+            return Err(TriggerCriterionError::NotServer);
+        }
+        let target = self
+            .player_handle_read(player)
+            .and_then(|_| self.native_entity_target(player.entity()))
+            .ok_or(TriggerCriterionError::PlayerUnavailable)?;
+        self.for_player(target, |g| {
+            if !g.world.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4)) {
+                return Err(TriggerCriterionError::UnloadedChunk);
+            }
+            fire(g);
+            Ok(())
+        })
+        .ok_or(TriggerCriterionError::PlayerUnavailable)?
+    }
+
     /// `trigger` for a mod's trigger, for the player in place.
     fn trigger_mod_criteria(
         &mut self,

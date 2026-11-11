@@ -4,3 +4,5 @@
 
 mod loading;
 pub use loading::main_with;
+
+pub use horizon_mod_wasm::compile_child;

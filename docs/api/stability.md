@@ -97,7 +97,7 @@ Deprecations and breaking changes are in bold. The release notes of the game rel
 | `horizon-server` commands, `server.toml` | stable | `horizon-server --version` |
 | Server control API | stable | `/api/v1` |
 | `horizon-launcher` commands and MCP tools | preview | none yet (unversioned) |
-| Launch API: `horizon-client`'s launch options, session JSON, exit codes; `horizon-prepare`'s output and progress | experimental | 0.1.0, `horizon-client --launch-api` and `horizon-prepare --launch-api` |
+| Launch API: `horizon-client`'s launch options, session JSON, exit codes; `horizon-prepare`'s output and progress | experimental | 0.1.1, `horizon-client --launch-api` and `horizon-prepare --launch-api` |
 | Benchmark report | stable | `"version": 1` |
 | `horizon-graphics.txt`, `horizon-extras.txt`, `horizon-mods.txt` | preview | none |
 | `SHA256SUMS` and `SHA256SUMS.sig` | stable | |

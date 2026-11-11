@@ -161,7 +161,12 @@ impl Game<'_> {
             SleepOn::Foot => foot_at,
         };
         shape_top(
-            self.outline_boxes_iter(&self.world, &self.be_anims, at, true),
+            self.outline_boxes_iter(
+                self.world.block(at[0], at[1], at[2]),
+                &self.be_anims,
+                at,
+                true,
+            ),
             f64::from(at[1]),
         )
     }

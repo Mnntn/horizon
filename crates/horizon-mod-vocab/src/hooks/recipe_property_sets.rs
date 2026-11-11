@@ -9,13 +9,17 @@ pub trait Hooks {
     /// items stay in. Called once per load, after the recipes are resolved, with
     /// the `DataLoadContext` of the load that owns them (`origin()`
     /// `ServerDataLoad` on a server, `ClientPreload` on a client's own load),
-    /// and again after `/reload`. An unknown set key, or an item that is air, is
-    /// logged and skipped; an item the registry does not know is ignored. The
+    /// and again after `/reload`. A new namespaced key creates a set when its
+    /// namespace belongs to the listener's manifest (its ID or `namespaces`).
+    /// Later listeners may extend existing sets. Invalid or foreign new keys,
+    /// unknown vanilla keys, and air are logged and skipped; unknown items are
+    /// ignored. Custom sets are synced to clients alongside vanilla sets. The
     /// answer must be the same every time.
     #[hook(
         side = "both",
         contract = "collect",
         out = "additions",
+        collect_validator = "crate::item::crafting::validate_recipe_properties",
         context = "data_load",
         target = "horizon_client_lib::crafting::native_hooks::native_recipe_property_sets",
         neoforge = "RegisterRecipePropertiesEvent"

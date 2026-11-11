@@ -20,9 +20,10 @@ on:
 permissions:
   contents: read
 
+# Finish running main checks; keep only the newest pending push. Obsolete PR runs still cancel.
 concurrency:
-  group: launcher-windows-check-${{ github.ref }}
-  cancel-in-progress: true
+  group: launcher-windows-check-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main') || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:

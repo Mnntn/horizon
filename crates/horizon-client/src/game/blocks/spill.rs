@@ -627,14 +627,22 @@ impl GameLevel<'_> {
             .map(|stack| self.block_drop_item([pos.x, pos.y, pos.z], stack))
             .collect();
         // `tryDropExperience` samples before the silk touch effect zeroes the
-        // amount; a spawner's experience ignores the tool.
+        // part/vanilla starting amount before the global break_block event; a
+        // spawner ignores the tool. An explicit global override is applied as given.
         let name = self.facts.get(state).name.clone();
         let silk = tool.is_some_and(|tool| tool.enchantment_level("minecraft:silk_touch") > 0);
-        let experience = exp_to_drop.unwrap_or_else(|| {
-            removal::break_experience(&mut self.world.random, &name)
-                .filter(|_| !silk || &*name == "minecraft:spawner")
-                .unwrap_or(0)
-        });
+        let experience = exp_to_drop
+            .or_else(|| self.part_break_experience(pos, state, breaker, tool))
+            .unwrap_or_else(|| {
+                removal::break_experience(&mut self.world.random, &name)
+                    .filter(|_| !silk || &*name == "minecraft:spawner")
+                    .unwrap_or(0)
+            });
+        let experience = if exp_to_drop.is_none() && silk && &*name != "minecraft:spawner" {
+            0
+        } else {
+            experience
+        };
         self.block_drops_ready(
             pos,
             state,

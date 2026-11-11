@@ -31,9 +31,9 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 | Interface | Public methods | Covered | Partial | Missing | n/a |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 3 | 23 | 34 | 0 |
-| `IBlockStateExtension` | 57 | 2 | 22 | 33 | 0 |
-| `IItemExtension` | 46 | 7 | 16 | 23 | 0 |
+| `IBlockExtension` | 60 | 6 | 21 | 33 | 0 |
+| `IBlockStateExtension` | 57 | 5 | 20 | 32 | 0 |
+| `IItemExtension` | 46 | 9 | 15 | 22 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
 | `IBlockEntityExtension` | 9 | 1 | 3 | 4 | 1 |
@@ -62,10 +62,10 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `hasDynamicLightEmission(state)` | Missing | — | `StateFacts.emission` is a fixed level, not a dynamic emission. |
 | `getLightEmission(state, level, pos)` | Partial | `BlockProperties.light` → `StateFacts.emission` | Static; no level or position. |
 | `ignitedByLava(state, level, pos, direction)` | Partial | template state flag (`StateFacts`, `state_flags::IGNITED_BY_LAVA`) | Inherited from the template's prepared data; no content field or Part changes it. |
-| `isLadder(state, level, pos, entity)` | Missing | — | Climbing reads vanilla tags and block classes. [#1038](https://github.com/arismoko/horizon/issues/1038). |
+| `isLadder(state, level, pos, entity)` | Covered | `BlockPart::is_ladder` (`hooks/is_ladder.rs`) | Asked of the block a living entity stands in, with the entity id, after the `#climbable` tag: the part's answer replaces the tag's, either way. Players and mobs; armor stands never ask. |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing | — | Engine rule in the climbing code; not exposed. |
 | `isBurning(state, level, pos)` | Missing | — | No per-block burning query; `block_burn` is fire removing a block. |
-| `canHarvestBlock(state, level, pos, player)` | Partial | `player_harvest_check` (`hooks/player_harvest_check.rs`) | Global `PlayerEvent.HarvestCheck`; can change the answer by state and position, but is not a Part method. [#1038](https://github.com/arismoko/horizon/issues/1038). |
+| `canHarvestBlock(state, level, pos, player)` | Covered | `BlockPart::can_harvest_block` (`hooks/can_harvest_block.rs`) | Asked where `player_harvest_check` fires, before it: the global hook still hears and may change the part's answer. |
 | `onDestroyedByPlayer(state, level, pos, player, stack, willHarvest, fluid)` | Partial | `break_block` (`hooks/base.rs`), `block_drops` (`hooks/block_drops.rs`) | `break_block` cancels the break or replaces the XP sample; `block_drops` edits drops. Neither returns "the block was destroyed" for the caller. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `onDestroyedByPushReaction(state, level, pos, direction, fluid)` | Missing | — | No hook at the piston/fluid destruction point. |
 | `getRespawnPosition(state, entityType, level, pos, angle)` | Partial | `player_respawn_position` (`hooks/base.rs`) | The global `PlayerRespawnPositionEvent` moves the player after vanilla found the bed or anchor; the per-block search is engine-owned. |
@@ -75,7 +75,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `addRunningEffects(state, level, pos, entity)` | Missing | — | No hook for the running dust burst. |
 | `playFallSound(state, level, pos, entity)` | Partial | `BlockProperties.sounds` | Picks a vanilla sound type; no custom event, volume or pitch. |
 | `playStepSound(state, level, pos, entity, volume, pitch)` | Partial | `BlockProperties.sounds` | Same static sound type; step volume and pitch are not settable. |
-| `canSustainPlant(state, level, pos, direction, plantState)` | Partial | `BlockPart::may_place_on` (`hooks/base.rs`) | `may_place_on` answers for your plant (the state's part), not your soil: a modded soil block cannot decide whether a vanilla plant stands on it, and there is no general `TriState` for non-plant callers. [#1038](https://github.com/arismoko/horizon/issues/1038). |
+| `canSustainPlant(state, level, pos, direction, plantState)` | Covered | `BlockPart::can_sustain_plant` (`hooks/can_sustain_plant.rs`) | The soil's answer for the plant above it (allow, deny or none), asked before the plant's `may_place_on`, which still answers for your plant. The direction is always up. |
 | `onTreeGrow(state, level, posConsumer, random, pos, feature)` | Missing | — | `block_grow_feature` observes or edits the feature a sapling grows into; it does not let a block run its own tree growth. |
 | `isFertile(state, level, pos)` | Missing | — | No fertile-block query; bonemeal hooks fire later. |
 | `getExpDrop(state, level, pos, blockEntity, breaker, tool)` | Partial | `break_block.exp_to_drop` (`hooks/base.rs`) | Replaces the XP sample for a player break; global, not per-block, and the block entity/tool/breaker are not arguments. [#1038](https://github.com/arismoko/horizon/issues/1038). |
@@ -131,7 +131,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 2 covered, 22 partial, 33 missing among the 57. The handful of signature differences (`canStickTo` takes
+Counts: 5 covered, 20 partial, 32 missing among the 57. The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 
@@ -152,7 +152,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `isCombineRepairable(stack)` | Partial | `minecraft:repairable` component via `ItemResource::repairable` | Data answers which material repairs it; the anvil combine predicate is not exposed. |
 | `getXpRepairRatio(stack)` | Partial | `mending_repair` (`hooks/base.rs`, a global hook) | Changes the repair amount for Mending; the per-item ratio is not a separate read, and the hook is not scoped to the item. |
 | `onStopUsing(stack, entity, timeLeft)` | Partial | `ItemPart::release_using` (`hooks/base.rs`) | Runs on an early release only, after the vanilla item's release; finishing the use or switching to another item stops it without asking. Both sides. |
-| `onLeftClickEntity(stack, player, entity)` | Missing | — | `hurt_enemy` only hears after the hit landed and cannot veto it. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `onLeftClickEntity(stack, player, entity)` | Covered | `ItemPart::on_left_click_entity` (`hooks/item_attack.rs`) | Runs where `Player.attack` starts, after `attack_entity` let the blow through; a cancel leaves the target unhurt, with no `hurt_enemy` and no wear. |
 | `getCraftingRemainder(instance)` | Covered | `ItemPart::crafting_remainder`, content `crafting_remainder` | The per-stack Part override replaces the data remainder in crafting, fuel and quick moves. |
 | `getEntityLifespan(stack, level)` | Partial | `item_expire` (`hooks/base.rs`) | Adds extra ticks to a dropped item's life; no absolute lifespan and not per-item. |
 | `hasCustomEntity(stack)` | Missing | — | No custom dropped-entity selection. |
@@ -161,12 +161,12 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `doesSneakBypassUse(stack, level, pos, player)` | Missing | — | No sneak-bypass query. |
 | `canEquip(stack, slot, entity)` | Partial | `equippable.allowed_entities`, `entity_capability::goes_in_slot` | Component data decides slot and allowed entities; no per-stack code predicate. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `getEquipmentSlot(stack)` | Covered | `ItemResource::equippable_slot`, `host.item_equippable_slot` | Read from the effective `equippable` component. |
-| `onEntitySwing(stack, entity, hand)` | Missing | — | No per-item swing callback. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `onEntitySwing(stack, entity, hand)` | Covered | `ItemPart::on_entity_swing` (`hooks/item_attack.rs`) | Runs where `LivingEntity.swing` starts, on both sides; a cancel starts no swing (no animation, no packet). |
 | `getDamage(stack)` | Covered | `ItemStack::damage` | The stack's numeric damage override. |
 | `getMaxDamage(stack)` | Partial | `minecraft:max_damage` effective component, `host.max_damage` | The stack's effective component includes a patch over the item default; `host.max_damage` reads that default only. |
 | `isDamaged(stack)` | Covered | `ItemStack::damage`, `damage_component` | Distinguishes explicit zero from absent. |
 | `setDamage(stack, damage)` | Partial | `ItemStack::set_damage` | Stores the requested value; the game checks it against the effective maximum when it accepts the write instead of clamping here. |
-| `canPerformAction(instance, ability)` | Partial | `block_tool_modification` (`hooks/block_tool_modification.rs`) | Covers the block-side tool action (strip, wax, path, ...); no item-side ability query. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `canPerformAction(instance, ability)` | Partial | `ItemPart::can_perform_action` (`hooks/can_perform_action.rs`), `block_tool_modification` (`hooks/block_tool_modification.rs`) | The part answers per stack and per namespaced ability id, starting from vanilla's answer, where vanilla checks the item kind: `minecraft:shield_block` (a raised item blocking attacks, its use time and animation), `minecraft:shears_harvest` (sheep, mooshroom, snow golem, bogged, bee nests, a dispenser's shears) and `minecraft:shears_carve` (a pumpkin). The block side of a tool action (strip, wax, path, ...) is `block_tool_modification`; no tool ability (`axe_strip`...) is asked of the item yet. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `getMaxStackSize(stack)` | Partial | `max_stack_size` component, `host.max_stack_size` | The stack's effective component includes a patch over the item default; `host.max_stack_size` reads that default only, and invalid values are refused at the write. |
 | `isPrimaryItemFor(stack, enchantment)` | Partial | `host.enchantment_supports` | Answers supported items; the narrower "primary item" distinction is not exposed. |
 | `supportsEnchantment(stack, enchantment)` | Partial | `host.enchantment_supports` | A client-side read of `Enchantment.isSupportedItem` for an item id; not per stack and without NeoForge's enchanted-book special case. |
@@ -177,7 +177,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `canContinueUsing(stack, otherStack)` | Missing | — | No continue-use query. |
 | `getCreatorModId(registries, stack)` | Missing | — | Diagnostic ownership string; Horizon keeps the item's namespace in its key. |
 | `onAnimalArmorTick(stack, level, mob)` | Missing | — | No per-item animal-armour tick. |
-| `damageItem(stack, amount, entity, onBreak)` | Partial | `item_damaged` (`hooks/base.rs`) | Global hook edits a player's item wear after Unbreaking; no per-item method and no `onBreak` consumer. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `damageItem(stack, amount, entity, onBreak)` | Covered | `ItemPart::damage_item` (`hooks/damage_item.rs`) | Runs on the server for the parts of the worn item, after Unbreaking, on every wear path (a player's tools, armour and shield, a dispenser's tool, a mob's armour). The part gets the stack and the amount about to be lost, and changes it (0 or less leaves the item whole) or cancels the wear. It is not given the wearing entity (`host.players().acting_player()` names the player on a player's paths) and has no `onBreak` consumer: the break is `player_destroy_item`. |
 | `onDestroyed(itemEntity, source)` | Missing | — | `item_despawn` is lifetime removal, not damage destruction. |
 | `isGazeDisguise(stack, player, target)` | Missing | — | No gaze-disguise query. |
 | `canWalkOnPowderedSnow(stack, entity)` | Missing | — | Powder-snow walking is engine-owned. |
@@ -299,17 +299,16 @@ their rows have landed or become partial since and should be narrowed when they 
 
 - **Changed on the block side:** `shouldCheckWeakPower` and `should_redstone_wire_connect_to` (the issue says
   reuse them) are Parts; `getFlammability` / `getFireSpreadSpeed` are now `fire_odds` (state-based, without a
-  position or direction); `canSustainPlant` is partly `may_place_on`, which answers for the plant, not the
-  soil; `canHarvestBlock` is partly `player_harvest_check`; `getToolModifiedState` is partly
-  `block_tool_modification`.
+  position or direction); `canSustainPlant` is `can_sustain_plant` (the soil) before `may_place_on` (the
+  plant); `canHarvestBlock` is `can_harvest_block` before `player_harvest_check`; `isLadder` is `is_ladder`;
+  `getToolModifiedState` is partly `block_tool_modification`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
-  has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `damageItem`
-  has the global `item_damaged`; `getXpRepairRatio` has a global `mending_repair` that changes the amount.
-- **Block group rows that still need their own answer:** `isLadder`, `getExpDrop`, `onBlockExploded`,
+  has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `getXpRepairRatio` has a global `mending_repair` that changes the amount.
+- **Block group rows that still need their own answer:** `getExpDrop`, `onBlockExploded`,
   `getWeakChanges`, `onNeighborChange`, `getBounceRestitution`, `isSlimeBlock`, `isStickyBlock`,
   `canStickTo`, `onDestroyedByPlayer` (all Partial or Missing above).
-- **Item group rows that still need their own answer:** `onLeftClickEntity`, `onEntitySwing`,
-  `onEntityItemUpdate`, `canPerformAction` (all Partial or Missing above).
+- **Item group rows that still need their own answer:** `onEntityItemUpdate`, `canPerformAction` (both
+  Partial or Missing above).
 - **Missing but not in either group:** the remaining block, entity, block-entity and fluid rows marked Missing
   above; they have no follow-up issue yet. The largest are the entity fluid queries, block entity model data and
   fluid tooltips.

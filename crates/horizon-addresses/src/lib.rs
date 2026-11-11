@@ -47,3 +47,15 @@ pub const HOSTING_PARTNER: &str = "https://my.sculkhosting.com/ref/horizon";
 
 /// The official cosmetics shop.
 pub const SHOP: &str = "https://playhorizon.dev/shop";
+
+/// The official launcher installer's product home.
+pub const LAUNCHER_ABOUT: &str = "https://playhorizon.dev";
+
+/// The separately branded arismoko fork launcher installer's product home.
+pub const FORK_LAUNCHER_ABOUT: &str = "https://github.com/arismoko/horizon";
+
+/// Exact fork Git source accepted for a starter native mod's SDK dependency.
+pub const NATIVE_MOD_SDK_SOURCE: &str = "https://github.com/arismoko/horizon";
+
+/// Cargo's canonical source identity for the crates.io registry.
+pub const CARGO_CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";

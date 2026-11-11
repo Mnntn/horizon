@@ -619,7 +619,7 @@ impl Game<'_> {
             _ if horizon_client::items::bucket_contents(&info.id).is_some() => return None,
             _ if info.blocks_attacks.is_some() => Verb::Raise,
             _ if let Some(consumable) = &info.consumable => {
-                if info.food.is_some() && !self.can_eat(&stack, info.can_always_eat) {
+                if info.food.is_some() && !self.can_eat(Some(&stack), info.can_always_eat) {
                     return None;
                 }
                 use horizon_core::use_animation::UseAnimation;

@@ -130,7 +130,7 @@ impl Game<'_> {
         Self::admit_entity_save()?;
         // `DedicatedServer.saveAllChunks` tells the management protocol's clients when a save starts and when
         // it ends without failing, for every save: the command, the autosave, the pause.
-        let dedicated = self.options.dedicated.is_some();
+        let dedicated = self.is_dedicated_server();
         if dedicated {
             dedicated::events::record_server("saving", serde_json::json!({}));
         }

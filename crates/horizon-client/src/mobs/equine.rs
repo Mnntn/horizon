@@ -62,6 +62,9 @@ pub struct Rider {
     pub sprint: bool,
     /// Holding the jump key (a happy ghast rises).
     pub jumping: bool,
+    /// Holding the sneak key (`Player.isShiftKeyDown`): a mount whose `entity_mount` listener
+    /// kept a sneaking rider on reads it here.
+    pub sneak: bool,
     /// A server's player whose own client moves the mount
     /// (`Entity.isClientAuthoritative`): here it only turns (`tickRidden`).
     pub client: bool,
@@ -617,7 +620,7 @@ impl Goal for RandomStand {
         stand_if_possible(m);
         // playStandSound: getAmbientStandSound is the ambient sound, plain
         // playSound(sound) at volume and pitch 1.
-        let sound = super::ai::voice_sounds(m)[0];
+        let sound = super::entity_sounds::voices(m)[0];
         let at = [m.position.x, m.position.y, m.position.z];
         cx.events.push(MobEvent::Sound(sound, at, 1.0, 1.0));
     }

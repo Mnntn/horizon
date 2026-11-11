@@ -544,10 +544,12 @@ impl ModelPolygon {
 /// `ModelPart`: a baked part, its children by name, and the pose a mod sets
 /// each frame before drawing it (`setupAnim`), from the pose it was baked
 /// with (`reset_pose`).
+///
+/// Wire uses JSON with at most 32 nested containers; named children consume
+/// object, list and tuple levels. Encoding preflights children before serialization.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 #[non_exhaustive]
-#[derive(horizon_mod_api_macros::Wire)]
-#[wire(via = String)]
+// no wire: handwritten JSON-backed Wire preflights recursive children before serde.
 pub struct ModelPart {
     /// Where it sits in its parent, in texels.
     pub x: f32,
@@ -678,6 +680,33 @@ impl ModelPart {
         self.load_pose(self.initial_pose);
     }
 
+    /// The path, by child index, selected by `ModelPart.createPartLookup`: `root` is this
+    /// part; other names use the first match, visiting each part's immediate children before
+    /// their descendants. `None` when no part has that name.
+    pub(crate) fn descendant_path(&self, name: &str) -> Option<Vec<u32>> {
+        if name == "root" {
+            return Some(Vec::new());
+        }
+        if let Some(index) = self.children.iter().position(|(child, _)| child == name) {
+            return Some(vec![index as u32]);
+        }
+        self.children
+            .iter()
+            .enumerate()
+            .find_map(|(index, (_, child))| {
+                let mut path = child.descendant_path(name)?;
+                path.insert(0, index as u32);
+                Some(path)
+            })
+    }
+    /// The part at `path`, child index by child index.
+    pub(crate) fn descendant_mut(&mut self, path: &[u32]) -> Option<&mut ModelPart> {
+        let mut part = self;
+        for &index in path {
+            part = &mut part.children.get_mut(index as usize)?.1;
+        }
+        Some(part)
+    }
     /// Puts it and every part under it back at their initial poses, as
     /// `Model.resetPose` does before each frame's `setupAnim`.
     pub fn reset_all_poses(&mut self) {

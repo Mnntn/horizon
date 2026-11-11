@@ -55,8 +55,7 @@ fn read_consumers_forward_nonresident_stacks_and_mutants() {
     }
     let draw = include_str!("../../host/draw.rs");
     let block = &draw[draw.find("impl BlockEntityDrawContext").unwrap()..];
-    let stations = include_str!("../../blocks/stations.rs");
-    let tooltip = &stations[stations.find("for image in &images {").unwrap()..];
+    let tooltip = include_str!("../../blocks/stations/tooltip.rs");
     let methods = [
         (
             "may_place",
@@ -68,7 +67,16 @@ fn read_consumers_forward_nonresident_stacks_and_mutants() {
         ("item_stack", body(draw, "fn item_stack(")),
         ("gui_draw_item_with", body(draw, "fn gui_draw_item_with(")),
         ("block_item", body(block, "fn item(")),
-        ("tooltip", body(tooltip, "for image in &images")),
+        (
+            "tooltip",
+            format!(
+                "if let Ok(stack) = crate::game::api_values::stack_value(&image.stack) {{ {} }}",
+                body(
+                    tooltip,
+                    "if let Ok(stack) = crate::game::api_values::stack_value(&image.stack)"
+                )
+            ),
+        ),
     ];
     let fixture = r#"
 #![allow(unused)]
@@ -98,7 +106,7 @@ impl Context<'_> {
 }
 impl Engine {
     fn tooltip(&self, image: &Image, batch: &mut Vec<Stack>) {
-        let x = 0.; let mut at = 0.;
+        let origin = [0.; 2]; let size = [70., 46.];
         TOOLTIP
     }
 }

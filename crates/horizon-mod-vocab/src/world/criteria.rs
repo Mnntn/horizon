@@ -52,21 +52,31 @@ impl From<(crate::Identifier, String)> for CriterionTestError {
 }
 
 /// Why [`PlayerRef::trigger_criterion`](crate::PlayerRef::trigger_criterion) was refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
 pub enum TriggerCriterionError {
-    /// Vanilla's `minecraft` triggers are fired only by the game, or the id has an empty
-    /// namespace or path.
+    /// The general criterion operation refuses vanilla's `minecraft` triggers,
+    /// or the id has an empty namespace or path.
     InvalidTrigger,
     /// This game is a remote client's copy, not the authoritative server.
     NotServer,
     /// The player handle is stale, offline, or displaced by a nested player's turn.
     PlayerUnavailable,
+    /// The block position is in a chunk not loaded in the player's level.
+    UnloadedChunk,
+    /// The generated item boundary refused a supplied stack before firing either trigger.
+    Stack(crate::StackWriteError),
     /// A criterion test could not answer. Earlier matching criteria may already be granted.
     Test(CriterionTestError),
     /// The host has no game backend (for example, a mod's test double).
     NoBackend,
+}
+
+impl From<crate::StackWriteError> for TriggerCriterionError {
+    fn from(error: crate::StackWriteError) -> Self {
+        Self::Stack(error)
+    }
 }
 
 impl NoBackend for TriggerCriterionError {

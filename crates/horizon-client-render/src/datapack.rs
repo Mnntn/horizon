@@ -722,6 +722,40 @@ fn resource_id(file: &str, kind: &str, ext: &str) -> Option<String> {
         .strip_suffix(ext)?;
     Some(format!("{ns}:{path}"))
 }
+/// The entry files of mods' datapack registries in `packs`, lowest pack first: each file
+/// `data/<entry namespace>/<registry namespace>/<registry path>/<entry>.json` of a registry
+/// in `registries` (`(namespace, path)` of its key), by that path, each path's versions in
+/// pack order. The folders are the mods' own, so the fixed kinds `DataStore` lists never
+/// cover them.
+pub fn registry_files(
+    packs: &[&DataPack],
+    registries: &[(&str, &str)],
+) -> BTreeMap<String, Vec<Vec<u8>>> {
+    let mut kinds: Vec<&str> = registries.iter().map(|(namespace, _)| *namespace).collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+    let mut files: BTreeMap<String, Vec<Vec<u8>>> = BTreeMap::new();
+    for pack in packs {
+        for file in pack.list_kinds(&kinds) {
+            let in_registry = file
+                .strip_prefix("data/")
+                .and_then(|rest| rest.split_once('/'))
+                .is_some_and(|(_, rest)| {
+                    file.ends_with(".json")
+                        && registries.iter().any(|(namespace, path)| {
+                            rest.strip_prefix(namespace)
+                                .and_then(|rest| rest.strip_prefix('/'))
+                                .and_then(|rest| rest.strip_prefix(path))
+                                .is_some_and(|rest| rest.starts_with('/'))
+                        })
+                });
+            if in_registry && let Some(bytes) = pack.read(&file) {
+                files.entry(file).or_default().push(bytes);
+            }
+        }
+    }
+    files
+}
 impl DataStore {
     pub fn load(packs: &[&DataPack]) -> Self {
         Self::load_impl(packs, None)
@@ -1881,6 +1915,49 @@ mod tests {
             saved,
             serde_json::json!({"enabled": selected, "disabled": ["file/off"]})
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A mod's registry folders are listed per pack, lowest pack first, and only the declared
+    /// registries' `.json` files, in any entry namespace.
+    #[test]
+    fn registry_files_list_the_declared_folders_in_pack_order() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-registry-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut packs = Vec::new();
+        for name in ["low", "high"] {
+            let folder = root.join(name);
+            for file in [
+                "data/example/example/spell/fire.json",
+                "data/addon/example/spell/nested/ice.json",
+                "data/addon/example/other/skip.json",
+                "data/addon/example/spell/note.txt",
+                "data/addon/example/spellbook/skip.json",
+            ] {
+                let path = folder.join(file);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, name).unwrap();
+            }
+            packs.push(DataPack::from_source(
+                name.into(),
+                ResourceSource::directory(folder),
+            ));
+        }
+        let refs = packs.iter().collect::<Vec<_>>();
+        let files = registry_files(&refs, &[("example", "spell")]);
+        assert_eq!(
+            files.keys().map(String::as_str).collect::<Vec<_>>(),
+            [
+                "data/addon/example/spell/nested/ice.json",
+                "data/example/example/spell/fire.json"
+            ]
+        );
+        assert_eq!(
+            files["data/example/example/spell/fire.json"],
+            vec![b"low".to_vec(), b"high".to_vec()]
+        );
+        assert!(registry_files(&refs, &[]).is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

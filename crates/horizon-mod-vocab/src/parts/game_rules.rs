@@ -10,7 +10,7 @@ impl PartRegistrar {
         if crate::Identifier::parse_namespaced(&id).is_none() {
             return Err(crate::GameRuleError::InvalidId);
         }
-        if id.split_once(':').unwrap().0 != self.mod_id {
+        if !owns_namespace(self.mod_id, id.split_once(':').unwrap().0) {
             return Err(crate::GameRuleError::ForeignNamespace);
         }
         Ok(id)
@@ -168,13 +168,13 @@ pub mod tests {
 
 /// Registrar operations for game rules.
 pub trait GameRulesRegistrar {
-    /// Declare a game rule category in the calling mod's namespace. Invalid,
+    /// Declare a game rule category in a namespace owned by the calling mod's manifest. Invalid,
     /// foreign or duplicate IDs refuse mod loading even if the error is ignored.
     /// Categories appear in the host's game rules screen; remote clients do not
     /// receive them in this version.
     fn game_rule_category(&mut self, id: &str) -> Result<(), crate::GameRuleError>;
 
-    /// Declare a boolean game rule in this mod's namespace. Category references are
+    /// Declare a boolean game rule in a namespace owned by this mod's manifest. Category references are
     /// resolved after all mods register; an unknown category refuses installation then.
     fn game_rule_bool(
         &mut self,

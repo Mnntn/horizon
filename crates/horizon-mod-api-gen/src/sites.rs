@@ -83,24 +83,6 @@ pub struct Declaration {
     pub ordinal: Option<usize>,
     pub ctx: String,
     pub origin: String,
-    pub local: Option<Local>,
-    /// An `expression` site: `selector` is then the expression's tokens, not a callee.
-    pub expression: Option<Expression>,
-}
-
-/// An `expression` site's declared value type, and the injections that declared it (`mod:inject`,
-/// comma-separated) for attributing a failure at the site.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-pub struct Expression {
-    pub ty: String,
-    pub origin: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-pub struct Local {
-    pub binding: String,
-    pub ty: String,
-    pub after: bool,
 }
 
 pub(crate) const DIRECTORY: &str = "crates/horizon-mod-api-gen/slots";
@@ -110,10 +92,9 @@ pub(crate) const DIRECTORY: &str = "crates/horizon-mod-api-gen/slots";
 pub struct Slots {
     pub functions: BTreeMap<String, String>,
     pub calls: Vec<Declaration>,
-    pub types: BTreeMap<String, String>,
 }
 
-/// Read function, call and type slots with one parser. An absent directory has no listed slots.
+/// Read function and call slots with one parser. An absent directory has no listed slots.
 pub fn slots(directory: &Path) -> Result<Slots, Error> {
     let contents = match fs::read_dir(directory) {
         Ok(files) => files,
@@ -159,28 +140,16 @@ impl Slots {
             let origin = format!("{}:{}", file.display(), i + 1);
             let mut parse = || -> Result<_, Error> {
                 let parts: Vec<_> = line.split('|').map(str::trim).collect();
-                let type_path = parts[0].strip_prefix("type ");
-                let target = type_path.unwrap_or(parts[0]).trim();
+                let target = parts[0].trim();
                 syn::parse_str::<syn::Path>(target)?;
                 let target = plain_path(target);
                 if parts.len() == 1 {
-                    let entries = if type_path.is_some() {
-                        &mut self.types
-                    } else {
-                        &mut self.functions
-                    };
-                    entries.entry(target).or_insert(origin.clone());
+                    self.functions.entry(target).or_insert(origin.clone());
                     return Ok(None);
                 }
                 let [_, selector, ordinal, ctx] = parts.as_slice() else {
-                    return Err(Cause::Format(
-                        "expected at, type <path>, or at | call | nth | ctx",
-                    )
-                    .into());
+                    return Err(Cause::Format("expected at or at | call | nth | ctx").into());
                 };
-                if type_path.is_some() {
-                    return Err(Cause::Format("type slots cannot select calls").into());
-                }
                 let call = if selector.starts_with('.') {
                     format!("__receiver{selector}()")
                 } else {
@@ -202,8 +171,6 @@ impl Slots {
                     )
                 };
                 Ok(Some(Declaration {
-                    expression: None,
-                    local: None,
                     target,
                     selector: selector.replace(' ', ""),
                     ordinal,
@@ -241,8 +208,7 @@ fn slot_extension_matches_disk_parser() {
     fs::create_dir_all(&directory).unwrap();
     let a = directory.join("a.txt");
     let b = directory.join("b.txt");
-    let first =
-        "# comment\nlower::run\ntype lower::Thing<'_>\ngame::tick | lower::call | 2 | context\n";
+    let first = "# comment\nlower::run\ngame::tick | lower::call | 2 | context\n";
     let second = "lower::run\ngame::tick | lower::call | 2 | context\nother::run\n";
     fs::write(&a, first).unwrap();
     fs::write(&b, second).unwrap();
@@ -251,13 +217,11 @@ fn slot_extension_matches_disk_parser() {
     extended.extend(&a, first).unwrap();
     extended.extend(&b, second).unwrap();
     assert_eq!(extended.functions, from_disk.functions);
-    assert_eq!(extended.types, from_disk.types);
     assert_eq!(extended.calls, from_disk.calls);
     assert_eq!(
         extended.functions.keys().collect::<Vec<_>>(),
         ["lower::run", "other::run"]
     );
-    assert!(extended.types.contains_key("lower::Thing"));
     assert_eq!(extended.calls[0].ordinal, Some(2));
     assert_eq!(extended.calls[0].ctx, "context");
     let conflict = "game::tick | lower::call | 2 | changed\n";
@@ -265,17 +229,13 @@ fn slot_extension_matches_disk_parser() {
     let disk_error = slots(&directory).unwrap_err().to_string();
     let memory_error = extended.extend(&b, conflict).unwrap_err().to_string();
     assert_eq!(disk_error, memory_error);
-    assert!(memory_error.contains("a.txt:4") && memory_error.contains("b.txt:1"));
+    assert!(memory_error.contains("a.txt:3") && memory_error.contains("b.txt:1"));
     fs::remove_dir_all(directory).unwrap();
 }
 
 /// A compiled call site's raw form, written to `points.json` beside the head/return points.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Site {
-    #[serde(default)]
-    pub local: Option<Local>,
-    #[serde(default)]
-    pub expression: Option<Expression>,
     pub name: String,
     pub target: String,
     pub selector: String,
@@ -286,6 +246,8 @@ pub struct Site {
     /// Statement and nesting-path fingerprint, independent of ordinal drift.
     pub ctx: String,
     pub listener: String,
+    /// Move record and consuming forwarding capability for native calls.
+    pub once: bool,
     pub record: String,
     pub receiver: String,
     pub args: Vec<(String, String)>,
@@ -293,14 +255,37 @@ pub struct Site {
 }
 
 pub(crate) mod analysis;
-pub mod expression;
+
 pub mod identity;
-mod local;
+
 pub(crate) mod resolve;
 pub(crate) mod rewrite;
-pub mod source;
+/// The sole facade name for this canonical call place, independent of written aliases.
+pub fn facade_name(target: &str, callee: &str, ordinal: usize) -> String {
+    rewrite::name(
+        &Declaration {
+            target: crate::points::plain_path(target),
+            selector: crate::points::plain_path(callee),
+            ordinal: Some(ordinal),
+            ctx: String::new(),
+            origin: String::new(),
+        },
+        ordinal,
+    )
+}
+
 mod stage;
 pub(crate) use stage::{ids, stage, tracked};
 
 #[cfg(test)]
+mod production_tests;
+#[cfg(test)]
 mod tests;
+
+#[test]
+fn facade_name_is_stable() {
+    assert_eq!(
+        facade_name("game::tick", "game::step", 2),
+        "S7de17070633c86a1"
+    );
+}

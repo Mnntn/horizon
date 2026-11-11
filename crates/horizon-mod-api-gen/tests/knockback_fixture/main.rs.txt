@@ -1,0 +1,67 @@
+static CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static INNER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+fn main() {
+    use entries::*;
+    use mod_points::{PointId, __private::{SlotListener, seal}};
+    use std::sync::atomic::Ordering::Relaxed;
+    let short: __ClientLibMobsKnockbackMobKnockbackListener = |_, args| {
+        *args.power *= 2.0;
+        *args.cancel = CANCEL.load(Relaxed);
+    };
+    let full: __ClientLibMobsKnockbackMobKnockbackFullListener = |_, args| {
+        INNER.fetch_add(1, Relaxed);
+        *args.power *= 2.0;
+    };
+    // SAFETY: the generated listener aliases above check the exact point signatures.
+    unsafe {
+        mod_points::register(&SlotListener::new("probe", PointId::ClientLibMobsKnockbackMobKnockback.place(), short as *const ())).unwrap();
+        mod_points::register(&SlotListener::new("probe", PointId::ClientLibMobsKnockbackMobKnockbackFull.place(), full as *const ())).unwrap();
+    }
+    let player_short: player_entries::__KnockBackPlayerListener = |_, args| {
+        *args.power *= 2.0;
+        *args.cancel = CANCEL.load(Relaxed);
+    };
+    let player_full: player_entries::__KnockBackPlayerFullListener = |_, args| {
+        INNER.fetch_add(1, Relaxed);
+        *args.power *= 2.0;
+    };
+    // SAFETY: the generated listener aliases check the player receiver and arguments.
+    unsafe {
+        mod_points::register(&SlotListener::new("probe", PointId::KnockBackPlayer.place(), player_short as *const ())).unwrap();
+        mod_points::register(&SlotListener::new("probe", PointId::KnockBackPlayerFull.place(), player_full as *const ())).unwrap();
+    }
+    seal();
+    let hit = Damage { attacker: None, from: None };
+    let mut heard = 0;
+    let mut mob = Mob::new();
+    mob.knockback(&mut DamageLevel { heard: &mut heard }, 0.2, 1.0, 0.0, &hit, 3.0);
+    assert_eq!((mob.velocity.x, mob.velocity.y), (-0.8, 0.4));
+    assert_eq!((heard, INNER.load(Relaxed)), (1, 1));
+    let mut mob = Mob::new();
+    mob.knockback_full(&mut DamageLevel { heard: &mut heard }, 0.2, 1.0, 0.0, &hit, 3.0, true);
+    assert_eq!((mob.velocity.x, mob.velocity.y), (-0.4, 0.4));
+    assert_eq!((heard, INNER.load(Relaxed)), (2, 2));
+    CANCEL.store(true, Relaxed);
+    let mut mob = Mob::new();
+    mob.knockback(&mut DamageLevel { heard: &mut heard }, 0.2, 1.0, 0.0, &hit, 3.0);
+    assert_eq!((mob.velocity.x, mob.velocity.y), (0.0, 0.0));
+    assert!(!mob.needs_sync);
+    assert_eq!((heard, INNER.load(Relaxed)), (2, 2));
+    CANCEL.store(false, Relaxed);
+    let mut heard = 0;
+    let make_player = || motion::PlayerMotion { velocity: Vec3::default(), ground: Ground { on_ground: true }, entity_id: 1 };
+    let mut game = Game { player: Some(make_player()), level: DamageLevel { heard: &mut heard } };
+    let attack = Attack { attacker: 0 };
+    game.knock_back_player(0.2, 1.0, 0.0, HurtSource("test"), &attack, 3.0);
+    assert_eq!(game.player.as_ref().unwrap().velocity.x, -0.8);
+    assert_eq!((*game.level.heard, INNER.load(Relaxed)), (1, 3));
+    game.player = Some(make_player());
+    game.knock_back_player_full(0.2, 1.0, 0.0, HurtSource("test"), &attack, 3.0, true);
+    assert_eq!(game.player.as_ref().unwrap().velocity.x, -0.4);
+    assert_eq!((*game.level.heard, INNER.load(Relaxed)), (2, 4));
+    CANCEL.store(true, Relaxed);
+    game.player = Some(make_player());
+    game.knock_back_player(0.2, 1.0, 0.0, HurtSource("test"), &attack, 3.0);
+    assert_eq!(game.player.as_ref().unwrap().velocity.x, 0.0);
+    assert_eq!((*game.level.heard, INNER.load(Relaxed)), (2, 4));
+}

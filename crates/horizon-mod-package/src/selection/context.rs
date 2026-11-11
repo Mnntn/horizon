@@ -126,9 +126,19 @@ impl LaunchArguments {
                     rest.push(Argument::Switch(arg));
                     break;
                 }
-                "--fullscreen" | "--session-stdin" | "--creative" | "--test-terrain"
-                | "--no-pause" | "--offscreen" | "--headless" | "--control" | "--server-thread"
-                | "--in-frame" | "--no-server-thread" | "--pregen" => {
+                "--developer-single-player"
+                | "--fullscreen"
+                | "--session-stdin"
+                | "--creative"
+                | "--test-terrain"
+                | "--no-pause"
+                | "--offscreen"
+                | "--headless"
+                | "--control"
+                | "--server-thread"
+                | "--in-frame"
+                | "--no-server-thread"
+                | "--pregen" => {
                     rest.push(Argument::Switch(arg));
                 }
                 _ => {

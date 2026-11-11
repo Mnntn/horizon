@@ -774,7 +774,10 @@ impl Guest {
         if self.anticheat.record.is_some() {
             self.note_change(packet);
         }
-        self.sender.send(packet.encode());
+        match packet.try_encode() {
+            Ok(body) => self.sender.send(body),
+            Err(error) => eprintln!("[lan] send refused: {error}"),
+        }
     }
     /// Whether the guest is placed and on a Horizon client (the only one that
     /// reads synced attachments).

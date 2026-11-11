@@ -27,7 +27,7 @@ pub(super) fn hostile_species(species: Species) -> bool {
 impl Game<'_> {
     /// The level in place holds the entity: events and game events are
     /// queued in it.
-    fn native_entity_here(&self, entity: EntityRef) -> bool {
+    pub(super) fn native_entity_here(&self, entity: EntityRef) -> bool {
         self.entity_level(entity)
             .is_some_and(|level| level.dimension() == self.native_level_key())
     }
@@ -100,48 +100,24 @@ impl Game<'_> {
     /// False for an event vanilla doesn't have, a dead guest and a guest while
     /// another one acts.
     pub(super) fn entity_game_event(&mut self, entity: EntityRef, event: &str) -> bool {
-        let Some(event) = horizon_client::sculk::intern(event) else {
-            return false;
-        };
         let Some(target) = self.native_entity_target(entity) else {
             return false;
         };
-        if !self.native_entity_here(entity) {
-            return false;
-        }
         let Some(at) = self.target_position(target) else {
             return false;
         };
-        match target {
-            Target::Player => {
-                let ctx = self.player_context(None);
-                self.post_game_event(event, at, ctx);
-                true
-            }
-            Target::Guest(conn) => {
-                let Some(uuid) = self.command_guest(conn).map(|g| g.uuid) else {
-                    return false;
-                };
-                self.native_as_player(uuid, |game| {
-                    let ctx = game.player_context(None);
-                    let at = game
-                        .player
-                        .as_ref()
-                        .map_or(at, |p| [p.position.x, p.position.y, p.position.z]);
-                    game.post_game_event(event, at, ctx);
-                })
-            }
-            Target::Mob(id) => {
-                let ctx = self.mob_context(id, None);
-                self.post_game_event(event, at, ctx);
-                true
-            }
-            _ => {
-                let ctx = self.entity_event_context(entity.id(), None);
-                self.post_game_event(event, at, ctx);
-                true
-            }
-        }
+        let Some(level) = self.level(self.dim.id()) else {
+            return false;
+        };
+        self.level_game_event(
+            level,
+            event,
+            at,
+            mod_api::GameEventContext {
+                source_entity: Some(entity),
+                affected_state: None,
+            },
+        )
     }
     /// `Level.broadcastEntityEvent(entity, id)`: sends entity event `id` (the
     /// byte `Entity.handleEntityEvent` reads: `2` is a hurt flash, `3` a
@@ -178,10 +154,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::dispense_fixture;
-    use super::super::lan::LanSettings;
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::command::args::GameMode;
-    use horizon_client::lan::{NetConfig, hub::HubConfig};
     use horizon_client::mobs::Mob;
     use horizon_client::motion::PlayerMotion;
     use horizon_core::geometry::Vec3;
@@ -196,8 +170,7 @@ mod tests {
 
     fn acting_player(game: &mut super::Game<'_>) {
         game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-        game.lan_acting_entity = Some(7);
-        game.lan_acting_uuid = Some(7);
+        crate::game::native_entity_refs::tests::bind_local_player(game, 7, 7);
     }
 
     #[test]
@@ -235,35 +208,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn play_sound_queues_at_the_entity_in_its_source() {
-        with_game(|game| {
-            // The seed comes from the hub's sound-seed generator, so only a
-            // hosting game queues sounds.
-            let config = HubConfig {
-                default_game_mode: 0,
-                guest_commands: false,
-                force_game_mode: false,
-                hardcore: false,
-                view_distance: 2,
-                simulation_distance: 2,
-                dimension: game.dim.id().to_owned(),
-                allow_flight: true,
-                seed: 0,
-                max_players: 3,
-                integrated: true,
-                levels: game.level_shapes,
-            };
-            let net = NetConfig {
-                listen: false,
-                announce: false,
-                lod_distance: 0,
-                ..NetConfig::lan(0, String::new(), 3)
-            };
-            let settings = LanSettings {
-                port: 0,
-                guest_commands: false,
-                force_game_mode: false,
-            };
-            game.lan_host(settings, net, config).unwrap();
+        super::super::native_guest_turn_tests::with_guests(|game| {
             let cow = spawn(game, 10, "minecraft:cow");
             assert!(game.entity_play_sound(cow, "minecraft:entity.cow.ambient", 0.5, 1.5));
             let sound = &game.creatures.lan_sounds[0];
@@ -278,13 +223,14 @@ mod tests {
             assert!(!game.entity_play_sound(cow, "minecraft:entity.cow.ambient", 1.0, f32::NAN));
             assert_eq!(game.creatures.lan_sounds.len(), 1);
             // A player doesn't hear their own sound, silent or not.
-            acting_player(game);
-            game.lan_acting = Some(3);
-            let player = game.entity(7).unwrap();
-            assert!(game.entity_play_sound(player, "minecraft:entity.player.burp", 1.0, 1.0));
-            let sound = &game.creatures.lan_sounds[1];
-            assert_eq!(sound.source as usize, SoundSource::Players.index());
-            assert_eq!(sound.except, Some(3));
+            game.as_guest(12, |game| {
+                let player = game.entity(12).unwrap();
+                assert!(game.entity_play_sound(player, "minecraft:entity.player.burp", 1.0, 1.0));
+                let sound = &game.creatures.lan_sounds[1];
+                assert_eq!(sound.source as usize, SoundSource::Players.index());
+                assert_eq!(sound.except, Some(12));
+            })
+            .expect("the sound's real guest turn runs");
             let stale = EntityRef::new(WorldEpoch::new(cow.epoch().get() + 1), 10);
             assert!(!game.entity_play_sound(stale, "minecraft:entity.cow.ambient", 1.0, 1.0));
             assert_eq!(game.creatures.lan_sounds.len(), 2);

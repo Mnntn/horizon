@@ -4,11 +4,10 @@
 //! mod point here is on the addon's target.
 use super::{internals::Catalog, Bundle};
 use crate::i18n::trf;
-use horizon_mod_package::manifest::inject::mod_points::{
-    self, Catalog as Points, Library, Refusal, Routed,
-};
+use horizon_mod_package::manifest::inject::mod_points::{self, Library, Refusal, Routed};
 use horizon_mod_package::manifest::inject::{Access, Inject};
 use horizon_mod_package::Manifest;
+use horizon_platform::mod_build::point_shape::catalog::Catalog as Points;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -106,7 +105,6 @@ pub(super) fn emitted(catalog: &Catalog, mods: &[&Manifest]) -> Vec<horizon_mod_
                 .map(move |point| horizon_mod_point_emit::Point {
                     name: point.name.clone(),
                     target: point.target.clone(),
-                    private: false,
                     at_return: point.at_return,
                     api_refusal: point.api_refusal.clone(),
                     returns: point.returns.clone(),
@@ -161,6 +159,15 @@ pub(super) fn refusal(refusal: &Refusal) -> String {
             "E_INJECT_MISSING: {id}: {at} has no point (opted out with #[mod_api::no_point])",
             &[("id", id), ("at", at)],
         ),
+        Refusal::LibraryCrate { id, library, krate } => trf(
+            "{id}: mod point library {library}'s crate is {krate}; a mod point library's crate is named after its mod id: {expected}",
+            &[
+                ("id", id),
+                ("library", library),
+                ("krate", krate),
+                ("expected", &library.replace('-', "_")),
+            ],
+        ),
         Refusal::CrossTargetInternals { id, library } => trf(
             "{id}: internals access to {library} needs the same target: the same binary on native, the same dependency group on wasm",
             &[("id", id), ("library", library)],
@@ -179,7 +186,7 @@ pub(super) fn refusal(refusal: &Refusal) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_mod_package::manifest::inject::mod_points::Point;
+    use horizon_platform::mod_build::point_shape::catalog::Point;
 
     const MANIFEST: &str = "name = 'Mod'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '0000000000000000000000000000000000000000'\nmixins = '0000000000000000000000000000000000000000'\n";
 

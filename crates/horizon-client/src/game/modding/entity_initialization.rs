@@ -44,6 +44,19 @@ impl Game<'_> {
         let previous = self.entity_initialization.active.replace(holder);
         self.native_entity_constructing(holder, kind);
         self.entity_initialization.active = previous;
+        // Listener stores skip binding while their holder is being constructed.
+        // A resident part has no separate join callback, so finish its binding
+        // here even when construction was triggered by an inspection.
+        if self.native_authoritative()
+            && let Holder::Entity(id) = holder
+            && self
+                .entity_attachments
+                .get(&id)
+                .is_some_and(|map| map.has_index_entries())
+            && let Err(error) = self.bind_resident_entity_attachments(id)
+        {
+            log::warn!("constructor attachment binding failed for entity {id}: {error:?}");
+        }
     }
 
     /// `initialize_entity` for a holder whose attachments are about to be read, its type
@@ -66,6 +79,9 @@ impl Game<'_> {
     }
 
     pub(super) fn forget_entity_initialization(&mut self, holder: Holder) {
+        if let Holder::Entity(id) = holder {
+            self.combat.death_weapons.remove(&id);
+        }
         self.entity_initialization.initialized.remove(&holder);
     }
 

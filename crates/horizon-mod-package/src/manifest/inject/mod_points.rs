@@ -5,59 +5,13 @@
 //! against another signature. The native launcher and the wasm loader route through this one
 //! function, and an edge across targets is refused by [`cross_target`] where it names a reason more
 //! precise than the mixed-target refusal.
-use super::{Entry, Inject, InjectError, NoSlotReason, Place, Route, SlotKind, Target};
-use serde::{Deserialize, Serialize};
+use super::{Entry, Inject, InjectError, NoSlotReason, Place, SlotKind, Target};
+use point_shape::catalog::{Catalog, Point};
 use std::{fmt, io::Read};
 
 /// The file a mod's build writes its points to, at the package root.
 pub const FILE: &str = "mod-points.json";
 const MAX_BYTES: u64 = 8 << 20;
-
-/// A mod crate's points, as its build lists them.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct Catalog {
-    /// The crate's library name: an injection's `at` starts with it.
-    #[serde(rename = "crate")]
-    pub krate: String,
-    /// The slot table module at the crate's root.
-    pub table: String,
-    /// The functions `#[mod_api::no_point]` opted out, by path.
-    #[serde(default)]
-    pub opted_out: Vec<String>,
-    pub points: Vec<Point>,
-}
-
-/// One mod point.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct Point {
-    /// Its place's name in the table: the head; the return adds `_return`.
-    pub name: String,
-    /// The function's path, as an injection's `at` names it.
-    pub target: String,
-    /// What an addon's declaration pins.
-    pub hash: String,
-    /// The signature the hash covers.
-    pub signature: String,
-    /// Whether it has an internals form.
-    pub raw: bool,
-    /// Whether its API listeners have a return place.
-    pub at_return: bool,
-    /// Why its API listeners are refused, naming the parameter and type.
-    #[serde(default)]
-    pub api_refusal: Option<String>,
-    /// What its listeners may do with the return: `cancel`, `result` or `none`.
-    pub returns: String,
-    /// Its API listeners' host: `none` for every mod point.
-    pub host: String,
-    /// The function's return type as written.
-    pub return_ty: String,
-    /// Its internals head and return listener types, by path from the crate root.
-    #[serde(default)]
-    pub listener: Option<String>,
-    #[serde(default)]
-    pub return_listener: Option<String>,
-}
 
 /// An installed library, built for the addon's target, whose points the addon may target.
 pub struct Library<'a> {
@@ -100,18 +54,6 @@ pub fn bound(bytes: Option<&[u8]>, pinned: Option<&str>) -> Result<Option<Catalo
     }
 }
 
-impl Catalog {
-    /// Parses a package's `mod-points.json`, strictly.
-    pub fn read(bytes: &[u8]) -> Result<Self, String> {
-        serde_json::from_slice(bytes).map_err(|e| format!("{FILE}: {e}"))
-    }
-
-    /// Whether `at` names a function of this crate.
-    pub fn owns(&self, at: &str) -> bool {
-        at.split("::").next() == Some(self.krate.as_str())
-    }
-}
-
 /// Where an injection listens in its library's table.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Routed<'a> {
@@ -130,6 +72,12 @@ pub enum Refusal {
     Changed(Box<Changed>),
     /// The function exists but its author opted it out with `#[mod_api::no_point]`.
     OptedOut { id: String, at: String },
+    /// The library's crate isn't named after its mod id, so no manifest can name its points.
+    LibraryCrate {
+        id: String,
+        library: String,
+        krate: String,
+    },
     /// `internals` reaches the library's own types, so it needs the library's target.
     CrossTargetInternals { id: String, library: String },
     /// An `api` record crosses targets only with a `Wire` form for every parameter.
@@ -177,6 +125,12 @@ impl fmt::Display for Refusal {
                 f,
                 "E_INJECT_MISSING: {id}: {at} has no point (opted out with #[mod_api::no_point])"
             ),
+            Self::LibraryCrate { id, library, krate } => write!(
+                f,
+                "{id}: mod point library {library}'s crate is {krate}; a mod point library's crate \
+                 is named after its mod id: {}",
+                library.replace('-', "_")
+            ),
             Self::CrossTargetInternals { id, library } => write!(
                 f,
                 "{id}: internals access to {library} needs the same target: the same binary on \
@@ -207,6 +161,15 @@ pub fn route<'a>(
     let id = format!("{mod_id}:{}", inject.id);
     let plain = |path: &str| path.replace(' ', "");
     let catalog = library.catalog;
+    // An addon's manifest names a library by mod id, and an `at` by crate, so both targets reach
+    // a library's points through the one rule `Manifest::mod_point_dependency` applies.
+    if catalog.krate != library.id.replace('-', "_") {
+        return Err(Refusal::LibraryCrate {
+            id,
+            library: library.id.to_owned(),
+            krate: catalog.krate.clone(),
+        });
+    }
     let Some(point) = catalog
         .points
         .iter()
@@ -304,21 +267,16 @@ pub fn route<'a>(
     )
     .map_err(Refusal::Inject)?
     {
-        Route::Slot(SlotKind::Head) => Ok(Routed {
+        SlotKind::Head => Ok(Routed {
             point,
             place: point.name.clone(),
             access: inject.access,
         }),
-        Route::Slot(_) => Ok(Routed {
+        _ => Ok(Routed {
             point,
             place: format!("{}_return", point.name),
             access: inject.access,
         }),
-        Route::Source(reason) => Err(Refusal::Inject(InjectError::NoSlot {
-            id,
-            reason,
-            declaration: inject.at.clone(),
-        })),
     }
 }
 

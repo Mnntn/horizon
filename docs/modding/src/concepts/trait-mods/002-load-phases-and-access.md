@@ -19,6 +19,14 @@ Each owning thread progresses through `Packages → Registration → Setup → C
 | Reloading | Published asset/data queries, registry facts, settings and mod-list reads, listener registration, and existing `DataLoadContext` callbacks; no world handles or transactions. |
 | World | The owning game's side-typed `ServerHost` or `ClientHost`. |
 
+`RegistrationContext::instance_dir()` reads the instance directory captured before
+registration begins, as an `InstanceDirectory`: `Unix(Vec<u8>)` preserves raw Unix
+path bytes, and `Windows(Vec<u16>)` preserves Windows UTF-16 code units, including
+unpaired surrogates. Never convert Unix bytes with a lossy UTF-8 conversion when
+constructing a native filesystem path. Wasm receives the identical host-encoded
+value through Wire as data only; this does not grant filesystem access. A context
+with no engine snapshot returns `RegistrationReadError::Unavailable`.
+
 Registration runs once: `register`, `component_types`, `blocks`, `items` and `standalone_models`
 receive only `RegistrationContext`. Its `mods()`, `registry(name)` and `setting(mod_id, key)` read
 one view captured before the first of them runs, so every registration step sees the same values

@@ -261,6 +261,6 @@ mod entry_tests;
 mod record;
 pub use controller::{Prepared, Started, capable, launch};
 mod game_entry;
-pub use game_entry::{acquire, acquire_entry, lease_paths};
+pub use game_entry::{acquire, acquire_entry, lease_paths, managed_lease_paths};
 #[cfg(test)]
 mod tests;

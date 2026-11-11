@@ -7,8 +7,9 @@ pub trait Hooks {
     /// click): where `ServerPlayerGameMode.destroyBlock` starts. Set
     /// `canceled` to keep the block: nothing is destroyed or dropped, and a
     /// guest sees it back. Set `exp_to_drop` to `Some(amount)` to replace
-    /// the vanilla experience sample later, after item drops are prepared;
-    /// `None` keeps vanilla sampling. `block_drops` sees and may change that
+    /// the experience sample later, after item drops are prepared;
+    /// `None` keeps sampling. A subscribed block part's `exp_drop` answer is
+    /// supplied as this event's initial amount. `block_drops` sees and may change that
     /// amount afterwards; cancellation or disabled block drops suppresses it.
     /// Server-side, for every player of the world (the
     /// helpers read the acting one). Diverges from upstream: renamed from

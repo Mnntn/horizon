@@ -580,16 +580,34 @@ pub trait FluidsRegistrar {
     /// Request a fluid by canonical registry id, checked when the registry loads.
     fn fluid_key(&mut self, id: &str) -> crate::FluidKey;
 
-    /// Declare a tank-only fluid in this mod's namespace and return its key.
+    /// Declare a tank-only fluid in a namespace owned by this mod's manifest and return its key.
     fn declare_fluid(&mut self, path: &str) -> crate::FluidKey;
 
-    /// Declare a fluid in this mod's namespace that exists in the world (NeoForge's
+    /// Declare a fluid in a namespace owned by this mod's manifest that exists in the world (NeoForge's
     /// `RegisterEvent` for a `FluidType`), with its block and, as `fluid` says, its bucket. Its
     /// `data/<mod id>/horizon/fluid/<path>.json`, if any, says how it looks.
     fn declare_world_fluid(&mut self, path: &str, fluid: crate::WorldFluid) -> crate::FluidKey;
 
     /// Attach `part`, of kind `kind`, to the world fluid `fluid`.
     fn attach_fluid_part(&mut self, fluid: &str, kind: &'static str, part: Arc<dyn FluidPart>);
+}
+
+impl PartRegistrar {
+    // Only callers that have resolved ownership may insert a declaration.
+    fn insert_declared_fluid(&mut self, id: String) -> crate::FluidKey {
+        let previous = self
+            .registry_keys
+            .borrow_mut()
+            .declared_fluids
+            .insert(id.clone(), self.mod_id);
+        if let Some(other) = previous {
+            self.refused.push(format!(
+                "fluid {id} declared by both {other} and {}",
+                self.mod_id
+            ));
+        }
+        self.fluid_key(&id)
+    }
 }
 
 impl FluidsRegistrar for PartRegistrar {
@@ -609,31 +627,26 @@ impl FluidsRegistrar for PartRegistrar {
     }
 
     fn declare_fluid(&mut self, path: &str) -> crate::FluidKey {
-        let id = format!("{}:{path}", self.mod_id);
-        if path.contains(':') || crate::Identifier::parse_namespaced(&id).is_none() {
-            self.refused.push(format!(
-                "mod {}: invalid fluid declaration {id:?}",
-                self.mod_id
-            ));
-            return crate::FluidKey(u32::MAX);
-        }
-        let previous = self
-            .registry_keys
-            .borrow_mut()
-            .declared_fluids
-            .insert(id.clone(), self.mod_id);
-        if let Some(other) = previous {
-            self.refused.push(format!(
-                "fluid {id} declared by both {other} and {}",
-                self.mod_id
-            ));
-        }
-        self.fluid_key(&id)
+        let id = match self.owned_declaration_id(path) {
+            Ok(id) => id,
+            Err(reason) => {
+                self.refused.push(reason);
+                return crate::FluidKey(u32::MAX);
+            }
+        };
+        self.insert_declared_fluid(id)
     }
 
     fn declare_world_fluid(&mut self, path: &str, fluid: crate::WorldFluid) -> crate::FluidKey {
-        let id = format!("{}:{path}", self.mod_id);
-        let flowing = format!("{}:flowing_{path}", self.mod_id);
+        let id = match self.owned_declaration_id(path) {
+            Ok(id) => id,
+            Err(reason) => {
+                self.refused.push(reason);
+                return crate::FluidKey(u32::MAX);
+            }
+        };
+        let (namespace, path) = id.split_once(':').expect("validated declaration id");
+        let flowing = format!("{namespace}:flowing_{path}");
         if [id.as_str(), flowing.as_str()].iter().any(|id| {
             self.registry_keys
                 .borrow()
@@ -651,7 +664,7 @@ impl FluidsRegistrar for PartRegistrar {
             ));
             return crate::FluidKey(u32::MAX);
         }
-        let key = self.declare_fluid(path);
+        let key = self.insert_declared_fluid(id.clone());
         if key != crate::FluidKey(u32::MAX) {
             self.registry_keys
                 .borrow_mut()

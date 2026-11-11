@@ -23,6 +23,7 @@ struct World {
     random: LegacyRandom,
     time: i64,
 }
+impl horizon_world::level::BlockEntityNeighbors for World {}
 impl LevelAccess for World {
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
         self.blocks.get(&pos).copied().unwrap_or(self.air)

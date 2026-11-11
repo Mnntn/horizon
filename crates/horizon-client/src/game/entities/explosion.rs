@@ -245,11 +245,10 @@ fn hurt_mob(
     m: &mut horizon_client::mobs::Mob,
     hurtable: bool,
     cause: Option<horizon_client::mobs::Species>,
-    (amount, source): (f32, horizon_client::mobs::Damage),
+    (amount, mut source): (f32, horizon_client::mobs::Damage),
 ) {
-    let shielded =
-        cause.is_some_and(|c| horizon_client::mobs::wither::shielded_from(m.species(), c));
-    if hurtable && !shielded {
+    source.attacker_species = cause;
+    if hurtable {
         m.damage(level, amount, source);
     }
 }
@@ -514,7 +513,7 @@ impl Game<'_> {
             + (feet[2] - center[2]).powi(2))
         .sqrt()
             / diameter;
-        if dist > 1.0 || p.health.dead_or_dying() {
+        if dist > 1.0 {
             return None;
         }
         // ServerPlayer.onExplosionHit: the blast that hit the player is theirs.
@@ -560,9 +559,8 @@ impl Game<'_> {
         if let Some(p) = self.player.as_mut()
             && let Some(id) = self.health_resources.damage.id(damage_type)
         {
-            // Creative players are invulnerable to explosions.
-            if !creative
-                && !spectator
+            // Creative damage is attempted and refused by Player.hurtServer, not here.
+            if !spectator
                 && hurtable
                 && let Ok(o) = p.hurt_caused_by(
                     crate::game::entity::damage_level_of!(self, scoped),
@@ -697,7 +695,7 @@ impl Game<'_> {
                 .hub
                 .guests
                 .iter()
-                .filter(|g| host.hub.here(g) && g.loaded && !g.dead)
+                .filter(|g| host.hub.here(g))
                 .map(|g| g.conn)
                 .collect();
             for conn in guests {
@@ -1145,24 +1143,22 @@ impl Game<'_> {
         resists: Option<([i32; 3], f32)>,
         source: ExplosionSource,
     ) -> Result<()> {
+        let start = ExplosionStart::from(mod_api::__private::built::ExplosionStart {
+            dimension: self.dim.id(),
+            center,
+            radius,
+            fire,
+            interaction: match interaction {
+                BlockInteraction::Keep => mod_api::BlockInteraction::Keep,
+                BlockInteraction::Destroy => mod_api::BlockInteraction::Destroy,
+                BlockInteraction::DestroyWithDecay => mod_api::BlockInteraction::DestroyWithDecay,
+            },
+            damage_type,
+            source: self.combat.explosion_source,
+            // `getIndirectSourceEntity`, as the blast's attacker is.
+            owner: self.blast_attacker().map(|(id, _)| id),
+        });
         if self.serving.is_some() || self.options.dedicated.is_some() {
-            let start = ExplosionStart::from(mod_api::__private::built::ExplosionStart {
-                dimension: self.dim.id(),
-                center,
-                radius,
-                fire,
-                interaction: match interaction {
-                    BlockInteraction::Keep => mod_api::BlockInteraction::Keep,
-                    BlockInteraction::Destroy => mod_api::BlockInteraction::Destroy,
-                    BlockInteraction::DestroyWithDecay => {
-                        mod_api::BlockInteraction::DestroyWithDecay
-                    }
-                },
-                damage_type,
-                source: self.combat.explosion_source,
-                // `getIndirectSourceEntity`, as the blast's attacker is.
-                owner: self.blast_attacker().map(|(id, _)| id),
-            });
             if self.explosion_start_cancelled(&start) {
                 return Ok(());
             }
@@ -1196,7 +1192,7 @@ impl Game<'_> {
             }
             let mut drops = ExplosionDrops::default();
             for &pos in &targets {
-                self.explosion_hit_block(pos, radius, interaction, &mut drops)?;
+                self.explosion_hit_block(pos, radius, interaction, &start, &mut drops)?;
             }
             self.spawn_explosion_drops(drops);
         }
@@ -1270,6 +1266,7 @@ impl Game<'_> {
         pos: [i32; 3],
         radius: f32,
         interaction: BlockInteraction,
+        explosion: &ExplosionStart<'_>,
         dropped: &mut ExplosionDrops,
     ) -> Result<()> {
         let state = self.world.block(pos[0], pos[1], pos[2]);
@@ -1368,6 +1365,7 @@ impl Game<'_> {
             }
         }
         self.pending.clear(pos);
+        self.notify_block_exploded(pos, state, explosion);
         self.level_set(pos, self.world.air)?;
         // BeehiveBlock.onExplosionHit: the bees about turn on the player.
         if is_hive {
@@ -1709,8 +1707,23 @@ mod tests {
                 let mut drops = ExplosionDrops::default();
                 for pos in [[1, 64, 1], [2, 64, 1]] {
                     game.world.set(pos[0], pos[1], pos[2], dirt).unwrap();
-                    game.explosion_hit_block(pos, 4.0, BlockInteraction::Destroy, &mut drops)
-                        .unwrap();
+                    game.explosion_hit_block(
+                        pos,
+                        4.0,
+                        BlockInteraction::Destroy,
+                        &ExplosionStart::from(mod_api::__private::built::ExplosionStart {
+                            dimension: "minecraft:overworld",
+                            center: [0.0; 3],
+                            radius: 4.0,
+                            fire: false,
+                            interaction: mod_api::BlockInteraction::Destroy,
+                            damage_type: "minecraft:explosion",
+                            source: None,
+                            owner: None,
+                        }),
+                        &mut drops,
+                    )
+                    .unwrap();
                 }
                 game.spawn_explosion_drops(drops);
                 game.world.random.next_int()
@@ -2016,7 +2029,7 @@ mod tests {
             brain: Brain::Passive,
             anim: Anim::Humanoid { zombie_arms: true },
             sounds: ["", "", ""],
-            step_sound: None,
+            sound_overrides: Default::default(),
             food: Default::default(),
             tempt: Default::default(),
             passenger_attachments: Vec::new(),
@@ -2281,3 +2294,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "explosion/explosion_part_tests.rs"]
+mod explosion_part_tests;

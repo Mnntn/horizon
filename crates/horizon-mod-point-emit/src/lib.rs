@@ -11,9 +11,6 @@ pub struct Point {
     pub name: String,
     /// The function's logical path.
     pub target: String,
-    /// A private staged source target has no public API constructor.
-    #[serde(default)]
-    pub private: bool,
     /// Whether an API return place exists (not a borrowed return).
     pub at_return: bool,
     /// Why its API listeners are refused: the first parameter with no API type, named.
@@ -196,7 +193,7 @@ fn resolve<'a, 'p>(
                     entry.id, entry.at
                 ));
             }
-            if point.private || entry.kind == Kind::Return && !point.at_return {
+            if entry.kind == Kind::Return && !point.at_return {
                 return Err(format!("{}: no public API place at {}", entry.id, entry.at));
             }
             if entry.kind == Kind::Replace {
@@ -284,7 +281,6 @@ hash = "pin"
         let points = [Point {
             name: "tick".into(),
             target: "horizon_client::game::Game < '_ > :: tick".into(),
-            private: false,
             at_return: true,
             api_refusal: None,
             returns: "cancel".into(),
@@ -411,7 +407,6 @@ hash = "pin"
             name: "tick".into(),
             table: None,
             target: "horizon_client::game::Game<'_>::tick".into(),
-            private: false,
             at_return: true,
             api_refusal: None,
             returns: "none".into(),

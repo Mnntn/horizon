@@ -113,6 +113,9 @@ impl Game<'_> {
         let index = &world_stations!(self).recipe_index;
         let removed = self.level.recipe_book.remove_recipes(index, recipes);
         let count = removed.len() as i32;
+        if count != 0 {
+            self.invalidate_mod_book_placement_knowledge();
+        }
         // A network player's client drops them from its book.
         if self.lan_acting.is_some() && !removed.is_empty() {
             self.guest_packets.push(C::RecipeBookRemove(
@@ -286,9 +289,6 @@ impl Game<'_> {
                 let attack = self.current_attack();
                 self.for_player(target, |g| {
                     g.with_attack(attack, |g| {
-                        if g.spectator() {
-                            return false;
-                        }
                         if let Some(name) = named {
                             g.note_direct_entity(ty, name);
                         }
@@ -615,11 +615,12 @@ impl Game<'_> {
         let Some(pos) = self.target_position(t) else {
             return Ok(0);
         };
-        let current = self.target_rotation(t);
         let mut look_at_target = None;
         let rot = if let Some(Arg::Coords(c)) = ctx.get("rotation") {
-            // Relative parts are offsets from the entity's own rotation.
-            c.rotation(current)
+            // RotateCommand.rotate: relative parts are offsets from the command
+            // source's rotation (WorldCoordinates.getRotation); the entity's own
+            // rotation cancels out in Entity.forceSetRotation.
+            c.rotation(self.source_rotation())
         } else {
             let mut faced_entity = None;
             let to = if ctx.has("entity") {
@@ -1814,7 +1815,7 @@ impl Game<'_> {
     /// (Entity.removePassenger), then to where the vehicle lets it out
     /// (LivingEntity.dismountVehicle).
     pub(in crate::game) fn dismount_mob(&mut self, rider: u32) {
-        self.dismount_mob_with_cart(rider, None);
+        self.dismount_mob_with_cart(rider, None, None, false);
     }
 
     pub(in crate::game) fn dismount_mob_from_cart(
@@ -1822,13 +1823,23 @@ impl Game<'_> {
         rider: u32,
         cart: &super::super::minecarts::Minecart,
     ) {
-        self.dismount_mob_with_cart(rider, Some(cart));
+        self.dismount_mob_with_cart(rider, Some(cart), None, false);
+    }
+
+    pub(in crate::game) fn dismount_mob_reentrant(&mut self, rider: u32) {
+        self.dismount_mob_with_cart(rider, None, None, true);
+    }
+
+    pub(in crate::game) fn dismount_mob_from_removed_vehicle(&mut self, rider: u32, y: f64) {
+        self.dismount_mob_with_cart(rider, None, Some(y), false);
     }
 
     fn dismount_mob_with_cart(
         &mut self,
         rider: u32,
         cart: Option<&super::super::minecarts::Minecart>,
+        removed_y: Option<f64>,
+        notified: bool,
     ) {
         let Some(v) = self
             .mob_object(rider)
@@ -1840,7 +1851,7 @@ impl Game<'_> {
         if cart.is_some_and(|cart| cart.id != v) {
             return;
         }
-        if !self.native_mob_may_ride(rider, v, false) {
+        if !notified && !self.native_mob_may_ride(rider, v, false) {
             return;
         }
         // A callback can remove or remount the rider. Do not overwrite its decision.
@@ -1861,11 +1872,22 @@ impl Game<'_> {
         if let Some(vehicle) = self.mob_object_mut(v) {
             vehicle.extra.rider = remaining;
         }
-        let at = match cart.filter(|cart| cart.id == v) {
-            Some(cart) => self
-                .mob_object(rider)
-                .and_then(|rider| self.cart_dismount_point_from(cart, rider)),
-            None => self.mob_dismount_point(v, rider),
+        let at = if let Some(y) = removed_y {
+            self.mob_object(rider).map(|mob| {
+                self.removed_vehicle_dismount_point(
+                    mob.position,
+                    f64::from(mob.width()),
+                    f64::from(mob.height()),
+                    y,
+                )
+            })
+        } else {
+            match cart.filter(|cart| cart.id == v) {
+                Some(cart) => self
+                    .mob_object(rider)
+                    .and_then(|rider| self.cart_dismount_point_from(cart, rider)),
+                None => self.mob_dismount_point(v, rider),
+            }
         };
         let Some(m) = self.mob_object_mut(rider) else {
             return;
@@ -1876,6 +1898,7 @@ impl Game<'_> {
         m.position = at;
         m.previous = at;
         self.snap_mob_passengers(rider);
+        self.release_removed_vehicle(v);
     }
     /// Where `dismount_mob` sets object `rider` down off the vehicle `v`: None when
     /// `v` is no boat, cart or mob.
@@ -1893,8 +1916,36 @@ impl Game<'_> {
                 vehicle.position.y,
             ));
         }
+        let removed_y = self
+            .persist
+            .removed_vehicles
+            .get(&v)
+            .map(|vehicle| vehicle.position().y)
+            .or_else(|| {
+                self.persist
+                    .removals
+                    .iter()
+                    .chain(self.persist.destroying_vehicles.iter())
+                    .find_map(|target| match *target {
+                        Target::Boat(id) if id == v => {
+                            self.boats.iter().find(|b| b.id == v).map(|b| b.position.y)
+                        }
+                        Target::Cart(id) if id == v => {
+                            self.carts.iter().find(|c| c.id == v).map(|c| c.position.y)
+                        }
+                        _ => None,
+                    })
+            });
+        if let Some(y) = removed_y {
+            return Some(self.removed_vehicle_dismount_point(
+                mob.position,
+                f64::from(mob.width()),
+                f64::from(mob.height()),
+                y,
+            ));
+        }
         let (width, yaw) = (f64::from(mob.width()), mob.yaw);
-        if let Some(b) = self.boats.iter().position(|b| b.id == v) {
+        if let Some(b) = self.boat_object(v) {
             return Some(self.boat_dismount_target(b, width, yaw));
         }
         self.horse_dismount_point(v, rider)
@@ -2836,11 +2887,9 @@ mod vehicle_damage_command_tests {
 
 impl Game<'_> {
     /// `PoiTypes`: the point of interest type of a block state.
-    pub(super) fn poi_type(
-        &self,
-        state: horizon_world::registry::BlockStateId,
-    ) -> Option<&'static str> {
-        let s = self.pack.assets.registry.state(state)?;
-        horizon_world::poi::poi_type(s).map(|(kind, _)| kind)
+    pub(super) fn poi_type(&self, state: horizon_world::registry::BlockStateId) -> Option<&str> {
+        let table = &self.stations().professions;
+        let state = self.pack.assets.registry.state(state)?;
+        table.pois.name(table.pois.classify(state)?)
     }
 }

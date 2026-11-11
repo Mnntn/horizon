@@ -1,6 +1,7 @@
 """Execute release shell steps with optional archives present and absent."""
 
 import hashlib
+from itertools import product
 import os
 from pathlib import Path
 import re
@@ -35,12 +36,14 @@ def run_step(containing):
                      "release shell checks require a bash that is not WSL's, OpenSSL and sha256sum")
 class OptionalReleaseAssetsTests(unittest.TestCase):
     def test_sign_and_publish_with_each_optional_archive_combination(self):
-        for mask in range(4):
-            with self.subTest(mask=mask), tempfile.TemporaryDirectory() as folder:
+        for repository, mask in product(("arismoko/horizon", "horizon-rust/horizon"), range(4)):
+            with self.subTest(repository=repository, mask=mask), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
                 dist = root / "dist"
                 dist.mkdir()
                 present = REQUIRED | {name for i, name in enumerate(OPTIONAL) if mask & (1 << i)}
+                if repository == "arismoko/horizon":
+                    present |= {"mod-catalog.json"}
                 for name in present:
                     (dist / name).write_text(name)
                 script_dir = root / "tools/ci"
@@ -48,7 +51,7 @@ class OptionalReleaseAssetsTests(unittest.TestCase):
                 shutil.copy(ROOT / "tools/ci/sign_release.sh", script_dir)
                 # The steps' own env from nightly-build.yml: SHORT is the commit the title and
                 # SHA256SUMS.v2.sig name (ALSO_FOR, nightly-<date>-<short>).
-                env = dict(os.environ, EPHEMERAL="yes", SHA="0123456789abcdef", SHORT="0123456", DATE="2026-11-04",
+                env = dict(os.environ, GITHUB_REPOSITORY=repository, EPHEMERAL="yes", SHA="0123456789abcdef", SHORT="0123456", DATE="2026-11-04",
                            ALSO_FOR="nightly-2026-11-04-0123456", SOURCE_TAG="nightly-test",
                            RELEASE_SIGNING_KEY="", RELEASE_SIGNING_KEY_NEXT="")
                 signed = subprocess.run([BASH, "-e", "-c", run_step("sign_release.sh nightly")],

@@ -150,17 +150,7 @@ impl CustomBooks {
 /// Whether `id` is a namespaced resource id a book can have: `namespace:path`, both nonempty,
 /// the namespace of `[a-z0-9_.-]` and the path of `[a-z0-9_.-/]`, at most [`MAX_ID_BYTES`] bytes.
 pub fn valid_book_id(id: &str) -> bool {
-    let Some((namespace, path)) = id.split_once(':') else {
-        return false;
-    };
-    let allowed = |b: u8, slash: bool| {
-        matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.' | b'-') || (slash && b == b'/')
-    };
-    id.len() <= MAX_ID_BYTES
-        && !namespace.is_empty()
-        && !path.is_empty()
-        && namespace.bytes().all(|b| allowed(b, false))
-        && path.bytes().all(|b| allowed(b, true))
+    id.len() <= MAX_ID_BYTES && super::resource_id::valid(id)
 }
 
 /// A book's saved flags: a compound whose `open` and `filtering` are each the byte 0 or 1.

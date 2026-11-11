@@ -429,8 +429,12 @@ impl Game<'_> {
                 )
                 .ok_or_else(stale)?;
                 horizon_client::mobs::armor::prepare(&new, &self.motion.attributes);
-                self.warn_missing_profession(&new);
-                let unresolved = new.extra.profession.index().is_none();
+                self.resolve_loaded_profession(&mut new);
+                let unresolved = self
+                    .stations()
+                    .professions
+                    .state_index(&new.extra.profession)
+                    .is_none();
                 if let Some(slot) = self.mobs.iter_mut().find(|m| m.id == id) {
                     // LivingEntity.readAdditionalSaveData only replaces a decoded
                     // Brain. Keep the Allay's modeled LIKED_PLAYER when the
@@ -455,6 +459,16 @@ impl Game<'_> {
                     slot.extra.boarding_cooldown = old.extra.boarding_cooldown;
                     slot.rider = old.rider;
                     // Runtime-only state (AI, animation) carries over.
+                    // Entity.load keeps the unsaved Allay.jukeboxPos and
+                    // DATA_DANCING of the entity it loads into.
+                    if slot.species() == horizon_client::mobs::Species::Allay {
+                        slot.extra.flag = old.extra.flag;
+                        if let (Some(st), Some(was)) =
+                            (slot.extra.allay.as_mut(), old.extra.allay.as_ref())
+                        {
+                            st.jukebox = was.jukebox;
+                        }
+                    }
                     if keep_liked_player {
                         slot.extra.tame = old.extra.tame;
                         slot.extra.owner = old.extra.owner;

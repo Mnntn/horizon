@@ -1,5 +1,6 @@
 import datetime as dt
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from tools.ci import nightly
@@ -62,7 +63,27 @@ class NightlyTests(unittest.TestCase):
 
     def test_notes_open_with_the_way_to_the_launcher(self):
         # A raw HTML line that launchers skip, as on a game release.
-        self.assertTrue(notes().startswith(nightly.train.PLAYERS + "\n\nNightly 2026-10-28 · bbbbbbb: "))
+        with mock.patch.object(nightly.train, "REPO", "horizon-rust/horizon"):
+            self.assertTrue(notes().startswith(nightly.train.PLAYERS + "\n\nNightly 2026-10-28 · bbbbbbb: "))
+            self.assertIn(nightly.PLAYERS, notes())
+
+    def test_fork_notes_use_loaded_intro_and_keep_build_details(self):
+        with mock.patch.object(nightly.train, "REPO", "arismoko/horizon"):
+            # An older selected checkout may not contain the template. It must already be loaded.
+            with mock.patch.object(Path, "read_text", side_effect=AssertionError("late template read")):
+                text = notes(merged=[merged_pr(9, "Fix fork install", [])], issues=["- Known issue"])
+        self.assertTrue(text.startswith(nightly.FORK_PLAYERS + "\n\n"))
+        self.assertNotIn(nightly.PLAYERS, text)
+        self.assertIn("Nightly 2026-10-28 · bbbbbbb: main (mmmmmmm)", text)
+        self.assertIn("nightly-source/2026-10-28-bbbbbbb", text)
+        self.assertIn("### Fixed\n- Fix fork install (#9)", text)
+        self.assertIn("### Known issues\n- Known issue", text)
+        self.assertTrue(text.endswith(nightly.train.DISCLAIMER + "\n"))
+
+    def test_other_repositories_keep_the_upstream_intro(self):
+        with mock.patch.object(nightly.train, "REPO", "another/horizon"):
+            self.assertTrue(notes().startswith(nightly.train.PLAYERS + "\n\n"))
+            self.assertIn(nightly.PLAYERS, notes())
 
     def test_notes_name_the_commit_and_its_permanent_source_tag(self):
         sha = "0c0206714abc" + "0" * 28
@@ -114,6 +135,27 @@ if __name__ == "__main__":
 WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 
 
+class FirstNightlyTests(unittest.TestCase):
+    def test_fetch_succeeds_with_or_without_an_existing_nightly_tag(self):
+        class ReachedGreenBase(Exception):
+            pass
+
+        for existing in (False, True):
+            with self.subTest(existing=existing):
+                calls = []
+                def git(*args):
+                    calls.append(args)
+                    if args[0] == "ls-remote":
+                        return "abc\\trefs/tags/nightly" if existing else ""
+                    return ""
+                with mock.patch.object(nightly, "git", side_effect=git), mock.patch.object(nightly, "green_base", side_effect=ReachedGreenBase):
+                    with self.assertRaises(ReachedGreenBase):
+                        nightly.pick(False)
+                fetched = next(args for args in calls if args[0] == "fetch")
+                self.assertIn("+refs/heads/main:refs/remotes/origin/main", fetched)
+                self.assertEqual("+refs/tags/nightly:refs/tags/nightly" in fetched, existing)
+
+
 class UntrustedBuildTests(unittest.TestCase):
     """A nightly can hold pull requests nobody reviewed: nothing its build leaves may reach a release (game-build.yml)."""
 
@@ -136,12 +178,16 @@ class UntrustedBuildTests(unittest.TestCase):
         self.assertEqual(self.game.count("Swatinem/rust-cache"), 1)
 
     def test_an_untrusted_build_never_runs_on_the_release_runner(self):
-        runs_on = [line for line in self.game.splitlines() if "runs-on:" in line]
-        self.assertEqual(len(runs_on), 2)
+        runs_on = [line for line in self.game.splitlines() if "runs-on: ${{" in line]
+        self.assertEqual(len(runs_on), 3)
         # The nightly's own runner: never the release runner, and never behind pull requests' parity queue.
-        nightly_runner = "fromJSON('[\"self-hosted\", \"macOS\", \"horizon-nightly\"]')"
-        for line in runs_on:
-            self.assertIn(f"inputs.trusted && vars.MAC_RUNNER || {nightly_runner}", line)
+        nightly_default = "'[\"self-hosted\", \"macOS\", \"horizon-nightly\"]'"
+        for line, variable in zip(runs_on, ("NIGHTLY_EXPORTERS_RUNNER", "NIGHTLY_MAC_RUNNER")):
+            self.assertIn("inputs.trusted && toJSON(vars.MAC_RUNNER)", line)
+            self.assertIn(f"vars.DYNA_CI_SELF_HOSTED == 'true' && vars.{variable}", line)
+            self.assertIn(f"vars.SELF_HOSTED_CI != 'off' && {nightly_default}", line)
+        self.assertNotIn("NIGHTLY_LINUX_RUNNER", runs_on[1])
+        self.assertIn("vars.NIGHTLY_LINUX_RUNNER", runs_on[2])
 
     def test_a_trusted_build_never_reads_the_shared_sccache(self):
         calls = self.game.count("bash tools/ci/runner-env.sh")
@@ -195,3 +241,102 @@ class PruneBuildsTests(unittest.TestCase):
         self.assertIn("prune-builds --days 7", step)
         self.assertIn("GITHUB_STEP_SUMMARY", step)
 
+
+
+class SdkPairTests(unittest.TestCase):
+    def test_only_complete_published_exact_pair_is_eligible(self):
+        assets = [{"name": name} for name in (
+            "SHA256SUMS", "horizon-prebuilt-v4-x86_64-unknown-linux-gnu.tar.gz",
+            "horizon-prebuilt-v4-x86_64-unknown-linux-gnu-server.tar.gz",
+            "horizon-prebuilt-v4-x86_64-pc-windows-gnu.tar.gz",
+            "horizon-prebuilt-v4-aarch64-apple-darwin.tar.gz")]
+        release = {"draft": False, "tag_name": "prebuilt-" + "a" * 40, "assets": assets}
+        for changes, expected in [({}, True), ({"draft": True}, False),
+                                  ({"tag_name": "prebuilt-" + "b" * 40}, False)]:
+            with mock.patch.object(nightly.train, "gh_json", return_value=[[], [{**release, **changes}]]):
+                self.assertEqual(nightly.sdk_ready("a" * 40), expected)
+        for index in range(len(assets)):
+            with mock.patch.object(nightly.train, "gh_json", return_value=[[{
+                    **release, "assets": assets[:index] + assets[index + 1:]}]]):
+                self.assertFalse(nightly.sdk_ready("a" * 40))
+        with mock.patch.object(nightly.train, "gh_json", return_value=[[]]):
+            self.assertFalse(nightly.sdk_ready("a" * 40))
+        with mock.patch.object(nightly.train, "gh_json", side_effect=SystemExit("API failed")):
+            with self.assertRaises(SystemExit):
+                nightly.sdk_ready("a" * 40)
+
+    def test_explicit_missing_sdk_stops_without_selecting_another_base(self):
+        with mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": "a" * 40}), \
+                mock.patch.object(nightly, "is_ancestor", return_value=True), \
+                mock.patch.object(nightly, "git", return_value="a" * 40), \
+                mock.patch.object(nightly, "sdk_ready", return_value=False), \
+                mock.patch.object(nightly.train, "green_main_head") as automatic:
+            with self.assertRaises(SystemExit):
+                nightly.green_base("arismoko/horizon", "")
+            automatic.assert_not_called()
+
+    def test_final_sha_change_or_disappearing_sdk_stops_before_pushing(self):
+        for sha, sdk_ready in (("a" * 40, False), ("b" * 40, True)):
+            with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "arismoko/horizon"}), \
+                    mock.patch.object(nightly.ns, "fetch_heads", return_value=[]), \
+                    mock.patch.object(nightly.ns, "assemble", return_value=sha), \
+                    mock.patch.object(nightly, "sdk_ready", return_value=sdk_ready), \
+                    mock.patch.object(nightly.ns, "push") as push:
+                with self.assertRaises(SystemExit):
+                    nightly.build_set(nightly.Ref("main", "a" * 40, T), [], [], "2026-11-11", True, False)
+                push.assert_not_called()
+
+    def test_automatic_selection_reads_inventory_once_for_all_candidates(self):
+        def choose(*, parity, eligible):
+            self.assertTrue(parity)
+            self.assertFalse(eligible("b" * 40))
+            self.assertTrue(eligible("a" * 40))
+            return "a" * 40
+        with mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": ""}), \
+                mock.patch.object(nightly, "ready_sdk_shas", return_value={"a" * 40}) as inventory, \
+                mock.patch.object(nightly.train, "green_main_head", side_effect=choose), \
+                mock.patch.object(nightly, "is_ancestor", return_value=True), \
+                mock.patch.object(nightly, "git", side_effect=["a" * 40, NOW]):
+            self.assertEqual(nightly.green_base("arismoko/horizon", "").sha, "a" * 40)
+            inventory.assert_called_once_with()
+
+    def test_publication_checks_fresh_inventory_and_leaves_upstream_unchanged(self):
+        with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "arismoko/horizon"}), \
+                mock.patch.object(nightly, "ready_sdk_shas", side_effect=[{"a" * 40}, set()]) as inventory:
+            nightly.require_sdk("a" * 40)
+            with self.assertRaisesRegex(SystemExit, "publication refused"):
+                nightly.require_sdk("a" * 40)
+            self.assertEqual(inventory.call_count, 2)
+        with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "horizon-rust/horizon"}), \
+                mock.patch.object(nightly, "sdk_ready") as sdk:
+            nightly.require_sdk("a" * 40)
+            sdk.assert_not_called()
+
+    def test_fork_pick_refuses_explicit_prs_ignores_saved_prs_and_upstream_keeps_both(self):
+        main = nightly.Ref("main", "a" * 40, T)
+        saved = [{"number": 17, "head": "b" * 40}]
+        explicit = [{"number": 19, "head": "c" * 40}]
+        for repo in ("arismoko/horizon", "horizon-rust/horizon"):
+            for spec in ("", "19"):
+                with self.subTest(repo=repo, spec=spec), \
+                        mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": repo, "NIGHTLY_PRS": spec,
+                                                            "GITHUB_EVENT_NAME": "workflow_dispatch", "DRY_RUN": "true"}), \
+                        mock.patch.object(nightly, "git", return_value=""), \
+                        mock.patch.object(nightly, "green_base", return_value=main), \
+                        mock.patch.object(nightly.ns, "load_state", return_value=({"prs": saved}, "", "")) as state, \
+                        mock.patch.object(nightly.ns, "lookup"), \
+                        mock.patch.object(nightly, "requested", return_value=explicit) as requested, \
+                        mock.patch.object(nightly, "build_set") as build:
+                    if repo == "arismoko/horizon" and spec:
+                        with self.assertRaises(SystemExit):
+                            nightly.pick(False)
+                        build.assert_not_called()
+                        requested.assert_not_called()
+                        state.assert_not_called()
+                    else:
+                        nightly.pick(False)
+                        expected = [] if repo == "arismoko/horizon" else explicit if spec else saved
+                        self.assertEqual(build.call_args.args[:3], (main, expected, []))
+                        if repo == "arismoko/horizon":
+                            state.assert_not_called()
+                            requested.assert_not_called()

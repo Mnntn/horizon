@@ -1,26 +1,55 @@
 name: native dylib linkage probe
 
-# Probe only: no release, mod loader, or player data. Open the probe PR only
-# after the local gates pass; its ready head receives one cross-platform run.
+# Full SDK proof is main-only; cheap Python contract tests remain in verify.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
     paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'third_party/**'
+      - '.cargo/**'
+      - 'packaging/windows/exe.rs'
+      - 'packaging/executable_link.rs'
+      - 'rust-toolchain*'
+      - 'launcher/src/rust_toolchain.rs'
+      - 'tools/prebuilt_game.py'
       - 'tools/native_dylib_probe.py'
       - 'tools/native_dylib_probe/**'
-      - 'tools/prebuilt_game.py'
+      - 'tools/native_probe_ci.py'
       - '.github/workflows/native-dylib-probe.yml'
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
   group: native-dylib-probe-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      selected: ${{ steps.select.outputs.selected }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: select
+        env:
+          PROBE_SELECT: '1'
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/native_probe_ci.py
   linkage:
-    if: github.event.pull_request.draft == false
+    needs: select
+    if: needs.select.outputs.selected == 'true'
     name: linkage ${{ matrix.target }}
     strategy:
       fail-fast: false
@@ -42,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
       - name: Record exact head and select the launcher's pinned compiler
         id: rust
         run: |
@@ -72,3 +101,21 @@ jobs:
       - name: Probe command log
         if: failure()
         run: tail -n 120 target/native-dylib-probe/commands.log
+
+  main-break:
+    needs: [select, linkage]
+    if: always() && (needs.linkage.result == 'failure' || needs.select.result == 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Main break and last green range
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo '## MAIN BREAK: native dylib probe failed; fast-path fix required.' >> "$GITHUB_STEP_SUMMARY"
+          python tools/native_probe_ci.py

@@ -137,8 +137,9 @@ request doesn't wait for them.
 3. merges once `verify` and `parity` pass, nobody's change request is open, and every comment has been read (a
    "don't merge" from anyone holds it).
 
-Never merge your own pull request: another Team member reviews and merges it. Never force-push or rebase a
-contributor's branch; push a fixup commit, or merge main into it.
+Never merge your own pull request: another Team member reviews and merges it. Never push to, force-push or rebase a
+contributor's branch. On this fork small fixes go in our own commits on top of theirs in a rollup, their commits stay
+intact, and their pull request shows as merged.
 
 **A risky pull request gets the `needs-proof` label** and waits for an agent's local proof (both single-player
 paths, `lan_e2e`, a screenshot for anything visible) before it merges. Risky means any of:

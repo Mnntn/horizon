@@ -31,54 +31,6 @@ pub(super) struct Declared {
     pub explanation: String,
 }
 
-impl Declared {
-    pub(super) fn fields<'a>(
-        manifests: impl IntoIterator<Item = &'a horizon_mod_package::manifest::Manifest>,
-    ) -> Vec<Self> {
-        manifests.into_iter().flat_map(|manifest| {
-            manifest.inject.iter().filter(|inject| inject.kind == horizon_mod_package::manifest::inject::Kind::Field).map(|inject| {
-                let prefix = if manifest.id.starts_with(|c: char| c.is_ascii_digit()) { "_" } else { "" };
-                let injections = format!("{}:{}", manifest.id, inject.id);
-                let field = format!("{prefix}{}__{}", manifest.id, inject.with);
-                Self {
-                    binding: field.clone(),
-                    explanation: crate::i18n::trf(
-                        "E_INJECT_FIELD_TYPE: {injections}: the declared field type `{type}` for `{field}` in {target} failed to compile; use a visible type with the required Default and Clone bounds.",
-                        &[("injections", &injections), ("type", inject.local_type.as_deref().expect("validated field type")), ("field", &field), ("target", &inject.at)],
-                    ),
-                    injections,
-                }
-            })
-        }).collect()
-    }
-
-    /// Each staged `expression` site: an error inside its binding block means the declared
-    /// `type` doesn't match how the game uses the read.
-    pub(super) fn expressions(
-        sites: &[horizon_platform::mod_build::api_gen::sites::Site],
-    ) -> Vec<Self> {
-        sites
-            .iter()
-            .filter_map(|site| {
-                let expression = site.expression.as_ref()?;
-                Some(Self {
-                    binding: horizon_platform::mod_build::api_gen::sites::expression::marker(&site.name),
-                    injections: expression.origin.clone(),
-                    explanation: crate::i18n::trf(
-                        "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.",
-                        &[
-                            ("injections", &expression.origin),
-                            ("type", &expression.ty),
-                            ("expr", &site.call),
-                            ("target", &site.target),
-                        ],
-                    ),
-                })
-            })
-            .collect()
-    }
-}
-
 #[derive(Default)]
 pub(super) struct Output {
     errors: Vec<String>,
@@ -440,55 +392,6 @@ mod tests {
     }
 
     #[test]
-    fn a_wrong_expression_type_names_the_injection_not_just_rustc() {
-        let dir = super::super::tests::dir("expression-culprit");
-        fs::create_dir_all(dir.join("src")).unwrap();
-        fs::write(dir.join("Cargo.toml"), "[workspace]\n[package]\nname = 'expression-fixture'\nversion = '0.1.0'\nedition = '2021'\n").unwrap();
-        // The staged shape of an `expression` site: the read bound to the declared type first. The
-        // game uses it as an `f64`; the mod declared `f32`.
-        fs::write(
-            dir.join("src/main.rs"),
-            "fn reach() -> f64 { 3.0 }\nfn main() {\n    let far = reach() > { let __horizon_expression_Sreach: f32 = 4.5; __horizon_expression_Sreach };\n    let _ = far;\n}\n",
-        )
-        .unwrap();
-        let output = Command::new(env!("CARGO"))
-            .args(["check", "--offline", "--message-format=json"])
-            .arg("--manifest-path")
-            .arg(dir.join("Cargo.toml"))
-            .env("CARGO_TARGET_DIR", dir.join("target"))
-            .output()
-            .unwrap();
-        assert!(!output.status.success());
-        let stdout = String::from_utf8(output.stdout).unwrap();
-        let site: horizon_platform::mod_build::api_gen::sites::Site = serde_json::from_value(json!({
-            "expression": {"ty": "f32", "origin": "far_reach:reach, other:reach"},
-            "name": "Sreach", "target": "horizon_client::game::reach", "selector": "4.5",
-            "ordinal": 0, "hash": "h", "call": "4.5", "ctx": "c", "listener": "L", "record": "R",
-            "receiver": "()", "args": [], "output": "f32"
-        }))
-        .unwrap();
-        let mods = vec![("far_reach".to_owned(), "0.2.0".to_owned())];
-        let compiler = Compiler {
-            stage: &dir,
-            source: &dir,
-            mods: &mods,
-            declared: &Declared::expressions(std::slice::from_ref(&site)),
-        };
-        let error = capture(&compiler, Cursor::new(&stdout), Vec::new()).explain(String::new());
-        assert!(error.starts_with("far_reach 0.2.0:\nE_INJECT_EXPRESSION_TYPE: far_reach:reach, other:reach: the declared type `f32` doesn't match the expression `4.5` in horizon_client::game::reach; set `type` in its [[inject]] to the type the game uses there.\n"), "{error}");
-        // rustc's own words follow, for the details.
-        assert!(error.contains("E0308"), "{error}");
-        // The same error outside any expression site names no injection.
-        let unrelated = Compiler {
-            declared: &[],
-            ..compiler
-        };
-        let error = capture(&unrelated, Cursor::new(&stdout), Vec::new()).explain(String::new());
-        assert!(!error.contains("E_INJECT_EXPRESSION_TYPE"), "{error}");
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
     fn any_kind_declares_its_own_binding_and_explanation() {
         // A kind other than `expression` (such as an extension field) supplies only its binding
         // and words: the span lookup and the owner attribution are shared.
@@ -510,28 +413,11 @@ mod tests {
         assert!(!output.status.success());
         let stdout = String::from_utf8(output.stdout).unwrap();
         let mods = vec![("charged".to_owned(), "1.0.0".to_owned())];
-        let manifest = horizon_mod_package::manifest::Manifest::parse(
-            r#"
-id = "charged"
-name = "Charged"
-version = "1.0.0"
-api = "0.2"
-capabilities = ["registries"]
-[native]
-game = "26.3"
-horizon = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-mixins = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-[[inject]]
-id = "charge"
-at = "game::Game"
-kind = "field"
-access = "internals"
-with = "charge"
-type = "Charge"
-"#,
-        )
-        .unwrap();
-        let declared = Declared::fields([&manifest]);
+        let declared = vec![Declared {
+            binding: "charged__charge".into(),
+            injections: "charged:charge".into(),
+            explanation: "E_INJECT_FIELD_TYPE: charged:charge".into(),
+        }];
         let compiler = Compiler {
             stage: &dir,
             source: &dir,
@@ -540,7 +426,7 @@ type = "Charge"
         };
         let error = capture(&compiler, Cursor::new(&stdout), Vec::new()).explain(String::new());
         assert!(
-            error.contains("charged:charge: the declared field type `Charge` for `charged__charge` in game::Game"),
+            error.contains("E_INJECT_FIELD_TYPE: charged:charge"),
             "{error}"
         );
         assert!(error.contains("E0425"), "{error}");
@@ -599,6 +485,7 @@ type = "Charge"
                         mods: &mods,
                         declared: &[],
                     }),
+                    None,
                 )
                 .map_err(|ran| ran.error)
             })

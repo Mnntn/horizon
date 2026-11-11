@@ -62,6 +62,7 @@ struct Level {
     crop_asked: Vec<(BlockPos, bool)>,
     crop_grown: Vec<(BlockPos, BlockStateId)>,
 }
+impl crate::level::BlockEntityNeighbors for Level {}
 impl LevelAccess for Level {
     fn day_time(&self) -> i64 {
         self.day
@@ -343,6 +344,7 @@ fn bone_meal_answers_a_mod_blocks_three_questions() {
         /// How often `isValidBonemealTarget` was asked.
         asks: std::cell::Cell<u32>,
     }
+    impl crate::level::BlockEntityNeighbors for ModLevel<'_> {}
     impl LevelAccess for ModLevel<'_> {
         fn day_time(&self) -> i64 {
             self.inner.day_time()

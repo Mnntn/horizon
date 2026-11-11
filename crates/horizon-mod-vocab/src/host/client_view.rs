@@ -91,4 +91,16 @@ pub trait ClientViewClientHost {
     /// native_view_hit, this never traces distant terrain.
     #[access(ClientSetup)]
     fn crosshair_target(&self) -> Option<CrosshairTarget>;
+    /// Side: client.
+    /// Current targeting controls. Stale entity overrides are omitted. Reach comes from the
+    /// player's vanilla interaction-range attributes, including server and equipment modifiers.
+    #[access(WorldOnly)]
+    fn targeting(&self) -> ClientTargeting;
+    /// Side: client.
+    /// Set the window's targeting controls for subsequent picks. False, without changing any
+    /// control, outside a client world or for a stale/self entity. Entity range, item attack
+    /// range and (unless enabled here) occlusion are checked again when attacking. This does
+    /// not change server reach checks or attack cooldowns. None clears an entity override.
+    #[access(WorldOnly)]
+    fn set_targeting(&self, targeting: ClientTargeting) -> bool;
 }

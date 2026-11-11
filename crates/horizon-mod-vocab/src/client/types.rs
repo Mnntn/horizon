@@ -212,6 +212,9 @@ pub struct ClientGuiOptions {
     pub main_hand_left: bool,
     /// Whether the debug screen shows reduced information.
     pub reduced_debug_info: bool,
+    /// Current `advancedItemTooltips` preference, toggled with F3+H.
+    /// This is the user's preference, independent of a tooltip request's advanced flag.
+    pub advanced_item_tooltips: bool,
     /// Whether the high contrast resource pack is on.
     pub high_contrast: bool,
     /// Whether subtitles are shown.
@@ -633,12 +636,12 @@ pub enum SoundState {
 }
 
 // no wire: dispatch result retains a static owning-mod identity; not an owned transport record.
-/// A replace hook's answer with the mod that gave it: the dispatch fills in `mod_id` (the
-/// answering mod's `[mod] id`), so no mod can answer for another.
+/// A replace hook's answer, or a collect hook's entry, with the mod that gave it: the dispatch
+/// fills in `mod_id` (the answering mod's `[mod] id`), so no mod can answer for another.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Answered<T> {
-    /// The replace hook's answer.
+    /// The replace hook's answer, or the collect hook's entry.
     pub answer: T,
     /// The `[mod] id` of the mod that answered.
     pub mod_id: &'static str,
@@ -789,6 +792,15 @@ pub struct Screen {
     /// The mod draws its own background (`native_screen_draw`), so Horizon
     /// leaves out the plain panel and the slot frames.
     pub own_background: bool,
+    /// The registered recipe book hosted beside this menu. Its declarations must
+    /// target this menu; no panel is enabled until authoritative settings arrive.
+    /// Leaving this unset keeps the screen without a recipe book.
+    pub recipe_book: Option<crate::RecipeBookTypeKey>,
+    /// Optional 20 × 18 recipe-book toggle position relative to this menu.
+    /// The screen author reserves this area, as vanilla screen templates do.
+    /// Without an anchor the engine uses an external gutter; if none fits,
+    /// the book is refused with a diagnostic while the menu remains usable.
+    pub recipe_book_toggle: Option<[f32; 2]>,
 }
 
 /// An item the panel shows (`panel_items`): its id
@@ -1064,4 +1076,19 @@ pub struct MenuRef {
     pub(crate) player: PlayerRef,
     pub(crate) window: i32,
     pub(crate) generation: u64,
+}
+
+/// Per-window targeting controls. Defaults preserve vanilla picking. Reach remains backed
+/// by `minecraft:block_interaction_range` and `minecraft:entity_interaction_range`; a server
+/// mod changes those through the player's living attribute handle, not these client controls.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[non_exhaustive]
+pub struct ClientTargeting {
+    /// Include source and flowing fluid shapes in the ordinary outline pick.
+    pub pick_liquids: bool,
+    /// Let entity picks and mod-selected attacks pass block outlines on this client.
+    pub hit_through_walls: bool,
+    /// Prefer this client-level entity for the crosshair and attacks; None restores the ray.
+    /// Stale, self, unsupported, out-of-reach or occluded targets cannot be attacked.
+    pub entity: Option<EntityRef>,
 }

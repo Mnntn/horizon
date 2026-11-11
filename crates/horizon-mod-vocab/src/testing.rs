@@ -68,8 +68,9 @@ pub fn with_mods<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
             TEST_MODS.set(self.0);
         }
     }
-    let controllers: &'static [_] =
-        Box::leak(crate::parts::registered_controllers(&mods).into_boxed_slice());
+    let (controllers, poses) = crate::parts::registered_controllers(&mods);
+    let controllers: &'static [_] = Box::leak(controllers.into_boxed_slice());
+    let _poses = crate::client::arm_pose::test_table(poses);
     let installed = Box::leak(Box::new(Installed::new(mods)));
     let _restore = Restore(TEST_MODS.replace(Some(installed)));
     let _controllers = RestoreControllers(TEST_CONTROLLERS.replace(Some(controllers)));
@@ -361,6 +362,14 @@ impl crate::prelude::PlayersBackend for FakeHost {
     }
     fn player_name(&self, player: PlayerRef) -> Option<String> {
         Some(self.players.get(player.uuid())?.name.clone())
+    }
+    fn player_level(&self, player: PlayerRef) -> Option<LevelRef> {
+        (self.players.handle(player.uuid())? == player).then_some(())?;
+        Some(self.players.get(player.uuid())?.level)
+    }
+    fn player_dimension(&self, player: PlayerRef) -> Option<crate::Identifier> {
+        let level = self.player_level(player)?;
+        crate::Identifier::parse(level.dimension_id()).ok()
     }
 }
 crate::impl_backend_areas!(

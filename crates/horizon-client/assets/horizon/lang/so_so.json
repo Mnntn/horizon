@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s muddo %2$s, ilaa %3$s",
   "horizon.tempban.usage": "/tempban <ciyaartoy> <muddo> [sabab]",
   "horizon.title.not_affiliated": "Aan ku xidhnayn Mojang ama Microsoft",
-  "key.emote": "Wareegga Emote-yada"
+  "key.emote": "Wareegga Emote-yada",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

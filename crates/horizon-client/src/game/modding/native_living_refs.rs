@@ -1200,8 +1200,7 @@ mod tests {
         use mod_api::ServerHost;
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let living = game.living(game.entity(20).unwrap()).unwrap();
             let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
             stack.data_mut().enchantments = vec![("minecraft:unbreaking".into(), 3)];
@@ -1406,8 +1405,7 @@ mod tests {
         use mod_api::Host;
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let living = game.living(game.entity(20).unwrap()).unwrap();
             let attributes = &mut game.player.as_mut().unwrap().attributes;
             let key = attributes.key("minecraft:max_health").unwrap();
@@ -1555,8 +1553,7 @@ mod tests {
 
             // A player's own map answers the same read.
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let player = game.living(game.entity(20).unwrap()).unwrap();
             let health = "minecraft:max_health";
             assert_eq!(player.attribute_modifiers(game, health), Some(Vec::new()));
@@ -1597,18 +1594,18 @@ mod tests {
             game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
             game.armor_stands.push(ArmorStand::new(13, Vec3::ZERO, 0.0));
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
-            dragon.id = 14;
+            // The eight dragon parts must not overlap the player at ID 20.
+            dragon.id = 40;
             game.dragon.replace(dragon);
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             // The vanilla attribute defaults: a player and a zombie 20, an
             // armor stand the 20 the game seeds it with, the dragon its 200.
             for (id, health, max, alive) in [
                 (20u32, 20.0, 20.0, true),
                 (12, 20.0, 20.0, true),
                 (13, 20.0, 20.0, true),
-                (14, 200.0, 200.0, true),
+                (40, 200.0, 200.0, true),
             ] {
                 let living = game.living(game.entity(id).unwrap()).unwrap();
                 assert_eq!(living.health(game), Some(health), "health of {id}");
@@ -1616,7 +1613,7 @@ mod tests {
                 assert_eq!(living.alive(game), Some(alive), "alive of {id}");
             }
             // A dead dragon: isAlive is health above zero.
-            let dragon_handle = game.living(game.entity(14).unwrap()).unwrap();
+            let dragon_handle = game.living(game.entity(40).unwrap()).unwrap();
             game.dragon.as_mut().unwrap().health = 0.0;
             assert_eq!(dragon_handle.health(game), Some(0.0));
             assert_eq!(dragon_handle.alive(game), Some(false));
@@ -1627,7 +1624,7 @@ mod tests {
             game.mobs[0].removed = true;
             game.armor_stands.clear();
             game.dragon.discard();
-            for id in [20u32, 12, 13, 14] {
+            for id in [20u32, 12, 13, 40] {
                 let handle = game.entity(id).and_then(|er| game.living(er));
                 assert!(handle.is_none(), "handle of {id} after it is gone");
             }
@@ -1715,8 +1712,7 @@ mod tests {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.player.as_mut().unwrap().entity_id = 20;
             // The host's own turn: the uuid is acting, no guest connection.
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let pig_living = game.living(game.entity(12).unwrap()).unwrap();
             // A mob's hit names the mob's own id.
             game.mobs[0].ai.last_hurt_by = Some(Who::Mob(15));
@@ -1792,8 +1788,6 @@ mod tests {
                 .unwrap()
                 .clone();
             game.mobs.push(Mob::new(15, zombie, Vec3::ZERO, 0.0));
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
             let source = game
                 .motion
                 .health
@@ -1817,6 +1811,7 @@ mod tests {
                     .unwrap();
                 player.set_health(absorption, true).unwrap();
                 game.player = Some(player);
+                crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
                 game.note_attacker("minecraft:mob_attack", 15);
                 let rules = game.world.health_rules;
                 let level = super::super::entity::damage_level_of!(game);
@@ -1866,8 +1861,7 @@ mod tests {
             game.mobs[0].health = 0.0;
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.player.as_mut().unwrap().entity_id = 20;
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let mob_living = game.living(game.entity(12).unwrap()).unwrap();
             assert!(!mob_living.heal(game, 10.0));
             assert_eq!(mob_living.health(game), Some(0.0));
@@ -1898,8 +1892,7 @@ mod tests {
         use mod_api::ServerHost;
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             game.selected = 3;
             let player = game.living(game.entity(20).unwrap()).unwrap();
             let sword = ItemStack::new("minecraft:iron_sword", 1);
@@ -2489,8 +2482,7 @@ mod tests {
             game.drop_held(true);
             let key_velocity = game.dropped.last().unwrap().velocity;
             game.world.random = horizon_core::random::LegacyRandom::new(12345);
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(42);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 42, 123);
             let player = game.living(game.entity(42).unwrap()).unwrap();
             let id = game.living_drop(player, item, false, true).unwrap().id();
             let mod_velocity = game
@@ -2619,8 +2611,7 @@ mod tests {
 
             // A player's own answers: alive and awake, freezable, drowning.
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let player = game.living(game.entity(20).unwrap()).unwrap();
             {
                 let host: &dyn Host = game;
@@ -2734,8 +2725,7 @@ mod tests {
             // A player asleep in the same bed answers the same facing.
             game.player =
                 Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             game.sleeping = Some([2, 63, 2]);
             let player = game.living(game.entity(20).unwrap()).unwrap();
             let host: &dyn Host = game;

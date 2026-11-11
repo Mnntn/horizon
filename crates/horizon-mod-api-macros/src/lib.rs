@@ -1,8 +1,23 @@
 //! Derive hook subscriptions from a trait implementation.
+mod payload;
 mod point;
 mod wire;
 
+/// Derive a typed payload's value codec from its fields.
+///
+/// `#[payload(crate = ::mod_vocab)]` selects the contract crate for
+/// lower-layer crates. The default is `::mod_api`.
+#[proc_macro_derive(PayloadCodec, attributes(payload))]
+pub fn derive_payload_codec(input: TokenStream) -> TokenStream {
+    payload::expand(syn::parse_macro_input!(input as syn::DeriveInput))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 /// Derive the shared native/wasm owned-value encoding.
+///
+/// `#[wire(crate = ::mod_vocab::wire)]` selects the contract module for
+/// lower-layer crates. The default is `::mod_api::wire`.
 #[proc_macro_derive(Wire, attributes(wire))]
 pub fn derive_wire(input: TokenStream) -> TokenStream {
     wire::expand(syn::parse_macro_input!(input as syn::DeriveInput))
@@ -18,6 +33,8 @@ use syn::{
 };
 
 /// The staged call site's typed boundary. Only generated source invokes this macro.
+/// A borrowing record is passed as `Args::<'a>`; the generated dispatch function
+/// binds that call lifetime and preserves it through every continuation.
 #[proc_macro]
 pub fn site(input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(input with Punctuated::<syn::Expr, Token![,]>::parse_terminated);
@@ -41,8 +58,14 @@ pub fn site(input: TokenStream) -> TokenStream {
         .to_compile_error()
         .into();
     };
+    let borrow_lifetime = match record {
+        syn::Expr::Path(path) if path.path.segments.iter().any(|s| !s.arguments.is_empty()) => {
+            quote!(, 'a)
+        }
+        _ => quote!(),
+    };
     quote! {{
-        fn #wrap<'g>(__at: usize, __receiver: #recv_ty<'g, '_>, __args: &mut #record,
+        fn #wrap<'g #borrow_lifetime>(__at: usize, __receiver: #recv_ty<'g, '_>, __args: &mut #record,
             __original: &mut dyn FnMut(#recv_ty<'g, '_>, &mut #record) -> #output) -> #output {
             ::mod_points::__private::wrap(::mod_points::SiteId::#place, __at, |__entry| {
                 match __entry {
@@ -56,6 +79,52 @@ pub fn site(input: TokenStream) -> TokenStream {
             })
         }
         #wrap(0, #receiver, &mut #args, &mut #original)
+    }}.into()
+}
+
+/// The consuming boundary for a native source call with owned arguments.
+/// Only generated source invokes it. Each listener gets a private, stack-borrowed
+/// forwarding capability whose `call(self, receiver, args)` consumes both values.
+#[proc_macro]
+pub fn site_once(input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(input with Punctuated::<syn::Expr, Token![,]>::parse_terminated);
+    let args: Vec<_> = args.iter().collect();
+    let [
+        wrap,
+        place,
+        listener,
+        recv_ty,
+        record,
+        output,
+        capability,
+        receiver,
+        args,
+        original,
+    ] = args.as_slice()
+    else {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "expected consuming site types, capability, receiver, args and original",
+        )
+        .to_compile_error()
+        .into();
+    };
+    quote! {{
+        fn #wrap<'g, 'a>(__at: usize, __receiver: #recv_ty<'g, '_>, __args: #record,
+            __original: &mut dyn FnMut(#recv_ty<'g, '_>, #record) -> #output) -> #output {
+            ::mod_points::__private::wrap(::mod_points::SiteId::#place, __at, |__entry| {
+                match __entry {
+                    Some((__pointer, __next)) => {
+                        // SAFETY: registration checks this exact site's consuming listener type.
+                        let __listener: #listener = unsafe { ::std::mem::transmute(__pointer) };
+                        let mut __forward = |__recv: #recv_ty<'g, '_>, __args: #record| #wrap(__next, __recv, __args, __original);
+                        __listener(__receiver, __args, #capability::new(&mut __forward))
+                    }
+                    None => __original(__receiver, __args),
+                }
+            })
+        }
+        #wrap(0, #receiver, #args, &mut #original)
     }}.into()
 }
 

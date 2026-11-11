@@ -25,8 +25,10 @@ noise textures also stay data (`docs/api/shaders.md:171`).
 
 The existing pack generator supplies the conversion helpers in
 `crates/horizon-shader-api/src/stages.rs:133`, frame-storage conversion at
-`:510`, and linear post-chain entry code at `:610`. These are pack implementation
-seams to reuse, not evidence that R5 mod pipelines already exist. The current
+`:510`, and linear post-chain entry code at `:610`. Mod pipelines (#884,
+[Drawing with your own render pipeline](../how-to/render-pipelines.md)) reuse the
+helpers at `:133` in their generated entry points; mod passes (#867, #869) do not
+exist yet. The current
 experimental serving limits are in `docs/api/shaders.md:163`: 0.2 needs
 `HORIZON_HDR_FRAME=float`; linear frame blending is not yet served.
 

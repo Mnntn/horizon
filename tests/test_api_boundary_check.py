@@ -121,7 +121,7 @@ class ApiBoundaryCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             self.assertEqual(boundary.generated_findings(target)[0].rule, "missing-generated")
-            out = target / "debug/build/horizon-mod-api-abcdef/out"
+            out = target / "debug/build/horizon-mod-vocab-abcdef/out"
             out.mkdir(parents=True)
             (out / "mod_api_generated.rs").write_text('pub struct BlocksEvent { pub blocks: Vec<horizon_mod_package::content::Block> }')
             (out / "mod_api_generated_host.rs").write_text('pub trait Host { fn leak() -> serde_json::Value; }')
@@ -133,6 +133,10 @@ class ApiBoundaryCheckTests(unittest.TestCase):
             fixture.mkdir(parents=True)
             (fixture / "mod_api_generated.rs").write_text('pub use horizon_world::*;')
             self.assertEqual(boundary.generated_findings(target), [])
+            (out / "mod_api_generated_host.rs").unlink()
+            missing = boundary.generated_findings(target)
+            self.assertEqual([(f.rule, f.detail) for f in missing],
+                             [("missing-generated", "mod_api_generated_host.rs")])
 
     def test_dependency_aliases_and_target_tables(self):
         with tempfile.TemporaryDirectory() as directory:

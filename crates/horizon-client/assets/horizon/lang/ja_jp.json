@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s を %2$s BAN しました (%3$s まで)",
   "horizon.tempban.usage": "/tempban <プレイヤー> <期間> [理由]",
   "horizon.title.not_affiliated": "Mojang や Microsoft とは関係ありません",
-  "key.emote": "エモートホイール"
+  "key.emote": "エモートホイール",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

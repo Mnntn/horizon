@@ -316,12 +316,7 @@ impl Game<'_> {
                     // handleUseItemOn: a consuming useItemOn triggers
                     // ANY_BLOCK_USE with the hand's stack as it now is.
                     if consumed && !g.use_failed {
-                        let stack = g
-                            .with_hand(hand, |g| g.held().cloned())
-                            .unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
-                        horizon_client::spans::time("use_advancements", || {
-                            g.trigger_any_block_use(hit.pos, &stack);
-                        });
+                        g.finish_block_use(hit.pos, hand);
                     }
                     (g.forced_hit, g.guest_use) = saved;
                     reset_use_attack_strength(&mut g.attack_ticks, swings, g.swings_started);
@@ -534,8 +529,9 @@ impl Game<'_> {
                 return Err(ActionRefused::OutOfReach);
             }
         }
-        // Native mods, where Player.attack starts: a canceled blow does
-        // nothing (game/native_hooks.rs).
+        // Native mods, where Player.attack starts: the global `attack_entity`,
+        // then the held item's `on_left_click_entity` Part. A canceled blow
+        // does nothing (game/native_hooks.rs).
         let Some(host) = self.lan.as_ref() else {
             return Err(ActionRefused::Stale);
         };
@@ -561,7 +557,7 @@ impl Game<'_> {
             && self.as_guest_at(gi, conn, |g| {
                 let mut canceled = false;
                 g.native_attack_entity(id, &kind, at, &mut canceled);
-                canceled
+                canceled || g.native_left_click_entity_event(id, &kind)
             }) == Ok(true)
         {
             return Ok(false);

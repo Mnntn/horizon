@@ -49,6 +49,8 @@ struct RainView<'a> {
     random: LegacyRandom,
 }
 
+impl horizon_world::level::BlockEntityNeighbors for RainView<'_> {}
+
 impl LevelAccess for RainView<'_> {
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
         self.world.block(pos.x, pos.y, pos.z)

@@ -6,6 +6,8 @@ src = "src"
 
 [build]
 build-dir = "../../target/modding-book"
+# A SUMMARY.md link to a page that doesn't exist fails the build instead of creating an empty page.
+create-missing = false
 
 # Resolve from mdBook's context, not the caller's working directory.
 [preprocessor.hook-notes]
@@ -17,6 +19,18 @@ context, book = json.load(sys.stdin)
 sys.path.insert(0, str(pathlib.Path(context["root"]).resolve().parents[1] / "tools"))
 import modding_hook_notes as notes
 print(json.dumps(notes.preprocess(context, book)))
+'"""
+before = ["concept-pages", "links"]
+
+[preprocessor.wasm-coverage]
+command = """python3 -c '
+import json, pathlib, sys
+if sys.argv[1:2] == ["supports"]:
+    sys.exit(0)
+context, book = json.load(sys.stdin)
+sys.path.insert(0, str(pathlib.Path(context["root"]).resolve().parents[1] / "tools"))
+import modding_hook_notes as notes
+print(json.dumps(notes.coverage(context, book)))
 '"""
 before = ["concept-pages", "links"]
 

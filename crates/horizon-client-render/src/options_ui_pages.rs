@@ -105,7 +105,9 @@ impl OptionsUi {
         // Two to a row, as vanilla's OptionsList.addSmall lays out
         // buttons; each opens one of Horizon's settings pages. Each page has
         // one way in: graphics and shader packs are Video Settings' (the graphics
-        // screen), the controller is Controls', mods are the Options screen's.
+        // screen), the controller is Controls', mods are the Options screen's. The
+        // registry's mod browser is Horizon's own and opens from here, not from the
+        // two-button Mods footer.
         let open = |key: &str, page: Page| button(0.0, 0.0, 150.0, tr(key), Act::Push(page));
         let mut rows: Vec<Row> = vec![
             Row::Buttons(
@@ -132,6 +134,7 @@ impl OptionsUi {
                     Some(self.extra_button(s, crate::extras::Item::NoAi)),
                 )
             },
+            Row::Buttons(open("horizon.mods.browse", Page::ModBrowser), None),
         ];
         self.added_entries(&mut rows);
         rows

@@ -3,7 +3,6 @@
 use clap::{Parser, Subcommand};
 use horizon_launcher::account::{self, Accounts};
 use horizon_launcher::backend::{self, Release};
-use horizon_launcher::build_import;
 use horizon_launcher::github_mods;
 use horizon_launcher::i18n::{tr, trf};
 use horizon_launcher::instances;
@@ -34,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 #[derive(Parser)]
 #[command(
-    name = "horizon-launcher",
+    name = crate::identity::EXECUTABLE,
     version = backend::VERSION,
     about = "Installs, prepares and starts Horizon. Without a subcommand, opens the window."
 )]
@@ -703,10 +702,14 @@ enum Cmd {
     },
     /// Download and install a release (a tag such as v2026.10.13, or "latest")
     Install { tag: String },
+    /// Install a local unsigned developer build from a trusted checkout
+    #[command(about = tr("Install a local unsigned developer build from a trusted checkout"), after_help = tr("Example: horizon-launcher developer-install CHECKOUT --program CHECKOUT/target/debug/horizon-client --trust-unsigned\nThis executes the checkout's build code and an unsigned game with your rights. Trust both before continuing."), long_about = tr("Install a local unsigned developer build. This runs the checkout's build code through cargo run -p xtask -- package. Commit tracked changes and rebuild first. Build horizon-ctl, horizon-prepare and horizon-server beside the game, and compile exporters into the checkout's exporters folder. Native builds use the saved local source commit, including unpublished commits. Select this base explicitly; automatic updates never replace it."))]
+    DeveloperInstall(developer_builds::DeveloperInstall),
     /// Remove an installed version
     Remove { tag: String },
     /// Install a game program you have, such as a horizon-client built on your fork's Actions,
-    /// as its own version on an installed release or Nightly's game files, and select it.
+    /// as its own version on an installed base's game files, and select it. A local unsigned
+    /// developer base is allowed only when explicitly selected or named with --version.
     /// Nothing signed it: it runs with your rights, and updates never replace it
     #[command(
         after_help = "The program must match this computer's executable format and carry the exact `horizon-game-executable;`\nidentity signature embedded by ordinary and launcher-generated games. It carries no mod API level or build id,\nand is not a signature of authenticity. Unmarked programs are refused."
@@ -714,8 +717,8 @@ enum Cmd {
     ImportBuild {
         /// The program (horizon-client, horizon-client.exe on Windows), or a zip holding it
         path: PathBuf,
-        /// The installed release or Nightly whose game files it plays with (default: the
-        /// selected one, else the newest)
+        /// The installed base whose game files it plays with (default: the selected usable
+        /// base, else the newest release or Nightly; developer bases need explicit selection)
         #[arg(long)]
         version: Option<String>,
         /// You picked this build yourself and trust it with full access to this computer
@@ -794,6 +797,13 @@ enum Cmd {
         /// Request cleanup of build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all rows; game-accessible caches refuse cleanup without enforceable lifetime exclusion
         #[arg(long, value_parser = parse_storage_row)]
         clear: Option<ClearStorage>,
+    },
+    /// Generate the registry-only Cargo.lock for one native mod, without executing mod code
+    NativeLock {
+        folder: PathBuf,
+        /// Explicitly replace an existing lock with newly resolved registry pins
+        #[arg(long)]
+        update_lock: bool,
     },
     /// Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod projects against the instance's exact
     /// Horizon source revision with the launcher's own Rust, as the version the instance then
@@ -1142,29 +1152,13 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
 }
 
 /// Every launcher setting, as `settings` shows them.
-fn settings_json(s: &backend::Settings) -> serde_json::Value {
-    serde_json::json!({
-        "selected_version": backend::resolve_version(None).ok(),
-        "game_architecture": s.game_architecture.name(),
-        "minecraft_dir": s.minecraft_dir,
-        "server_dir": backend::server_dir(None),
-        "install_new_versions": s.install_new_versions.unwrap_or(true),
-        "prune_old_versions": s.auto_prune(),
-        "keep_versions": s.keep_newest(),
-        "opening_animation": !s.skip_opening,
-        "game_args": s.game_args,
-        "proxy": s.proxy,
-        "desktop_entry": s.desktop_entry.unwrap_or(true),
-        "while_playing": s.while_playing.name(),
-        "language": s.language.map_or("system", |l| l.code()),
-        "accent": s.accent.name(),
-        "background": horizon_launcher::themes::background(&backend::data_dir(), s.background.as_deref()),
-        "cache_limit_gib": s.cache_limit_gib.unwrap_or(horizon_launcher::storage::policy::DEFAULT_LIMIT_GIB),
-        "no_ai": backend::no_ai(),
-    })
+/// Runs a subcommand and returns the exit code, or None when the window should open.
+fn registry_consent(inventory: &native_mods::RegistryInventory) -> bool {
+    eprintln!("{}\n{}", inventory.label(), inventory.detail());
+    // The headless native route has already required explicit native-code permission.
+    true
 }
 
-/// Runs a subcommand and returns the exit code, or None when the window should open.
 pub fn run() -> Option<i32> {
     use clap::FromArgMatches;
     let no_ai = backend::no_ai();
@@ -1279,7 +1273,9 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                 } else {
                     "prepared, no sounds (prepare again)"
                 };
-                println!("{mark} {tag}  {state}");
+                let label =
+                    horizon_launcher::developer_install::label(tag).unwrap_or_else(|| tag.clone());
+                println!("{mark} {label}  {state}");
             }
         }
         Cmd::Versions { installed: false } => {
@@ -1330,6 +1326,10 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                 }
             }
         }
+        Cmd::NativeLock {
+            folder,
+            update_lock,
+        } => native_mods::registry_lock(&folder, update_lock)?,
         Cmd::NativeBuild {
             sync_internals,
             catalog,
@@ -1379,6 +1379,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                     profile.unwrap_or_default(),
                     allow_jar_downloads,
                     steps,
+                    registry_consent,
                 )?;
                 let built = std::path::absolute(&built).unwrap_or(built);
                 let path = built.display().to_string();
@@ -1420,7 +1421,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             };
             let profile = explicit.then_some(target.native_profile);
             let built =
-                native_mods::build(&base, &folder, &target, profile, steps).map_err(|error| {
+                native_mods::build(&base, &folder, &target, profile, steps, registry_consent).map_err(|error| {
                     let error = String::from(error);
                     if error.starts_with(native_mods::MISMATCH) {
                         trf("{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's folder to pin it to this game, then build again.", &[("error", &error), ("commit", &base)])
@@ -1434,6 +1435,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                 )
             );
         }
+        Cmd::DeveloperInstall(args) => developer_builds::install(args, as_json)?,
         Cmd::Remove { tag } => {
             backend::remove_version(&tag)?;
             println!("Removed {tag}.");
@@ -1442,24 +1444,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             path,
             version,
             trust_unsigned,
-        } => {
-            if !trust_unsigned {
-                return Err("An imported build is unsigned: Horizon can't check where it came from. If you trust it, pass --trust-unsigned.".into());
-            }
-            let tag = build_import::import(&path, version.as_deref())?;
-            let prepared = backend::check_prepared(&tag);
-            if as_json {
-                json(serde_json::json!({ "imported": tag, "prepared": prepared }));
-            } else if prepared {
-                println!(
-                    "Imported {tag} and selected it. It is prepared already, from another installed version."
-                );
-            } else {
-                println!(
-                    "Imported {tag} and selected it. Prepare it next: horizon-launcher prepare --version {tag}"
-                );
-            }
-        }
+        } => developer_builds::import(&path, version.as_deref(), trust_unsigned, as_json)?,
         Cmd::Prepare {
             minecraft,
             download,
@@ -2787,7 +2772,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
         serde_json::json!({
             "id": i.id, "name": i.name, "kind": format!("{:?}", i.kind).to_lowercase(),
             "home": i.home, "icon": i.icon, "group": i.group, "selected": selected,
-            "version": i.version, "java": i.java, "played_secs": i.played.as_secs(),
+            "version": i.version, "version_label": i.version.as_deref().and_then(horizon_launcher::developer_install::label), "java": i.java, "played_secs": i.played.as_secs(),
             "last_played_ms": i.last_played.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64),
         })
     };
@@ -2808,7 +2793,10 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                 ),
                 None => format!("  Minecraft {} (Java Edition)", java.minecraft),
             },
-            (None, Some(v)) => format!("  {v}"),
+            (None, Some(v)) => format!(
+                "  {}",
+                horizon_launcher::developer_install::label(v).unwrap_or_else(|| v.clone())
+            ),
             (None, None) => String::new(),
         };
         let played = match i.last_played {
@@ -4063,3 +4051,8 @@ mod catalog_tests;
 #[path = "cli_native_permission.rs"]
 mod native_permission_impl;
 use native_permission_impl::{github_native, native_permission};
+
+mod developer_builds;
+
+mod settings_output;
+use settings_output::settings_json;

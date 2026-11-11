@@ -734,7 +734,10 @@ fn an_arm_pose_answer_replaces_the_pose_the_item_gives() {
         assert_eq!(game.held_arm_poses(1, &m), [None, None]);
         let mods = vec![ModEntry::new("horn", Box::new(Horn))].into();
         with_mods(mods, || {
-            assert_eq!(game.held_arm_poses(1, &m), [Some(ArmPose::TootHorn), None]);
+            assert_eq!(
+                game.held_arm_poses(1, &m),
+                [Some(horizon_core::arm_pose::ArmPose::TootHorn), None]
+            );
         });
     });
 }
@@ -1104,7 +1107,7 @@ fn humanoid_arm_pose_mod_reads_mob_state_and_changes_the_model() {
         game.tick_player_model();
         let own_before =
             anim::humanoid_arm_poses(game.player_model.as_ref().unwrap(), [None; 2], 0.0);
-        assert_eq!(own_before, [ArmPose::Item, ArmPose::Item]);
+        assert_eq!(own_before, [horizon_core::arm_pose::ArmPose::Item; 2]);
         for (id, kind) in [
             (60, "minecraft:zombie"),
             (61, "minecraft:skeleton"),
@@ -1144,7 +1147,7 @@ fn humanoid_arm_pose_mod_reads_mob_state_and_changes_the_model() {
                 game.tick_remote_arm_poses();
                 assert_eq!(
                     game.mobs[0].extra.held_arm_pose,
-                    [Some(ArmPose::ThrowTrident), None]
+                    [Some(horizon_core::arm_pose::ArmPose::ThrowTrident), None]
                 );
                 let posed = arms(&game.mobs[0]);
                 assert!((posed[1][3] + std::f32::consts::PI).abs() < 1e-6);
@@ -1168,3 +1171,6 @@ fn humanoid_arm_pose_mod_reads_mob_state_and_changes_the_model() {
         assert_eq!(game.mobs.iter().map(arms).collect::<Vec<_>>(), baseline);
     });
 }
+
+#[path = "custom_arm_pose_tests.rs"]
+mod custom_arm_pose_tests;

@@ -6,6 +6,8 @@
 
 #[path = "stations/anvil.rs"]
 mod anvil;
+#[path = "stations/tooltip.rs"]
+mod tooltip;
 /// Invalid measurements must not reach tooltip positioning or reserve empty space.
 fn tooltip_component_size(size: Option<[f32; 2]>) -> Option<[f32; 2]> {
     size.filter(|size| size.iter().all(|v| v.is_finite() && *v > 0.0))
@@ -2882,58 +2884,6 @@ impl Game<'_> {
         self.tooltip_box(batch, None, x, y, w, h);
         Self::tooltip_text(batch, atlas, &lines, x, y);
     }
-    /// `RenderTooltipEvent.Pre` for a tooltip of `lines` then `images`, hanging from `at`: the
-    /// point a mod moved it to, `None` when one cancelled it. Only built when a mod listens.
-    pub(super) fn tooltip_pre(
-        &self,
-        batch: &mut HudBatch,
-        stack: Option<&ItemStack>,
-        lines: &[(horizon_client::text::Text, u32)],
-        images: &[TooltipImage],
-        at: (f32, f32),
-        screen: (f32, f32),
-    ) -> Option<(f32, f32)> {
-        if !mod_api::__private::listened(mod_api::HookId::RenderTooltipPre) {
-            return Some(at);
-        }
-        let stack = stack.try_into_api().ok()?;
-        let mut elements: Vec<TooltipElement> = lines
-            .iter()
-            .map(|(text, color)| {
-                text.try_into_api()
-                    .map(|text| TooltipElement::Text(text, *color))
-            })
-            .collect::<Result<_, _>>()
-            .ok()?;
-        elements.extend(images.iter().cloned().map(TooltipElement::Image));
-        let mut place = mod_api::TooltipPlace {
-            x: at.0 as i32,
-            y: at.1 as i32,
-        };
-        let before = place;
-        let mut cancel = false;
-        let mut draw = super::host::draw::GameDrawContext {
-            game: self,
-            surface: batch,
-        };
-        self.native_render_tooltip_pre(mod_api::__private::RenderTooltipPreCall {
-            draw: &mut draw,
-            stack: stack.as_ref(),
-            screen_width: screen.0 as i32,
-            screen_height: screen.1 as i32,
-            elements: &elements,
-            place: &mut place,
-            cancel: &mut cancel,
-        });
-        if cancel {
-            return None;
-        }
-        Some(if place == before {
-            at
-        } else {
-            (place.x as f32, place.y as f32)
-        })
-    }
     /// A tooltip's lines with their legacy codes resolved and their colours.
     fn resolved<T: Clone + Into<horizon_client::text::Text>>(
         lines: &[(T, u32)],
@@ -3039,156 +2989,6 @@ impl Game<'_> {
             batch.text_styled(atlas, text, x, ty, *color, true);
             ty += if i == 0 { 12.0 } else { 10.0 };
         }
-    }
-    /// A stack's tooltip: its lines, and under them a bundle's contents
-    /// (`ClientBundleTooltip`: the 4 wide grid, the `+N` of what it leaves
-    /// out, and the weight bar).
-    pub(super) fn draw_stack_tooltip(
-        &mut self,
-        batch: &mut HudBatch,
-        stack: &ItemStack,
-        x: f32,
-        y: f32,
-    ) {
-        self.draw_stack_tooltip_with(batch, stack, false, x, y, Vec::new());
-    }
-    /// [`Self::draw_stack_tooltip`] with `TooltipFlag.isCreative` set when
-    /// `creative` (a creative tab's own slot), and `after_name` inserted from
-    /// line 1, as the creative screen adds its tab names.
-    pub(super) fn draw_stack_tooltip_with(
-        &mut self,
-        batch: &mut HudBatch,
-        stack: &ItemStack,
-        creative: bool,
-        x: f32,
-        y: f32,
-        after_name: Vec<(horizon_client::text::Text, u32)>,
-    ) {
-        let mut lines = self.stack_tooltip_lines(stack, false, creative);
-        if lines.is_empty() {
-            return;
-        }
-        lines.splice(1..1, after_name);
-        // The component's height does not depend on where it is drawn, so a
-        // probe at the origin gives the box its extra height.
-        let probe =
-            horizon_client::item_tooltip::bundle_tooltip(self.items(), stack, 0.0, 0.0, 96.0);
-        let bundle_extra = probe.as_ref().map_or(0.0, |l| l.height + 2.0);
-        let mut component = None;
-        self.native_tooltip_component(stack, &mut component);
-        let images: Vec<TooltipImage> = tooltip_component_size(component)
-            .and_then(|size| {
-                Some(TooltipImage {
-                    stack: stack.try_into_api().ok()?,
-                    size,
-                })
-            })
-            .into_iter()
-            .collect();
-        let Some((lines, images)) =
-            self.gather_tooltip_components(stack, lines, images, (batch.width, batch.height))
-        else {
-            return;
-        };
-        if lines.is_empty() && images.is_empty() {
-            return;
-        }
-        let lines = Self::resolved(&lines);
-        let image_h: f32 = images.iter().map(|image| image.size[1] + 2.0).sum();
-        let extra = bundle_extra + image_h;
-        let min_width = images
-            .iter()
-            .fold(if probe.is_some() { 96.0_f32 } else { 0.0 }, |w, image| {
-                w.max(image.size[0])
-            });
-        let screen = (batch.width, batch.height);
-        let Some(at) = self.tooltip_pre(batch, Some(stack), &lines, &images, (x, y), screen) else {
-            return;
-        };
-        let atlas = &self.gui.atlas;
-        let (x, y, w, h) = Self::tooltip_geometry(atlas, &lines, at, screen, [min_width, extra]);
-        self.tooltip_box(batch, Some(stack), x, y, w, h);
-        let text_h = h - extra;
-        Self::tooltip_text(batch, atlas, &lines, x, y);
-        if let Some(layout) = horizon_client::item_tooltip::bundle_tooltip(
-            self.items(),
-            stack,
-            x,
-            y + text_h + 2.0,
-            w,
-        ) {
-            self.draw_bundle_tooltip(batch, &layout);
-            self.draw_bundle_selected_name(batch, &layout, x, y + text_h + 2.0, w);
-        }
-        let mut at = y + text_h + bundle_extra + 2.0;
-        for image in &images {
-            if let Ok(stack) = crate::game::api_values::stack_value(&image.stack) {
-                self.native_tooltip_component_draw(&stack, batch, [x, at], image.size);
-            }
-            at += image.size[1] + 2.0;
-        }
-    }
-    /// `RenderTooltipEvent.GatherComponents` for an item's tooltip: the
-    /// lines and the images the item's part answered go to
-    /// `render_tooltip_gather_components` as one list. A mod's `max_width`
-    /// wraps the lines (`Font.split`; unset, -1, leaves them as they are); an
-    /// image a mod gave an invalid size is dropped, as an invalid answer of
-    /// the part is. `None` when a mod cancelled it, so nothing is drawn.
-    fn gather_tooltip_components(
-        &self,
-        stack: &ItemStack,
-        lines: Vec<(horizon_client::text::Text, u32)>,
-        images: Vec<TooltipImage>,
-        (width, height): (f32, f32),
-    ) -> Option<(Vec<(horizon_client::text::Text, u32)>, Vec<TooltipImage>)> {
-        if !mod_api::__private::listened(mod_api::HookId::RenderTooltipGatherComponents) {
-            return Some((lines, images));
-        }
-        let mut elements: Vec<TooltipElement> = lines
-            .into_iter()
-            .map(|(text, color)| {
-                text.try_into_api()
-                    .map(|text| TooltipElement::Text(text, color))
-            })
-            .collect::<Result<_, _>>()
-            .ok()?;
-        elements.extend(images.into_iter().map(TooltipElement::Image));
-        let (mut max_width, mut cancel) = (-1, false);
-        self.native_render_tooltip_gather_components(
-            stack,
-            width as i32,
-            height as i32,
-            &mut elements,
-            &mut max_width,
-            &mut cancel,
-        );
-        if cancel {
-            return None;
-        }
-        let font = &self.gui.atlas.font;
-        let (mut lines, mut images) = (Vec::new(), Vec::new());
-        for element in elements {
-            match element {
-                TooltipElement::Text(text, color) => {
-                    let text = text.try_into_engine(&()).ok()?;
-                    if max_width < 0 {
-                        lines.push((text, color));
-                    } else {
-                        lines.extend(
-                            font.split(&text.resolve_legacy(), max_width as f32)
-                                .into_iter()
-                                .map(|line| (line, color)),
-                        );
-                    }
-                }
-                TooltipElement::Image(image) => {
-                    if let Some(size) = tooltip_component_size(Some(image.size)) {
-                        images.push(TooltipImage { size, ..image });
-                    }
-                }
-            }
-        }
-        Some((lines, images))
     }
     /// `ClientBundleTooltip.extractSelectedItemTooltip`: the selected item's
     /// name in a box of its own, centred over the grid (less 12) and 15 above
@@ -3742,14 +3542,28 @@ mod tests {
                 match MODE.load(Ordering::Relaxed) {
                     1 => {
                         event.max_width = 40;
-                        event.elements.push(TooltipElement::Image(TooltipImage {
-                            stack: event.stack.clone(),
-                            size: [16.0, 8.0],
-                        }));
+                        event.elements.insert(
+                            1,
+                            TooltipElement::Image(TooltipImage {
+                                stack: event.stack.clone(),
+                                size: [16.0, 8.0],
+                            }),
+                        );
                         event.elements.push(TooltipElement::Image(TooltipImage {
                             stack: event.stack.clone(),
                             size: [f32::NAN, 8.0],
                         }));
+                    }
+                    3 => {
+                        *event.elements = vec![
+                            TooltipElement::Text(mod_api::Text::literal("Name"), u32::MAX),
+                            TooltipElement::Image(TooltipImage {
+                                stack: event.stack.clone(),
+                                size: [12.0, 16.0],
+                            }),
+                            TooltipElement::Text(mod_api::Text::literal("Second"), u32::MAX),
+                            TooltipElement::Text(mod_api::Text::literal("Third"), u32::MAX),
+                        ];
                     }
                     2 => return mod_api::Flow::Cancel,
                     _ => {}
@@ -3772,11 +3586,25 @@ mod tests {
                     )
                 };
                 MODE.store(0, Ordering::Relaxed);
-                let (plain, images) = gather(game).unwrap();
+                let plain = gather(game).unwrap();
                 assert_eq!(plain.len(), 1);
-                assert!(images.is_empty());
+                assert!(matches!(plain[0], tooltip::Element::Text(_, _)));
                 MODE.store(1, Ordering::Relaxed);
-                let (wrapped, images) = gather(game).unwrap();
+                let elements = gather(game).unwrap();
+                let wrapped: Vec<_> = elements
+                    .iter()
+                    .filter_map(|e| match e {
+                        tooltip::Element::Text(t, c) => Some((t, c)),
+                        _ => None,
+                    })
+                    .collect();
+                let images: Vec<_> = elements
+                    .iter()
+                    .filter_map(|e| match e {
+                        tooltip::Element::Image(i) => Some(i),
+                        _ => None,
+                    })
+                    .collect();
                 let font = &game.gui.atlas.font;
                 let expected = font.split(&long, 40.0);
                 assert!(expected.len() > 1);
@@ -3788,6 +3616,15 @@ mod tests {
                 // The invalid image is dropped, the valid one stays.
                 assert_eq!(images.len(), 1);
                 assert_eq!(images[0].size, [16.0, 8.0]);
+                // Wrapping expands text in place, never moving the image behind later text.
+                assert!(matches!(elements.last(), Some(tooltip::Element::Image(_))));
+                MODE.store(3, Ordering::Relaxed);
+                let mixed = gather(game).unwrap();
+                assert_eq!(mixed.len(), 4);
+                assert!(matches!(mixed[0], tooltip::Element::Text(_, _)));
+                assert!(matches!(mixed[1], tooltip::Element::Image(_)));
+                assert!(matches!(mixed[2], tooltip::Element::Text(_, _)));
+                assert!(matches!(mixed[3], tooltip::Element::Text(_, _)));
                 MODE.store(2, Ordering::Relaxed);
                 assert!(gather(game).is_none());
             });

@@ -507,6 +507,8 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "horizon-mod-point-emit",
+ "horizon-mod-point-shape",
+ "horizon-mod-wasm",
  "horizon-port-pack",
  "libc",
  "rustc-demangle",
@@ -518,6 +520,7 @@ dependencies = [
  "ureq",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
+ "wasmtime",
  "zip",
 ]
 
@@ -1821,6 +1824,7 @@ dependencies = [
  "horizon-mod-package",
  "horizon-mod-render",
  "horizon-mod-runtime",
+ "horizon-mod-wasm",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1850,6 +1854,7 @@ dependencies = [
  "toml",
  "unicode-bidi",
  "ureq",
+ "wat",
  "wgpu",
  "winit",
  "winresource",
@@ -1932,6 +1937,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "tempfile",
  "unicode-bidi",
  "ureq",
  "wgpu",
@@ -2078,6 +2084,7 @@ dependencies = [
  "horizon-core",
  "horizon-mod-host",
  "horizon-mod-package",
+ "horizon-protocol",
  "horizon-threads",
  "serde_json",
  "tempfile",
@@ -2146,7 +2153,6 @@ dependencies = [
  "bytemuck",
  "glam",
  "horizon-core",
- "horizon-items",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-runtime",
@@ -2162,7 +2168,6 @@ version = "0.1.0"
 dependencies = [
  "heck",
  "horizon-game-discovery",
- "horizon-mod-package",
  "horizon-mod-point-shape",
  "prettyplease",
  "proc-macro2",
@@ -2171,6 +2176,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "syn 2.0.119",
+ "tempfile",
  "toml",
  "wit-parser",
 ]
@@ -2246,6 +2252,10 @@ dependencies = [
  "flate2",
  "getrandom 0.4.3",
  "horizon-core",
+ "horizon-mod-api",
+ "horizon-mod-api-macros",
+ "horizon-mod-point-shape",
+ "horizon-mod-vocab",
  "horizon-shader-api",
  "libc",
  "log",
@@ -2283,6 +2293,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
+ "serde_json",
  "syn 2.0.119",
 ]
 
@@ -2351,7 +2362,10 @@ dependencies = [
  "horizon-mod-points",
  "horizon-mod-runtime",
  "log",
+ "rustix 1.1.5",
  "serde_json",
+ "sha2",
+ "tempfile",
  "wasmparser 0.261.0",
  "wasmtime",
  "wat",
@@ -2440,6 +2454,7 @@ dependencies = [
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
+ "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "serde",

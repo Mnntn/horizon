@@ -5,7 +5,7 @@ mod append;
 mod borrowed;
 mod calls;
 mod host;
-pub use host::generate_host;
+pub use host::{generate_coverage, generate_host};
 mod ty;
 
 use crate::capability_providers::key_shapes;
@@ -57,8 +57,14 @@ pub(super) const IMPORTS: &[&str] = &[
     "PackFinders",
     "ColorResolvers",
     "BlockTintSources",
+    "CauldronInteractions",
+    "SectionGeometryRenderers",
+    "SectionGeometryContext",
     "ParticleProviders",
     "EnchantmentDamageEffects",
+    "PoiTypeExtensions",
+    "VillagerProfessions",
+    "CauldronFluidContents",
     "BlockAndTintGetter",
     "GroundLevel",
     "BlockMetadata",
@@ -77,11 +83,6 @@ pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("ClientSession", "client_host", "Ok(h.client_session())"),
     ("RenderAssets", "client_host", "Ok(h.render_assets())"),
     ("InstanceGroups", "client_host", "Ok(h.instance_groups())"),
-    (
-        "Tags",
-        "",
-        "level_host().map(|h| h.tags()).or_else(|_| host().map(|h| h.tags()))",
-    ),
     // A level hook's host first: inside a level write it is the one the call hands over.
     (
         "AttachmentStore",
@@ -132,6 +133,8 @@ const EXPORTS: &[&str] = &[
     "ClientReloadListener",
     "BiomeColorResolver",
     "BlockTintSource",
+    "Interaction",
+    "SectionGeometry",
     "ParticleProvider",
     "EnchantmentDamageEffect",
     "CommandArgumentType",
@@ -166,13 +169,14 @@ const LOAD_CONTEXTS: &[&str] = &[
 ];
 
 /// The traits the game calls on its worker threads: a mod's structure types and their pieces on
-/// the worldgen workers, its block tint sources and colour resolvers on the meshing workers. They
-/// keep no mutable state and get no `Host`.
+/// the worldgen workers, its block tint sources, colour resolvers and section geometry on the
+/// meshing workers. They keep no mutable state and get no `Host`.
 const WORKERS: &[&str] = &[
     "StructureType",
     "StructurePiece",
     "BlockTintSource",
     "BiomeColorResolver",
+    "SectionGeometry",
 ];
 
 /// What a call of `method` is to the runtime, for its limits and its wait.
@@ -927,15 +931,56 @@ mod tests {
             .join()
             .unwrap();
     }
+    /// The book renders the coverage page from the generator at build time; what the page
+    /// promises is checked here, against the generator itself.
     #[test]
-    fn coverage_document_is_current() {
-        std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
-            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-            super::generate_host(&root).unwrap();
-            let actual = std::fs::read_to_string(root.join("target/wire-coverage.md")).unwrap();
-            let checked_in = std::fs::read_to_string(root.join("docs/modding/src/wasm-coverage.md")).unwrap();
-            assert_eq!(actual, checked_in, "regenerate with HORIZON_UPDATE_WIRE_COVERAGE=1 cargo test -p horizon-mod-api-gen coverage_document_is_current");
-            assert!(actual.contains("Required gap total: 0."), "required boundary methods must not silently lose coverage");
-        }).unwrap().join().unwrap();
+    fn coverage_page_is_well_formed() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let page = super::generate_coverage(&root).unwrap();
+                let mut lines = page.lines();
+                assert_eq!(lines.next(), Some("# Wire boundary coverage"));
+                let header = "| Method | Status | Reason |";
+                let rows: Vec<Vec<&str>> = page
+                    .lines()
+                    .skip_while(|line| *line != header)
+                    .skip(2)
+                    .take_while(|line| line.starts_with('|'))
+                    .filter(|line| !line.trim().is_empty())
+                    .map(|line| line.trim_matches('|').split(" | ").map(str::trim).collect())
+                    .collect();
+                assert!(
+                    rows.len() > 100,
+                    "the table lists the surface: {} rows",
+                    rows.len()
+                );
+                let mut methods = std::collections::BTreeSet::new();
+                for row in &rows {
+                    assert_eq!(row.len(), 3, "three cells: {row:?}");
+                    assert!(
+                        row.iter().all(|cell| !cell.is_empty()),
+                        "no empty cell: {row:?}"
+                    );
+                    assert!(matches!(row[1], "crosses" | "gap"), "a status: {row:?}");
+                    assert!(methods.insert(row[0]), "each method once: {}", row[0]);
+                }
+                for owner in ["Host", "ServerHost", "ClientHost", "Registrar"] {
+                    assert!(
+                        methods
+                            .iter()
+                            .any(|m| m.starts_with(&format!("`{owner}::"))),
+                        "the page lists {owner}'s methods"
+                    );
+                }
+                assert!(
+                    page.contains("Required gap total: 0."),
+                    "required boundary methods must not silently lose coverage"
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }

@@ -152,20 +152,9 @@ pub fn register_world_fluids(
     Ok(names)
 }
 
-/// Joins the world fluids native mods declare in code to the content mods of their namespaces:
-/// a fluid's file, if it has one, keeps saying how it looks.
-pub fn accept_world_fluids(mods: &mut [ContentMod], fluids: &[FluidLook]) {
-    for fluid in fluids {
-        let namespace = fluid.id.split_once(':').map_or("", |(ns, _)| ns);
-        let Some(owner) = mods.iter_mut().find(|m| m.id == namespace) else {
-            continue;
-        };
-        match owner.content.fluids.iter_mut().find(|f| f.id == fluid.id) {
-            Some(look) => look.world = fluid.world,
-            None => owner.content.fluids.push(fluid.clone()),
-        }
-    }
-}
+#[path = "mod_content_fluid_declarations.rs"]
+mod fluid_declarations;
+pub use fluid_declarations::accept_world_fluids;
 
 /// How the fluid `id` looks, when a mod declares it.
 pub fn fluid_look(id: &str) -> Option<FluidLook> {
@@ -839,13 +828,10 @@ fn component_types(map: &J) -> BTreeSet<String> {
     }
 }
 
-/// Blocks and items native mods declare in code (`native_blocks`,
-/// `native_items`), joined to the content mods: each namespace's go into
-/// the content mod of that id when one is on (a native mod's own `.hmod`,
-/// with its models and textures), else into a content mod with no files of
-/// its own. Checked as files are ([`horizon_mod_package::Content::declare`],
-/// [`accept_mod`]); a namespace whose declarations are refused is left out
-/// whole, and its error returned.
+/// Code declarations, joined to their manifest owner. Each owner's namespaces
+/// validate together, independent of namespace order, with all-or-nothing refusal.
+/// Unknown namespaces become synthetic content-only mods. Checked as files are
+/// ([`horizon_mod_package::Content::declare`], [`accept_mod`]).
 pub fn accept_declared(
     mods: &mut Vec<ContentMod>,
     blocks: &[horizon_mod_package::content::Block],
@@ -853,37 +839,50 @@ pub fn accept_declared(
     types: &[BlockEntityType],
     known: &BTreeSet<String>,
 ) -> Vec<String> {
-    let namespace = |id: &str| id.split_once(':').map_or("", |(ns, _)| ns).to_owned();
-    let mut by_namespace: std::collections::BTreeMap<String, (Vec<_>, Vec<_>)> = Default::default();
+    let owners: BTreeMap<_, _> = mods
+        .iter()
+        .flat_map(|m| {
+            m.content
+                .namespaces
+                .iter()
+                .map(|ns| (ns.clone(), m.id.clone()))
+        })
+        .collect();
+    let owner = |id: &str| {
+        let ns = id.split_once(':').map_or("", |(ns, _)| ns);
+        owners.get(ns).cloned().unwrap_or_else(|| ns.to_owned())
+    };
+    let mut by_owner: BTreeMap<String, (Vec<_>, Vec<_>)> = Default::default();
     for block in blocks {
-        by_namespace
-            .entry(namespace(&block.id))
+        by_owner
+            .entry(owner(&block.id))
             .or_default()
             .0
             .push(block.clone());
     }
     for item in items {
-        by_namespace
-            .entry(namespace(&item.id))
+        by_owner
+            .entry(owner(&item.id))
             .or_default()
             .1
             .push(item.clone());
     }
     for kind in types {
-        by_namespace.entry(namespace(&kind.id)).or_default();
+        by_owner.entry(owner(&kind.id)).or_default();
     }
     let mut errors = Vec::new();
-    for (ns, (blocks, items)) in by_namespace {
-        let types = types.iter().filter(|t| namespace(&t.id) == ns).cloned();
-        let result = match mods.iter().position(|m| m.id == ns) {
+    for (id, (blocks, items)) in by_owner {
+        let types = types.iter().filter(|t| owner(&t.id) == id).cloned();
+        let result = match mods.iter().position(|m| m.id == id) {
             Some(i) => {
-                let mut content = horizon_mod_package::Content::declared(&ns);
+                let mut content = horizon_mod_package::Content::declared(&mods[i].id);
+                content.namespaces.clone_from(&mods[i].content.namespaces);
                 content.blocks.clone_from(&mods[i].content.blocks);
                 content.items.clone_from(&mods[i].content.items);
                 content
                     .declare(&blocks, &items)
                     .and_then(|()| {
-                        let mut added = horizon_mod_package::Content::declared(&ns);
+                        let mut added = horizon_mod_package::Content::declared(&id);
                         added.blocks.clone_from(&blocks);
                         added.items.clone_from(&items);
                         validate_components(&added, known).map_err(|e| e.to_string())
@@ -895,11 +894,11 @@ pub fn accept_declared(
                     })
             }
             None => {
-                let mut content = horizon_mod_package::Content::declared(&ns);
+                let mut content = horizon_mod_package::Content::declared(&id);
                 content.declare(&blocks, &items).and_then(|()| {
                     content.block_entity_types.extend(types);
                     let candidate = ContentMod {
-                        id: ns.clone(),
+                        id: id.clone(),
                         content,
                         jars: Vec::new(),
                     };
@@ -908,7 +907,7 @@ pub fn accept_declared(
             }
         };
         if let Err(e) = result {
-            errors.push(format!("native blocks and items of {ns}: {e}"));
+            errors.push(format!("native blocks and items of {id}: {e}"));
         }
     }
     errors
@@ -1001,8 +1000,8 @@ fn read_json(path: &Path) -> Result<J> {
 impl Plan<'_> {
     /// `entity-types.json` with a row for each mod type: its template's, so its
     /// size, eyes and category remain the template's (eyes, spawners and `reg.entity_types`),
-    /// with `template`, passenger attachments and a living type's attribute bases (`MobTypes`
-    /// makes the mob from it). Template values stay raw text: parsing and rewriting a float
+    /// with `template`, attachments and attribute bases (`MobTypes`
+    /// makes the mob from it). Template values stay raw text: rewriting a float
     /// such as a zombie's `movement_speed` can come back one ulp off.
     fn entity_types_json(&self, bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
         use serde_json::value::RawValue;
@@ -1032,43 +1031,9 @@ impl Plan<'_> {
     }
 }
 
-/// A mod entity type's row in `entity-types.json`: its template's `row` with
-/// `template` added and the type's attribute bases in place of the
-/// template's. The other values keep the template's text.
-fn mod_entity_row(
-    row: &serde_json::value::RawValue,
-    t: &EntityType,
-) -> std::result::Result<Vec<u8>, String> {
-    use serde_json::value::{RawValue, to_raw_value};
-    type Raw = BTreeMap<String, Box<RawValue>>;
-    let fail = |e: serde_json::Error| format!("{}: {e}", t.template);
-    let mut fields: Raw = serde_json::from_str(row.get()).map_err(fail)?;
-    if !t.attributes.is_empty() {
-        let mut attributes: Raw = fields.get("attributes").map_or(Ok(Raw::new()), |a| {
-            serde_json::from_str(a.get()).map_err(fail)
-        })?;
-        for (id, value) in &t.attributes {
-            // Refused rather than added: the mob reads the template's class attributes.
-            let Some(base) = attributes.get_mut(id) else {
-                return Err(format!(
-                    "{}: attribute {id} is not one of {}'s",
-                    t.id, t.template
-                ));
-            };
-            *base = to_raw_value(value).map_err(fail)?;
-        }
-        fields.insert(
-            "attributes".into(),
-            to_raw_value(&attributes).map_err(fail)?,
-        );
-    }
-    if !t.passenger_attachments.is_empty() {
-        let raw = to_raw_value(&t.passenger_attachments).map_err(fail)?;
-        fields.insert("passenger_attachments".into(), raw);
-    }
-    fields.insert("template".into(), to_raw_value(&t.template).map_err(fail)?);
-    serde_json::to_vec(&fields).map_err(fail)
-}
+/// Content entity rows preserve template numbers and carry sound selections.
+mod entity_sounds;
+use entity_sounds::mod_entity_row;
 
 impl<'a> Plan<'a> {
     fn new(base: &Path, mods: &'a [ContentMod]) -> Result<Self> {
@@ -2500,6 +2465,7 @@ impl Addition {
 const BIOMES: &str = "worldgen/biomes.json";
 const FEATURE_TAGS: &str = "worldgen/feature_tags.json";
 const PLACED_FEATURES: &str = "worldgen/placed_features.json";
+const CARVERS: &str = "worldgen/carvers.json";
 
 /// Rewrites the biome bundle with the mods' biome modifiers. `biome_tags`
 /// and `placed` are the bundles as the mods left them (`None`: the base's).
@@ -2538,7 +2504,10 @@ fn place_in_biomes(
     let placed: BTreeSet<String> = bundle(placed, PLACED_FEATURES)?.into_keys().collect();
     let feature_tags = bundle(None, FEATURE_TAGS)?;
     let (entity_categories, entity_tags) = modifier_entities(base, overlay, tags)?;
+    let carver_ids = biomes::carver_ids(&base.join(CARVERS))?;
     let mut saved = SavedModifiers {
+        carver_ids,
+        carver_tags: modifier_tags(base, overlay, tags, "worldgen/carver")?,
         enabled_mods,
         modifiers: modifiers.iter().map(|m| m.source.clone()).collect(),
         unmodified: BTreeMap::new(),
@@ -2556,11 +2525,9 @@ fn place_in_biomes(
             overlay.write(&file, text.as_bytes())?;
         }
     }
-    overlay.write(MODIFIERS, &serde_json::to_vec(&saved)?)?;
-    overlay.write(BIOMES, &serde_json::to_vec(&doc)?)
+    biomes::write_state(overlay, &saved, &doc, modifiers)
 }
 
-/// Registry metadata shared by both modifier loaders, after tag overlays are merged.
 fn modifier_entities(
     base: &Path,
     overlay: &Overlay<'_>,
@@ -2588,7 +2555,6 @@ fn modifier_entities(
     Ok((entity_categories, entity_tags))
 }
 
-/// Registry tags after all accepted layers, shared by both modifier loaders.
 fn modifier_tags(
     base: &Path,
     overlay: &Overlay<'_>,
@@ -2635,8 +2601,6 @@ mod structures;
 /// world's data packs takes (`biome_modifiers_over_packs`).
 const MODIFIERS: &str = "biome-modifiers.json";
 
-/// The modifiers and the registries packs leave alone, as the content root
-/// applied them.
 #[derive(Serialize, Deserialize)]
 struct SavedModifiers {
     enabled_mods: Vec<String>,
@@ -2647,11 +2611,13 @@ struct SavedModifiers {
     feature_tags: BTreeMap<String, String>,
     entity_categories: BTreeMap<String, String>,
     entity_tags: BTreeMap<String, String>,
+    #[serde(default)]
+    carver_ids: BTreeSet<String>,
+    #[serde(default)]
+    carver_tags: BTreeMap<String, String>,
 }
 
 impl SavedModifiers {
-    /// Applies `modifiers` to the biome bundle `doc`, its tags `biome_tags`
-    /// and the placed features `placed` (see `biomes::apply`).
     fn apply(
         &self,
         doc: &mut J,
@@ -2665,24 +2631,18 @@ impl SavedModifiers {
             _ => return Err(format!("{BIOMES}: not an object").into()),
         };
         let entity_ids: BTreeSet<String> = self.entity_categories.keys().cloned().collect();
+        let registries = biomes::Registries::of(
+            &biome_ids,
+            biome_tags,
+            placed,
+            &self.feature_tags,
+            (&entity_ids, &self.entity_tags),
+            (&self.carver_ids, &self.carver_tags),
+        );
         biomes::apply(
             doc,
             modifiers,
-            &biomes::Registry {
-                what: "biome",
-                ids: &biome_ids,
-                tags: biome_tags,
-            },
-            &biomes::Registry {
-                what: "placed feature",
-                ids: placed,
-                tags: &self.feature_tags,
-            },
-            &biomes::Registry {
-                what: "entity type",
-                ids: &entity_ids,
-                tags: &self.entity_tags,
-            },
+            &registries,
             &self.entity_categories,
             warnings,
         )
@@ -2694,19 +2654,17 @@ impl SavedModifiers {
 /// pack is in, to the final biomes and tags: a pack's file for a biome
 /// (Terralith's `minecraft:plains`) keeps the mods' features and spawns, and
 /// a pack's biome its tags put under a modifier's selector gets them too.
-/// `None` when the root's biomes stand: no modifiers, or packs that bring no
-/// biome and no biome tag.
+/// `None` when the root's biomes stand: no modifiers, or nothing declared and packs that bring
+/// no biome and no tag. `declared` are mods' code modifiers (mod, file, text), applied last.
 pub fn biome_modifiers_over_packs(
     root: &Path,
     packs: &horizon_world::worldgen::overrides::WorldgenOverrides,
+    declared: &[[String; 3]],
 ) -> Result<Option<horizon_world::worldgen::overrides::WorldgenOverrides>> {
-    if packs.entries("biomes").next().is_none() && packs.tags("biome_tags").next().is_none() {
-        return Ok(None);
-    }
-    let Ok(bytes) = fs::read(root.join(MODIFIERS)) else {
+    let Some(bytes) = biomes::saved_bytes(root, packs, declared) else {
         return Ok(None);
     };
-    let saved: SavedModifiers =
+    let mut saved: SavedModifiers =
         serde_json::from_slice(&bytes).map_err(|e| format!("{MODIFIERS}: {e}"))?;
     let read = |name: &str| -> Result<BTreeMap<String, String>> {
         match fs::read(root.join(name)) {
@@ -2716,7 +2674,7 @@ pub fn biome_modifiers_over_packs(
     };
     let mut warnings = Vec::new();
     let mut modifiers = Vec::new();
-    for [m, file, text] in &saved.modifiers {
+    for [m, file, text] in saved.modifiers.iter().chain(declared) {
         modifiers.extend(biomes::Modifier::read(m, file, text, &mut warnings)?);
     }
     // What the generator reads without the modifiers over the packs.
@@ -2755,6 +2713,7 @@ pub fn biome_modifiers_over_packs(
         .apply("placed_features", read(PLACED_FEATURES)?)
         .into_keys()
         .collect();
+    carver_registry::refresh(&mut saved, packs)?;
     saved.apply(&mut doc, &modifiers, &biome_tags, &placed, &mut warnings)?;
     for warning in warnings {
         log::warn!("Horizon: biome modifiers over data packs: {warning}");
@@ -2772,8 +2731,11 @@ pub fn biome_modifiers_over_packs(
     Ok(Some(out))
 }
 
+#[path = "mod_content_carvers.rs"]
+mod carver_registry;
+
 #[path = "mod_content_biomes.rs"]
-mod biomes;
+pub mod biomes;
 
 /// The overlay being written: `out` mirrors `base` through links, and a
 /// directory becomes real only when something inside it is written.
@@ -3420,7 +3382,7 @@ pub fn build(
             placed_doc = Some(doc);
         }
     }
-    if !modifiers.is_empty() {
+    if !modifiers.is_empty() || (!mods.is_empty() && base.join(BIOMES).exists()) {
         place_in_biomes(
             base,
             &overlay,

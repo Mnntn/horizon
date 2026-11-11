@@ -130,7 +130,7 @@ pub struct World {
     /// (`ChunkHolder.sectionLightChanged`).
     pub light_log: Option<crate::fast_hash::FxHashMap<(i32, i32), SectionMask>>,
     /// The villager POIs of each section (`PoiManager`'s sections).
-    pub pois: crate::poi_sections::PoiSections<horizon_world::poi::PoiType>,
+    pub pois: crate::poi_sections::PoiSections<horizon_world::poi::PoiIdentity>,
     /// Moving-piston states removed during the last tick; retained until the
     /// final block mesh is visible.
     pub moving_piston_fallback: Vec<([i32; 3], horizon_world::piston_shape::MovingPistonState)>,
@@ -707,6 +707,18 @@ mod tests {
     use crate::chunk::{Chunk, MIN_Y, SECTIONS};
     use horizon_world::registry::BlockStateId;
     use std::sync::Arc;
+
+    #[test]
+    fn block_entity_neighbor_far_read_keeps_chunk_unloaded() {
+        let mut world = World::new(BlockStateId(0), 0);
+        world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        let count = world.chunks.len();
+        assert!(world.loaded(15, 0));
+        assert!(!world.loaded(16, 0));
+        assert_eq!(world.block(16, 64, 0), BlockStateId(0));
+        assert_eq!(world.chunks.len(), count);
+        assert!(!world.loaded(16, 0));
+    }
 
     #[test]
     fn container_limit_index_tracks_load_rollback_removal_and_replacement() {

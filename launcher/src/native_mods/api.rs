@@ -136,8 +136,11 @@ pub(super) fn main_rs(
             .enumerate()
             .flat_map(|(index, manifest)| {
                 super::slots::sites(sites, manifest).map(move |(entry, site)| {
-                    let adapter =
-                        super::sites::adapter(entry.kind, &format!("mod_{index}::{}", entry.with));
+                    let adapter = super::sites::adapter(
+                        entry.kind,
+                        &format!("mod_{index}::{}", entry.with),
+                        site.once,
+                    );
                     format!(
                         "        mod_{index}_internals::raw::{}({:?}, {}, {:?}, {adapter}),\n",
                         site.constructor(),
@@ -257,6 +260,24 @@ impl<'a> Project<'a> {
             mod_id: mod_id(),
             reason,
         })?;
+        for section in ["patch", "replace"] {
+            if cargo.contains_key(section) {
+                return Err(ProjectError::Cargo {
+                    mod_id: mod_id(),
+                    reason: format!("[{section}] is not allowed in a native mod"),
+                });
+            }
+        }
+        for config in [".cargo/config", ".cargo/config.toml"] {
+            if bundle.dir.join(config).exists() {
+                return Err(ProjectError::Cargo {
+                    mod_id: mod_id(),
+                    reason: format!(
+                        "{config} is not allowed in a native mod; source replacement is refused"
+                    ),
+                });
+            }
+        }
         let package = cargo
             .get("package")
             .and_then(|p| p.get("name"))
@@ -284,6 +305,51 @@ impl<'a> Project<'a> {
                     .into_iter()
                     .flatten()
                 {
+                    let package = value
+                        .get("package")
+                        .and_then(toml::Value::as_str)
+                        .unwrap_or(key);
+                    if PACKAGES.iter().any(|(sdk, _)| *sdk == package) {
+                        for selector in [
+                            "registry",
+                            "registry-index",
+                            "branch",
+                            "tag",
+                            "workspace",
+                            "path",
+                        ] {
+                            if value.get(selector).is_some() {
+                                return Err(ProjectError::Cargo {
+                                    mod_id: mod_id(),
+                                    reason: format!(
+                                        "{key}: {selector} is not a launcher-owned SDK source"
+                                    ),
+                                });
+                            }
+                        }
+                        if value.get("git").is_some()
+                            && (value.get("git").and_then(toml::Value::as_str)
+                                != Some(horizon_addresses::NATIVE_MOD_SDK_SOURCE)
+                                || value.get("rev").and_then(toml::Value::as_str)
+                                    != Some(bundle.native().horizon.as_str()))
+                        {
+                            return Err(ProjectError::Cargo { mod_id: mod_id(), reason: format!("{key}: SDK git dependency must name the exact pinned Horizon repository and revision") });
+                        }
+                    } else {
+                        for selector in [
+                            "git",
+                            "registry",
+                            "registry-index",
+                            "branch",
+                            "rev",
+                            "tag",
+                            "workspace",
+                        ] {
+                            if value.get(selector).is_some() {
+                                return Err(ProjectError::Cargo { mod_id: mod_id(), reason: format!("{key}: {selector} source is refused; use crates.io with Cargo.lock") });
+                            }
+                        }
+                    }
                     if value
                         .get("package")
                         .and_then(toml::Value::as_str)
@@ -751,10 +817,6 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(index, kind)| Inject {
-                local: None,
-                local_type: None,
-                position: None,
-                expr: None,
                 id: format!("listen_{index}"),
                 at: "game::Game<'_>::tick".into(),
                 kind,
@@ -769,7 +831,6 @@ mod tests {
             .collect();
         let listed = [super::super::inject::ListedPoint {
             name: "tick".into(),
-            private: false,
             record_name: None,
             target: "game::Game::tick".into(),
             raw: true,

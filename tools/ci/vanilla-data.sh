@@ -22,6 +22,13 @@ mkdir -p .local "$shared/prepared"
 sha256() { if command -v shasum > /dev/null; then shasum -a 256; else sha256sum; fi; }
 key=${HORIZON_PREPARE_KEY:-$(git ls-files -s crates/horizon-prepare mods/horizon/src/test/java research-lock.json tools/ci/vanilla-data.sh tools/ci/seed_prepared_extras.py tools/prepare_output.py | sha256 | cut -c1-16)}
 prepared="$shared/prepared/$key"
+# .entries stores output names only, not a digest of the preparation that made them.
+# The directory name is the expected lookup key, not independent found-key evidence.
+export HORIZON_DIAGNOSTIC_EXPECTED_KEY="$key"
+export HORIZON_DIAGNOSTIC_CACHE_STATE=missing-entry-list
+if [ -f "$prepared/.entries" ]; then
+  export HORIZON_DIAGNOSTIC_CACHE_STATE=missing-horizon-client
+fi
 report_prepared() {
   echo "prepared cache footprint KiB: $(du -sk "$prepared" | cut -f1)"
 }
@@ -90,17 +97,19 @@ if [ ! -f "$prepared/.entries" ]; then
   before=$(ls -1A .local | LC_ALL=C sort)
   started=$SECONDS
   if [ "$dyna" = true ]; then
-    cargo build --release --locked -p horizon-prepare >"$RUNNER_TEMP/prepare-build.log" 2>&1 || { echo "::error::preparer build failed"; exit 1; }
+    python3 tools/ci/preparation_step.py preparer-build "$RUNNER_TEMP/prepare-build.log" cargo build --release --locked -p horizon-prepare
   else
     cargo build --release --locked -p horizon-prepare
   fi
-  if ! "${CARGO_TARGET_DIR:-target}/release/horizon-prepare" --root "$PWD" > "$RUNNER_TEMP/prepare.log" 2>&1; then
-    if [ "$dyna" = true ]; then echo "::error::preparation failed; private log retained in runner temp"; else tail -40 "$RUNNER_TEMP/prepare.log"; fi
+  if python3 tools/ci/preparation_step.py resource-export "$RUNNER_TEMP/prepare.log" "${CARGO_TARGET_DIR:-target}/release/horizon-prepare" --root "$PWD"; then
+    :
+  else
+    status=$?
     # Nothing of a failed preparation stays in .local/: the next job prepares again.
     LC_ALL=C comm -13 <(echo "$before") <(ls -1A .local | LC_ALL=C sort) |
       while read -r name; do rm -rf ".local/${name:?}"; done
     rm -rf "$prepared"
-    exit 1
+    exit "$status"
   fi
   LC_ALL=C comm -13 <(echo "$before") <(ls -1A .local | LC_ALL=C sort) > "$RUNNER_TEMP/prepared-entries"
   while read -r name; do mv ".local/$name" "$prepared/$name"; done < "$RUNNER_TEMP/prepared-entries"
@@ -110,7 +119,7 @@ if [ ! -f "$prepared/.entries" ]; then
       python3 tools/prepare_output.py digest "$prepared/horizon-client/$version" > "$HORIZON_PREPARE_EXPORT_DIGEST" 2> "$RUNNER_TEMP/export-digest.log" || { echo "::error::export digest unavailable"; exit 1; }
     fi
     # Only sounds, languages and their metadata may come from the shared preparation.
-    python3 -m tools.ci.seed_prepared_extras "$source/horizon-client/$version" "$prepared/horizon-client/$version/" > "$RUNNER_TEMP/seed-extras.log" 2>&1 || { echo "::error::seeding launcher extras failed"; exit 1; }
+    python3 tools/ci/preparation_step.py seed-extras "$RUNNER_TEMP/seed-extras.log" python3 -m tools.ci.seed_prepared_extras "$source/horizon-client/$version" "$prepared/horizon-client/$version/"
   fi
   mv "$RUNNER_TEMP/prepared-entries" "$prepared/.entries"
   if [ "$dyna" != true ]; then echo "Prepared in $((SECONDS - started)) s: $(tr '\n' ' ' < "$prepared/.entries")"; fi

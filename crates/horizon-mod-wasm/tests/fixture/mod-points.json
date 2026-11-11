@@ -1,0 +1,91 @@
+{
+  "crate": "wasm_fixture",
+  "table": "__horizon_points",
+  "opted_out": [],
+  "points": [
+    {
+      "name": "matrix_mirrors",
+      "target": "wasm_fixture::matrix::mirrors",
+      "hash": "cdf81bd8a6caa50d",
+      "signature": "wasm_fixture::matrix::mirrors: fnf(args:&mutmod_points::ListenerFixtureMirrorsArgs) []",
+      "raw": true,
+      "at_return": false,
+      "api_refusal": "argument 1 `args` (`&mutmod_points::ListenerFixtureMirrorsArgs`) has no API type yet",
+      "returns": "none",
+      "host": "none",
+      "return_ty": "()",
+      "listener": "crate::matrix::__MatrixMirrorsListener",
+      "return_listener": "crate::matrix::__MatrixMirrorsReturnListener"
+    },
+    {
+      "name": "matrix_sum_return",
+      "target": "wasm_fixture::matrix::sum_return",
+      "hash": "1367fb101d8a9105",
+      "signature": "wasm_fixture::matrix::sum_return: fnf(args:&mutmod_points::ListenerFixtureSumArgs) []",
+      "raw": true,
+      "at_return": false,
+      "api_refusal": "argument 1 `args` (`&mutmod_points::ListenerFixtureSumArgs`) has no API type yet",
+      "returns": "none",
+      "host": "none",
+      "return_ty": "()",
+      "listener": "crate::matrix::__MatrixSumReturnListener",
+      "return_listener": "crate::matrix::__MatrixSumReturnReturnListener"
+    },
+    {
+      "name": "on_tick",
+      "target": "wasm_fixture::on_tick",
+      "hash": "fc2b94534dd50bb7",
+      "signature": "wasm_fixture::on_tick: fnf(_:mod_api::HostSide<'_>,args:&mutmod_points::TickArgs) []",
+      "raw": true,
+      "at_return": false,
+      "api_refusal": "argument 1 is a pattern, not a name",
+      "returns": "none",
+      "host": "none",
+      "return_ty": "()",
+      "listener": "crate::__OnTickListener",
+      "return_listener": "crate::__OnTickReturnListener"
+    },
+    {
+      "name": "replace_own_average",
+      "target": "wasm_fixture::replace::own_average",
+      "hash": "3e519191499ad68e",
+      "signature": "wasm_fixture::replace::own_average: fnf(args:&mutmod_points::GameBeaconAverageArgs)->u32 []",
+      "raw": true,
+      "at_return": false,
+      "api_refusal": "argument 1 `args` (`&mutmod_points::GameBeaconAverageArgs`) has no API type yet",
+      "returns": "none",
+      "host": "none",
+      "return_ty": "u32",
+      "listener": "crate::replace::__ReplaceOwnAverageListener",
+      "return_listener": "crate::replace::__ReplaceOwnAverageReturnListener"
+    },
+    {
+      "name": "shutdown_on_shutdown",
+      "target": "wasm_fixture::shutdown::on_shutdown",
+      "hash": "7b2ca8012ec6361a",
+      "signature": "wasm_fixture::shutdown::on_shutdown: fnf(args:&mutmod_points::GameServerLifecycleRememberShutdownArgs) []",
+      "raw": true,
+      "at_return": false,
+      "api_refusal": "argument 1 `args` (`&mutmod_points::GameServerLifecycleRememberShutdownArgs`) has no API type yet",
+      "returns": "none",
+      "host": "none",
+      "return_ty": "()",
+      "listener": "crate::shutdown::__ShutdownOnShutdownListener",
+      "return_listener": "crate::shutdown::__ShutdownOnShutdownReturnListener"
+    },
+    {
+      "name": "turn_turn_angle",
+      "target": "wasm_fixture::turn::turn_angle",
+      "hash": "b04f5cf5237d510f",
+      "signature": "wasm_fixture::turn::turn_angle: fnf(args:&mutmod_points::GameCommandsWrapDegreesArgs) []",
+      "raw": true,
+      "at_return": false,
+      "api_refusal": "argument 1 `args` (`&mutmod_points::GameCommandsWrapDegreesArgs`) has no API type yet",
+      "returns": "none",
+      "host": "none",
+      "return_ty": "()",
+      "listener": "crate::turn::__TurnTurnAngleListener",
+      "return_listener": "crate::turn::__TurnTurnAngleReturnListener"
+    }
+  ]
+}

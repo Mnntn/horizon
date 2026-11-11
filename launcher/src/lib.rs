@@ -8,6 +8,8 @@ pub mod data_location;
 pub mod datapacks;
 pub mod desktop;
 pub mod desktop_seams;
+pub mod developer_install;
+pub mod developer_offline;
 pub mod export;
 #[cfg(unix)]
 pub mod game_app;
@@ -16,6 +18,7 @@ pub mod github;
 pub mod github_mods;
 pub mod heads;
 pub mod i18n;
+pub mod identity;
 pub mod import;
 #[cfg(windows)]
 pub mod installer;

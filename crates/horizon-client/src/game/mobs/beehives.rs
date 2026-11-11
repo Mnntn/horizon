@@ -1,7 +1,7 @@
 //! Beehives and bee nests in the game (`crate::beehive` holds their logic):
 //! their server tick, bees going in, and the bees let out, angry, when a
 //! player breaks the hive or fire reaches it.
-use super::Game;
+use super::{Game, item_abilities::ability};
 use horizon_client::{
     Result,
     beehive::{self, Beehive, BeehiveExt, HiveHost, Release},
@@ -330,7 +330,7 @@ impl Game<'_> {
     /// smokes the hive, the bees come out angry. True when it took the click.
     pub(super) fn use_beehive(&mut self, pos: [i32; 3], held: Option<&ItemStack>) -> Result<bool> {
         let Some(held) = held else { return Ok(false) };
-        let shears = &*held.item == "minecraft:shears";
+        let shears = self.stack_shears(held, ability::SHEARS_HARVEST);
         if !shears && &*held.item != "minecraft:glass_bottle" {
             return Ok(false);
         }

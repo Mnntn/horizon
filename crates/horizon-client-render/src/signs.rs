@@ -535,6 +535,14 @@ mod tests {
             editor_sprite("hanging_signs", "ruby:elm"),
             "ruby:gui/hanging_signs/elm"
         );
+        assert_eq!(
+            editor_sprite("signs", "farmersdelight:canvas"),
+            "farmersdelight:gui/signs/canvas"
+        );
+        assert_eq!(
+            editor_sprite("hanging_signs", "farmersdelight:canvas"),
+            "farmersdelight:gui/hanging_signs/canvas"
+        );
         assert_eq!(SignText::default().dark_color(), 0);
         let red = SignText {
             color: 14,

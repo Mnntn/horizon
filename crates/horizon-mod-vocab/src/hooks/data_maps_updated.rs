@@ -11,8 +11,8 @@ pub trait Hooks {
     /// (`native_data_map_types`) from the world's data packs and mods' files.
     /// Fires once for each registry that has a type, right after
     /// `tags_updated`'s `ServerDataLoad` (tags are bound), on a world's first open
-    /// and after every `/reload`. `native_data_map` and `native_data_map_entries`
-    /// read the new values.
+    /// and after every `/reload`. `ItemKey::data` and `BlockKey::data` read the
+    /// new values.
     ///
     /// `ClientSync`: data maps are server-side and not synced to clients yet, so
     /// this cause does not fire; it comes with the sync.

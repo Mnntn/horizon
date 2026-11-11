@@ -1269,6 +1269,58 @@ impl Game<'_> {
         Some(self.online_player_record(player)?.name.clone())
     }
 
+    /// The dimension key of an online player (`ServerPlayer.level().dimension()`):
+    /// the dimension the player is placed in.
+    pub(super) fn player_dimension_key(&self, player: PlayerRef) -> Option<mod_api::DimensionKey> {
+        let epoch = self.native_lifecycle.epoch()?;
+        if epoch != player.fields().entity.epoch() {
+            return None;
+        }
+        if !self.is_logical_server() {
+            return (self.local_player()? == player).then(|| self.native_level_key());
+        }
+        if self.native_acting_player() == Some(player) {
+            let dim = match self.lan_acting {
+                Some(conn) => {
+                    let g = self.command_guest(conn)?;
+                    Dim::from_id(&g.dimension).key()
+                }
+                None => self.dim.key(),
+            };
+            return Some(dim);
+        }
+        if let Some(guest) = self.online_player_record(player) {
+            return Some(Dim::from_id(&guest.dimension).key());
+        }
+        if self.serving.is_some()
+            && self.player(player.uuid()) == Some(player)
+            && self
+                .level
+                .player_uuid
+                .map(horizon_client::lan::playerdata::ints_uuid)
+                == Some(player.uuid())
+        {
+            return Some(self.dim.key());
+        }
+        None
+    }
+
+    /// The level the online player is in (`ServerPlayer.level`): on an integrated
+    /// server or dedicated server, the player's current dimension; on a client,
+    /// the client's level. None for a stale or unavailable player.
+    pub(super) fn player_level(&self, player: PlayerRef) -> Option<LevelRef> {
+        let dim = self.player_dimension_key(player)?;
+        Some(LevelRef::new(player.fields().entity.epoch(), dim))
+    }
+
+    /// The dimension the online player is in (`ServerPlayer.level().dimension()`):
+    /// `minecraft:overworld`, `minecraft:the_nether`, ... None for a stale
+    /// or unavailable player.
+    pub(super) fn player_dimension(&self, player: PlayerRef) -> Option<Identifier> {
+        let level = self.player_level(player)?;
+        Identifier::parse(level.dimension_id()).ok()
+    }
+
     /// The IP address the player connects from, without the port (behind a
     /// Velocity proxy, the address the proxy forwards). Displaced connected
     /// players keep their address; an acting player with no known connection
@@ -1636,7 +1688,7 @@ impl Game<'_> {
             return;
         }
         let plain = line.plain();
-        if self.options.dedicated.is_some() {
+        if self.is_dedicated_server() {
             super::dedicated::log("INFO", &plain);
         } else {
             log::info!("{plain}");
@@ -1655,7 +1707,7 @@ impl Game<'_> {
     /// about (empty and 0 for no one), `message` is the line (`§` codes colour it).
     /// Only on a dedicated server; false elsewhere and for an empty message.
     pub(super) fn native_server_event(&self, name: &str, uuid: u128, message: &str) -> bool {
-        if self.options.dedicated.is_none() || message.trim().is_empty() {
+        if !self.is_dedicated_server() || message.trim().is_empty() {
             return false;
         }
         super::dedicated::events::record("announce", name, uuid, json!({ "message": message }));
@@ -2313,6 +2365,30 @@ impl Drop for Acting {
 mod tests {
     use super::*;
     use horizon_client::items::ItemStack;
+
+    /// A mod's `announce` reaches the dedicated server's event stream and nothing else's.
+    /// The integrated server thread keeps the launch configuration (`options.dedicated`) too,
+    /// so it cannot be what decides.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn server_events_are_posted_only_on_the_dedicated_role() {
+        use crate::game::execution_role::ExecutionRole;
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
+        game.options.dedicated = Some(Vec::new());
+        for (role, posted) in [
+            (ExecutionRole::DedicatedServer, true),
+            (ExecutionRole::IntegratedServer, false),
+            (ExecutionRole::Client, false),
+        ] {
+            game.options.execution_role = role;
+            assert_eq!(
+                game.native_server_event("Alex", 7, "hello"),
+                posted,
+                "{role:?}"
+            );
+        }
+    }
 
     fn with_command_sources(test: impl FnOnce(&mut Game<'_>)) {
         use horizon_client::{

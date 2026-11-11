@@ -120,6 +120,16 @@ pub(super) fn from_mixins(output: &str, mods: &[Bundle]) -> Option<LeftOut> {
         .or_else(|| value["file"].as_str().and_then(super::mod_id_from_file))
         .and_then(|id| mods.iter().find(|b| b.manifest.id == id))
         .or_else(|| {
+            let id = value["injection_id"].as_str()?;
+            let mut declaring = mods
+                .iter()
+                .filter(|bundle| bundle.native().mixin.iter().any(|row| row.id == id));
+            match (declaring.next(), declaring.next()) {
+                (Some(bundle), None) => Some(bundle),
+                _ => None,
+            }
+        })
+        .or_else(|| {
             let name = message
                 .split("support module '")
                 .nth(1)?

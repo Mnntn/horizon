@@ -4,6 +4,7 @@
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
 pub mod inject;
 mod jar;
+pub mod mixin;
 mod wasm;
 pub use jar::{
     JarConflict, JarInputsError, JarRef, JarRequirement, MissingJar, collect_jar_requirements,
@@ -83,8 +84,8 @@ pub struct Manifest {
     /// Game internals used by this mod, fingerprinted against its pinned build.
     #[serde(default)]
     pub internals: Vec<Internal>,
-    /// Unified listeners; routing and staging are separate from manifest parsing.
-    #[serde(default)]
+    /// Listeners at compiled slots; they never compile game code.
+    #[serde(default, deserialize_with = "inject::rows")]
     pub inject: Vec<inject::Inject>,
 }
 
@@ -109,8 +110,18 @@ pub struct Native {
     pub game: String,
     pub horizon: String,
     pub mixins: String,
+    /// Source-level edits of game functions, forwarded as horizon-mixins' `[[injection]]`.
+    /// Only the tables of `[native]` compile game code.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mixin: Vec<mixin::Mixin>,
     #[serde(default)]
     pub module: Vec<Module>,
+    /// Accessor and invoker bridges, forwarded as horizon-mixins' `[[bridge]]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bridge: Vec<mixin::Forwarded>,
+    /// State fields added to game types, forwarded as horizon-mixins' `[[state]]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub state: Vec<mixin::Forwarded>,
 }
 
 /// One declared game internal, as listed in the pinned game's `internals.json`.
@@ -227,27 +238,46 @@ impl Internal {
 }
 
 impl Manifest {
+    /// The declared dependency whose normalized crate namespace owns a mod-point target.
+    /// Targets outside these namespaces belong to the engine catalog.
+    pub fn mod_point_dependency(&self, at: &str) -> Option<&str> {
+        self.dependencies
+            .keys()
+            .find(|id| at.split("::").next() == Some(id.replace('-', "_").as_str()))
+            .map(String::as_str)
+    }
+
     pub fn parse(text: &str) -> Result<Self, String> {
-        let m: Manifest = toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
-        if m.wasm.is_some()
-            && let Some(field) = m.inject.iter().find(|i| i.kind == inject::Kind::Field)
-        {
-            return Err(inject::InjectError::NoSlot {
-                id: format!("{}:{}", m.id, field.id),
-                reason: inject::NoSlotReason::FieldRequiresSource,
-                declaration: format!("slots/{}.txt: type {}", m.id, field.at),
+        let both = || {
+            format!(
+                "{MANIFEST}: a mod is [native] or [wasm], not both; only [native] tables \
+                 compile game code, so a wasm mod has no mixin, bridge, state or module"
+            )
+        };
+        // A wasm manifest whose only fault is its `[native]` table is told that, not which
+        // pin a half-written `[native]` lacks. Any other error stays the one reported.
+        let m: Manifest = toml::from_str(text).map_err(|e| {
+            let native_alone = toml::from_str::<toml::Table>(text).is_ok_and(|mut table| {
+                table.contains_key("wasm")
+                    && table.remove("native").is_some()
+                    && table.try_into::<Manifest>().is_ok()
+            });
+            if native_alone {
+                both()
+            } else {
+                format!("{MANIFEST}: {e}")
             }
-            .to_string());
-        }
+        })?;
         Internal::check_all(&m.internals)?;
         if m.wasm.is_some()
             && m.internals.is_empty()
-            && m.inject
-                .iter()
-                .any(|i| i.access == inject::Access::Internals)
+            && m.inject.iter().any(|i| {
+                i.access == inject::Access::Internals && m.mod_point_dependency(&i.at).is_none()
+            })
         {
             return Err(format!(
-                "{MANIFEST}: a wasm internals listener needs declared internals"
+                "{MANIFEST}: a wasm internals listener needs declared internals, or a declared \
+                 dependency whose mod id, with `-` as `_`, starts its `at`"
             ));
         }
         if !m.internals.is_empty() && m.native.is_none() && m.wasm.is_none() {
@@ -273,15 +303,29 @@ impl Manifest {
             }
         }
         if m.native.is_some() && m.wasm.is_some() {
-            return Err(format!("{MANIFEST}: a mod is [native] or [wasm], not both"));
+            return Err(both());
         }
         inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
             .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(native) = &m.native {
+            // horizon-mixins keeps one id space per mod, which injects share.
             let mut ids: std::collections::HashSet<_> =
                 m.inject.iter().map(|entry| &entry.id).collect();
+            mixin::Mixin::check_all(&native.mixin, &m).map_err(|e| format!("{MANIFEST}: {e}"))?;
+            for id in native
+                .mixin
+                .iter()
+                .map(|entry| &entry.id)
+                .chain(native.bridge.iter().chain(&native.state).map(|row| &row.id))
+            {
+                if id.trim().is_empty() || !ids.insert(id) {
+                    return Err(format!(
+                        "{MANIFEST}: empty or duplicate mixin, bridge or state id"
+                    ));
+                }
+            }
             for module in &native.module {
-                if module.id.is_empty() || !ids.insert(&module.id) {
+                if module.id.trim().is_empty() || !ids.insert(&module.id) {
                     return Err(format!("{MANIFEST}: empty or duplicate module id"));
                 }
                 if !plain_path(&module.file) {
@@ -375,6 +419,7 @@ pub fn source_file(name: &str) -> bool {
         return false;
     }
     name == "Cargo.toml"
+        || name == "Cargo.lock"
         || name == "build.rs"
         || (name.starts_with("src/") && (name.ends_with(".rs") || name.ends_with(".toml")))
         || (!name.contains('/')
@@ -398,7 +443,7 @@ pub struct Package {
     pub layouts: crate::layouts::Layouts,
     /// A wasm mod's own points (#2339), as its build listed them; a native mod's are listed from
     /// its source when it is built.
-    pub points: Option<inject::mod_points::Catalog>,
+    pub points: Option<point_shape::catalog::Catalog>,
 }
 impl Package {
     /// The kind of this validated package, independent of its install folder.
@@ -1381,6 +1426,8 @@ capabilities = ["registries"]
         )
         .unwrap();
         std::fs::write(root.join("src/lib.rs"), "pub fn hooks() {}\n").unwrap();
+        let registry_lock = "version = 4\n[[package]]\nname = 'itoa'\nversion = '1.0.18'\n";
+        std::fs::write(root.join("Cargo.lock"), registry_lock).unwrap();
         std::fs::write(root.join(".git/hooks/pre-commit"), "#!/bin/sh\n").unwrap();
         std::fs::write(root.join("target/generated/bad.rs"), "#!/bin/sh\n").unwrap();
         let bytes = Package::pack_directory(&root).unwrap();
@@ -1388,6 +1435,10 @@ capabilities = ["registries"]
         assert_eq!(Package::read_zip(&mut zip).unwrap().manifest.id, "ruby");
         assert!(zip.by_name("Cargo.toml").is_ok());
         assert!(zip.by_name("src/lib.rs").is_ok());
+        let mut packed_lock = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("Cargo.lock").unwrap(), &mut packed_lock)
+            .unwrap();
+        assert_eq!(packed_lock, registry_lock);
         assert!(zip.by_name(".git/hooks/pre-commit").is_err());
         assert!(zip.by_name("target/generated/bad.rs").is_err());
         std::fs::write(root.join("src/lib.rs"), b"MZ executable").unwrap();
@@ -1500,7 +1551,7 @@ issues = \"http://example.org/issues\"
     }
 
     #[test]
-    fn wasm_packages_refuse_unknown_native_fields_even_with_unified_injects() {
+    fn wasm_packages_refuse_native_tables_even_with_injects() {
         use sha2::{Digest, Sha512};
         use std::io::Write;
         let module = b"\0asm\x01\0\0\0";
@@ -1513,7 +1564,7 @@ issues = \"http://example.org/issues\"
         assert!(
             Manifest::parse(&format!("{base}{missing_raw}"))
                 .unwrap_err()
-                .contains("unknown field `injection`")
+                .contains("a mod is [native] or [wasm], not both")
         );
         for unified in [
             "",
@@ -1531,8 +1582,11 @@ issues = \"http://example.org/issues\"
             let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
             let error = Package::read_zip(&mut archive)
                 .err()
-                .expect("unknown native field refused before package classification");
-            assert!(error.contains("unknown field `injection`"), "{error}");
+                .expect("native tables refused before package classification");
+            assert!(
+                error.contains("a mod is [native] or [wasm], not both"),
+                "{error}"
+            );
         }
     }
 
@@ -1679,6 +1733,16 @@ issues = \"http://example.org/issues\"
                 "{wrong}"
             );
         }
+        let mod_injection = injection.replace("Game::break_block", "chem_lib::transfer");
+        Manifest::parse(&format!(
+            "{wasm}{mod_injection}[dependencies]\nchem_lib='^1.0'\n"
+        ))
+        .unwrap();
+        assert!(
+            Manifest::parse(&format!("{wasm}{mod_injection}"))
+                .unwrap_err()
+                .contains("needs declared internals")
+        );
         assert!(
             Manifest::parse(&format!("{wasm}{injection}"))
                 .unwrap_err()

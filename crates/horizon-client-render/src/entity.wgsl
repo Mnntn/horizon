@@ -37,6 +37,8 @@ struct Globals {
     hdr_light: vec4<f32>,
     hdr_settings: vec4<f32>,
     hdr_shares: vec4<f32>,
+    // The eye fog is measured from, camera-relative: zero but in a mod's world view.
+    view_origin: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var atlas: texture_2d<f32>;
@@ -165,8 +167,9 @@ fn entity_vertex(position: vec3<f32>, uv: vec2<f32>,
     out.back_color = back;
     out.overlay_color = overlay_texel(overlay);
     // Sky geometry (clouds, celestial bodies) is exempt from render-distance fog.
-    out.fog_distance.x = select(length(position), 0.0, overlay >= 2u && overlay <= 4u);
-    out.fog_distance.y = select(max(length(position.xz), abs(position.y)), 0.0, overlay >= 2u && overlay <= 4u);
+    let eye = position - globals.view_origin.xyz;
+    out.fog_distance.x = select(length(eye), 0.0, overlay >= 2u && overlay <= 4u);
+    out.fog_distance.y = select(max(length(eye.xz), abs(eye.y)), 0.0, overlay >= 2u && overlay <= 4u);
     out.overlay = overlay;
     out.glint_uv = vec2(0.0);
     if overlay == 4u { out.fog_distance.x = length(position); }

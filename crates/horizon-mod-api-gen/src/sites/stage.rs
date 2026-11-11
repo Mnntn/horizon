@@ -11,10 +11,7 @@ pub fn tracked(root: &Path) -> Result<Vec<PathBuf>, Error> {
             .into_iter()
             .map(|file| file.path),
     );
-    let private = root.join(super::source::FILE);
-    if private.exists() {
-        paths.push(private);
-    }
+
     Ok(paths)
 }
 
@@ -49,16 +46,10 @@ fn files(root: &Path, declarations: &[Declaration]) -> Result<Vec<points::GameFi
 /// Generate site IDs independently of the raw types, keeping the points crate below gameplay.
 pub fn ids(root: &Path) -> Result<String, Error> {
     let declarations = slots(&root.join(DIRECTORY))?.calls;
-    let mut names = declarations
+    let names = declarations
         .iter()
         .map(|d| format_ident!("{}", super::rewrite::name(d, d.ordinal.unwrap_or(0))))
         .collect::<Vec<_>>();
-    names.extend(
-        super::source::read(root)
-            .map_err(Cause::Source)?
-            .iter()
-            .map(|site| format_ident!("{}", site.name)),
-    );
     Ok(quote! {
         #[doc(hidden)] #[repr(usize)] #[derive(Clone, Copy, Debug, PartialEq, Eq)] #[non_exhaustive]
         pub enum SiteId { #(#names,)* __Count }
@@ -69,16 +60,7 @@ pub fn ids(root: &Path) -> Result<String, Error> {
 
 /// Validate the entire union before writing any expression rewrite. Widening precedes this pass.
 pub fn stage(root: &Path, entries: &[Internal]) -> Result<Vec<Site>, Error> {
-    let declarations = slots(&root.join(DIRECTORY))?.calls;
-    stage_declarations(root, entries, &declarations, false)
-}
-
-pub(super) fn stage_declarations(
-    root: &Path,
-    entries: &[Internal],
-    declarations: &[Declaration],
-    private: bool,
-) -> Result<Vec<Site>, Error> {
+    let declarations = &slots(&root.join(DIRECTORY))?.calls;
     if declarations.is_empty() {
         return Ok(Vec::new());
     }
@@ -105,7 +87,7 @@ pub(super) fn stage_declarations(
         }
         let source = fs::read_to_string(&file.path)?;
         let source = crate::game_modules::expand(&file.path, &source).map_err(Cause::Source)?;
-        let (rewritten, found) = rewrite(&source, &file.module, entries, &selected, private)?;
+        let (rewritten, found) = rewrite(&source, &file.module, entries, &selected)?;
         if found.is_empty() {
             continue;
         }
@@ -121,9 +103,7 @@ pub(super) fn stage_declarations(
     }
     for d in declarations {
         if !sites.iter().any(|s| {
-            s.local == d.local
-                && s.expression.as_ref().map(|e| &e.ty) == d.expression.as_ref().map(|e| &e.ty)
-                && s.target == d.target
+            s.target == d.target
                 && s.selector == d.selector
                 && Some(s.ordinal) == d.ordinal.or(Some(0))
         }) {

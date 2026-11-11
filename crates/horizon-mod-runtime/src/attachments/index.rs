@@ -28,6 +28,71 @@ pub struct AttachmentRow<H> {
     generation: u64,
 }
 
+/// Dense rows and residency probes captured as one immutable bucket version.
+#[derive(Clone)]
+pub struct AttachmentSnapshot<H> {
+    rows: Vec<AttachmentRow<H>>,
+    slots: HashMap<H, usize>,
+}
+impl<H> Default for AttachmentSnapshot<H> {
+    fn default() -> Self {
+        Self {
+            rows: Vec::new(),
+            slots: HashMap::new(),
+        }
+    }
+}
+impl<H> std::ops::Deref for AttachmentSnapshot<H> {
+    type Target = Vec<AttachmentRow<H>>;
+    fn deref(&self) -> &Self::Target {
+        &self.rows
+    }
+}
+impl<H: Copy + Eq + Hash> AttachmentSnapshot<H> {
+    /// Build a captured bucket from transferred rows, preserving their order.
+    ///
+    /// rows must have distinct holders.
+    pub fn from_rows(rows: Vec<AttachmentRow<H>>) -> Self {
+        let mut snapshot = Self::default();
+        for row in rows {
+            snapshot.push(row);
+        }
+        snapshot
+    }
+
+    fn push(&mut self, row: AttachmentRow<H>) {
+        let previous = self.slots.insert(row.holder, self.rows.len());
+        debug_assert!(previous.is_none(), "duplicate attachment residency");
+        self.rows.push(row);
+    }
+    fn replace(&mut self, slot: usize, row: AttachmentRow<H>) -> AttachmentRow<H> {
+        let old = std::mem::replace(&mut self.rows[slot], row);
+        self.slots.remove(&old.holder);
+        let row = &self.rows[slot];
+        self.slots.insert(row.holder, slot);
+        old
+    }
+    fn swap_remove(&mut self, slot: usize) -> AttachmentRow<H> {
+        let old = self.rows.swap_remove(slot);
+        self.slots.remove(&old.holder);
+        if let Some(row) = self.rows.get(slot) {
+            self.slots.insert(row.holder, slot);
+        }
+        reclaim_sparse_map(&mut self.slots);
+        old
+    }
+    /// Probe captured membership by holder in expected O(1) time.
+    pub fn slot_for(&self, holder: H) -> Option<usize> {
+        self.slots.get(&holder).copied()
+    }
+
+    /// Probe captured membership using the existing residency token.
+    pub fn slot_of(&self, owner: &AttachmentOwner<H>) -> Option<usize> {
+        self.slot_for(owner.holder)
+            .filter(|&slot| self.rows[slot].generation == owner.generation)
+    }
+}
+
 /// Authority to publish one registration's changes. Cloning or dropping this token has
 /// no membership effect. Re-registering the holder invalidates all earlier tokens.
 #[derive(Clone)]
@@ -136,7 +201,7 @@ fn reclaim_sparse_map<K: Eq + Hash, V>(map: &mut HashMap<K, V>) {
 /// A dimension's loaded attachment memberships, independent of holder storage.
 ///
 /// Snapshots clone one Arc, and borrowed row iteration needs no locks or allocations.
-/// Mutation copies a bucket's row vector only when a snapshot retains that version;
+/// Mutation copies a bucket's rows and probe map only when a snapshot retains that version;
 /// entries themselves remain shared. With no retained version, updates are in place.
 /// All key/holder lookups are expected O(1). An owner's key-to-slot map is the only
 /// reverse index; unregistration visits only that holder's keys, not all types.
@@ -150,9 +215,9 @@ fn reclaim_sparse_map<K: Eq + Hash, V>(map: &mut HashMap<K, V>) {
 /// holders must supply a defined registration order rather than HashMap iteration.
 #[non_exhaustive]
 pub struct AttachmentIndex<H> {
-    buckets: HashMap<BucketKey, Arc<Vec<AttachmentRow<H>>>>,
+    buckets: HashMap<BucketKey, Arc<AttachmentSnapshot<H>>>,
     owners: HashMap<H, Owner>,
-    empty: Arc<Vec<AttachmentRow<H>>>,
+    empty: Arc<AttachmentSnapshot<H>>,
     #[cfg(feature = "test-work-count")]
     work: AtomicU64,
 }
@@ -162,7 +227,7 @@ impl<H> Default for AttachmentIndex<H> {
         Self {
             buckets: HashMap::new(),
             owners: HashMap::new(),
-            empty: Arc::new(Vec::new()),
+            empty: Arc::new(AttachmentSnapshot::default()),
             #[cfg(feature = "test-work-count")]
             work: AtomicU64::new(0),
         }
@@ -228,7 +293,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
 
     /// Capture current membership and values. Missing keys share the same empty Arc;
     /// acquiring an empty snapshot neither allocates nor registers the key.
-    pub fn snapshot(&self, key: &AttachmentKey) -> Arc<Vec<AttachmentRow<H>>> {
+    pub fn snapshot(&self, key: &AttachmentKey) -> Arc<AttachmentSnapshot<H>> {
         self.record_work();
         self.buckets
             .get(key as &dyn Lookup)
@@ -238,7 +303,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
 
     /// Capture a bucket by UTF-8 names without allocating UTF-16 lookup keys.
     /// Both present and absent types use expected O(1) lookup, with no full scan.
-    pub fn snapshot_named(&self, namespace: &str, name: &str) -> Arc<Vec<AttachmentRow<H>>> {
+    pub fn snapshot_named(&self, namespace: &str, name: &str) -> Arc<AttachmentSnapshot<H>> {
         self.record_work();
         self.buckets
             .get(&Named(namespace, name) as &dyn Lookup)
@@ -299,7 +364,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
             if !Arc::ptr_eq(&rows[slot].entry, &row.entry)
                 || rows[slot].generation != row.generation
             {
-                let old = std::mem::replace(&mut Arc::make_mut(rows)[slot], row);
+                let old = Arc::make_mut(rows).replace(slot, row);
                 change.retire(old.entry);
             }
         } else {
@@ -385,7 +450,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
             self.buckets.remove(key as &dyn Lookup);
             reclaim_sparse_map(&mut self.buckets);
         } else if rows.len() < rows.capacity() / 4 {
-            rows.shrink_to_fit();
+            rows.rows.shrink_to_fit();
         }
         retired
     }
@@ -433,6 +498,75 @@ mod tests {
         rows.iter()
             .map(|row| (row.holder, *row.entry.read(&VALUE).unwrap()))
             .collect()
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "duplicate attachment residency")]
+    fn snapshot_from_rows_refuses_duplicate_residencies() {
+        let row = AttachmentOwner::from_parts(1u32, 7).into_row(entry(7));
+        AttachmentSnapshot::from_rows(vec![row.clone(), row]);
+    }
+
+    #[test]
+    fn snapshot_probes_follow_mutations_and_retain_old_residencies() {
+        let mut index = AttachmentIndex::default();
+        let k = key("value");
+        let a = index.register(1, [(k.clone(), entry(7))]).into_result();
+        let b = index.register(2, [(k.clone(), entry(9))]).into_result();
+        let c = index.register(3, [(k.clone(), entry(11))]).into_result();
+        let old = index.snapshot(&k);
+        assert_eq!(values(&old), [(1, 7), (2, 9), (3, 11)]);
+        assert_eq!(
+            [old.slot_of(&a), old.slot_of(&b), old.slot_of(&c)],
+            [Some(0), Some(1), Some(2)]
+        );
+        assert_eq!(old.slot_of(&AttachmentOwner::from_parts(4, 0)), None);
+        assert!(index.remove(&b, &k).into_result());
+        let live = index.snapshot(&k);
+        assert_eq!(values(&live), [(1, 7), (3, 11)]);
+        assert_eq!(live.slot_of(&c), Some(1));
+        assert_eq!(live.slot_of(&b), None);
+        assert_eq!(old.slot_of(&c), Some(2));
+        let transferred = AttachmentSnapshot::from_rows(old.iter().cloned().collect());
+        assert_eq!(values(&transferred), [(1, 7), (2, 9), (3, 11)]);
+        assert_eq!(transferred.slot_of(&b), Some(1));
+        assert_eq!(transferred.slot_of(&c), Some(2));
+        assert_eq!(values(&old), [(1, 7), (2, 9), (3, 11)]);
+        assert!(index.unregister(&c).into_result());
+        let seven = index.snapshot(&k);
+        assert!(index.set(&a, &k, entry(8)).into_result());
+        let eight = index.snapshot(&k);
+        assert_eq!(values(&seven), [(1, 7)]);
+        assert_eq!(values(&eight), [(1, 8)]);
+        let fresh = index.register(1, [(k.clone(), entry(8))]).into_result();
+        assert!(!index.set(&a, &k, entry(99)).into_result());
+        let rebound = index.snapshot(&k);
+        assert_eq!(values(&rebound), [(1, 8)]);
+        assert_eq!(rebound.slot_of(&a), None);
+        assert_eq!(rebound.slot_of(&fresh), Some(0));
+        assert_eq!(eight.slot_of(&a), Some(0));
+        assert!(index.remove(&fresh, &k).into_result());
+        assert_eq!(index.snapshot(&k).len(), 0);
+        assert_eq!(eight.len(), 1);
+        assert!(index.unload(1).into_result());
+        assert_eq!(rebound.slot_of(&fresh), Some(0));
+    }
+
+    #[test]
+    fn ten_thousand_unbound_holders_have_no_idle_memberships() {
+        let index = AttachmentIndex::<u32>::default();
+        let holders: Vec<_> = (0..10_000).collect();
+        #[cfg(feature = "test-work-count")]
+        let before = index.work_count();
+        for _ in 0..100 {
+            // Unbound holders have no lifecycle publication to perform on idle ticks.
+            std::hint::black_box(&holders);
+        }
+        assert!(index.buckets.is_empty());
+        assert!(index.owners.is_empty());
+        #[cfg(feature = "test-work-count")]
+        assert_eq!(index.work_count(), before);
     }
 
     #[test]

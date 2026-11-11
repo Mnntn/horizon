@@ -2,13 +2,34 @@
 
 ## Boundary benchmark
 
-After building the shared std and the test fixture, run the release benchmark with their paths:
+From the root of the worktree containing the fixture and runtime to measure, build the tool, fixture,
+and shared std, then run the release benchmark. This requires `rust-src` and the
+`wasm32-unknown-unknown` target for the pinned wasm toolchain:
 
 ```sh
-HORIZON_WASM_STD="$PWD/target/horizon-wasm-std.wasm" HORIZON_WASM_FIXTURE="$PWD/crates/horizon-mod-wasm/tests/fixture/target/horizon-mod/wasm_fixture.hmod" cargo test --release -p horizon-mod-wasm --test bench block_entity_ticks -- --ignored --nocapture
+cargo build -p cargo-horizon-mod
+(cd crates/horizon-mod-wasm/tests/fixture && "$OLDPWD/target/debug/cargo-horizon-mod" horizon-mod build --wasm --catalog points.json && "$OLDPWD/target/debug/cargo-horizon-mod" horizon-mod wasm-std "$OLDPWD/target/horizon-wasm-std.wasm" --catalog points.json)
+HORIZON_WASM_STD="$PWD/target/horizon-wasm-std.wasm" HORIZON_WASM_FIXTURE="$PWD/crates/horizon-mod-wasm/tests/fixture/target/horizon-mod/wasm_fixture.hmod" cargo test --release -p horizon-mod-wasm --features listener-fixture --test bench empty_subscribed_listener -- --ignored --exact --nocapture
 ```
 
-It measures 1,000 block entity ticks against an in-memory host, both without and with two host reads per tick; it is not a full game-world benchmark. The `wasm-mods` workflow runs it only on manual dispatch.
+Building the fixture rewrites `crates/horizon-mod-wasm/tests/fixture/horizon-mod.toml` with the
+generated wasm hash and toolchain identity. Inspect and discard those generated manifest changes
+after measurement rather than committing toolchain-specific hashes; preserve any intended edits.
+Keep the machine, build profile and conditions consistent when comparing revisions.
+
+The empty-listener benchmark dispatches the same subscribed `server_stopped` listener natively and
+in wasm. It reports 100 samples of 100,000 dispatches after 20 warm-up samples, with loading,
+initialization, subscription installation and the in-memory host outside timing. It is not a
+server teardown or world tick. The existing `block_entity_ticks` case measures 1,000 in-memory
+block entity ticks per sample, with and without two host reads per tick; replace
+`empty_subscribed_listener` with `block_entity_ticks` in the command to run it. The `wasm-mods`
+workflow runs that case only on manual dispatch.
+
+For an outer wasm call, an immediately available group lock does not start the busy timer. On
+contention, non-worker calls wait up to five seconds from the first failed lock attempt; they
+return busy immediately if the group is lent to another thread. Worker calls continue waiting
+instead of using that timeout or lending refusal. A synchronous same-thread reentrant call uses
+the lent context and its enclosing deadline; frame, resource and trap cleanup still apply.
 
 A mod written against `mod_api` builds either way from the same source: native, compiled into
 the game by the launcher ([Native mods](native-mods.md)), or to `mod.wasm`, which any game with
@@ -207,3 +228,30 @@ and named on the Mods page.
 
 The game limits execution time, memory and table usage. A trap or limit hit disables the affected
 group. APIs marked `Not on wasm` in their Rust documentation cannot be used by wasm mods.
+
+## Compiled module cache
+
+The game caches compiled wasm modules in `<game_dir>/.horizon-cache/wasm/`, keyed by the
+wasm bytes, Wasmtime compatibility and engine settings. Hits map the compiled file into memory;
+files shipped beside a mod are never loaded as compiled code.
+
+On Unix, a cache miss compiles in a short-lived child of the game executable, returning
+compiler memory to the operating system when the child exits. The internal entry runs before
+game initialization, with closed standard streams and an empty environment. It receives a
+private input file and the expected cache key, refuses changed input, and writes through the
+same atomic cache writer. The parent accepts only its expected entry through the verified
+opened-file loader. Startup failure, a crash, a non-zero exit, an invalid entry or a timeout
+falls back to in-process compilation with a log message. A timed-out child is killed and
+reaped before fallback; its input and unfinished writer files are removed. This child path
+is Unix-only; Windows continues to compile in process with persistent caching disabled.
+
+On Unix, the game creates the cache folder with mode 0700 and entries with mode 0600. It checks
+folder ownership and permissions, then checks each opened entry is a regular file owned by the
+current user, not writable by group or others, and has only one hard link. Symlink entries are
+refused. On Windows, persistent caching is disabled until owner, DACL and inheritance trust
+can be verified for the cache folder and opened entries. Modules compile from wasm instead,
+with one warning explaining the fallback. The player's account is the trust boundary.
+
+A failed check logs the reason once per launch. Unavailable, corrupt or incompatible entries
+fall back to compiling the wasm. Writes replace entries atomically without changing files that
+running modules have mapped. Deleting the cache is always safe: the next launch rebuilds it.

@@ -3,8 +3,8 @@
 //! entities for. A behaviour returns what is left in the slot and the level
 //! event it plays (`DefaultDispenseItemBehavior.dispense` then plays that
 //! event and the smoke animation, event 2000).
-use super::Game;
 use super::level_sounds::LevelSound;
+use super::{Game, item_abilities::ability};
 use horizon_client::{
     Result,
     collisions::SceneCollisions,
@@ -611,7 +611,11 @@ impl Game<'_> {
             return Ok(left);
         }
         let item = stack.item.to_string();
+        // A stack able to `shears_harvest` is dispensed as shears are, whatever its item.
+        let shears = self.stack_shears(&stack, ability::SHEARS_HARVEST);
         let (left, event) = match item.as_str() {
+            _ if shears => self.dispense_shears(pos, facing, stack)?,
+
             "minecraft:arrow"
             | "minecraft:tipped_arrow"
             | "minecraft:spectral_arrow"
@@ -645,7 +649,6 @@ impl Game<'_> {
             "minecraft:carved_pumpkin" => self.dispense_carved_pumpkin(pos, facing, stack)?,
             "minecraft:glass_bottle" => self.dispense_glass_bottle(pos, facing, stack)?,
             "minecraft:glowstone" => self.dispense_glowstone(pos, facing, stack)?,
-            "minecraft:shears" => self.dispense_shears(pos, facing, stack)?,
             "minecraft:brush" => self.dispense_brush(pos, facing, stack),
             "minecraft:honeycomb" => self.dispense_honeycomb(pos, facing, stack)?,
             "minecraft:potion" => self.dispense_potion(pos, facing, stack)?,
@@ -1093,6 +1096,16 @@ impl Game<'_> {
             count: 1,
             ..stack.clone()
         };
+        // A rocket makes its own random in `launch_angled_rocket`: the constructor's draws
+        // and then the shot's spread come from that one.
+        if item == "minecraft:firework_rocket" {
+            self.launch_angled_rocket(at, &one, None, |own| {
+                let mut shot = Projectile::new(ProjectileKind::Snowball, at, None);
+                shot.shoot(own, dir, power, uncertainty);
+                shot.velocity
+            });
+            return;
+        }
         // Projectile.shoot spreads the shot with the projectile's own random.
         let mut own = random_source::entity();
         match item.as_str() {
@@ -1102,11 +1115,6 @@ impl Game<'_> {
                 let mut shot = Projectile::new(ProjectileKind::Snowball, at, None);
                 shot.shoot(&mut own, dir, power, uncertainty);
                 self.launch_thrown(one, at, shot.velocity, None);
-            }
-            "minecraft:firework_rocket" => {
-                let mut shot = Projectile::new(ProjectileKind::Snowball, at, None);
-                shot.shoot(&mut own, dir, power, uncertainty);
-                self.launch_angled_rocket(at, shot.velocity, &one, None);
             }
             _ => {
                 let kind = match item.as_str() {
@@ -1153,7 +1161,7 @@ impl Game<'_> {
                     a.pickup = horizon_client::arrows::Pickup::Allowed;
                 }
                 shot.shoot(&mut own, dir, power, uncertainty);
-                self.add_projectile(shot);
+                self.spawn_projectile(shot, &one);
             }
         }
     }
@@ -2532,6 +2540,29 @@ mod tests {
             let remainder = game.hurt_and_break(shears, 1).unwrap();
             assert_eq!(remainder.count, 1);
             assert_eq!(remainder.damage, max);
+        });
+    }
+
+    /// `IItemExtension.damageItem` on the wear of a tool a dispenser uses: a brush (16 points a
+    /// brushing) whose part halves it loses 8, one whose part cancels it keeps its durability, and
+    /// the shears, which have no part, lose the whole point.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+    fn a_damage_item_part_changes_the_wear_of_a_dispensed_tool() {
+        use crate::game::damage_item_tests::{Rule, with_wear_part};
+        with_wear_part("minecraft:brush", Rule::Halve, |game, wear| {
+            let damage = |game: &mut Game<'_>, item: &str, points| {
+                game.hurt_and_break(ItemStack::new(item, 1), points)
+                    .unwrap()
+                    .damage
+            };
+            assert_eq!(damage(game, "minecraft:brush", 16), 8);
+            assert_eq!(wear.take_asked(), [16]);
+            wear.set(Rule::Cancel);
+            assert_eq!(damage(game, "minecraft:brush", 16), 0);
+            assert_eq!(wear.take_asked(), [16]);
+            assert_eq!(damage(game, "minecraft:shears", 1), 1);
+            assert!(wear.take_asked().is_empty());
         });
     }
 

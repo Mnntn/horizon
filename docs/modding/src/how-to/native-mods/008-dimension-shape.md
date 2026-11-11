@@ -77,7 +77,13 @@ gives the timelines and `default_clock` back. The day time itself is the world's
 The level's biomes are the one `biome` everywhere unless `biome_source` says otherwise:
 `BiomeSourceKind::Checkerboard` alternates the `biomes` in cells `2^biome_scale` chunks wide,
 `MultiNoise` uses the Overworld's or the Nether's biomes (`biome_preset`) and `End` the End's islands.
-Only `Fixed` suits a chunk generator of the mod's own, which writes terrain only.
+`Points` places the mod's own biomes: `biome_points` lists a `BiomePoint` per biome, with an interval
+(`(min, max)`, each from -2 to 2, a single value is `(v, v)`) for temperature, humidity, continentalness,
+erosion, depth and weirdness, and an `offset` from 0 to 1. The biome whose point is nearest to the level's
+climate at a position wins, as in a data pack's `minecraft:multi_noise` source with an inline `biomes` list;
+the biomes can be the mod's own or vanilla's. A mod's points shape its own level only: placing a mod's biomes
+among vanilla's in the Overworld or the Nether is a separate design (#2554). Only `Fixed` suits a chunk
+generator of the mod's own, which writes terrain only.
 
 A dimension in another mod's namespace, an empty name, a name that is not a folder of the world
 (lowercase letters, digits and `_ . -` only, with `/` between segments that are not empty, `.` or

@@ -3,6 +3,8 @@
 //! dispensers, shulker boxes). The click modes are pickup, quick move, swap,
 //! clone, throw, quick craft (drag) and pickup all; items thrown out of a
 //! menu are returned for the game to drop.
+#[path = "menu/backing.rs"]
+mod backing;
 use super::guest::Guest;
 use crate::{
     bundle::{Contents, can_be_in_bundle, toggle_selected},

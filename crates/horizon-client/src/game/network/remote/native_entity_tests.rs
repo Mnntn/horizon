@@ -220,6 +220,46 @@ fn a_client_reads_the_entities_and_menu_the_server_shows_it() {
     // The hotbar's first slot is the player's inventory slot 0.
     assert_eq!(game.inventory[0].as_ref().map(|s| s.count), Some(5));
 
+    // SynchedEntityData.assignValues invokes each accessor callback before
+    // applying the next value. The enderman only plays its stare sound when
+    // the stared-at flag is already set at the DATA_CREEPY callback.
+    use horizon_protocol::entity_data::serializer;
+    game.handle_packet(add(31, 31, "minecraft:enderman", [3.0, 64.0, 0.0]))
+        .unwrap();
+    game.handle_packet(add(32, 32, "minecraft:enderman", [4.0, 64.0, 0.0]))
+        .unwrap();
+    game.audio.heard.clear();
+    game.audio.capture = Some(Vec::new());
+    let metadata = |id, values| C::SetEntityData(play::SetEntityData { id, values });
+    let creepy = |value| (17, serializer::BOOLEAN, Value::Bool(value));
+    let stared = |value| (18, serializer::BOOLEAN, Value::Bool(value));
+    game.handle_packet(metadata(31, vec![creepy(true), stared(true)]))
+        .unwrap();
+    assert_eq!(
+        game.audio.heard.get("minecraft:entity.enderman.stare"),
+        None
+    );
+    game.handle_packet(metadata(32, vec![stared(true), creepy(true)]))
+        .unwrap();
+    assert_eq!(
+        game.audio.heard.get("minecraft:entity.enderman.stare"),
+        Some(&1)
+    );
+    game.handle_packet(metadata(32, vec![creepy(false), stared(false)]))
+        .unwrap();
+    assert_eq!(
+        game.audio.heard.get("minecraft:entity.enderman.stare"),
+        Some(&1)
+    );
+    game.mobs.iter_mut().find(|mob| mob.id == 31).unwrap().age = 400;
+    game.handle_packet(metadata(31, vec![creepy(false), stared(false)]))
+        .unwrap();
+    assert_eq!(
+        game.audio.heard.get("minecraft:entity.enderman.stare"),
+        Some(&2)
+    );
+    assert!(game.audio.capture.as_ref().unwrap().is_empty());
+
     // A new client level: the handles of the old one read as None.
     game.handle_packet(C::Respawn(play::Respawn {
         spawn: spawn("minecraft:the_nether"),

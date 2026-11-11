@@ -359,7 +359,14 @@ impl Game<'_> {
         self.persist
             .uuids
             .iter()
-            .find(|(id, u)| **u == uuid && self.boats.iter().any(|b| b.id == **id))
+            .find(|(id, u)| {
+                **u == uuid
+                    && self.boats.iter().any(|b| b.id == **id)
+                    && self.resident_source_target_visible(
+                        self.dim.key(),
+                        super::commands::Target::Boat(**id),
+                    )
+            })
             .map(|(id, _)| *id)
     }
 

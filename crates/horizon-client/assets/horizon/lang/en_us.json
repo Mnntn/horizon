@@ -1186,5 +1186,7 @@
   "horizon.tempban.success": "%1$s for %2$s, until %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "Not affiliated with Mojang or Microsoft",
-  "key.emote": "Emote Wheel"
+  "key.emote": "Emote Wheel",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only.",
+  "Auto uses the peak Windows reports. Calibrate if highlights look clipped.": "Auto uses the peak Windows reports. Calibrate if highlights look clipped."
 }

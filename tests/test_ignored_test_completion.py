@@ -230,7 +230,7 @@ class Legs(unittest.TestCase):
 
     def test_a_leg_that_cannot_list_its_tests_fails(self):
         def fake(command, **_):
-            return subprocess.CompletedProcess(command, 101, "")
+            return subprocess.CompletedProcess(command, 101, "", "error: synthetic compile failure")
 
         with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
             self.assertIsNone(ignored_tests.run("example", [], 1, 2))

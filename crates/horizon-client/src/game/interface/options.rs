@@ -129,6 +129,8 @@ impl Game<'_> {
         self.set_screen(Screen::Options);
         self.options_from_title = from_title;
         let minecart_improvements = self.minecart_improvements();
+        // Restore fullbright when leaving another server.
+        self.hold_fullbright();
         let ui = &mut self.ui.options;
         ui.open_at(!from_title && self.title.is_none(), page);
         ui.minecart_improvements = minecart_improvements;
@@ -361,6 +363,7 @@ impl Game<'_> {
                 Event::DebugEntriesChanged => self.debug_entries.invalidate(),
                 Event::Changed => {
                     self.settings.save(&Self::options_path());
+                    self.settings.keys.sync_action_bindings();
                     self.apply_settings();
                     self.switch_mods();
                     self.sync_native_switches();
@@ -576,10 +579,10 @@ impl Game<'_> {
         {
             self.settings.horizon.save(dir);
         }
+        self.hold_fullbright();
         let s = &self.settings;
         if let Some(r) = self.renderer.as_mut() {
             r.gamma = s.gamma;
-            r.fullbright = s.extras.fullbright;
             r.improved_transparency = s.improved_transparency;
             r.set_present_mode(s.vsync, s.horizon.present_mode);
             r.animated_textures = s.horizon.animated_textures;
@@ -792,6 +795,30 @@ impl Game<'_> {
     }
 }
 
+impl Game<'_> {
+    /// Fullbright as this window may draw it (`fullbright_held`): the renderer's flag and the
+    /// graphics screen's row. Each tick (`tick_frame_visuals`) and when settings apply, so
+    /// joining or leaving a server needs no call of its own.
+    pub(super) fn hold_fullbright(&mut self) {
+        let held = fullbright_held(
+            self.remote.as_ref().map(|_| self.integrated.is_some()),
+            self.replay.driver.is_some(),
+        );
+        self.settings.fullbright_held = held;
+        if let Some(r) = self.renderer.as_mut() {
+            r.fullbright = self.settings.extras.fullbright && !held;
+        }
+    }
+}
+
+/// Fullbright is held off on another's server, where it would light what the server shows
+/// dark: a connection without this window's integrated server, as a multiplayer server
+/// or a LAN guest has. Single player, a LAN host and Replay Studio keep it.
+/// `connection`: none, or whether it plays on this window's integrated server.
+fn fullbright_held(connection: Option<bool>, studio: bool) -> bool {
+    connection == Some(false) && !studio
+}
+
 /// The named device can be a connected pad that has not driven the game yet.
 fn detected_controller_style(
     device: Option<&horizon_client::controller_ui::Device>,
@@ -954,6 +981,23 @@ mod resize_state_tests {
             gui_size: horizon_client::window::GuiSize::new([1280, 960], 100, false).size,
         };
         assert!(!larger_limit.differs_from(&mut last));
+    }
+}
+
+#[cfg(test)]
+mod fullbright_tests {
+    use super::fullbright_held;
+
+    #[test]
+    fn fullbright_is_held_only_on_another_servers_world() {
+        // The title screen, with no connection.
+        assert!(!fullbright_held(None, false));
+        // Single player and a LAN host play their own save; so does a splitscreen seat in P1's.
+        assert!(!fullbright_held(Some(true), false));
+        // A multiplayer server, or another player's world opened to LAN.
+        assert!(fullbright_held(Some(false), false));
+        // Replay Studio plays a recording, not a server.
+        assert!(!fullbright_held(Some(false), true));
     }
 }
 

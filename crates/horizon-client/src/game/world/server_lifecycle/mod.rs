@@ -184,6 +184,7 @@ impl Game<'_> {
             result = Err(shutdown_panic(payload.as_ref()).into());
         }
         self.session_lock = None;
+        super::cauldron_interactions::clear();
         mod_api::__private::clear_game_parts();
         self.world_adopted = false;
         result

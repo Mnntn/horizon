@@ -1086,6 +1086,11 @@ impl Game<'_> {
     /// one) and announce the world. The socket is bound at once so a busy
     /// port fails here; the hub starts listening once it is at hand.
     pub(super) fn publish(&mut self, settings: LanSettings) -> std::result::Result<u16, String> {
+        if self.options.developer_single_player {
+            return Err(horizon_client::lang::get(
+                "horizon.developer_offline.single_player",
+            ));
+        }
         let Some(s) = self.serving.as_mut() else {
             return Err("not an integrated server".into());
         };

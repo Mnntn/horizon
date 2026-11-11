@@ -43,10 +43,6 @@ fn inject(at: &str, kind: Kind, access: Access, hash: &str) -> Inject {
         call: None,
         nth: None,
         ctx: None,
-        local: None,
-        local_type: None,
-        position: None,
-        expr: None,
     }
 }
 
@@ -213,4 +209,24 @@ fn a_package_catalog_is_read_bounded_and_strict() {
     );
     let huge = vec![b' '; (8 << 20) + 1];
     assert!(read_bytes(huge.as_slice()).unwrap_err().contains("exceeds"));
+}
+
+#[test]
+fn a_library_whose_crate_is_not_named_after_its_id_is_refused() {
+    let mut catalog = catalog();
+    catalog.krate = "chem_core".into();
+    for point in &mut catalog.points {
+        point.target = point.target.replace("chemlib::", "chem_core::");
+    }
+    let hash = catalog.points[0].hash.clone();
+    for access in [Access::Api, Access::Internals] {
+        let injection = inject("chem_core::transfer", Kind::Head, access, &hash);
+        assert_eq!(
+            route("addon", &injection, &library(&catalog))
+                .unwrap_err()
+                .to_string(),
+            "addon:listen: mod point library chemlib's crate is chem_core; a mod point library's \
+             crate is named after its mod id: chemlib"
+        );
+    }
 }

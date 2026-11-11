@@ -798,6 +798,7 @@ struct ShapeLevel<'w, 'a> {
     world: &'w World<'a>,
     random: horizon_core::random::LegacyRandom,
 }
+impl crate::level::BlockEntityNeighbors for ShapeLevel<'_, '_> {}
 impl crate::level::LevelAccess for ShapeLevel<'_, '_> {
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
         self.world

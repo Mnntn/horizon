@@ -56,6 +56,51 @@ class GitChangedPathsTests(unittest.TestCase):
         self.git("add", ".")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "base")
 
+    @unittest.skipUnless(os.name == "posix", "requires POSIX symlinks and FIFO")
+    def test_revision_snapshot_never_reads_symlink_targets_or_nonregular_files(self):
+        self.write("tracked.txt", "base\n")
+        self.commit()
+        (self.root / "dangling").symlink_to("absent")
+        (self.root / "directory-link").symlink_to(self.root, target_is_directory=True)
+        os.mkfifo(self.root / "pipe")
+        actual_git = pr_ready.git
+        def git(*arguments):
+            if arguments[0] == "ls-files":
+                # Git may omit nonregular files; exercise the refusal even if listed.
+                return "dangling\0directory-link\0pipe\0"
+            return actual_git(*arguments)
+        with mock.patch.object(pr_ready, "git", side_effect=git), \
+                mock.patch.object(Path, "open", side_effect=AssertionError("must not read untracked objects")):
+            before = pr_ready.revision_state()
+            self.assertTrue(before[1])
+            self.assertIn("absent", before[2])
+            self.assertIn("pipe", before[2])
+            (self.root / "dangling").unlink()
+            (self.root / "dangling").symlink_to("another-absent")
+            after = pr_ready.revision_state()
+        self.assertNotEqual(before, after)
+
+    def test_self_check_header_identifies_commit_and_dirty_state(self):
+        self.write("tracked.txt", "base\n")
+        self.write(".gitignore", "ignored-output/\n")
+        self.commit()
+        head = self.git("rev-parse", "HEAD").strip()
+        def header():
+            return pr_ready.block(args(), "HEAD", head, [], {}, [], "skip-release", 0,
+                                  pr_ready.revision_state()).splitlines()[0]
+        self.assertIn(f"commit `{head}`", header())
+        self.assertIn("host `", header())
+        self.assertNotIn(" dirty", header())
+        self.write("ignored-output/log.txt", "ignored\n")
+        self.assertNotIn(" dirty", header())
+        self.write("untracked.txt", "new\n")
+        self.assertIn(f"commit `{head}` dirty", header())
+        (self.root / "untracked.txt").unlink()
+        self.write("tracked.txt", "edited\n")
+        self.assertIn(" dirty", header())
+        self.git("add", "tracked.txt")
+        self.assertIn(" dirty", header())
+
     def test_unicode_paths_select_checks_and_keep_line_counts(self):
         tracked = "crates/horizon-core/src/caf\u00e9 edit.rs"
         untracked = "crates/horizon-core/src/\u65b0 file.rs"
@@ -94,6 +139,35 @@ class GitChangedPathsTests(unittest.TestCase):
 
 
 class PrReadyTests(unittest.TestCase):
+    def test_data_backed_summary_with_and_without_prepared_data(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(pr_ready, "ROOT", Path(directory) / "checkout/repo"), \
+                mock.patch.object(pr_ready, "git", side_effect=lambda *args: "a" * 40 if args[0] == "rev-parse" else ""), \
+                mock.patch.dict(os.environ):
+            os.environ.pop("HORIZON_TEST_RESOURCES", None)
+            step = pr_ready.Step("content root tests", summary=pr_ready.tests_passed)
+            step.output = "test result: ok. 3 passed; 0 failed; 0 ignored"
+            step.status = "pass"
+            step.detail = pr_ready.tests_passed(step.output)
+            def render():
+                return pr_ready.block(args(), "origin/main", "abcdef123", [], {}, [step], "skip-release", 0,
+                                      ("a" * 40, "", ""))
+            self.assertIn("data-backed tests not run: no prepared data here", render())
+            prepared = pr_ready.ROOT / ".local/horizon-client/26.3"
+            prepared.mkdir(parents=True)
+            self.assertIn("data-backed tests not run: no prepared data here", render())
+            (prepared / "gameplay-facts.json").write_text("{}")
+            self.assertIn("data-backed tests: horizon-client-lib mod_content::tests:: (--ignored): 3 passed", render())
+            override = Path(directory) / "override"
+            override.mkdir()
+            os.environ["HORIZON_TEST_RESOURCES"] = str(override)
+            self.assertIn("data-backed tests not run: no prepared data here", render())
+            (override / "gameplay-facts.json").write_text("{}")
+            (prepared / "gameplay-facts.json").unlink()
+            self.assertIn("data-backed tests: horizon-client-lib mod_content::tests:: (--ignored): 3 passed", render())
+            step.status, step.detail = "skip", "content root untouched"
+            self.assertIn("data-backed tests not run: content root untouched", render())
+
     def test_windows_runner_gives_a_leading_variable_to_the_environment(self):
         step = pr_ready.Step(
             "dispatch tests tests",

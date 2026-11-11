@@ -103,6 +103,10 @@ pub struct RenderAssets {
     pub connected: crate::connected::ConnectedTextures,
     /// Fusion connected textures (empty without Fusion's connecting textures and models).
     pub fusion: crate::fusion::FusionTextures,
+    /// The keyframe animations mods and packs ship (`neoforge/animations/entity`), by id.
+    pub mod_animations: crate::mod_animations::Animations,
+    /// The mods' registered render pipelines as this load built them.
+    pub mod_pipelines: crate::mod_pipelines::Pipelines,
     /// Counts up on every successful resource load, including model-only changes.
     /// Only publishing this store invalidates the previous store's model handles and sprites.
     pub generation: u64,
@@ -118,6 +122,19 @@ impl RenderAssets {
             .standalone_slot(&id.to_string())
             .ok_or(mod_api::ModelError::UnknownModel)?;
         Ok(mod_api::__private::built::model_ref(self.generation, slot))
+    }
+    /// The keyframe animation `id` of this published store
+    /// (`assets/<namespace>/neoforge/animations/entity/<path>.json`).
+    pub fn animation(&self, id: &mod_api::Identifier) -> Option<mod_api::AnimationHolder> {
+        self.mod_animations.get(id).cloned()
+    }
+
+    /// The handle of the registered render pipeline `id` in this published store.
+    pub fn render_pipeline(
+        &self,
+        id: &mod_api::Identifier,
+    ) -> std::result::Result<mod_api::RenderPipelineRef, mod_api::RenderPipelineError> {
+        self.mod_pipelines.resolve(id)
     }
 
     /// Validate a handle once at consumption, before appending any geometry.
@@ -285,7 +302,7 @@ impl Assets {
         // Chunks hold every state of this registry: content mods can take it
         // past vanilla's 16-bit global palette.
         crate::chunk::set_block_states(registry.len());
-        let registry: &'static BlockRegistry = Box::leak(Box::new(registry));
+        let registry = registry.intern(mod_api::__private::registry_installation_identity());
         Ok(Self {
             registry,
             properties,
@@ -451,6 +468,7 @@ impl RenderAssets {
         }
         // `finish` grows the buffer by doubling: keep only the bytes in use.
         sprites.pixels.shrink_to_fit();
+        let generation = GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         Ok(Self {
             sprite_size: sprites.size,
             sprite_minimum_size: sprites.minimum_size,
@@ -470,10 +488,16 @@ impl RenderAssets {
             pbr_size: sprites.pbr_size,
             connected,
             fusion,
-            generation: GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
+            mod_animations: crate::mod_animations::Animations::load(root.source()),
+            mod_pipelines: crate::mod_pipelines::Pipelines::load(root.source(), generation),
+            generation,
         })
     }
 }
+
+#[cfg(test)]
+#[path = "assets_registry_tests.rs"]
+mod registry_tests;
 
 #[cfg(test)]
 mod tests {

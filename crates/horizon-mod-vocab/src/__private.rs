@@ -2,6 +2,8 @@
 //! game fills for its hooks (`built`) and what it reads of handles and the API's own types
 //! (`game`). None of it is part of the API a mod is written against.
 use crate::*;
+#[path = "__private/registry_installation.rs"]
+mod registry_installation;
 
 /// The game's profiler control and reports, not a mod-facing API contract.
 #[path = "profiler.rs"]
@@ -100,6 +102,11 @@ pub mod built {
     pub fn model_ref(generation: u64, slot: u32) -> crate::ModelRef {
         crate::ModelRef(generation, slot)
     }
+    /// Wrap a slot in the pipeline set's published generation.
+    pub fn render_pipeline_ref(generation: u64, slot: u32) -> crate::RenderPipelineRef {
+        crate::RenderPipelineRef::from_parts(generation, slot)
+            .expect("published pipeline generation")
+    }
 }
 
 /// What the game reads of handles and calls on the API's own types.
@@ -187,6 +194,16 @@ pub mod game {
         pub slot: u32,
     }
     impl Fields for ModelRef {
+        type Fields<'a> = ModelRefFields;
+        fn fields(&self) -> ModelRefFields {
+            ModelRefFields {
+                generation: self.0,
+                slot: self.1,
+            }
+        }
+    }
+
+    impl Fields for RenderPipelineRef {
         type Fields<'a> = ModelRefFields;
         fn fields(&self) -> ModelRefFields {
             ModelRefFields {

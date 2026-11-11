@@ -58,7 +58,7 @@ fn kind(eye_height: f64) -> Arc<MobType> {
         brain: Brain::Passive,
         anim: Anim::Zombie,
         sounds: [""; 3],
-        step_sound: None,
+        sound_overrides: Default::default(),
         food: Arc::default(),
         tempt: Arc::default(),
         passenger_attachments: Vec::new(),

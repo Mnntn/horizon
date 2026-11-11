@@ -45,9 +45,9 @@ use {
 pub mod advancements;
 pub mod chat;
 pub mod chat_filter;
+mod item_particles;
 mod spawn_info;
 use advancements::AdvancementOwners;
-
 pub mod game_event {
     pub const NO_RESPAWN_BLOCK_AVAILABLE: u8 = 0;
     pub const START_RAINING: u8 = 1;
@@ -1522,12 +1522,7 @@ impl Hub {
         // for, to a Horizon client only.
         if g.brand == "horizon" {
             send_recipe_content(g);
-            g.send(&C::CustomPayload(
-                horizon_protocol::packets::configuration::CustomPayload {
-                    channel: super::recipes::TRANSFER_CHANNEL.into(),
-                    data: Vec::new(),
-                },
-            ));
+            super::recipes::advertise_viewer_channels(g);
         }
         // PlayerList.sendPlayerPermissionLevel, then the recipe book.
         self.send_permission_level(i);
@@ -3402,7 +3397,7 @@ impl Hub {
                     ticks: *ticks,
                 })
             }
-            T::Item | T::Trail => return None,
+            T::Item | T::Trail => return item_particles::encode(self, id, options),
             _ => None,
         };
         Some(Particle { id, data })

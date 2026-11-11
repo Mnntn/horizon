@@ -27,6 +27,7 @@ pub(crate) type Attributes = LiveAttributes<Box<dyn horizon_world::attributes::l
 pub(crate) type State = HurtState<DamageTypeId>;
 
 pub use crate::world::HealthRules;
+mod hit_attempt;
 /// What `LivingEntity.hurtServer` is about to hurt, for [`DamageHooks::incoming`], or
 /// `LivingEntity.knockback` to push, for [`DamageHooks::knockback`]: the entity and the
 /// hit's source.
@@ -870,12 +871,16 @@ impl PlayerMotion {
             causing,
             creative_source,
             false,
+            true,
         )?;
         self.finish_hurt(level, resources, rules, hit)
     }
     /// `hurtServer` up to `hurtHelmet`, for a player who wears a `helmet`; the arguments are
     /// `hurt_caused_by`'s. The caller has the player and the level back to wear the helmet
     /// with ([`PausedHurt::helmet_damage`]), and ends the hit with [`Self::finish_hurt`].
+    /// `can_harm_player` is the server PvP decision, applied after the invulnerability
+    /// observation. Non-PvP damage passes true. The base observation is retained across
+    /// all continuations belonging to this hit.
     pub fn start_hurt(
         &mut self,
         level: &mut DamageLevel<'_>,
@@ -888,9 +893,12 @@ impl PlayerMotion {
         causing: i32,
         creative_source: bool,
         helmet: bool,
+        can_harm_player: bool,
     ) -> Result<PausedHurt> {
         let mut hit = PausedHurt {
             pending: None,
+            invulnerability_checked: None,
+            can_harm_player,
             selected: None,
             inner: None,
             source,
@@ -1065,6 +1073,8 @@ impl PlayerMotion {
         let h = &mut self.health;
         let mut environment = Environment {
             level: level.reborrow(),
+            invulnerability_checked: hit.invulnerability_checked,
+            can_harm_player: hit.can_harm_player,
             entity: self.entity_id,
             victim,
             causing: hit.causing,
@@ -1104,6 +1114,7 @@ impl PlayerMotion {
             )?,
             &mut h.hurt,
         )?;
+        hit.invulnerability_checked = environment.invulnerability_checked;
         hit.blocking = environment.blocking;
         hit.blocked = environment.blocked;
         hit.shield_damage = environment.shield_damage;
@@ -1134,6 +1145,8 @@ impl PlayerMotion {
     }
 }
 pub(crate) struct Environment<'a> {
+    pub(crate) invulnerability_checked: Option<bool>,
+    pub(crate) can_harm_player: bool,
     /// The level the hit lands in, for the damage hooks.
     pub(crate) level: DamageLevel<'a>,
     /// The player's entity id, and the causing entity's (0: none or not known).
@@ -1191,6 +1204,8 @@ pub(crate) struct Environment<'a> {
 /// Everything the player and level hold is read again when it resumes.
 #[derive(Debug)]
 pub struct PausedHurt {
+    invulnerability_checked: Option<bool>,
+    can_harm_player: bool,
     /// None for a hit refused before `hurtHelmet`.
     selected: Option<horizon_world::living_hurt::SelectedHurt<()>>,
     inner: Option<bool>,
@@ -1491,18 +1506,7 @@ impl ImmunityWorld for Environment<'_> {
         Ok(self.client_loaded)
     }
     fn invulnerability_check(&mut self, vanilla: bool) -> io::Result<bool> {
-        let source = HurtSource {
-            damage_type: &self.source.definition().name,
-            causing: self.causing,
-            direct: self
-                .level
-                .attack()
-                .projectile_direct(&self.source.definition().name),
-            position: None,
-        };
-        Ok(self
-            .level
-            .invulnerability_check(Hurting::Player(self.entity, source), vanilla))
+        Ok(self.observe_hit_invulnerability(vanilla))
     }
 }
 impl HurtWorld for Environment<'_> {
@@ -1761,13 +1765,17 @@ impl ServerPlayerHurtWorld for Environment<'_> {
     type Player = ();
     type Arrow = ();
     fn causing_entity(&mut self, _: &mut State) -> io::Result<CausingEntity<(), ()>> {
-        Ok(CausingEntity::Other)
+        Ok(if self.can_harm_player {
+            CausingEntity::Other
+        } else {
+            CausingEntity::Player(())
+        })
     }
     fn arrow_player_owner(&mut self, _: &mut State, _: ()) -> io::Result<Option<()>> {
         Ok(None)
     }
     fn can_harm_player(&mut self, _: &mut State, _: ()) -> io::Result<bool> {
-        Ok(true)
+        Ok(self.can_harm_player)
     }
 }
 
@@ -2310,7 +2318,7 @@ mod tests {
             m.on_ground = true;
             m.attrs.knockback_resistance = own;
             m.gear_knockback_resistance = gear;
-            m.knockback(level, 0.4, 3.0, 0.0, &hit);
+            m.knockback(level, 0.4, 3.0, 0.0, &hit, 0.0);
             m.velocity.x
         };
         assert_eq!(pushed(None, 0.0), -0.4);
@@ -2347,7 +2355,7 @@ mod tests {
         let hit = Damage::player([3.0, 0.0, 0.0]);
         let mut push = |id, resistance| {
             let mut m = mob(id, resistance);
-            m.knockback(level, 0.4, 3.0, 0.0, &hit);
+            m.knockback(level, 0.4, 3.0, 0.0, &hit, 0.0);
             m
         };
         // No mod in the way (the hook leaves 9100 alone): vanilla's push, away from x = 3.

@@ -36,7 +36,10 @@ pub fn bootstrap_path() -> Result<PathBuf> {
         return pointer_path(Path::new(&path));
     }
     dirs::config_dir()
-        .map(|p| p.join("horizon-launcher-location").join("location.json"))
+        .map(|p| {
+            p.join(crate::identity::LOCATION_FOLDER)
+                .join("location.json")
+        })
         .ok_or_else(|| "Cannot locate the platform configuration folder for location.json".into())
 }
 

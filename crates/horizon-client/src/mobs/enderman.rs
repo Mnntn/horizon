@@ -193,14 +193,34 @@ fn teleport_towards(
     let z = m.position.z + (m.random.next_double() - 0.5) * 8.0 - d[2] * 16.0;
     teleport_to(m, w, x, y, z, events)
 }
-/// `Enderman.SPEED_MODIFIER_ATTACKING`, an ADD_VALUE modifier `setTarget`
-/// adds while the enderman has a target.
+/// `Enderman.SPEED_MODIFIER_ATTACKING` is held in the movement attribute map.
 pub fn attacking_speed(m: &Mob) -> f64 {
-    if m.species() == Species::Enderman && m.ai.target.is_some() {
-        f64::from(0.15f32)
-    } else {
-        0.0
+    m.extra
+        .attributes
+        .as_ref()
+        .and_then(|attributes| {
+            attributes
+                .transient
+                .iter()
+                .chain(attributes.modifiers.iter())
+                .find(|modifier| {
+                    modifier.attr == super::finalize::Attr::MovementSpeed
+                        && modifier.id == "minecraft:attacking"
+                })
+        })
+        .map_or(0.0, |modifier| modifier.amount)
+}
+/// `Enderman.playStareSound`: the client throttles the local sound to one
+/// every 400 entity ticks, including a silent attempt.
+pub fn stare_sound(m: &mut Mob) -> Option<[f64; 3]> {
+    if m.extra
+        .last_stare_sound
+        .is_some_and(|last| m.age < last.saturating_add(400))
+    {
+        return None;
     }
+    m.extra.last_stare_sound = Some(m.age);
+    (!m.silent).then(|| [m.position.x, m.eye_y(), m.position.z])
 }
 /// Enderman.customServerAiStep: in daylight, flee by teleporting. The End has a
 /// fixed time, so `Level.isBrightOutside` is never true there.
@@ -350,8 +370,9 @@ impl Goal for LookForPlayer {
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
         self.aggro = reduced(5);
         self.teleport = 0;
-        // setBeingStaredAt: play the stare sound.
-        m.extra.counter = m.age as i32;
+        // `Enderman.setBeingStaredAt` syncs the stare; the target timer starts
+        // only when a target is assigned.
+        m.extra.flag2 = true;
     }
     fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.pending = false;
@@ -383,12 +404,6 @@ impl Goal for LookForPlayer {
             if self.aggro <= 0 {
                 self.pending = false;
                 m.set_ai_target(cx.w, Some(Who::Player));
-                cx.events.push(MobEvent::Sound(
-                    "entity.enderman.stare",
-                    m.center(),
-                    2.5,
-                    1.0,
-                ));
             }
         } else if m.ai.target == Some(Who::Player) && !m.extra.passenger {
             if stared_at(m, cx.w) {

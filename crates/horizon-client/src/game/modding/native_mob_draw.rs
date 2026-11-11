@@ -52,8 +52,9 @@ pub(super) fn mob_pose(at: DVec3, body_yaw: f32) -> Mat4 {
 impl Game<'_> {
     /// `native_mob_submit` for `mob`, lit by `light` (packed as the entity
     /// pass packs it): true when a mod drew it, and its vanilla model, armour
-    /// and held items are left out. The name tag, shadow, fire and a glowing
-    /// outline still draw as for any mob.
+    /// and held items are left out; else the parts of the vanilla model mods
+    /// hid. The name tag, shadow, fire and a glowing outline still draw as for
+    /// any mob.
     pub(super) fn mod_mob_geometry(
         &self,
         mob: &Mob,
@@ -61,12 +62,14 @@ impl Game<'_> {
         camera: DVec3,
         light: u32,
         out: &mut Vec<Vertex>,
-    ) -> bool {
-        self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
+    ) -> (bool, mod_api::HiddenParts) {
+        let mut hidden = mod_api::HiddenParts::default();
+        let drawn = self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
             let mut drawn = false;
-            self.native_mob_submit(render, draw, &mut drawn);
+            self.native_mob_submit(render, draw, &mut hidden, &mut drawn);
             drawn
-        })
+        });
+        (drawn, hidden)
     }
     /// `native_player_submit` for the player `mob` (`who` says which): true
     /// when a mod drew it and the vanilla model, armour, held items, cape and
@@ -81,9 +84,7 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
     ) -> (bool, mod_api::HiddenParts) {
         // Posing a player for the mods costs, each frame: only when one listens.
-        let mut listened = false;
-        self.native_player_render_listened(&mut listened);
-        if !listened {
+        if !self.mob_render_listened() {
             return (false, mod_api::HiddenParts::default());
         }
         let mut hidden = mod_api::HiddenParts::default();
@@ -94,24 +95,31 @@ impl Game<'_> {
         });
         (drawn, hidden)
     }
+    /// Whether a mod listens to the mob and player render hooks this frame: the
+    /// draw keeps what they read (`mob_layer`'s posed parts) only then.
+    pub(super) fn mob_render_listened(&self) -> bool {
+        let mut listened = false;
+        self.native_player_render_listened(&mut listened);
+        listened
+    }
     /// `native_mob_layer` for `mob` (`who` set for a player): what a mod adds
-    /// is kept, drawn after the vanilla model and its layers.
+    /// is kept, drawn after the vanilla model and its layers. `parts` are the
+    /// humanoid parts as the vanilla draw posed them this frame, kept by it.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn mod_mob_layer_geometry(
         &self,
         mob: &Mob,
         who: Option<PlayerRender<'_>>,
+        parts: Option<mod_api::PosedParts>,
         partial: f32,
         camera: DVec3,
         light: u32,
         out: &mut Vec<Vertex>,
     ) {
         // Every mob in view each frame: only when a mod listens.
-        let mut listened = false;
-        self.native_player_render_listened(&mut listened);
-        if !listened {
+        if !self.mob_render_listened() {
             return;
         }
-        let parts = horizon_client::mobs::render::posed_parts(mob, partial, self.res.mob_data());
         self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
             self.native_mob_layer(render, who.as_ref(), parts.as_ref(), draw);
             true

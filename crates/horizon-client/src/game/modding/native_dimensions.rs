@@ -87,6 +87,28 @@ fn biome_source(settings: &DimensionSettings) -> Value {
             json!({"type": "minecraft:multi_noise", "preset": settings.biome_preset})
         }
         BiomeSourceKind::End => json!({"type": "minecraft:the_end"}),
+        BiomeSourceKind::Points => {
+            let interval = |(min, max): (f32, f32)| json!([min, max]);
+            let biomes: Vec<Value> = settings
+                .biome_points
+                .iter()
+                .map(|point| {
+                    json!({
+                        "biome": point.biome,
+                        "parameters": {
+                            "temperature": interval(point.temperature),
+                            "humidity": interval(point.humidity),
+                            "continentalness": interval(point.continentalness),
+                            "erosion": interval(point.erosion),
+                            "depth": interval(point.depth),
+                            "weirdness": interval(point.weirdness),
+                            "offset": point.offset,
+                        },
+                    })
+                })
+                .collect();
+            json!({"type": "minecraft:multi_noise", "biomes": biomes})
+        }
         _ => unreachable!("unknown API biome source"),
     }
 }
@@ -227,7 +249,7 @@ mod tests {
         assert_eq!(errors.len(), 7, "{errors:?}");
         assert!(errors[0].contains("test registered dimension test:pocket twice"));
         assert!(errors[1].contains("namespace"));
-        assert!(errors[2].contains("no name"));
+        assert!(errors[2].contains("test declares invalid identifier \"test:\""));
         assert!(errors[3].contains("test:uneven"));
         assert!(errors[4].contains("test:low_ceiling"));
         assert!(errors[5].contains("test:too_tall"));
@@ -279,8 +301,8 @@ mod tests {
         let errors = install_parts(&[ModEntry::new("test", Box::new(Invalid))]).unwrap_err();
         assert_eq!(errors.len(), 3, "{errors:?}");
         assert!(errors[0].contains("test registered chunk generator test:void twice"));
-        assert!(errors[1].contains("test registered chunk generator \"other:void\""));
-        assert!(errors[2].contains("test registered a chunk generator with no name"));
+        assert!(errors[1].contains("test declares \"other:void\" in unowned namespace \"other\""));
+        assert!(errors[2].contains("test declares invalid identifier \"test:\""));
     }
 
     /// A mod with vanilla's id can't take over every noise level.
@@ -680,6 +702,7 @@ mod rule_tests {
 #[cfg(test)]
 mod biome_source_tests {
     use super::*;
+    use mod_api::BiomePoint;
 
     #[test]
     fn each_source_names_the_stem_the_data_pack_codec_reads() {
@@ -709,6 +732,35 @@ mod biome_source_tests {
         assert_eq!(
             biome_source(&settings),
             json!({"type": "minecraft:the_end"})
+        );
+        settings.biome_source = BiomeSourceKind::Points;
+        settings.biome_points = vec![BiomePoint {
+            biome: "mymod:glowing_forest".into(),
+            temperature: (-0.5, 0.25),
+            humidity: (0.5, 0.5),
+            continentalness: (-1.0, 2.0),
+            erosion: (-2.0, 0.0),
+            depth: (0.0, 1.0),
+            weirdness: (-0.5, 0.5),
+            offset: 0.25,
+        }];
+        assert_eq!(
+            biome_source(&settings),
+            json!({
+                "type": "minecraft:multi_noise",
+                "biomes": [{
+                    "biome": "mymod:glowing_forest",
+                    "parameters": {
+                        "temperature": [-0.5, 0.25],
+                        "humidity": [0.5, 0.5],
+                        "continentalness": [-1.0, 2.0],
+                        "erosion": [-2.0, 0.0],
+                        "depth": [0.0, 1.0],
+                        "weirdness": [-0.5, 0.5],
+                        "offset": 0.25
+                    }
+                }]
+            })
         );
     }
 
@@ -758,6 +810,49 @@ mod biome_source_tests {
                 s.biome_source = BiomeSourceKind::MultiNoise;
             }),
             ""
+        );
+        // A points source: at least one point, each as the climate codec reads it.
+        let point = || BiomePoint {
+            biome: "mymod:glowing_forest".into(),
+            temperature: (-2.0, 2.0),
+            humidity: (0.0, 0.0),
+            continentalness: (0.0, 0.0),
+            erosion: (0.0, 0.0),
+            depth: (0.0, 0.0),
+            weirdness: (0.0, 0.0),
+            offset: 1.0,
+        };
+        let points = |edit: fn(&mut BiomePoint)| {
+            let mut p = point();
+            edit(&mut p);
+            DimensionSettings {
+                biome_source: BiomeSourceKind::Points,
+                biome_points: vec![p],
+                ..Default::default()
+            }
+            .invalid_biome_source()
+            .unwrap_or_default()
+        };
+        assert_eq!(points(|_| {}), "");
+        assert!(refused(|s| s.biome_source = BiomeSourceKind::Points).contains("at least one"));
+        assert!(points(|p| p.temperature = (0.5, -0.5)).contains("biome point"));
+        assert!(points(|p| p.humidity = (-2.5, 0.0)).contains("biome point"));
+        assert!(points(|p| p.erosion = (0.0, 2.001)).contains("biome point"));
+        assert!(points(|p| p.depth = (f32::NAN, 0.0)).contains("biome point"));
+        assert!(points(|p| p.offset = 1.5).contains("biome point"));
+        assert!(points(|p| p.offset = -0.1).contains("biome point"));
+        assert!(points(|p| p.biome.clear()).contains("biome point"));
+        // A valid points source still refuses a chunk generator of the mod's own.
+        assert!(
+            DimensionSettings {
+                biome_source: BiomeSourceKind::Points,
+                biome_points: vec![point()],
+                generator: "mymod:void".into(),
+                ..Default::default()
+            }
+            .invalid_biome_source()
+            .unwrap_or_default()
+            .contains("fixed biome source")
         );
     }
 }

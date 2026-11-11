@@ -18,7 +18,8 @@ class ConceptPages(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.src = Path(self.tmp.name)
         self.book = {"sections": []}
-        for group in pages.GROUPS:
+        for part, group in zip(pages.FOLDERS, pages.GROUPS):
+            self.book["sections"].append({"PartTitle": part})
             path = self.src / group
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("# Original\n\n" + pages.MARKER + "\n")
@@ -42,10 +43,44 @@ class ConceptPages(unittest.TestCase):
         directory = (self.src / pages.GROUPS[0]).with_suffix("")
         (directory / "002-third.md").write_text("<!-- chapter: Third -->\n\nA new concept.\n")
         result = pages.expand(copy.deepcopy(self.book), self.src)
-        chapter = result["sections"][0]["Chapter"]
+        chapter = result["sections"][1]["Chapter"]
         self.assertEqual([c["Chapter"]["name"] for c in chapter["sub_items"]], ["First", "Second", "Third"])
         self.assertIn("[second](#second)", chapter["content"])
         self.assertIn("# Third", chapter["sub_items"][2]["Chapter"]["content"])
+
+    def test_unlisted_page_joins_its_part_by_title_and_is_numbered(self):
+        (self.src / "concepts/zeta.md").write_text("# Zeta\n\nLast by title.\n")
+        (self.src / "concepts/alpha.md").write_text("# Alpha\n\n[first](trait-mods/000-first.md#first)\n")
+        result = pages.expand(copy.deepcopy(self.book), self.src)
+        flat = [(i.get("PartTitle"), i.get("Chapter", {}).get("name"), i.get("Chapter", {}).get("number"))
+                for i in result["sections"]]
+        self.assertEqual(flat, [("Concepts", None, None), (None, "Original", [1]), (None, "Alpha", [2]),
+                                (None, "Zeta", [3]), ("How-to", None, None), (None, "Original", [4])])
+        self.assertEqual(result["sections"][2]["Chapter"]["path"], "concepts/alpha.md")
+        self.assertEqual(result["sections"][5]["Chapter"]["sub_items"][1]["Chapter"]["number"], [4, 2])
+
+    def test_equal_titles_use_filename_order_not_directory_iteration_order(self):
+        for name in ("zeta", "alpha"):
+            (self.src / f"concepts/{name}.md").write_text("# Same title\n")
+        glob = Path.glob
+        def reversed_glob(path, *args, **kwargs):
+            return iter(sorted(glob(path, *args, **kwargs), reverse=True))
+        with patch.object(Path, "glob", reversed_glob):
+            result = pages.expand(copy.deepcopy(self.book), self.src)
+        found = [c["path"] for c in pages.chapters(result["sections"])
+                 if c["path"] in {"concepts/alpha.md", "concepts/zeta.md"}]
+        self.assertEqual(found, ["concepts/alpha.md", "concepts/zeta.md"])
+
+    def test_discovered_page_links_are_checked(self):
+        (self.src / "how-to/broken.md").write_text("# Broken\n\n[gone](missing.md)\n")
+        with self.assertRaisesRegex(AssertionError, "how-to/broken.md: missing link target"):
+            pages.expand(copy.deepcopy(self.book), self.src)
+
+    def test_page_outside_the_discovered_folders_must_be_listed(self):
+        (self.src / "reference").mkdir()
+        (self.src / "reference/orphan.md").write_text("# Orphan\n")
+        with self.assertRaisesRegex(AssertionError, "doesn't render.*reference/orphan.md"):
+            pages.expand(copy.deepcopy(self.book), self.src)
 
     def test_links_resolve_generated_chapter_and_anchor_without_a_file(self):
         book = copy.deepcopy(self.book)

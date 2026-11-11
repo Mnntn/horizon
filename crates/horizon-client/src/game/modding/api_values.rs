@@ -45,6 +45,27 @@ pub(crate) fn block_speed_factor(
         factor,
     );
 }
+pub(crate) fn is_ladder(
+    context: &horizon_world::native_load_context::LoopContext,
+    entity: u32,
+    pos: horizon_core::position::BlockPos,
+    state: horizon_world::registry::BlockStateId,
+    ladder: &mut bool,
+) {
+    if !block_state::block_listens(mod_api::HookId::IsLadder, state) {
+        return;
+    }
+    let Ok(state) = state.try_into_api() else {
+        return;
+    };
+    mod_api::dispatch_is_ladder(
+        &horizon_client_render::api_context::LoopReader(context).context(),
+        entity,
+        pos,
+        state,
+        ladder,
+    );
+}
 
 /// Resolve the metadata default through the sole numeric reverse index, without allocation.
 pub(crate) fn default_state(
@@ -285,7 +306,7 @@ fn block_values_keep_frozen_ordinals_when_world_state_ids_reorder() {
 pub(in crate::game) fn mod_tint_values(
     _registry: &horizon_world::registry::BlockRegistry,
 ) -> Result<Option<crate::mesher::ModTintValues>, String> {
-    if !crate::mesher::has_custom_block_tint_sources() {
+    if !crate::mesher::has_custom_block_tint_sources() && !crate::mesher::has_section_geometry() {
         return Ok(None);
     }
     let metadata =
@@ -1836,78 +1857,7 @@ impl TryIntoApi for crate::containers::ModBlockEntity {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum BlockEntitySnapshotError {
-    InvalidRevision,
-    InvalidStack,
-}
-
-fn apply_block_entity_snapshot(
-    entity: &mut crate::containers::ModBlockEntity,
-    snapshot: &mod_api::ModBlockEntity,
-    before: mod_api::item::containers::ModRevision,
-    items: &Items,
-) -> Result<(), BlockEntitySnapshotError> {
-    let current = entity.revision();
-    let revision = snapshot.revision();
-    if snapshot.id() != entity.id()
-        || revision.identity() != current.identity()
-        || revision.changes() < current.changes()
-    {
-        return Err(BlockEntitySnapshotError::InvalidRevision);
-    }
-    if revision != before {
-        let fields = (**snapshot)
-            .try_into_engine(items)
-            .map_err(|_| BlockEntitySnapshotError::InvalidStack)?;
-        entity.apply_snapshot(fields, snapshot.revision().changes());
-    }
-    if let Some(fields) = snapshot.client_update_fields() {
-        entity.set_client_update_fields(fields.clone());
-    }
-    Ok(())
-}
-
-// Validation runs after all listeners return; dispatch does not retain per-mod provenance.
-// Bound diagnostics even when mods register many entity types.
-fn finish_block_entity_writeback<T>(
-    entity: &mut crate::containers::ModBlockEntity,
-    snapshot: &mod_api::ModBlockEntity,
-    before: mod_api::item::containers::ModRevision,
-    items: &Items,
-    hook: &'static str,
-    output: Result<T, BlockEntitySnapshotError>,
-) -> Result<T, BlockEntitySnapshotError> {
-    let result = output.and_then(|output| {
-        apply_block_entity_snapshot(entity, snapshot, before, items)?;
-        Ok(output)
-    });
-    if let Err(reason) = &result {
-        let changes = entity
-            .revision()
-            .changes()
-            .max(snapshot.revision().changes())
-            .saturating_add(1);
-        entity.apply_snapshot((**entity).clone(), changes);
-        static REPORTED: std::sync::Mutex<Vec<(String, &'static str)>> =
-            std::sync::Mutex::new(Vec::new());
-        let mut reported = REPORTED.lock().unwrap_or_else(|poison| poison.into_inner());
-        if reported.len() < 1024
-            && !reported
-                .iter()
-                .any(|(id, name)| id == entity.id() && *name == hook)
-        {
-            reported.push((entity.id().to_owned(), hook));
-            log::warn!(
-                "Rejected block entity writeback: entity type {}, hook {}, reason {:?}",
-                entity.id(),
-                hook,
-                reason
-            );
-        }
-    }
-    result
-}
+include!("api_values/block_entity_writeback.rs");
 
 impl super::Game<'_> {
     pub(in crate::game) fn api_block_entity_tick(
@@ -1928,13 +1878,25 @@ impl super::Game<'_> {
         };
         let revision = api.revision();
         self.native_block_entity_tick(pos, &mut api);
+        if let Some(scope) = &mut self.block_entity_tick_items
+            && scope.items.is_some()
+        {
+            scope.snapshot = Some(Box::new((api, revision)));
+            return;
+        }
         let _ = finish_block_entity_writeback(
             entity,
             &api,
             revision,
             self.items(),
             "block_entity_tick",
-            Ok(()),
+            if self.block_entity_tick_key.as_ref().is_none_or(|key| {
+                !key.unbalanced && key.failure_generation == self.wasm_dispatch_failures.get()
+            }) {
+                Ok(())
+            } else {
+                Err(BlockEntitySnapshotError::InvalidRevision)
+            },
         );
     }
     pub(in crate::game) fn api_block_entity_update_tag(

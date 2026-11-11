@@ -3,6 +3,10 @@
 //! read from the prepared resources.
 use super::*;
 
+#[cfg(test)]
+#[path = "incoming_tests/resource_load_scope.rs"]
+mod scope_tests;
+
 pub(super) const STAGE_LINES: [&str; 10] = [
     "Loading menu",
     "Loading assets",
@@ -53,6 +57,7 @@ pub(super) fn synchronous_startup(options: &Options) -> bool {
         || options.benchmark.is_some()
         || options.control.is_some()
         || !options.execution_role.is_client()
+        || std::env::var_os("HORIZON_SCREEN_BUILD_FIXTURE").is_some()
         || std::env::var_os("HORIZON_DISPENSE_FIXTURE").is_some()
         || std::env::var_os("HORIZON_SCULK_FIXTURE").is_some()
         || std::env::var_os("HORIZON_COMMAND_SCRIPT").is_some()
@@ -80,6 +85,10 @@ pub(super) fn named_scope<'scope, T: Send + 'scope>(
     name: &str,
     f: impl FnOnce() -> T + Send + 'scope,
 ) -> std::thread::ScopedJoinHandle<'scope, T> {
+    #[cfg(test)]
+    let inherited = mod_api::testing::inherit_mods(move |_: &()| f());
+    #[cfg(test)]
+    let f = move || inherited(&());
     std::thread::Builder::new()
         // Linux keeps 15 bytes of a thread name: a short prefix keeps them apart
         // ("horizon-load-core" and "horizon-load-collision" would both read
@@ -607,6 +616,8 @@ pub(super) fn load_resources(
         );
     }
     api_values::resolve_block_definitions(assets.registry)?;
+    mods::extend_poi_types(assets.registry);
+    mods::register_cauldron_fluid_contents(assets.registry);
     let tables = Arc::new(startup::time("pack.mesh_tables", || {
         MeshTables::new(
             &assets,

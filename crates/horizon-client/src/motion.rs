@@ -2,6 +2,7 @@
 //! jump, collision, support, restitution and stored health bindings, and
 //! powder snow's block-inside effects and freezing. Entity lifecycle, other
 //! block-inside effects and audiovisual event consumers remain separate work.
+mod player_init;
 use crate::{
     Result, assets::Assets, collisions::SceneCollisions, living_attributes::attribute_error,
     world::World,
@@ -92,6 +93,21 @@ pub fn native_block_speed_factor(context: &LoopContext, state: BlockStateId, fac
     crate::native_client_hooks::block_speed_factor(context, state, factor);
 }
 
+/// Whether a block is a ladder to a living entity (`IBlockExtension.isLadder`, which
+/// `LivingEntity.onClimbable` asks of the block the entity stands in) is being decided. `ladder`
+/// starts with the `#minecraft:climbable` answer and the block's parts may change it. Fires on
+/// replayed ticks too, so a listener must be a pure function of its inputs.
+#[inline(never)]
+pub fn native_is_ladder(
+    context: &LoopContext,
+    entity: u32,
+    pos: BlockPos,
+    state: BlockStateId,
+    ladder: &mut bool,
+) {
+    crate::native_client_hooks::is_ladder(context, entity, pos, state, ladder);
+}
+
 /// The factors the `block_jump_factor` and `block_speed_factor` parts give the blocks an entity
 /// reads, for the loop of the side that ticks it.
 pub(crate) struct ModBlockFactors<'a>(pub &'a LoopContext);
@@ -141,6 +157,7 @@ pub(crate) fn pushing_flow<W: horizon_world::fluid_flow::FluidFlowWorld>(
 
 pub(crate) mod environment;
 mod fluids;
+mod ladder;
 pub use fluids::{
     BubbleColumn, FluidResources, FluidTags, LAVA, PlayerFluids, RiddenBoat, WATER,
     bubble_column_at, bubble_column_push, bubble_column_push_over, bubble_column_surfaces,
@@ -458,6 +475,8 @@ pub struct PlayerMotion {
     /// spin. The damage stays until the game has dealt the hit.
     pub auto_spin_attack_ticks: i32,
     pub auto_spin_attack_dmg: f32,
+    /// The stack supplied to Player.startAutoSpinAttack, including its components.
+    pub auto_spin_attack_item: Option<crate::items::ItemStack>,
     /// The living entities the game put near a spinning player (id, box).
     pub spin_targets: Vec<(u32, Aabb)>,
     /// The entity the spin touched this tick (`doAutoAttackOnTouch`).
@@ -648,115 +667,7 @@ impl PlayerMotion {
         });
         Self::with_attribute_identities(resources, position, &hashes, next)
     }
-    /// Explicit identity allocation for deterministic reference replay.
-    pub fn with_attribute_identities(
-        resources: &MotionResources,
-        position: Vec3,
-        hashes: &[i32],
-        next: Box<dyn horizon_world::attributes::live::Identities>,
-    ) -> Result<Self> {
-        let mut attributes = LiveAttributes::new(
-            resources.attributes.clone(),
-            "minecraft:player",
-            hashes,
-            next,
-        )
-        .map_err(attribute_error)?;
-        Ok(Self {
-            health: crate::health::PlayerHealth::new(&resources.health, &mut attributes)?,
-            status: crate::effects::StatusFlags::default(),
-            impulse: ImpulseContext::default(),
-            spawn_extra_particles_on_fall: false,
-            position,
-            velocity: Vec3::ZERO,
-            ground: GroundState::default(),
-            collision: CollisionFlags::default(),
-            history: MovementHistory::default(),
-            fall_distance: 0.0,
-            block_landing: None,
-            stuck_multiplier: Vec3::ZERO,
-            piston: Default::default(),
-            yaw: 0.0,
-            head_yaw: 0.0,
-            jumping: false,
-            no_jump_delay: 0,
-            jump_trigger_time: 0,
-            may_fly: false,
-            mobility_restricted: false,
-            invulnerable: false,
-            spectator: false,
-            flying: false,
-            flying_speed: 0.05,
-            was_jumping: false,
-            auto_jump_enabled: false,
-            auto_jump_time: 0,
-            was_auto_jump: false,
-            move_vector: [0.0, 0.0],
-            applied_input: [0.0, 0.0],
-            glider: false,
-            pitch: 0.0,
-            fall_flying: false,
-            sleeping: false,
-            fall_fly_ticks: 0,
-            glide_ending: false,
-            server_owns_glide: false,
-            glider_wear: 0,
-            location_effects: LocationEffects::default(),
-            auto_spin_attack_ticks: 0,
-            auto_spin_attack_dmg: 0.0,
-            spin_targets: Vec::new(),
-            spin_hit: None,
-            sprinting: false,
-            sprint_input: crate::sprint::SprintState::default(),
-            shift_key_down: false,
-            local_crouching: false,
-            pose: crate::pose::Pose::Standing,
-            dimensions: crate::pose::Pose::Standing.dimensions(1.0),
-            size_answer: None,
-            scale: 1.0,
-            swimming: false,
-            is_passenger: false,
-            fire_ticks: -20,
-            air: 300,
-            respiration: 0,
-            speed: 0.0,
-            item_use_speed: None,
-            item_use_slows_sprint: false,
-            nudge: [None; 2],
-            last_climbable: None,
-            on_climbable: false,
-            steps: MovementDistances {
-                next_step: 1.0,
-                ..MovementDistances::default()
-            },
-            crystal_sound_intensity: 0.0,
-            last_crystal_sound_play_tick: 0,
-            needs_sync: false,
-            sync_position: false,
-            teleported: false,
-            teleported_delta: [false; 3],
-            events: Vec::new(),
-            attributes,
-            fluids: PlayerFluids::default(),
-            in_powder_snow: false,
-            was_in_powder_snow: false,
-            ticks_frozen: 0,
-            leather_boots: false,
-            freeze_immune: false,
-            burn_from_stepping_immune: false,
-            old_position: position,
-            server_copy: false,
-            replaying: false,
-            wall_hit_events: None,
-            client_side: false,
-            entity_id: 0,
-            client_loaded: true,
-            block_effects: true,
-            hurt_log: Vec::new(),
-            attack_log: Vec::new(),
-            border: None,
-        })
-    }
+
     /// LivingEntity.aiStep: speeds too small to matter stop.
     fn drop_tiny_velocity(&mut self) {
         let v = &mut self.velocity;
@@ -2342,30 +2253,6 @@ impl MotionWorld<'_, '_, '_> {
             self.player.auto_jump_time = 1;
         }
         Ok(())
-    }
-}
-impl ClimbingWorld for MotionWorld<'_, '_, '_> {
-    type Error = std::convert::Infallible;
-    fn is_spectator(&mut self) -> std::result::Result<bool, Self::Error> {
-        Ok(self.player.spectator)
-    }
-    fn block_position(&mut self) -> std::result::Result<BlockPos, Self::Error> {
-        Ok(BlockPos::containing(self.player.position))
-    }
-    fn in_block_state(&mut self) -> std::result::Result<BlockStateId, Self::Error> {
-        Ok(self.block(BlockPos::containing(self.player.position)))
-    }
-    fn is_fall_flying(&mut self) -> std::result::Result<bool, Self::Error> {
-        Ok(self.player.fall_flying)
-    }
-    fn block_state(
-        &mut self,
-        position: BlockPos,
-    ) -> std::result::Result<BlockStateId, Self::Error> {
-        Ok(self.block(position))
-    }
-    fn set_last_climbable_position(&mut self, position: BlockPos) {
-        self.player.last_climbable = Some(position);
     }
 }
 impl crate::auto_jump::AutoJumpWorld for MotionWorld<'_, '_, '_> {
@@ -4741,6 +4628,13 @@ mod tests {
                     .unwrap();
                 assert_eq!(player.health.food.food, (food - 1).max(0));
                 assert_eq!(player.health.health(), if food <= 1 { 19.0 } else { 20.0 });
+                assert_eq!(
+                    player.events.iter().any(|event| matches!(
+                        event,
+                        MotionEvent::Health(crate::health::HealthEvent::StarvationDamage(1.0))
+                    )),
+                    food <= 1
+                );
             }
         }
     }

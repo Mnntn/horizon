@@ -5,7 +5,9 @@ on:
     paths: ["docs/modding/**", "crates/horizon-mod-api/**", "crates/horizon-mod-api-gen/**", "xtask/**", "tools/*modding*", "tests/test_modding_*.py"]
   # A PR gets the book itself (concept-pages preprocessor and mdBook build), not the API doc and example builds.
   pull_request:
-    paths: ["docs/modding/**", "tools/*modding*", "tests/test_modding_*.py", ".github/workflows/modding-book.yml"]
+    # The generator and xtask render the hook-notes and coverage chapters at build time, from the
+    # mod API's surface and catalog.
+    paths: ["docs/modding/**", "crates/horizon-mod-api/**", "crates/horizon-mod-api-gen/**", "xtask/**", "tools/*modding*", "tests/test_modding_*.py", ".github/workflows/modding-book.yml"]
   workflow_dispatch:
 jobs:
   book:

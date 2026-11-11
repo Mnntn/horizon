@@ -17,6 +17,14 @@ sprite set. All option constructors take the resolved key, including `dust`, `it
 `vibration`, `shriek`, `sculk_charge` and `dust_transition`. Use the corresponding vanilla key
 for these parameter families. Sending an option performs no string parsing or registry scan.
 
+For stack-derived breaking or eating particles, call
+`ClientHost::item_particle_options(&stack)` and pass the returned options to
+`add_particle`. This read resolves the ground model with seed 0, preserving all
+layer particle sprites and resource-pack and stack-component overrides. It returns
+`None` for invalid stacks or unavailable resources/provider. It is available in
+Setup, Reloading and World, on native and wasm. Resolve again after resource reloads.
+It allocates a sprite list only when called; it adds no per-tick work.
+
 ### Bot movement and block collisions
 
 `PlayerRef::simulate_move` predicts one server player's movement tick from
@@ -32,5 +40,13 @@ query covering more than 1,000,000 cells returns `None`; a valid query with no
 collisions returns `Some` containing an empty vector. Keep queries bounded rather
 than scanning a whole level each tick.
 
-Both queries take typed handles for their natural receiver. There are no parallel
+`LevelRef::block_shape(host, state, pos, kind)` reads an explicit `BlockState`'s
+outline or collision boxes with an empty context at a position in that level.
+The supplied state can differ from the world's block, without changing it;
+level-dependent shape inputs still come from the actual level. To query the
+stored block, first read `level.block_state(host, pos)` and pass that state.
+This server read returns block-local boxes, or `None` for an unknown state,
+stale handle, closed level or client. Parked levels are supported.
+
+These queries take typed handles for their natural receiver. There are no parallel
 UUID-only or dimension-string helpers.

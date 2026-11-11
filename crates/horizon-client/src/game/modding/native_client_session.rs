@@ -54,7 +54,7 @@ impl Game<'_> {
         })
     }
 
-    fn native_local_status(&self, player: PlayerRef) -> Option<()> {
+    pub(super) fn native_local_status(&self, player: PlayerRef) -> Option<()> {
         self.native_session()?;
         (self.local_player()? == player).then_some(())
     }

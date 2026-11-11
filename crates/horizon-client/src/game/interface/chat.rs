@@ -572,7 +572,7 @@ static COMMAND_EXPORTS: Mutex<Vec<(PathBuf, Option<Arc<Registries>>)>> = Mutex::
 /// its 1.6 MB again took about 15 ms of every world opening. Only the part
 /// the registries fill from stays, not the parsed export (4.2 MB, against
 /// 2.2 MB). A dedicated server opens its world once and keeps nothing.
-fn command_export(dir: &Path, keep: bool) -> Option<Arc<Registries>> {
+pub(super) fn command_export(dir: &Path, keep: bool) -> Option<Arc<Registries>> {
     let mut cache = COMMAND_EXPORTS.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, export)) = cache.iter().find(|(cached, _)| cached == dir) {
         return export.clone();
@@ -784,7 +784,7 @@ impl Game<'_> {
     }
     /// `ResourceOrIdArgument`'s loot tables are the server's: every table the
     /// world plays with, the game's, the content mods' and its packs'.
-    pub(super) fn sync_loot_table_ids(&mut self) {
+    pub(in crate::game) fn sync_loot_table_ids(&mut self) {
         let mut ids: Vec<String> = self.items().loot_table_ids().map(str::to_owned).collect();
         ids.sort();
         self.ui.registries.loot_tables = ids;

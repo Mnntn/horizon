@@ -54,15 +54,16 @@ trusting native code is the player's decision, never an agent's.
    63 MB unpacked), with the commit in `.horizon-revision`. Never the player's own checkout. Links in the
    archive are left out: the tool refuses them and nothing needs them to build.
 4. **Stage.** The projects are copied first, so the build and its key use that copy whatever happens to the
-   folder meanwhile. Compiled slot listeners register without a source splice. For source-routed internals
-   declarations the launcher generates private slots and source adapters before compilation.
+   folder meanwhile. Compiled slot listeners register without a source splice. For `[[native.mixin]]`
+   declarations the launcher forwards helpers and options to horizon-mixins and rebuilds the game.
+   `[[inject]]` never compiles game code; a missing compiled slot is refused.
    It stages the mod crates and generated executable, copying only changed files into `native/stage/`,
    so Cargo, which goes by file times, recompiles only the crates the mods touch.
    Each file written gets the current time, never the archive's (the commit's) or the copy's original: on
    Windows and macOS a copy keeps it, and a file older than the last build reads as already compiled, so
    switching Nightlies linked the previous one's crates (horizon-rust/horizon#10421). A stage from before
    that fix is written again once (`native/stage.stamped` marks it). Registry dependencies
-   are checked against Horizon's `Cargo.lock` ([The mod's crate](016-the-mods-crate.md#the-mods-crate)).
+   are checked against Horizon's `Cargo.lock` before Cargo resolves the staged workspace ([The mod's crate](016-the-mods-crate.md#the-mods-crate)).
 5. **Compile**: `cargo build --locked --profile <fast|release> [--config ...] [--features horizon-client/mods] -p
    horizon-native-game`, into `native/target/`, with one of three build modes:
 

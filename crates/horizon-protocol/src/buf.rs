@@ -335,6 +335,10 @@ pub fn varint_size(v: i32) -> usize {
 pub trait Codec<T> {
     fn read(r: &mut Reader) -> Result<T>;
     fn write(v: &T, w: &mut Writer);
+    /// Validate a value before allocating its encoded body.
+    fn validate(_v: &T) -> Result<()> {
+        Ok(())
+    }
 }
 macro_rules! primitive {
     ($name:ident, $ty:ty, $read:ident, $write:ident) => {

@@ -159,6 +159,10 @@ name = "datapack_biome_sync"
 path = "tests/datapack_biome_sync.rs"
 
 [[test]]
+name = "mod_biome_sync"
+path = "tests/mod_biome_sync.rs"
+
+[[test]]
 name = "mod_api_hooks"
 path = "tests/mod_api_hooks.rs"
 
@@ -166,6 +170,8 @@ path = "tests/mod_api_hooks.rs"
 workspace = true
 
 [dev-dependencies]
+horizon-mod-wasm = { path = "../horizon-mod-wasm", features = ["runtime-fixture", "listener-fixture"] }
+wat = "1.261"
 tempfile = "3"
 horizon-mod-runtime = { path = "../horizon-mod-runtime", features = ["test-work-count"] }
 horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }

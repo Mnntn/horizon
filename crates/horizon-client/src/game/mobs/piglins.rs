@@ -18,6 +18,45 @@ use horizon_client::{
 use horizon_core::{geometry::Vec3, random::RandomSource};
 
 impl Game<'_> {
+    /// `ZombifiedPiglin.alertOthers`: keep the source's player binding and
+    /// refuse recipients that already have a target or are allied to it.
+    pub(in crate::game) fn piglin_alert_target(
+        &mut self,
+        alert: horizon_client::mobs::undead::PiglinAlert,
+    ) {
+        use horizon_client::mobs::Who;
+        let horizon_client::mobs::undead::PiglinAlert {
+            mob,
+            source,
+            target,
+        } = alert;
+        let player = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.mob_players.get(&source).copied())
+            .or(self.lan_acting);
+        let target_team = match target {
+            Who::Mob(id) => self.mob_team(id),
+            Who::Player => match player {
+                Some(conn) => self
+                    .command_guest(conn)
+                    .and_then(|guest| self.score.board.players_team(&guest.name)),
+                None => self.player_team(),
+            },
+        };
+        if target == Who::Mob(mob)
+            || horizon_client::scoreboard::teams_allied(self.mob_team(mob), target_team)
+            || self
+                .mobs
+                .iter()
+                .find(|other| other.id == mob)
+                .is_none_or(|other| other.ai.target.is_some())
+        {
+            return;
+        }
+        self.set_event_ai_target(mob, Some(target), player);
+    }
+
     fn item_in_tag(&self, tag: &str, item: &str) -> bool {
         self.res
             .items()

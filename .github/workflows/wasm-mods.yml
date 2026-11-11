@@ -8,13 +8,19 @@ on:
       - 'crates/cargo-horizon-mod/**'
       - 'crates/horizon-mod-*/**'
       - '.github/workflows/wasm-mods.yml'
+      - 'tools/generate_wire_enum_goldens.py'
+      - 'tools/capture_wire_enum_layouts.py'
+      - 'tools/fixtures/wire_enum_layouts.json'
+      - 'tools/fixtures/wire_enum_baseline_identities.json'
+      - 'tests/test_wire_enum_goldens.py'
       - 'Cargo.lock'
   workflow_dispatch:
 permissions:
   contents: read
+# Finish running main checks; keep only the newest pending push. Obsolete PR runs still cancel.
 concurrency:
-  group: wasm-mods-${{ github.ref }}
-  cancel-in-progress: true
+  group: wasm-mods-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main') || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   fixture:
     # Drafts skip it: the shared runners go to ready PRs (CI rule, 2026-11-08).
@@ -63,13 +69,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.99.1
-          components: rust-src
+          components: rust-src, rustfmt
           targets: wasm32-unknown-unknown
       - if: runner.environment == 'github-hosted'
         uses: Swatinem/rust-cache@v2
         with:
           # These custom-profile targets belong to staged, independent workspaces.
           cache-directories: .wasm-fixture-targets
+      - name: Check fieldless Wire layout coverage and hashes
+        shell: bash
+        run: |
+          python3 -m unittest tests.test_wire_enum_goldens
+          mkdir -p "$CARGO_TARGET_DIR/wire-goldens"
+          env -u RUSTC_WRAPPER RUSTC_BOOTSTRAP=1 cargo rustc --locked -p horizon-mod-vocab --lib -- \
+            -Zunpretty=expanded > "$CARGO_TARGET_DIR/wire-goldens/expanded.rs"
+          python3 tools/generate_wire_enum_goldens.py \
+            --expanded "$CARGO_TARGET_DIR/wire-goldens/expanded.rs" --check
+          cargo test --locked -p horizon-mod-vocab --lib existing_fieldless_enum_layouts_match_baseline
       - name: Compile and test emitted point records
         run: |
           manifest=crates/horizon-mod-point-shape/tests/record-wire/Cargo.toml
@@ -87,7 +103,7 @@ jobs:
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
         run: |
           cargo test -p horizon-mod-api --features wasm-guest --lib guest_pool_
-          cargo test -p horizon-mod-wasm --features listener-fixture --test real_member --test native_listener --test no_wire_registration -- --include-ignored --nocapture
+          cargo test -p horizon-mod-wasm --features listener-fixture --test real_member --test self_refusal --test native_listener --test no_wire_registration -- --include-ignored --nocapture
           cargo test -p horizon-mod-wasm --features listener-fixture --lib guest_input_pool_stays_flat_for_100k_no_import_calls -- --ignored --nocapture
       - name: Build independent library members
         run: |

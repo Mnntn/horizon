@@ -1440,6 +1440,7 @@ impl Game<'_> {
             (selected + count - 1) % count
         };
         super::select_creative_tab(&mut self.creative_screen, &mut self.inv_clicks, tab);
+        self.build_screen();
         self.refresh_saved_hotbars();
         self.inv_drag = None;
         self.last_inv_click = None;

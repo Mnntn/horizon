@@ -203,6 +203,9 @@ pub struct Settings {
     pub startup_api: crate::graphics::GraphicsApi,
     /// `Monitor.videoModes` of the window's monitor, for the Video page (set by the game).
     pub video_modes: Vec<crate::window::VideoMode>,
+    /// Fullbright is held off: this window plays on another's server (set by the game, not
+    /// saved). The graphics screen hides its row; `extras.fullbright` keeps the choice.
+    pub fullbright_held: bool,
     /// Controller settings (`horizon-controller.txt`, Horizon's own).
     pub controller: crate::gamepad::PadSettings,
     /// Horizon's optional extras (`horizon-extras.txt`), all off by default.
@@ -293,6 +296,7 @@ impl Default for Settings {
             horizon: Default::default(),
             startup_api: Default::default(),
             video_modes: Vec::new(),
+            fullbright_held: false,
             controller: Default::default(),
             extras: Default::default(),
             mods: Default::default(),
@@ -404,6 +408,8 @@ impl Settings {
         // Horizon's own key bindings live in horizon-extras.txt, not in options.txt.
         let emote = settings.extras.emote_key.clone();
         settings.keys.set("key.emote", &emote);
+        // The loaded set is the active one: `keybind` text components show its keys.
+        settings.keys.sync_action_bindings();
         // `Options.load`: `sharePresence` decides what the friends service posts.
         crate::social::set_share_presence(crate::social::SharePresence::of(
             settings.file.int("sharePresence").clamp(0, 2) as u8,
@@ -514,6 +520,7 @@ impl Settings {
             horizon: Default::default(),
             startup_api: Default::default(),
             video_modes: Vec::new(),
+            fullbright_held: false,
             controller: Default::default(),
             extras: Default::default(),
             mods: Default::default(),

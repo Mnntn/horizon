@@ -1,10 +1,9 @@
 //! Injection points (#589): every function of the game module that [`point_shape::eligible`]
 //! admits is a point, and so is each function `slots/*.txt` lists in the crates below it. The staging
 //! pass ([`stage`]) puts `#[point]` on each in a staged copy of the game's source, the copy the
-//! prebuilt game and the launcher's source builds compile, with each raw form's types beside it;
+//! prebuilt game builds compile, with each raw form's types beside it;
 //! the generator lists the same points from any copy, staged or not, as `mod_points` (each point's
-//! record, typed function slots, `PointId`) and as `points.json`, the list the launcher routes
-//! injections by. All of them are build outputs, never committed.
+//! record, typed function slots, `PointId`) and as `points.json`, the compiled slot catalog. All of them are build outputs, never committed.
 
 use quote::{ToTokens, quote};
 use std::{
@@ -14,7 +13,9 @@ use std::{
 use syn::{ImplItem, Item, Type};
 
 pub mod mod_crate;
-pub mod source;
+
+#[cfg(test)]
+mod target_tests;
 
 /// One point, as `points.json` lists it.
 #[derive(Debug, serde::Serialize)]
@@ -507,7 +508,8 @@ impl Found<'_> {
     }
 
     /// Its point's name: a `Game` method's own name; else its path from the game module (`game_…`),
-    /// or in a lower crate from its crate's name less `horizon_`, snake-cased.
+    /// or in a lower crate from its crate's name less `horizon_`, snake-cased. The form is not
+    /// injective (`a::b_c` and `a_b::c` collide): `all_points` refuses two points of one name.
     fn name(&self) -> String {
         if self.on_game() {
             return unraw(&self.sig.ident);
@@ -729,8 +731,7 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
     let mut scanned = Vec::new();
     for (file, package) in files {
         let source = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
-        let parsed =
-            syn::parse_file(&source).map_err(|e| format!("{}: {e}", file.path.display()))?;
+        let parsed = crate::interface_cache::parse(&file.path, &source)?;
         scanned.push(Scanned {
             path: file.path,
             module: file.module,
@@ -917,24 +918,18 @@ fn all_points<'a>(
 }
 
 /// The game's points, by name: every point function of the game module, and the listed ones of
-/// the crates below it. Staged private source targets are never part of this public list.
+/// the crates below it. Unlisted targets have no compiled slot.
 pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
     points_with(root, &crate::build::wire_types(root)?)
 }
 
 /// [`game_points`] with the `mod_api` types a record may hold.
 pub(crate) fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
-    let private = source::read(root)?
-        .into_iter()
-        .map(|point| plain_path(&point.target))
-        .collect::<std::collections::BTreeSet<_>>();
     let (scanned, list) = scan(root)?;
     let mut points = Vec::new();
     for (_, found) in all_points(&scanned, &list, wire)? {
         let target = found.target();
-        if private.contains(&plain_path(&target)) {
-            continue;
-        }
+
         let shape = found.shape()?;
         points.push(GamePoint::new(shape, &found, target));
     }
@@ -1160,13 +1155,12 @@ fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<String> {
 
 /// `mod_points`: records, typed function constructors, dispatchers and place ids.
 #[cfg(test)]
-pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String {
-    records_selected(points, sources, None)
+pub(crate) fn records(points: &[GamePoint]) -> String {
+    records_selected(points, None)
 }
 
 pub(crate) fn records_selected(
     points: &[GamePoint],
-    sources: &[source::Point],
     selected: Option<&std::collections::BTreeSet<String>>,
 ) -> String {
     let enabled = |point: &GamePoint| {
@@ -1268,16 +1262,8 @@ pub(crate) fn records_selected(
             });
         }
     }
-    let private_variants: Vec<_> = sources
-        .iter()
-        .map(|point| {
-            let head = quote::format_ident!("{}", point_shape::camel(&point.name));
-            let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
-            quote!(#head, #back,)
-        })
-        .collect();
     let ids: syn::ItemEnum = syn::parse2(quote! {
-        enum PointId { #(#variants)* #(#private_variants)* __Count }
+        enum PointId { #(#variants)* __Count }
     })
     .expect("point variants");
     let debug_names = ids.variants.iter().map(|variant| variant.ident.to_string());
@@ -1316,7 +1302,7 @@ pub(crate) fn records_selected(
         #[repr(usize)]
         #[derive(Clone, Copy, PartialEq, Eq)]
         #[non_exhaustive]
-        pub enum PointId { #(#variants)* #(#private_variants)* __Count }
+        pub enum PointId { #(#variants)* __Count }
         // Deriving Debug creates an enormous match for this enum. Keep the exact
         // unit-variant names without its compiler-memory cost.
         impl ::std::fmt::Debug for PointId {
@@ -1374,8 +1360,8 @@ mod tests {
         };
         let points = [make("first"), make("second")];
         let selected = std::collections::BTreeSet::from(["first_return".to_string()]);
-        let all = records(&points, &[]);
-        let selected = records_selected(&points, &[], Some(&selected));
+        let all = records(&points);
+        let selected = records_selected(&points, Some(&selected));
         let layout = |source: &str| {
             syn::parse_file(source)
                 .unwrap()
@@ -1402,10 +1388,7 @@ mod tests {
     #[test]
     fn point_id_debug_preserves_every_declared_variant() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let source = records(
-            &game_points(&root).unwrap(),
-            &source::build_input(&root).unwrap(),
-        );
+        let source = records(&game_points(&root).unwrap());
         let file = syn::parse_file(&source).unwrap();
         let ids = file
             .items
@@ -1710,6 +1693,81 @@ mod tests {
         }
     }
 
+    /// Two functions whose paths snake-case to one name are refused at build, naming both:
+    /// `a::b_c` and `a_b::c` both give `game_a_b_c`.
+    #[test]
+    fn engine_points_with_one_snake_cased_name_are_refused_naming_both() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-points-clash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let put = |path: &str, text: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        put("crates/horizon-mod-api-gen/internals.txt", "");
+        put(
+            "crates/horizon-client/Cargo.toml",
+            "[package]
+name = 'horizon-client'
+",
+        );
+        put(
+            "crates/horizon-client/src/lib.rs",
+            "mod game;
+",
+        );
+        put(
+            "crates/horizon-client/src/game.rs",
+            "mod a;
+mod a_b;
+",
+        );
+        put(
+            "crates/horizon-client/src/game/a.rs",
+            "fn b_c() {}
+",
+        );
+        put(
+            "crates/horizon-client/src/game/a_b.rs",
+            "fn c() {}
+",
+        );
+        put(
+            "crates/horizon-mod-points/Cargo.toml",
+            "[package]
+name = 'horizon-mod-points'
+[dependencies]
+horizon-world = { path = '../horizon-world' }
+[build-dependencies]
+horizon-mod-api-gen = { path = '../horizon-mod-api-gen' }
+",
+        );
+        put(
+            "crates/horizon-world/Cargo.toml",
+            "[package]
+name = 'horizon-world'
+",
+        );
+        put(
+            "crates/horizon-mod-api-gen/Cargo.toml",
+            "[package]
+name = 'horizon-mod-api-gen'
+",
+        );
+        let error = points_with(&root, &WireTypes::new()).unwrap_err();
+        assert!(
+            error.contains("horizon_client::game::a::b_c")
+                && error.contains("horizon_client::game::a_b::c")
+                && error.contains("game_a_b_c"),
+            "{error}"
+        );
+        // Without the second function the same tree is accepted.
+        put("crates/horizon-client/src/game/a_b.rs", "");
+        assert!(points_with(&root, &WireTypes::new()).is_ok());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn the_pass_marks_the_functions_the_generator_lists() {
         let root = std::env::temp_dir().join(format!("horizon-points-{}", std::process::id()));
@@ -1843,7 +1901,7 @@ mod tests {
                 ("tick", "horizon_client::game::Game<'_>::tick", "both", true),
             ]
         );
-        let api = records(&points, &[]);
+        let api = records(&points);
         assert!(
             api.contains("fn tick_return")
                 // A borrowed return has a raw return place only.

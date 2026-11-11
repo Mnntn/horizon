@@ -8,7 +8,6 @@ use std::convert::Infallible;
 struct World<'a, 'g> {
     game: &'a mut Game<'g>,
     original: &'a ItemStack,
-    player: bool,
     broken: Option<ItemStack>,
 }
 
@@ -27,12 +26,7 @@ impl DurabilityWorld for World<'_, '_> {
         _: &mut DurabilityStack,
         amount: i32,
     ) -> Result<i32, Infallible> {
-        let amount = amount as u32;
-        let loss = if self.player {
-            self.game.modify_wear(self.original, amount)
-        } else {
-            self.game.durability_loss(self.original, amount)
-        };
+        let loss = self.game.durability_loss(self.original, amount as u32);
         Ok(loss.min(i32::MAX as u32) as i32)
     }
     fn durability_changed(
@@ -97,7 +91,6 @@ impl Game<'_> {
         let mut world = World {
             game: self,
             original: stack,
-            player,
             broken: None,
         };
         item_durability::hurt_and_break(&mut projected, &mut world, amount, player).unwrap();

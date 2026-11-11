@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "Zabaniōno %1$s na %2$s, do %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "Niy powiōnzany ze Mojang abo Microsoft",
-  "key.emote": "Koło emocyj"
+  "key.emote": "Koło emocyj",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

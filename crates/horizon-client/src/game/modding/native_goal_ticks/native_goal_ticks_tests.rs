@@ -170,7 +170,8 @@ fn tick_goals_as(
         selector.tick(&mut mobs[index], &mut cx);
         mobs[index].ai.goals = selector;
     }
-    game.mobs = mobs;
+    game.mobs
+        .restore(mobs, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
 }
 
 /// The events of one mob's goal, in order.

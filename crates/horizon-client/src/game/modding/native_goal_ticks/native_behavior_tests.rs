@@ -7,6 +7,7 @@ use super::super::creatures;
 use super::super::native_entity_refs::tests::with_game;
 use super::tests::zombie;
 use horizon_client::health::DamageLevel;
+use horizon_client::join_seq::RestoreOrder;
 use horizon_client::mobs::{self, Mob, MobWorld};
 use mod_api::{
     Activity, Behavior, BehaviorCx, BehaviorRegistrar, BrainMemory, EntityPart, Hooks,
@@ -122,7 +123,7 @@ fn with_mob_world(
     let mut test_level = horizon_client::health::TestLevel::new(0);
     let mut level = test_level.level();
     drive(&mut mobs[0], &w, &mut level);
-    game.mobs = mobs;
+    game.mobs.restore(mobs, RestoreOrder::SurvivorsFirst);
 }
 
 /// The level random's state, for the draw assertions.
@@ -404,7 +405,7 @@ fn with_villager_tick(
     let mut events = Vec::new();
     let index = mobs.iter().position(|m| m.id == id).unwrap();
     f(&mut mobs[index], &w, level, &mut events);
-    game.mobs = mobs;
+    game.mobs.restore(mobs, RestoreOrder::SurvivorsFirst);
 }
 
 /// `villager_brain::tick` once at this time, on the caller's level random.
@@ -437,7 +438,7 @@ fn random_states(
     let mobs = game.mobs.lift();
     let mob = mobs.iter().find(|m| m.id == id).unwrap();
     let mob_state = (&mob.random).into();
-    game.mobs = mobs;
+    game.mobs.restore(mobs, RestoreOrder::SurvivorsFirst);
     (mob_state, (&*level.random()).into())
 }
 
@@ -846,7 +847,7 @@ fn grown_up_stops_a_running_ghastling_behavior() {
         {
             let mut mobs = game.mobs.lift();
             mobs::finalize::set_baby(&mut mobs[0], true);
-            game.mobs = mobs;
+            game.mobs.restore(mobs, RestoreOrder::SurvivorsFirst);
         }
         let mut test_level = horizon_client::health::TestLevel::new(0);
         let mut level = test_level.level();
@@ -975,7 +976,7 @@ fn warden_behaviors_join_after_vanilla_of_their_priority() {
             {
                 let mut mobs = game.mobs.lift();
                 mobs::warden::register(&mut mobs[0]);
-                game.mobs = mobs;
+                game.mobs.restore(mobs, RestoreOrder::SurvivorsFirst);
             }
             let mut test_level = horizon_client::health::TestLevel::new(0);
             let mut level = test_level.level();
@@ -994,7 +995,7 @@ fn warden_behaviors_join_after_vanilla_of_their_priority() {
         {
             let mut mobs = game.mobs.lift();
             mobs::warden::register(&mut mobs[0]);
-            game.mobs = mobs;
+            game.mobs.restore(mobs, RestoreOrder::SurvivorsFirst);
         }
         let mut test_level = horizon_client::health::TestLevel::new(0);
         let mut level = test_level.level();

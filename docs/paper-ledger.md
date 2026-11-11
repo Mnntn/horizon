@@ -289,7 +289,7 @@ Scope: the 20 base-entity hooks below, comparing each Javadoc moment, side, expo
 
 ## Event counterparts: base hooks (hanging, hopper, inventory, item, block state) (#1015)
 
-Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only; Horizon hooks are cited by function name. Scope: the 20 `base.rs` hooks below.
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only; Horizon hooks are cited by function name. Scope: the 19 `base.rs` hooks below.
 A key exists only where the moment, side, facts and outcome all agree; otherwise the row says which part differs.
 
 | Horizon hook | Paper event / status | Evidence and porting boundary |
@@ -310,7 +310,6 @@ A key exists only where the moment, side, facts and outcome all agree; otherwise
 | `is_valid_bonemeal_target` | **Gap:** none | No event asks, before bone meal is used, whether a block accepts it; the `TargetHitEvent`, `EntityTargetEvent` and `SlimeTargetLivingEntityEvent` candidates match on the word "target" only and describe unrelated moments. No key. |
 | `item_consumption_teleport` | **Partial:** [`PlayerTeleportEvent`][paper-PlayerTeleportEvent] | The chorus-fruit teleport is the same moment (`TeleportCause.CHORUS_FRUIT`), the from/to pair is the parent `PlayerMoveEvent`'s and can be changed, and cancel refuses it; but the hook fires per candidate draw before the ground check (up to 16) and its cancel ends the whole effect, while Paper fires for the teleport itself and its cancel only refuses that teleport. No key. |
 | `item_crafted` | **Partial:** [`ItemCraftedEvent`][paper-ItemCraftedEvent] | Same moment (a player takes the result from a crafting grid, not a stonecutter, smithing table or furnace), server side and listen-only, but the event gives only the player and the crafted stack: the recipe id the hook passes is missing. No key. |
-| `item_damaged` | **Partial:** [`EntityDamageItemEvent`][paper-EntityDamageItemEvent] | Same server durability-wear operation with entity, item, mutable damage and cancellation, but Paper exposes the damaged stack while `item_damaged` passes only its item id; the public Javadoc also does not establish that this generic event is after Unbreaking, as the hook requires. No key. |
 | `item_despawn` | **Partial:** [`ItemDespawnEvent`][paper-ItemDespawnEvent] | Same 6000-tick moment with the item entity, its stack and location, but the hook only hears while cancelling the event grants 5 more minutes: a listen-only hook cannot express that cancel (the separate `item_expire` hook extends life by ticks). No key. |
 | `item_expire` | **Partial:** [`ItemDespawnEvent`][paper-ItemDespawnEvent] | Same lifetime moment, but the hook lets each mod set or add an arbitrary `extra_life` in ticks (capped at 32766) while the event offers only a cancel that extends by a fixed 5 minutes, so the hook's out cannot be expressed. No key. |
 | `item_picked_up` | **Partial:** [`EntityPickupItemEvent`][paper-EntityPickupItemEvent] | Fired when a living entity picks an item off the ground, cancellable; the `Item` entity gives the stack's item and amount, `getRemaining()` the part left, and the entity is the player (filter out non-player pickups the hook does not hear), with cancel leaving the stack on the ground. The hook is told only for a player taking an item (`ItemEntity.playerTouch`) and, once cancelled, does not offer the stack again for 10 ticks; Paper's event also covers every other living entity that picks items up, so a port that relies on mob pickups loses them. No key. |
@@ -918,10 +917,11 @@ The comparison is made against the Paper event's documented moment, side, expose
 [paper-ExperienceOrbMergeEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/ExperienceOrbMergeEvent.html
 ## Event counterparts: item, level and living hooks (#1015)
 
-Paper API 26.3 (`26.3.build.244-stable`), public Javadoc only; Horizon cited by function name, never by position. Scope: the 20 item, level/sound and living hooks below; Paper is server-only, so the client half of a `both` hook has no counterpart by construction.
+Paper API 26.3 (`26.3.build.244-stable`), public Javadoc only; Horizon cited by function name, never by position. Scope: the 21 item, level/sound and living hooks below; Paper is server-only, so the client half of a `both` hook has no counterpart by construction.
 
 | Horizon hook | Paper event / status | Evidence and porting boundary |
 |---|---|---|
+| `damage_item` | **Partial:** [`EntityDamageItemEvent`][paper-EntityDamageItemEvent] | Same server durability-wear operation with the entity, the item, mutable damage and cancellation. The part form asks only the `ItemPart`s of the worn item (`IItemExtension.damageItem`) and passes the stack and the amount after Unbreaking, which Paper's public Javadoc does not establish for the generic event; it does not pass the wearing entity, and a part cannot change the wear of an item it is not attached to. No key. |
 | `item_after_vertical_collision` | **Gap:** none (nearest [`EntityLandEvent`][paper-EntityLandEvent]) | Paper documents landing after falling, before fall damage and block interactions, rather than every dropped-item vertical collision response reported by `native_item_after_vertical_collision`. Canceling the landing prevents fall damage and block interaction; it does not discard the item or replace its stack as this hook can. No key. |
 | `item_attribute_modifier` | **Gap:** none | No Paper event asks for or replaces an `ItemStack`'s attribute modifiers; Bukkit reads the modifiers from the stack directly. The `both` hook's client half (tooltips) has no server event at all. No key. |
 | `item_container` | **Gap:** none | Paper has no event for an item's container capability: a mod-supplied slot count plus the insert/extract helpers have no Bukkit event, and the contents live in item components. No key. |
@@ -998,7 +998,7 @@ one of these moments has to move that logic into a client native mod.
 |---|---|
 | `add_attribute_tooltips.rs` | `add_attribute_tooltips` |
 | `add_client_reload_listeners.rs` | `add_client_reload_listeners` |
-| `base.rs` | `biome_colors`, `block_entity_render_bounding_box`, `block_entity_submit`, `block_highlight`, `camera_distance`, `camera_shake`, `client_level_load`, `client_level_unload`, `client_resources_reloaded`, `command`, `compute_fog_color`, `compute_fov`, `emissive`, `framerate_limit`, `gui_layer_post`, `gui_layer_pre`, `health_hud`, `input_key`, `interaction_key_mapping_triggered`, `item_bar`, `item_decorations`, `map_decorations`, `minimap`, `mob_layer`, `mob_submit`, `mouse_button_post`, `mouse_button_pre`, `mouse_scrolling`, `music`, `music_layers`, `net_from_server`, `panel_event`, `player_render_listened`, `player_submit`, `recipes_received`, `register_client_commands`, `render_fog`, `render_hand`, `render_needs`, `screen_char_typed_pre`, `screen_click`, `screen_draw`, `screen_key_pressed_pre`, `screen_key_released_pre`, `screen_mouse_button_pressed_pre`, `screen_mouse_button_released_pre`, `screen_mouse_dragged_pre`, `screen_mouse_scrolled_pre`, `screen_render_post`, `screen_tooltip`, `setting_changed`, `shader_params`, `standalone_models`, `tooltip`, `tooltip_component`, `tooltip_component_draw`, `use_animation`, `visuals`, `world_drawn`, `zoom` |
+| `base.rs` | `biome_colors`, `block_entity_render_bounding_box`, `block_entity_submit`, `block_highlight`, `camera_distance`, `camera_shake`, `client_level_load`, `client_level_unload`, `client_resources_reloaded`, `command`, `compute_fog_color`, `compute_fov`, `emissive`, `framerate_limit`, `gui_layer_post`, `gui_layer_pre`, `health_hud`, `input_key`, `interaction_key_mapping_triggered`, `item_bar`, `item_decorations`, `map_decorations`, `minimap`, `mob_layer`, `mob_submit`, `mouse_button_post`, `mouse_button_pre`, `mouse_scrolling`, `music`, `music_layers`, `net_from_server`, `panel_event`, `player_render_listened`, `player_submit`, `recipes_received`, `register_client_commands`, `render_fog`, `render_needs`, `screen_char_typed_pre`, `screen_click`, `screen_draw`, `screen_key_pressed_pre`, `screen_key_released_pre`, `screen_mouse_button_pressed_pre`, `screen_mouse_button_released_pre`, `screen_mouse_dragged_pre`, `screen_mouse_scrolled_pre`, `screen_render_post`, `screen_tooltip`, `setting_changed`, `shader_params`, `standalone_models`, `tooltip`, `tooltip_component`, `tooltip_component_draw`, `use_animation`, `visuals`, `world_drawn`, `zoom` |
 | `block_entity_view_distance.rs` | `block_entity_view_distance` |
 | `block_render_visibility.rs` | `block_render_visibility` |
 | `block_screen_effect_draw.rs` | `block_screen_effect_draw` |
@@ -1059,6 +1059,7 @@ one of these moments has to move that logic into a client native mod.
 | `render_frame_pre.rs` | `render_frame_pre` |
 | `render_gui_post.rs` | `render_gui_post` |
 | `render_gui_pre.rs` | `render_gui_pre` |
+| `render_hand.rs` | `render_hand` |
 | `render_item_in_frame.rs` | `render_item_in_frame` |
 | `render_level_stage.rs` | `render_level_stage` |
 | `render_name_tag.rs` | `render_name_tag` |

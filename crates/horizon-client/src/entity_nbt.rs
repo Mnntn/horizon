@@ -3979,21 +3979,7 @@ pub fn ground_from_nbt(tag: &Tag) -> (bool, f64) {
     )
 }
 
-/// `VillagerData`: type, profession and level.
-fn villager_data(m: &Mob) -> Tag {
-    use crate::mobs::render::VILLAGER_TYPES;
-    Tag::compound([
-        (
-            "type",
-            string(&format!(
-                "minecraft:{}",
-                VILLAGER_TYPES[m.extra.variant as usize % VILLAGER_TYPES.len()]
-            )),
-        ),
-        ("profession", string(&m.extra.profession.id())),
-        ("level", Tag::Int(m.extra.villager_level.max(1))),
-    ])
-}
+use crate::mobs::villager::professions::save::villager_data;
 /// `AbstractVillager` "Offers" (`MerchantOffers.CODEC`).
 fn put_offers(map: &mut Compound, m: &Mob) {
     let Some(t) = m.extra.trade.as_ref().filter(|t| !t.unset) else {
@@ -4113,10 +4099,7 @@ fn read_villager(m: &mut Mob, tag: &Tag) {
         if let Some(t) = name("type").and_then(|t| VILLAGER_TYPES.iter().position(|v| *v == t)) {
             m.extra.variant = t as u8;
         }
-        m.extra.profession = text(data.get("profession"))
-            .as_deref()
-            .map(crate::mobs::villager::ProfessionState::from_id)
-            .unwrap_or_default();
+        crate::mobs::villager::professions::save::read_identity(m, data);
         m.extra.villager_level = number(data.get("level"))
             .unwrap_or(1)
             .clamp(1, i64::from(i32::MAX)) as i32;

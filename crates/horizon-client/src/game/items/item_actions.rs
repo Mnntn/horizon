@@ -136,7 +136,7 @@ impl Game<'_> {
                 );
             }
             if !claimed {
-                self.native_entity_interact(id, &kind, stack.as_ref(), &mut claimed);
+                self.native_entity_interact(self.hand, id, &kind, stack.as_ref(), &mut claimed);
             }
             if claimed {
                 self.swing_arm();

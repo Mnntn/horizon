@@ -325,7 +325,7 @@ fn next_draw_after_a_directionless_push(cancel: Option<bool>) -> i32 {
         zombie_at(game, 42, Vec3::ZERO);
         let hit = Damage::of(DamageKind::Generic);
         let mut mob = game.mobs.pop().unwrap();
-        mob.knockback(damage_level_of!(game), 0.4, 0.0, 0.0, &hit);
+        mob.knockback(damage_level_of!(game), 0.4, 0.0, 0.0, &hit, 0.0);
         *drawn.lock().unwrap() = mob.random.next_int();
     };
     match cancel {

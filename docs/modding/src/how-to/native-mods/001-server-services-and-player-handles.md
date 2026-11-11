@@ -28,7 +28,15 @@ Read identity through `player.uuid()`, `player.name(host)`,
 connection IP without a port (the forwarded address behind a Velocity proxy),
 empty for an acting player with no known connection. Name, permission and address
 reads retain connected identities during displacement and refuse stale handles.
-Use the entity and living handles for world-state reads.
+`player.level(host)` returns the authoritative `LevelRef`, and
+`player.dimension(host)` returns its dimension `Identifier`, including registered
+custom dimensions. These reads take `&dyn Host`; dedicated and integrated servers
+read the player's current dimension, while a client reads its local player's level.
+They return `None` for unknown,
+disconnected, replaced or stale player handles. Connected players retain their
+current dimension through nested guest turns; the level may be parked rather
+than the dimension whose tick is currently running.
+Use the entity and living handles for other world-state reads.
 No snapshot of event data is returned by these services.
 
 Send to one player with `player.tell(host, text)`, `action_bar(host, text)` or

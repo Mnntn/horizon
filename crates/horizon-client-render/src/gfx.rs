@@ -16,7 +16,6 @@ use glam::{DVec3, Mat4, Vec3, Vec4};
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
-
 // RenderPipelines.CRUMBLING: dst * src + src * dst, alpha replaced.
 const CRUMBLING_BLEND: wgpu::BlendState = wgpu::BlendState {
     color: wgpu::BlendComponent {
@@ -228,6 +227,7 @@ pub use prepared_model::{
 };
 #[cfg(test)]
 mod inter_stage_tests;
+mod section_fade;
 #[cfg(test)]
 mod sprite_arrays_tests;
 mod terrain_model;
@@ -243,6 +243,12 @@ pub use entity_batch::{
     TRANSLUCENT_GLINT_ITEM_OVERLAY, TRANSLUCENT_ITEM_OVERLAY, TRANSLUCENT_PARTICLE_OVERLAY,
     WATER_MASK_OVERLAY, WORLD_TEXT_OVERLAY, WORLD_TEXT_POLYGON_OFFSET_OVERLAY, is_native_terrain,
     mark_oit,
+};
+pub use frustum::{Cull, Frusta, ShadowCull};
+use frustum::{block_entities_within_reach, frustum, shadow_casters, taa_frustum};
+use section_fade::{
+    CHUNK_VISIBILITY_THRESHOLD, FadeInputs, chunk_visibility, fade_millis, section_instance,
+    section_visibility,
 };
 pub use view::{View, ViewSet};
 
@@ -361,6 +367,7 @@ mod end_sky;
 pub mod entity_skin;
 mod flat;
 mod frame_gen;
+mod frustum;
 mod gpu_culling;
 mod hdr;
 mod hdr_icc;
@@ -377,6 +384,7 @@ mod custom_sky;
 mod displace;
 pub mod lightning;
 mod lod;
+pub mod mod_pipelines;
 mod native_material;
 mod native_pack;
 mod native_post;
@@ -425,6 +433,7 @@ mod visbuffer;
 mod wgsl_prefix;
 mod world_post;
 pub mod world_primitives;
+mod world_views;
 
 /// A section's instance: its camera-relative origin and, in `w`, the step of
 /// its fixed-point UVs (`terrain.wgsl`'s `terrain_uv`).
@@ -536,62 +545,6 @@ fn pack_terrain_camera(camera: DVec3) -> DVec3 {
     let whole = camera.floor();
     whole + ((camera - whole) * 65536.0).round() / 65536.0
 }
-/// A section's instance: its camera-relative origin and its UV step, negated
-/// past its fade code while it fades in over far terrain (`lod::instance`).
-fn section_instance(origin: [f32; 3], fade: u32, visibility: f32) -> [f32; 4] {
-    let step = 1.0 / crate::mesher::UV_STEPS;
-    [
-        origin[0],
-        origin[1],
-        origin[2],
-        if fade == 0 {
-            // The step is a power of two, so its mantissa is free: it holds the vanilla
-            // chunk fade-in's `1 - visibility` in 23 bits (terrain.wgsl's `instance_step` and
-            // `instance_visibility` read it back). A whole section is the bare step.
-            let faded = ((1.0 - visibility) * 8_388_608.0)
-                .round()
-                .clamp(0.0, 8_388_607.0) as u32;
-            f32::from_bits(step.to_bits() | faded)
-        } else {
-            -(fade as f32 + step)
-        },
-    ]
-}
-/// `SectionRenderDispatcher.RenderSection.getVisibility`: how far through its fade-in a section
-/// uploaded `elapsed_ms` ago is.
-fn chunk_visibility(elapsed_ms: u64, fade_ms: u64) -> f32 {
-    if elapsed_ms >= fade_ms {
-        1.0
-    } else {
-        elapsed_ms as f32 / fade_ms as f32
-    }
-}
-/// `Util.toMillis`: `Mth.floor(seconds * 1000.0)`.
-fn fade_millis(seconds: f32) -> u64 {
-    (f64::from(seconds) * 1000.0).floor().max(0.0) as u64
-}
-/// `chunk_visibility` at `now` of a section first uploaded at `uploaded`
-/// (`Renderer::section_uploaded`; none: one that fades in over far terrain, or
-/// whose column left), with the chunk fade-in `fade_ms`.
-fn section_visibility(uploaded: Option<&Instant>, fade_ms: u64, now: Instant) -> f32 {
-    uploaded.map_or(1.0, |&t| {
-        let elapsed = now.saturating_duration_since(t).as_millis() as u64;
-        chunk_visibility(elapsed, fade_ms)
-    })
-}
-/// What a section's fade depends on besides the section itself
-/// (`SectionGpu::drawn_faded`): the time, the chunk fade-in time, the sections'
-/// first uploads (`Renderer::section_uploaded`) and those held while far
-/// terrain comes in (`Renderer::lod_retiring`).
-#[derive(Clone, Copy)]
-struct FadeInputs<'a> {
-    now: Instant,
-    fade_ms: u64,
-    uploaded: &'a FxHashMap<SectionKey, Instant>,
-    retiring: &'a crate::fast_hash::FxHashSet<SectionKey>,
-}
-/// `LevelRenderer.CHUNK_VISIBILITY_THRESHOLD`: a section's block entities wait for it.
-const CHUNK_VISIBILITY_THRESHOLD: f32 = 0.3;
 /// A new value for `Renderer::block_entity_revision`.
 fn next_block_entity_revision() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -641,6 +594,8 @@ struct Globals {
     /// (`Hdr::draw_params`).
     hdr_settings: [f32; 4],
     hdr_shares: [f32; 4],
+    /// The camera-relative eye fog is measured from: zero but in a mod's world view.
+    view_origin: [f32; 4],
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -1407,6 +1362,9 @@ pub struct Renderer {
     mirror_globals: wgpu::Buffer,
     mirror_group: wgpu::BindGroup,
     mirror: Option<MirrorTarget>,
+    /// Native mods' world views' targets, by id, and the largest side the device can give one.
+    world_views: world_views::Targets,
+    world_view_side: u32,
     entity_pipeline: wgpu::RenderPipeline,
     static_entity_pipeline: wgpu::RenderPipeline,
     static_entity_group: wgpu::BindGroup,
@@ -5275,6 +5233,8 @@ impl Renderer {
             mirror_globals,
             mirror_group,
             mirror: None,
+            world_views: Default::default(),
+            world_view_side: max_side,
             entity_pipeline,
             static_entity_pipeline,
             hdr_mark_pipeline,
@@ -7949,9 +7909,12 @@ impl Renderer {
         depth_far: f32,
     ) -> Frustum {
         let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));
-        Frustum {
-            planes: frustum(views.cull().view_proj(bob)),
-        }
+        world_views::open_while_asked(
+            Frustum {
+                planes: frustum(views.cull().view_proj(bob)),
+            },
+            self.world_view_side,
+        )
     }
     /// A conservative view for geometry built before TAA chooses this frame's
     /// jitter. Cover a whole rendered pixel on each side, at the configured
@@ -7965,10 +7928,13 @@ impl Renderer {
         depth_far: f32,
     ) -> Frustum {
         let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));
-        taa_frustum(
-            views.cull().view_proj(bob),
-            self.world_post
-                .taa_render_size([self.config.width, self.config.height]),
+        world_views::open_while_asked(
+            taa_frustum(
+                views.cull().view_proj(bob),
+                self.world_post
+                    .taa_render_size([self.config.width, self.config.height]),
+            ),
+            self.world_view_side,
         )
     }
     fn screen_view(&self, fov_degrees: f32, yaw: f32, pitch: f32, far: f32) -> View {
@@ -8634,6 +8600,7 @@ impl Renderer {
             ],
             hdr_settings,
             hdr_shares,
+            view_origin: [0.0; 4],
         };
         self.uploads
             .buffer(&mut encoder, &self.globals, 0, bytemuck::bytes_of(&globals));
@@ -8698,6 +8665,9 @@ impl Renderer {
         };
         let camera = frame.camera;
         let camera_section = camera_section(camera, self.layout.min_y());
+        // Native mods' world views (`world_views`): the lists take in their frusta, and nothing is
+        // left out by what follows the camera alone.
+        let asked = world_views::Asked::new(frame, self.world_view_side);
         // The water mirror draws the same lists: they take in what its camera sees too
         // (above the screen's top, the far shore, the trees against the sky).
         let mirror_plane = frame
@@ -8712,11 +8682,11 @@ impl Renderer {
         // Solid quads facing away from the eye are left out: the bob moves
         // the eye off `camera`, so it is found from the projection. With the mirror, those
         // facing its eye are kept too: it sits straight below, at this camera-relative y.
-        let eye = projection_center(cull_proj).filter(|_| self.sides_on);
+        let eye = projection_center(cull_proj).filter(|_| self.sides_on && !asked.on());
         let mirror_low = mirror_plane
             .zip(eye)
             .map(|(plane, eye)| 2.0 * (plane - frame.camera.y as f32) - eye.y);
-        let culling = !frame.title && frame.cave_culling;
+        let culling = !frame.title && frame.cave_culling && !asked.on();
         if culling {
             crate::spans::time("occlusion", || {
                 self.start_occlusion(camera, frame.detail_distance)
@@ -8776,7 +8746,8 @@ impl Renderer {
             && !pack_terrain
             && shadow_view.is_none()
             && mirror_plane.is_none()
-            && !displaced;
+            && !displaced
+            && !asked.on();
         #[cfg(debug_assertions)]
         if gpu_frame {
             if self.gpu_checks.is_multiple_of(64) {
@@ -8845,7 +8816,7 @@ impl Renderer {
             self.sections.walk(
                 camera,
                 radius,
-                &Frusta(view, mirror),
+                &world_views::Union(Frusta(view, mirror), &asked.frusta),
                 |k| !culling || reachable.contains(k),
                 |x, z| {
                     (!cutout.is_empty() && cutout.contains(&(x, z)))
@@ -9074,6 +9045,7 @@ impl Renderer {
                     && self.multi_draw
                     // Occlusion is found from the camera, not the mirror's eye.
                     && mirror.is_none()
+                    && !asked.on()
                     // It tests the CPU's lists, which leave out GPU culling's sections.
                     && !gpu_frame
                     && visible.len() >= c.min_sections
@@ -11997,6 +11969,15 @@ impl Renderer {
             );
         }
         if !frame.title {
+            let counts = [solid_draws, translucent_draws, entity_quads];
+            self.draw_world_views(
+                &mut encoder,
+                frame,
+                &asked.views,
+                globals,
+                flat_frame,
+                counts,
+            );
             let (depth, depth_size) = match &scaled {
                 Some((_, depth)) => (depth, self.world_post.size().unwrap_or(size)),
                 None => (&self.depth, size),
@@ -12925,112 +12906,6 @@ pub(crate) fn square_downscale(pixels: &[u8], width: u32, height: u32, size: [u3
     }
     out
 }
-/// The union of two frusta (the camera's and its water mirror's), for `Resident::visible`.
-#[derive(Clone, Copy, Debug)]
-pub struct Frusta(pub Frustum, pub Option<Frustum>);
-/// What `Resident::visible` culls with: a frustum or a union of them.
-pub trait Cull {
-    fn intersects(&self, min: Vec3, max: Vec3) -> bool;
-    fn contains(&self, min: Vec3, max: Vec3) -> bool;
-    /// Whether a section is tested by the box around its geometry, not its whole 16 blocks.
-    fn tight(&self) -> bool {
-        true
-    }
-}
-impl Cull for Frustum {
-    fn intersects(&self, min: Vec3, max: Vec3) -> bool {
-        Frustum::intersects(self, min, max)
-    }
-    fn contains(&self, min: Vec3, max: Vec3) -> bool {
-        Frustum::contains(self, min, max)
-    }
-}
-impl Cull for Frusta {
-    fn intersects(&self, min: Vec3, max: Vec3) -> bool {
-        self.0.intersects(min, max) || self.1.is_some_and(|f| f.intersects(min, max))
-    }
-    /// Entirely inside one of them is entirely inside the union.
-    fn contains(&self, min: Vec3, max: Vec3) -> bool {
-        self.0.contains(min, max) || self.1.is_some_and(|f| f.contains(min, max))
-    }
-}
-/// A shader pack's shadow camera's box, and with `casters` only what can shade the camera's view
-/// (`shadow_casters`): a box must meet all of them.
-#[derive(Clone, Copy, Debug)]
-pub struct ShadowCull {
-    pub light: Frustum,
-    pub casters: Option<[Frustum; 2]>,
-    /// `shadowDistance × shadowDistanceRenderMul`: only what lies within this many blocks of the
-    /// camera along each axis, a cube around it. Our probe's Iris 1.11.7 maps keep the sections
-    /// whose box, grown by `SHADOW_CASTER_MARGIN` as for the casters, meets that cube (#8464):
-    /// out to its corners, and a section 1 block past its side but not one 1.5 blocks past.
-    pub reach: Option<f32>,
-}
-impl ShadowCull {
-    /// Whether the camera-relative box `min..max`, grown by the margin, meets (`whole`: lies
-    /// within) `reach`'s cube.
-    fn within_reach(&self, min: Vec3, max: Vec3, whole: bool) -> bool {
-        let (min, max) = (min - SHADOW_CASTER_MARGIN, max + SHADOW_CASTER_MARGIN);
-        self.reach.is_none_or(|d| {
-            if whole {
-                min.cmpge(Vec3::splat(-d)).all() && max.cmple(Vec3::splat(d)).all()
-            } else {
-                max.cmpge(Vec3::splat(-d)).all() && min.cmple(Vec3::splat(d)).all()
-            }
-        })
-    }
-}
-/// How far past a section's 16 blocks the shadow pass looks for what can shade the view: our
-/// probes' Iris 1.11.7 maps keep the sections whose box, grown by this much on every side, meets
-/// `shadow_casters`' shape. Over 76 scenes at fields of view 30 to 110, Iris keeps every section
-/// that needs up to 1.1224 blocks and drops every one that needs 1.1252 or more (#8464): one
-/// growth, whatever the field of view, of 9/8 (a fit, not Iris's code). Without it the edges of
-/// the wedge lose a column of terrain.
-const SHADOW_CASTER_MARGIN: f32 = 1.125;
-impl Cull for ShadowCull {
-    fn intersects(&self, min: Vec3, max: Vec3) -> bool {
-        let (grown_min, grown_max) = (min - SHADOW_CASTER_MARGIN, max + SHADOW_CASTER_MARGIN);
-        self.within_reach(min, max, false)
-            && self.light.intersects(min, max)
-            && self
-                .casters
-                .is_none_or(|c| c.iter().all(|f| f.intersects(grown_min, grown_max)))
-    }
-    fn contains(&self, min: Vec3, max: Vec3) -> bool {
-        let (grown_min, grown_max) = (min - SHADOW_CASTER_MARGIN, max + SHADOW_CASTER_MARGIN);
-        self.within_reach(min, max, true)
-            && self.light.contains(min, max)
-            && self
-                .casters
-                .is_none_or(|c| c.iter().all(|f| f.contains(grown_min, grown_max)))
-    }
-    /// Our probe's Iris 1.11.7 maps fit testing the casters' whole sections (a guess that matched).
-    fn tight(&self) -> bool {
-        self.casters.is_none()
-    }
-}
-/// The block entities of `sections` whose box, a block wider on every side, comes within the
-/// 64 blocks block entities are drawn to (`Renderer::visible_block_entities_in_frustum`).
-fn block_entities_within_reach<'a>(
-    sections: impl Iterator<Item = SectionKey> + 'a,
-    block_entities: &'a FxHashMap<SectionKey, Vec<([i32; 3], u32)>>,
-    camera: DVec3,
-    min_y: i32,
-) -> impl Iterator<Item = &'a ([i32; 3], u32)> + 'a {
-    sections
-        .filter_map(move |key| {
-            let min = (DVec3::new(
-                f64::from(key.0 * 16 - 1),
-                f64::from(min_y + key.1 * 16 - 1),
-                f64::from(key.2 * 16 - 1),
-            ) - camera)
-                .as_vec3();
-            let max = min + Vec3::splat(18.0);
-            let near = Vec3::ZERO.max(min).min(max).length_squared() <= 64.0 * 64.0;
-            near.then(|| block_entities.get(&key)).flatten()
-        })
-        .flatten()
-}
 /// The shadow camera's box that the shadow pass draws terrain in: the sides of `view.cull`, and
 /// its near and far planes only with `depth_planes`.
 fn shadow_box(view: &pack_post::ShadowView) -> Frustum {
@@ -13211,90 +13086,6 @@ fn facing_runs_from(
         }
         None => sides.every(part, draw),
     }
-}
-/// The camera's view `view_proj` (wgpu depth, reversed or not) stretched without end toward
-/// `light` (a direction): the boxes whose shadow, cast away from the light, can fall into the
-/// view. Its planes are the view's faces turned toward the light, and through each edge between
-/// such a face and one turned away, the plane along the light; unused ones take in everything.
-fn shadow_casters(view_proj: Mat4, light: Vec3) -> [Frustum; 2] {
-    let faces = frustum(view_proj);
-    let toward = faces.map(|p| p.truncate().dot(light) >= 0.0);
-    let inverse = view_proj.inverse();
-    // Corner (x, y, z) of clip space's box; `frustum`'s faces at x -1 and 1 are 0 and 1, at
-    // y -1 and 1 are 2 and 3, at depth 0 and 1 are 4 and 5.
-    let corner = |c: [usize; 3]| {
-        inverse.project_point3(Vec3::new(
-            c[0] as f32 * 2.0 - 1.0,
-            c[1] as f32 * 2.0 - 1.0,
-            c[2] as f32,
-        ))
-    };
-    let corners: Vec<[usize; 3]> = (0..8).map(|i| [i & 1, (i >> 1) & 1, i >> 2]).collect();
-    let centre = corners.iter().map(|&c| corner(c)).sum::<Vec3>() / 8.0;
-    let mut planes = [Vec4::W; 12];
-    let mut n = 0;
-    for (k, &face) in faces.iter().enumerate() {
-        if toward[k] {
-            planes[n] = face;
-            n += 1;
-        }
-    }
-    for a in &corners {
-        for axis in 0..3 {
-            if a[axis] == 1 {
-                continue;
-            }
-            let mut b = *a;
-            b[axis] = 1;
-            // The edge from a to b lies on the faces of the two other axes.
-            let [f, g] = [(axis + 1) % 3, (axis + 2) % 3].map(|o| o * 2 + a[o]);
-            if toward[f] == toward[g] {
-                continue;
-            }
-            let (p, q) = (corner(*a), corner(b));
-            let normal = (q - p).cross(light);
-            if normal.length_squared() < 1e-12 {
-                continue;
-            }
-            let normal = normal.normalize();
-            let side = if normal.dot(centre - p) < 0.0 {
-                -1.0
-            } else {
-                1.0
-            };
-            // At most six such edges with at most four faces toward the light: 12 planes.
-            if let Some(plane) = planes.get_mut(n) {
-                *plane = (normal * side).extend(-normal.dot(p) * side);
-                n += 1;
-            }
-        }
-    }
-    let [a, b] = [0, 6].map(|i| Frustum {
-        planes: planes[i..i + 6].try_into().expect("six planes"),
-    });
-    [a, b]
-}
-fn taa_frustum(view_proj: Mat4, rendered_size: [u32; 2]) -> Frustum {
-    // TAA shifts clip x/y by at most half a rendered pixel times clip w.
-    // Widen x/y before extracting the planes: this includes every such shifted
-    // view, including a posed camera, without changing the near/far planes.
-    let [x, y] = rendered_size.map(|size| 1.0 / (1.0 + 2.0 / size.max(1) as f32));
-    Frustum {
-        planes: frustum(Mat4::from_scale(Vec3::new(x, y, 1.0)) * view_proj),
-    }
-}
-
-fn frustum(m: Mat4) -> [Vec4; 6] {
-    let r = |i| m.row(i);
-    let planes = [
-        r(3) + r(0),
-        r(3) - r(0),
-        r(3) + r(1),
-        r(3) - r(1),
-        r(2),
-        r(3) - r(2),
-    ];
-    planes.map(|p| p / p.truncate().length())
 }
 
 #[cfg(test)]
@@ -15490,8 +15281,8 @@ fn log_os_reported(reported: Option<crate::graphics::Reported>) {
     });
 }
 /// What the OS reports in absolute nits, HDR output's scale (Windows: DXGI's SDR white level,
-/// the brightness slider's, as Paper White, and its `MaxLuminance`, mostly the display's EDID
-/// guess, as Peak Brightness), kept within the settings' ranges. The player's values win.
+/// the brightness slider's, as Paper White, and its `MaxLuminance`, the display's or a calibration
+/// profile's, as Peak Brightness), kept within the settings' ranges. The player's values win.
 fn os_reported(info: &wgpu::DisplayHdrInfo) -> Option<crate::graphics::Reported> {
     let luminance = info.luminance?;
     let usable = |n: f32| n.is_finite() && n > 0.0;

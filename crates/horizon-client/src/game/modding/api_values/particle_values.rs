@@ -7,6 +7,7 @@ use mod_api::{__private::ParticleKind, ParticleOptions as ApiOptions};
 pub(crate) enum ParticleValueError {
     UnknownProvider,
     NonFinite,
+    InvalidStack,
 }
 
 fn finite(options: &ApiOptions) -> bool {
@@ -31,10 +32,23 @@ fn finite(options: &ApiOptions) -> bool {
                 }
         })
 }
-impl<C: ?Sized> TryIntoEngine<C> for ApiOptions {
+pub(crate) trait ParticleItems {
+    fn particle_items(&self) -> Option<&horizon_items::items::Items>;
+}
+impl ParticleItems for () {
+    fn particle_items(&self) -> Option<&horizon_items::items::Items> {
+        None
+    }
+}
+impl ParticleItems for horizon_items::items::Items {
+    fn particle_items(&self) -> Option<&Self> {
+        Some(self)
+    }
+}
+impl<C: ParticleItems + ?Sized> TryIntoEngine<C> for ApiOptions {
     type Engine = EngineOptions;
     type Error = ParticleValueError;
-    fn try_into_engine(&self, _: &C) -> Result<Self::Engine, Self::Error> {
+    fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
         if !finite(self) {
             return Err(ParticleValueError::NonFinite);
         }
@@ -66,6 +80,19 @@ impl<C: ?Sized> TryIntoEngine<C> for ApiOptions {
             to_color: self.to_color,
             trail: self.trail,
             item: self.item.clone(),
+            item_stack: self
+                .item_stack
+                .as_ref()
+                .map(|stack| {
+                    stack
+                        .try_into_engine(
+                            context
+                                .particle_items()
+                                .ok_or(ParticleValueError::InvalidStack)?,
+                        )
+                        .map_err(|_| ParticleValueError::InvalidStack)
+                })
+                .transpose()?,
             geyser: self.geyser,
             vibration: self.vibration.clone(),
             legacy_entity_effect: self.legacy_entity_effect,
@@ -90,6 +117,15 @@ impl TryIntoApi for EngineOptions {
             to_color: self.to_color,
             trail: self.trail,
             item: self.item.clone(),
+            item_stack: self
+                .item_stack
+                .as_ref()
+                .map(|stack| {
+                    stack
+                        .try_into_api()
+                        .map_err(|_| ParticleValueError::InvalidStack)
+                })
+                .transpose()?,
             geyser: self.geyser,
             vibration: self.vibration.clone(),
             legacy_entity_effect: self.legacy_entity_effect,

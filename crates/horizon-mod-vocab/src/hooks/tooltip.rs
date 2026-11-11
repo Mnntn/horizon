@@ -8,14 +8,16 @@ pub trait Hooks {
     /// it (`u32::MAX` keeps the text's own); `Text::legacy` reads `§` codes.
     /// The stack has its components (`stack.data()`). Asked each frame the
     /// tooltip shows, never for one the stack hides or a crossbow's loaded
-    /// projectile.
+    /// projectile. This is the scoped `Item.appendHoverText` moment, not
+    /// NeoForge's global `ItemTooltipEvent`: attached parts add their lines here
+    /// before component lines are assembled. Afterwards [`Hooks::item_tooltip`]
+    /// sees the finished list, including these parts' lines.
     #[hook(
         side = "client",
         contract = "collect",
         out = "lines",
         scope = "item",
-        key = "stack",
-        neoforge = "ItemTooltipEvent"
+        key = "stack"
     )]
     fn tooltip();
 }

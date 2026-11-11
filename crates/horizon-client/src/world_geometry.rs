@@ -1,10 +1,11 @@
 //! Fixed-capacity output for a view's custom geometry; the GPU consumer owns drawing.
+use crate::gfx::mod_pipelines::{self, PipelineRun, PipelineVertex};
 use crate::gfx::world_primitives::{Batch, DEFAULT_CAPACITY as CAPACITY, STAGES};
 use crate::{gizmos, mesher::Vertex};
 use glam::{DVec3, Mat4, Vec3, Vec4};
 use mod_api::{
-    DrawError, InstanceError, ModelInstance, RenderLevelStage, WorldDepth, WorldDrawUsage,
-    WorldLine, WorldQuad,
+    DrawError, InstanceError, ModelInstance, PipelineDrawError, PipelineQuad, RenderLevelStage,
+    WorldDepth, WorldDrawUsage, WorldLine, WorldQuad,
 };
 
 /// Copies of resolved models accepted for one view. Reserved once, never grown in a frame.
@@ -38,6 +39,12 @@ pub struct WorldGeometry {
     white: [f32; 2],
     lines: [Vec<[f32; 8]>; 2],
     quads: [Vec<Vertex>; 2],
+    /// Quads drawn by mod pipelines, 4 vertices each, and the runs that share a pipeline and
+    /// a stage. They count against the quad capacity.
+    pipeline_quads: Vec<PipelineVertex>,
+    pipeline_runs: Vec<PipelineRun>,
+    /// `PipelineFrame.time` for this view.
+    time: f32,
     copies: Vec<ModelCopy>,
     groups: std::collections::HashSet<mod_api::InstanceGroupRef>,
     accepted_models: u32,
@@ -55,6 +62,9 @@ impl Default for WorldGeometry {
             white: [0.0; 2],
             lines: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize)),
             quads: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize * 4)),
+            pipeline_quads: Vec::with_capacity(CAPACITY as usize * 4),
+            pipeline_runs: Vec::with_capacity(CAPACITY as usize),
+            time: 0.0,
             copies: Vec::with_capacity(INSTANCE_CAPACITY as usize),
             groups: std::collections::HashSet::with_capacity(INSTANCE_CAPACITY as usize),
             accepted_models: 0,
@@ -72,6 +82,8 @@ impl WorldGeometry {
         self.white = white;
         self.lines.iter_mut().for_each(Vec::clear);
         self.quads.iter_mut().for_each(Vec::clear);
+        self.pipeline_quads.clear();
+        self.pipeline_runs.clear();
         self.clear_copies();
         self.model_cut = 0;
         self.groups.clear();
@@ -91,6 +103,10 @@ impl WorldGeometry {
         }
         self.stage = self.stage.max(index);
     }
+    /// The game time this view's pipeline shaders read, in seconds (`PipelineFrame.time`).
+    pub fn set_time(&mut self, seconds: f32) {
+        self.time = seconds;
+    }
     /// Entity-stream cut used by directly staged instances in this view.
     pub fn set_model_cut(&mut self, cut: u32) {
         self.model_cut = cut;
@@ -106,7 +122,8 @@ impl WorldGeometry {
         WorldDrawUsage::new(
             self.lines.iter().map(|v| v.len() as u32).sum(),
             CAPACITY,
-            self.quads.iter().map(|v| v.len() as u32 / 4).sum(),
+            self.quads.iter().map(|v| v.len() as u32 / 4).sum::<u32>()
+                + self.pipeline_quads.len() as u32 / 4,
             CAPACITY,
             self.accepted_models,
             INSTANCE_CAPACITY,
@@ -261,7 +278,52 @@ impl WorldGeometry {
         }
         Ok(())
     }
-    /// Borrow the existing renderer's batch, with no copying or frame allocation.
+    /// Append an entire batch of quads drawn by the mod pipeline in `slot`, or leave the
+    /// output unchanged. The caller has resolved the handle; quads that follow the last ones
+    /// with the same pipeline and stage join their run.
+    pub fn pipeline_quads(
+        &mut self,
+        slot: u32,
+        quads: &[PipelineQuad],
+    ) -> Result<(), PipelineDrawError> {
+        if quads.len() > (CAPACITY - self.usage().quads) as usize {
+            return Err(PipelineDrawError::CapacityExceeded);
+        }
+        self.validate_positions(quads.iter().flat_map(|q| q.corners))
+            .map_err(|_| PipelineDrawError::NonFinite)?;
+        if quads
+            .iter()
+            .flat_map(|q| q.uv)
+            .flatten()
+            .any(|c| !c.is_finite())
+        {
+            return Err(PipelineDrawError::NonFinite);
+        }
+        if quads.is_empty() {
+            return Ok(());
+        }
+        for q in quads {
+            let color = crate::world_primitives::vertex_color(q.color, 255);
+            self.pipeline_quads
+                .extend((0..4).map(|corner| PipelineVertex {
+                    pos: std::array::from_fn(|i| (q.corners[corner][i] - self.camera[i]) as f32),
+                    uv: q.uv[corner],
+                    color,
+                }));
+        }
+        let (stage, count) = (self.stage as u32, quads.len() as u32);
+        match self.pipeline_runs.last_mut() {
+            Some(run) if run.slot == slot && run.stage == stage => run.quads += count,
+            _ => self.pipeline_runs.push(PipelineRun {
+                slot,
+                stage,
+                quads: count,
+            }),
+        }
+        Ok(())
+    }
+    /// Borrow the existing renderer's batch, with no copying or frame allocation. The frame's
+    /// builder names the pipeline set the queued slots belong to.
     pub fn batch(&self) -> Batch<'_> {
         Batch {
             lines: &self.lines[0],
@@ -269,7 +331,20 @@ impl WorldGeometry {
             quads: &self.quads[0],
             quads_through: &self.quads[1],
             stage_ends: self.stage_ends(),
+            pipelines: mod_pipelines::Batch {
+                set: None,
+                vertices: &self.pipeline_quads,
+                runs: &self.pipeline_runs,
+                time: self.time,
+            },
         }
+    }
+    /// [`Self::batch`] for a frame drawn with the resources that built `pipelines`, the set
+    /// the queued pipeline quads' slots were resolved in.
+    pub fn batch_with<'a>(&'a self, pipelines: &'a crate::mod_pipelines::Pipelines) -> Batch<'a> {
+        let mut batch = self.batch();
+        batch.pipelines.set = Some(pipelines);
+        batch
     }
     /// Quads, quads through walls, lines and lines through walls queued so far.
     fn counts(&self) -> [u32; 4] {
@@ -472,6 +547,90 @@ mod tests {
                 draw.lines.each_ref().map(Vec::capacity),
                 draw.quads.each_ref().map(Vec::capacity)
             )
+        );
+    }
+
+    #[test]
+    fn pipeline_quads_are_atomic_share_the_quad_capacity_and_run_by_pipeline_and_stage() {
+        use RenderLevelStage::*;
+        let mut draw = WorldGeometry::default();
+        draw.reset([30_000_000.0, 20.0, 0.0], Mat4::IDENTITY, [0.5, 0.5]);
+        draw.set_time(12.5);
+        let quad = PipelineQuad::new(
+            [
+                [30_000_000.25, 21.0, -1.0],
+                [30_000_000.25, 20.0, -1.0],
+                [30_000_001.25, 20.0, -1.0],
+                [30_000_001.25, 21.0, -1.0],
+            ],
+            [[0.0, 0.0], [0.0, 2.0], [3.0, 2.0], [3.0, 0.0]],
+            0x80402010,
+        );
+        draw.begin_stage(AfterSky);
+        draw.pipeline_quads(4, &[quad, quad]).unwrap();
+        // The same pipeline at the same stage joins the run; another pipeline starts one, and
+        // so does the first pipeline again after it, to keep the order submitted.
+        draw.pipeline_quads(4, &[quad]).unwrap();
+        draw.pipeline_quads(1, &[quad]).unwrap();
+        draw.pipeline_quads(4, &[quad]).unwrap();
+        draw.begin_stage(AfterWeather);
+        draw.pipeline_quads(4, &[quad]).unwrap();
+        draw.pipeline_quads(4, &[]).unwrap();
+
+        let pipelines = draw.batch().pipelines;
+        let run = |slot, stage, quads| PipelineRun { slot, stage, quads };
+        assert_eq!(
+            pipelines.runs,
+            [run(4, 0, 3), run(1, 0, 1), run(4, 0, 1), run(4, 3, 1)]
+        );
+        assert_eq!(pipelines.vertices.len(), 24);
+        assert_eq!(pipelines.time, 12.5);
+        assert!(pipelines.set.is_none());
+        // Camera-relative before narrowing to f32, texture coordinates as given, and the
+        // colour's bytes red first.
+        let corner = pipelines.vertices[2];
+        assert_eq!(corner.pos, [1.25, 0.0, -1.0]);
+        assert_eq!(corner.uv, [3.0, 2.0]);
+        assert_eq!(corner.color.to_le_bytes(), [0x40, 0x20, 0x10, 0x80]);
+        assert!(!draw.batch().is_empty());
+
+        // A fault anywhere refuses the whole batch.
+        let mut bad_corner = quad;
+        bad_corner.corners[3][1] = f64::NAN;
+        let mut bad_uv = quad;
+        bad_uv.uv[1][0] = f32::INFINITY;
+        for bad in [bad_corner, bad_uv] {
+            assert_eq!(
+                draw.pipeline_quads(4, &[quad, bad]),
+                Err(PipelineDrawError::NonFinite)
+            );
+        }
+        assert_eq!(draw.usage().quads, 6);
+
+        // One capacity for plain and pipeline quads.
+        let plain = WorldQuad::new(quad.corners, !0, WorldDepth::Tested);
+        draw.quads(&vec![plain; CAPACITY as usize - 7]).unwrap();
+        assert_eq!(
+            draw.pipeline_quads(4, &[quad, quad]),
+            Err(PipelineDrawError::CapacityExceeded)
+        );
+        draw.pipeline_quads(4, &[quad]).unwrap();
+        assert_eq!(draw.quads(&[plain]), Err(DrawError::CapacityExceeded));
+        assert_eq!(draw.usage().quads, CAPACITY);
+
+        let capacity = (
+            draw.pipeline_quads.capacity(),
+            draw.pipeline_runs.capacity(),
+        );
+        draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+        assert!(draw.batch().is_empty());
+        assert_eq!(
+            capacity,
+            (
+                draw.pipeline_quads.capacity(),
+                draw.pipeline_runs.capacity()
+            ),
+            "a view's pipeline quads never grow the storage reserved at setup"
         );
     }
 

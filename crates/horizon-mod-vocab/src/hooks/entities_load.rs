@@ -9,7 +9,8 @@ pub trait Hooks {
     /// non-finite changes keep the original spot. Canceling leaves the owner
     /// in place with no teleport sound, damage or endermite roll; the pearl is
     /// used up. Player owners keep their acting-player context and mutable fall
-    /// `damage` (5; nonpositive is none). Mob owners take no fall damage and
+    /// `damage` (5; nonpositive causes no health loss, but zero remains a hit
+    /// attempt that asks the invulnerability predicate). Mob owners take no fall damage and
     /// make no endermite draw; their `damage` starts at zero and is player-only.
     /// An owner moved, removed, killed or put to sleep by a listener is not moved
     /// again using the old decision. The impact hook still hears the hit.

@@ -12,6 +12,7 @@ pub(in crate::game) use fire::{
     BlockDropsCall, BlockScreenEffectDrawCall, ConnectsToCall, EntityChangeBlockPreCall,
     ItemAfterVerticalCollisionCall, UpdateShapeCall,
 };
+use mod_api::BlockEntityRef;
 
 use super::native_data_maps::DataMapType;
 use super::{
@@ -24,7 +25,6 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_client::block_contact::Pending;
-use horizon_client::creative::Creative;
 use horizon_client::{
     atlas_sources::qualified,
     biome::{BiomeColors, SpawnEntry},
@@ -69,14 +69,15 @@ use mod_api::GameMode;
 use mod_api::GameTests;
 pub use mod_api::game::{PhantomSpawnResult, Shake, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, BlockTintSources, CameraDrawContext, ClientAudioOptions,
-    ClientChatOptions, ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions,
-    ClientMiningPrediction, ClientModifiers, ClientReloadListeners, ColorResolvers,
-    CommandInvocation, EnchantmentDamageEffects, EnchantmentInfo, EntityRef, GameRuleActor,
-    HandRender, InteractionAttempt, InteractionKey, LayerDefinition, LifecycleContext, LivingRef,
-    NoteBlockChange, ParticleProviders, PathComputationType, Placement, PlayerRef,
+    self, Answered, BlockPlacement, BlockTintSources, CameraDrawContext, CauldronFluidContents,
+    CauldronInteractions, ClientAudioOptions, ClientChatOptions, ClientGraphicsOptions,
+    ClientGuiOptions, ClientInputOptions, ClientMiningPrediction, ClientModifiers,
+    ClientReloadListeners, ColorResolvers, CommandInvocation, EnchantmentDamageEffects,
+    EnchantmentInfo, EntityRef, GameRuleActor, HandRender, InteractionAttempt, InteractionKey,
+    JsonAnimationType, LayerDefinition, LifecycleContext, LivingRef, NoteBlockChange,
+    ParticleProviders, PathComputationType, Placement, PlayerRef, PoiTypeExtensions,
     RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage, ServerReloadListeners,
-    ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    ServerTickPhase, TicketController, ToolUse, VillagerProfessions, WorldPhase,
 };
 use mod_api::{
     ActiveEffect, AttachmentStore, BlockClick, BlockUpdateFlags, BonemealSource, ChunkRef,

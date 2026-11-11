@@ -61,6 +61,17 @@ pub fn main_with(
                 .collect();
             let order = horizon_mod_package::dependencies::resolve(&inputs)
                 .unwrap_or_else(|error| panic!("mod load refused: {error}"));
+            // What every level.dat this game saves records (`fml.LoadingModList`).
+            horizon_client::save::level_mods::set_loaded(Some(
+                order
+                    .order
+                    .iter()
+                    .map(|&i| horizon_client::save::level_mods::ModRecord {
+                        id: manifests[i].id.clone(),
+                        version: manifests[i].version.clone(),
+                    })
+                    .collect(),
+            ));
             let mut entries: std::collections::BTreeMap<_, _> = mods
                 .into_iter()
                 .map(|entry| (entry.fields().id, entry))

@@ -1231,7 +1231,7 @@ mod tests {
                 "entity.player.hurt",
                 "entity.player.death",
             ],
-            step_sound: None,
+            sound_overrides: Default::default(),
             food: Default::default(),
             tempt: Default::default(),
             passenger_attachments: Vec::new(),

@@ -7,6 +7,9 @@ rust-version.workspace = true
 description = "Horizon's mod files: content mods, modpacks and the registry index (docs/modding/src/how-to/content-mods.md)"
 
 [dependencies]
+horizon-mod-vocab = { path = "../horizon-mod-vocab" }
+horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
+horizon-mod-point-shape = { path = "../horizon-mod-point-shape" }
 horizon-core = { path = "../horizon-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -54,6 +57,7 @@ prebuilt = ["dep:cap-std", "dep:flate2", "dep:tar"]
 index = ["dep:minisign-verify", "dep:horizon-shader-api"]
 
 [dev-dependencies]
+horizon-mod-api = { path = "../horizon-mod-api" }
 wat = "1"
 tempfile = "3.27.0"
 

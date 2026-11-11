@@ -279,6 +279,8 @@ pub struct PlayerSender {
     /// The connection's bytes on the wire (after compression and encryption), counted by its
     /// network thread: `horizon-report`'s network use per player. None for a test's channel.
     wire: Option<Arc<Counters>>,
+    /// Registry negotiation belongs to this live connection, never a process-wide UUID cache.
+    pub datapack_offer: Option<Arc<[u8]>>,
 }
 #[derive(Clone)]
 enum To {
@@ -298,6 +300,7 @@ impl PlayerSender {
             held: Arc::default(),
             to: To::Channel(tx),
             wire: None,
+            datapack_offer: None,
         }
     }
     /// A connectionless actor has no writer, queue or packet delivery.
@@ -308,6 +311,7 @@ impl PlayerSender {
             held: Arc::default(),
             to: To::Disabled,
             wire: None,
+            datapack_offer: None,
         }
     }
     /// The bytes received from and sent to the client on the wire so far.
@@ -971,6 +975,7 @@ struct Parts {
     properties: Vec<login::Property>,
     info: ClientInformation,
     brand: String,
+    datapack_offer: Option<Vec<u8>>,
 }
 
 fn login_and_configure(
@@ -1013,7 +1018,9 @@ fn login_and_configure(
     // Configuration.
     let sync_data = shared.sync();
     let sync: &SyncData = &sync_data;
-    let send = |c: &mut Connection, p: cfg::Clientbound| c.send(&p.encode()).map_err(e);
+    let send = |c: &mut Connection, p: cfg::Clientbound| {
+        p.try_encode().and_then(|body| c.send(&body)).map_err(e)
+    };
     send(
         c,
         cfg::Clientbound::CustomPayload(cfg::CustomPayload {
@@ -1047,6 +1054,7 @@ fn login_and_configure(
     // answering known packs. That reply orders the announcement without a ping.
     let server_mods = horizon_protocol::mod_list::local();
     let mut client_mods = Vec::new();
+    let mut datapack_offer = None;
     let core = KnownPack {
         namespace: CORE_PACK.0.into(),
         id: CORE_PACK.1.into(),
@@ -1062,7 +1070,7 @@ fn login_and_configure(
     let mut brand = String::from("vanilla");
     let known_pack = loop {
         let (id, payload) = c.recv().map_err(e)?;
-        match decode_config(id, &payload).map_err(e)? {
+        match cfg::Serverbound::decode(id, &payload).map_err(e)? {
             cfg::Serverbound::ClientInformation(i) => info = i,
             cfg::Serverbound::CustomPayload(p) if p.channel == "minecraft:brand" => {
                 brand = horizon_protocol::buf::Reader::new(&p.data)
@@ -1095,6 +1103,11 @@ fn login_and_configure(
                         return Ok(None);
                     }
                 }
+            }
+            cfg::Serverbound::CustomPayload(p)
+                if p.channel == crate::datapack_net::OFFER_CHANNEL =>
+            {
+                datapack_offer = Some(p.data);
             }
             cfg::Serverbound::SelectKnownPacks(p) => break p.packs == vec![core.clone()],
             _ => {}
@@ -1194,11 +1207,13 @@ fn login_and_configure(
         let mut content_match = false;
         loop {
             let (id, payload) = c.recv().map_err(e)?;
-            match decode_config(id, &payload).map_err(e)? {
+            match cfg::Serverbound::decode(id, &payload).map_err(e)? {
                 cfg::Serverbound::CustomPayload(p)
                     if p.channel == crate::content_identity::CHANNEL =>
                 {
-                    content_match = p.data == hash;
+                    content_match = crate::content_identity::decode_payload(&p.data)
+                        .map_err(|error| error.to_string())?
+                        == Some(hash);
                 }
                 cfg::Serverbound::Pong(p) if p.id == 0 => break,
                 cfg::Serverbound::ClientInformation(i) => info = i,
@@ -1215,6 +1230,28 @@ fn login_and_configure(
                 &format!("{name} ({})", uuid_string(uuid)),
                 crate::content_identity::MISMATCH,
             );
+            return Ok(None);
+        }
+    }
+    // The mods' datapack registries this client has, or the reason it cannot play (#811).
+    match crate::datapack_net::server_step(brand == "horizon", datapack_offer.as_deref()) {
+        crate::datapack_net::Step::Nothing => {}
+        crate::datapack_net::Step::Send(data) => {
+            for data in crate::datapack_net::chunks(&data)? {
+                send(
+                    c,
+                    cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                        channel: crate::datapack_net::CHANNEL.into(),
+                        data,
+                    }),
+                )?;
+            }
+        }
+        crate::datapack_net::Step::Refuse(text) => {
+            let reason =
+                horizon_core::nbt::Tag::String(horizon_core::nbt::JavaString::from(text.as_str()));
+            let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
+            lost(shared, &format!("{name} ({})", uuid_string(uuid)), &text);
             return Ok(None);
         }
     }
@@ -1239,7 +1276,7 @@ fn login_and_configure(
     send(c, cfg::Clientbound::FinishConfiguration(Empty))?;
     loop {
         let (id, payload) = c.recv().map_err(e)?;
-        match decode_config(id, &payload).map_err(e)? {
+        match cfg::Serverbound::decode(id, &payload).map_err(e)? {
             cfg::Serverbound::FinishConfiguration(_) => break,
             cfg::Serverbound::ClientInformation(i) => info = i,
             _ => {}
@@ -1251,6 +1288,7 @@ fn login_and_configure(
         properties,
         info,
         brand,
+        datapack_offer,
     }))
 }
 
@@ -1434,7 +1472,9 @@ fn wait_alive<T>(
         });
         let result = loop {
             let packet = match c.reader.recv() {
-                Ok((id, payload)) => decode_config(id, &payload).map_err(|e| e.to_string()),
+                Ok((id, payload)) => {
+                    cfg::Serverbound::decode(id, &payload).map_err(|e| e.to_string())
+                }
                 Err(err) => break Err(err.to_string()),
             };
             if let Some(result) = answer(packet) {
@@ -1480,6 +1520,7 @@ fn play(
         held: Arc::default(),
         to: To::Pool(outbox.clone(), watch.clone()),
         wire: Some(c.reader.counters.clone()),
+        datapack_offer: parts.datapack_offer.map(Into::into),
     };
     let required_pack = shared
         .config
@@ -1655,21 +1696,11 @@ impl PacketRate {
     }
 }
 
-/// ServerboundCustomPayloadPacket's codec (DiscardedPayload): a payload of at most
-/// 32767 bytes, in configuration and in play.
-const MAX_PAYLOAD: usize = horizon_protocol::quiet::MAX_PAYLOAD;
 const COMMAND_SUGGESTION: i32 = horizon_protocol::ids::play::serverbound::COMMAND_SUGGESTION;
-
-fn too_large() -> String {
-    format!("Payload may not be larger than {MAX_PAYLOAD} bytes")
-}
 
 /// A play packet as vanilla's decoders read it.
 fn checked_play(packet: play::Serverbound) -> horizon_protocol::Result<play::Serverbound> {
     match &packet {
-        play::Serverbound::CustomPayload(p) if p.data.len() > MAX_PAYLOAD => {
-            Err(horizon_protocol::Error::new(too_large()))
-        }
         // ServerboundCommandSuggestionPacket: a VarInt id, then the command, at most
         // 32500 chars. The game reads it later; its codec's limits apply here.
         play::Serverbound::Unknown(COMMAND_SUGGESTION, body) => {
@@ -1679,16 +1710,6 @@ fn checked_play(packet: play::Serverbound) -> horizon_protocol::Result<play::Ser
             Ok(packet)
         }
         _ => Ok(packet),
-    }
-}
-
-/// A configuration packet as vanilla's decoders read it.
-fn decode_config(id: i32, payload: &[u8]) -> horizon_protocol::Result<cfg::Serverbound> {
-    match cfg::Serverbound::decode(id, payload)? {
-        cfg::Serverbound::CustomPayload(p) if p.data.len() > MAX_PAYLOAD => {
-            Err(horizon_protocol::Error::new(too_large()))
-        }
-        packet => Ok(packet),
     }
 }
 
@@ -1833,6 +1854,7 @@ impl KeepAliveWatch {
 
 #[cfg(test)]
 mod tests {
+    include!("profession_join_tests.rs");
 
     #[test]
     fn undrained_packets_stop_at_twice_the_inbox() {
@@ -2197,8 +2219,15 @@ mod tests {
                 data: vec![0; len],
             })
         };
-        assert!(checked_play(payload(MAX_PAYLOAD)).is_ok());
-        assert!(checked_play(payload(MAX_PAYLOAD + 1)).is_err());
+        let decode = |packet: play::Serverbound| {
+            let encoded = packet.encode();
+            play::Serverbound::decode(
+                horizon_protocol::ids::play::serverbound::CUSTOM_PAYLOAD,
+                &encoded[1..],
+            )
+        };
+        assert!(decode(payload(32_767)).is_ok());
+        assert!(decode(payload(32_768)).is_err());
         let config = |len: usize| {
             cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                 channel: "a:b".into(),
@@ -2208,8 +2237,8 @@ mod tests {
         };
         // The body after the packet's one-byte VarInt id.
         let id = horizon_protocol::ids::configuration::serverbound::CUSTOM_PAYLOAD;
-        assert!(decode_config(id, &config(MAX_PAYLOAD)[1..]).is_ok());
-        assert!(decode_config(id, &config(MAX_PAYLOAD + 1)[1..]).is_err());
+        assert!(cfg::Serverbound::decode(id, &config(32_767)[1..]).is_ok());
+        assert!(cfg::Serverbound::decode(id, &config(32_768)[1..]).is_err());
         let suggestion = |len: usize| {
             let mut w = horizon_protocol::buf::Writer::new();
             w.varint(7);
@@ -2476,3 +2505,7 @@ mod tests {
         assert!(rate.next > t0 + Duration::from_secs(10));
     }
 }
+
+#[cfg(test)]
+#[path = "datapack_offer_tests.rs"]
+mod datapack_offer_tests;

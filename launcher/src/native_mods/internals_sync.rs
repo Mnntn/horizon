@@ -30,7 +30,7 @@ impl std::fmt::Display for Error {
                 "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for {revision}. It is not cached and could not be downloaded: {error}",
                 &[("revision", revision), ("error", reason)],
             )),
-            Self::SourceInjection => f.write_str(crate::i18n::tr("E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, raw listeners and the mod's own modules, not source listeners or helpers. Use cargo horizon-mod internals add for this mod.")),
+            Self::SourceInjection => f.write_str(crate::i18n::tr("E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, slot listeners and supporting modules, not mixin helpers. Use cargo horizon-mod internals add for this mod.")),
             Self::Check(reason) => f.write_str(reason),
         }
     }
@@ -225,6 +225,7 @@ fn catalog_for_mod_with(
         &fresh.join(super::inject::POINTS),
         &fresh.join(internals::INTERNALS),
         horizon_platform::mod_build::api_gen::staging::Mode::Discovery,
+        horizon_mod_package::manifest::API,
     )?;
     fs::write(fresh.join(".discovery-ready"), "").map_err(|e| e.to_string())?;
     if game.exists() {
@@ -368,7 +369,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn discovery_refuses_private_source_listeners_before_facade_assembly() {
+    fn discovery_refuses_unlisted_injects_before_facade_assembly() {
         for kind in ["before_call", "after_call", "modify_value"] {
             let root = super::super::tests::dir("discovery-source-listener");
             let folder = root.join("mod");
@@ -394,10 +395,14 @@ mod tests {
             }]).to_string()).unwrap();
             let result = std::panic::catch_unwind(|| discover(&folder, &root));
             assert!(
-                matches!(result, Ok(Err(Error::SourceInjection))),
+                matches!(&result, Ok(Err(Error::Check(error))) if error.contains("E_INJECT_NO_SLOT")),
                 "discovery must return the typed source refusal, not panic: {result:?}"
             );
-            assert_eq!(result.unwrap().unwrap_err().to_string(), "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, raw listeners and the mod's own modules, not source listeners or helpers. Use cargo horizon-mod internals add for this mod.");
+            assert!(result
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("[[inject]] never compiles game code"));
             fs::remove_dir_all(root).unwrap();
         }
     }

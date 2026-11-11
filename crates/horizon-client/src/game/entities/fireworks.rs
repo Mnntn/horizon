@@ -296,20 +296,35 @@ pub(super) fn fireworks_of(stack: &ItemStack) -> (u8, Vec<FireworkExplosion>) {
         .and_then(|d| d.fireworks.clone())
         .unwrap_or((1, Vec::new()))
 }
+/// `FireworkRocketEntity(Level, double, double, double, ItemStack)`, after the UUID:
+/// the motion's two triangles, then the lifetime's two `nextInt`s, all from `random`.
+fn rocket_draws(random: &mut horizon_core::random::LegacyRandom, flight: u8) -> (Vec3, i32) {
+    let tri = |r: &mut horizon_core::random::LegacyRandom| r.triangle(0.0, 0.002297);
+    let velocity = Vec3::new(tri(random), 0.05, tri(random));
+    let lifetime = 10 * (1 + i32::from(flight))
+        + random.next_int_bound(6).unwrap_or(0)
+        + random.next_int_bound(7).unwrap_or(0);
+    (velocity, lifetime)
+}
 impl Game<'_> {
-    pub(super) fn new_rocket(&mut self, at: Vec3, stack: &ItemStack, attached: bool) -> Rocket {
+    /// A rocket built from `own`, the rocket's own random (`Entity.random`): the
+    /// UUID, the motion and the lifetime draw from it in that order, and a rocket
+    /// that is then shot (`Projectile.shoot`) goes on drawing from the same one.
+    pub(super) fn new_rocket(
+        &mut self,
+        at: Vec3,
+        stack: &ItemStack,
+        attached: bool,
+        own: &mut horizon_core::random::LegacyRandom,
+    ) -> Rocket {
         let (flight, explosions) = fireworks_of(stack);
-        // FireworkRocketEntity: motion and lifetime come from the rocket's own random.
-        let mut random = random_source::entity();
-        let r = &mut random;
-
-        let tri = |r: &mut horizon_core::random::LegacyRandom| r.triangle(0.0, 0.002297);
-        let velocity = Vec3::new(tri(r), 0.05, tri(r));
-        let lifetime = 10 * (1 + i32::from(flight))
-            + r.next_int_bound(6).unwrap_or(0)
-            + r.next_int_bound(7).unwrap_or(0);
-        // Entity.<init>: the id comes from the one counter at construction.
+        // Entity.<init>: the id comes from the one counter at construction, the UUID
+        // from the random's first two longs.
         let id = self.take_entity_id();
+        self.persist
+            .uuids
+            .insert(id, horizon_client::save::insecure_uuid(own));
+        let (velocity, lifetime) = rocket_draws(own, flight);
         Rocket {
             attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
@@ -329,7 +344,7 @@ impl Game<'_> {
             attached_to: None,
             angled: false,
             item: stack.clone(),
-            random,
+            random: own.clone(),
             on_ground: false,
             has_been_shot: false,
             silent: false,
@@ -347,7 +362,7 @@ impl Game<'_> {
             hit.point[1] + f64::from(hit.face[1]) * 0.15,
             hit.point[2] + f64::from(hit.face[2]) * 0.15,
         );
-        let mut rocket = self.new_rocket(at, stack, false);
+        let mut rocket = self.new_rocket(at, stack, false, &mut random_source::entity());
         rocket.owner = Some(Who::Player);
         rocket.guest = self.lan_acting;
         self.rockets.push(rocket);
@@ -359,15 +374,19 @@ impl Game<'_> {
     }
     /// A rocket shot at an angle (`DATA_SHOT_AT_ANGLE`): out of a dispenser
     /// (`FireworkRocketItem.asProjectile`) or a crossbow.
+    ///
+    /// `shoot` gives the shot's velocity from the rocket's own random, after the
+    /// constructor's draws (`asProjectile`, then `spawnProjectileUsingShoot`).
     pub(super) fn launch_angled_rocket(
         &mut self,
         at: Vec3,
-        velocity: Vec3,
         stack: &ItemStack,
         owner: Option<Who>,
+        shoot: impl FnOnce(&mut horizon_core::random::LegacyRandom) -> Vec3,
     ) {
-        let mut rocket = self.new_rocket(at, stack, false);
-        rocket.velocity = velocity;
+        let mut own = random_source::entity();
+        let mut rocket = self.new_rocket(at, stack, false, &mut own);
+        rocket.velocity = shoot(&mut own);
         rocket.angled = true;
         rocket.owner = owner;
         rocket.guest = self.lan_acting.filter(|_| owner == Some(Who::Player));
@@ -442,7 +461,7 @@ impl Game<'_> {
             self.play_player_bound_sound("minecraft:item.lead.break", 6, 1.0, 1.0, false);
         }
         let at = self.player.as_ref().map_or(Vec3::ZERO, |p| p.position);
-        let mut rocket = self.new_rocket(at, stack, true);
+        let mut rocket = self.new_rocket(at, stack, true, &mut random_source::entity());
         rocket.owner = Some(Who::Player);
         rocket.guest = self.lan_acting;
         self.rockets.push(rocket);
@@ -594,12 +613,21 @@ impl Game<'_> {
             }
             // Every other player in the level (LAN guests, the players of a
             // server thread), each swapped in as the player.
-            self.each_guest_hit_except(boosted, |g| g.rocket_blast_player(from, damage));
+            let guests: Vec<u32> = self.lan.as_ref().map_or_else(Vec::new, |host| {
+                host.hub
+                    .guests
+                    .iter()
+                    .filter(|g| host.hub.here(g) && Some(g.conn) != boosted)
+                    .map(|g| g.conn)
+                    .collect()
+            });
+            for conn in guests {
+                self.as_guest(conn, |g| g.rocket_blast_player(from, damage));
+            }
             let hits: Vec<(u32, f32)> = {
                 let world = self.mob_world_base(&[]);
                 self.mobs
                     .iter()
-                    .filter(|m| m.alive())
                     .filter_map(|m| {
                         let d2 = (m.position.x - from.x).powi(2)
                             + (m.position.y - from.y).powi(2)
@@ -765,10 +793,15 @@ impl Game<'_> {
                 .fireworks(at, v, r.explosions.clone(), camera.unwrap_or(at));
         }
     }
-    /// `dealExplosionDamage` on a player that is not the rocket's
+    /// `FireworkRocketEntity.dealExplosionDamage` on a player that is not the rocket's
     /// `attachedToEntity`: within 5 blocks, when the rocket sees its feet or
     /// its middle (`ClipContext.Block.COLLIDER`, no fluids).
     fn rocket_blast_player(&mut self, from: Vec3, damage: f32) {
+        // The splash query uses EntitySelector.NO_SPECTATORS. The attached
+        // target is hurt directly, without that query's exclusion.
+        if self.spectator() {
+            return;
+        }
         let Some(p) = self.player.as_ref() else {
             return;
         };
@@ -794,15 +827,8 @@ impl Game<'_> {
     /// from it and the death message names it; creative and spectator
     /// players are immune.
     fn rocket_hurt_player(&mut self, from: Vec3, amount: f32) {
-        if self.creative
-            || self.spectator()
-            || self
-                .player
-                .as_ref()
-                .is_none_or(|p| p.health.dead_or_dying())
-        {
-            return;
-        }
+        // Ability, spectator and death refusals belong to hurtServer, after
+        // its invulnerability observation (also for an attached target).
         // No mob ever owns a rocket.
         self.combat.projectile_owner = None;
         self.combat.rocket_hit = true;
@@ -874,6 +900,30 @@ fn use_on_passes(fall_flying: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// A rocket draws its UUID's two longs first, then the motion's two triangles
+    /// (four doubles), then `nextInt(6)` and `nextInt(7)` for the lifetime, all from
+    /// the one random. The expected values come from `java.util.Random` replayed
+    /// outside the game: a rocket whose UUID draw were skipped would read 30, 22
+    /// and 26 here.
+    #[test]
+    fn a_rockets_lifetime_follows_its_uuid_and_motion_draws() {
+        use horizon_core::random::LegacyRandom;
+        for (seed, flight, lifetime) in [
+            (1, 1, 26),
+            (12_345, 1, 26),
+            (987_654_321, 1, 25),
+            (1, 3, 46),
+        ] {
+            let mut own = LegacyRandom::new(seed);
+            horizon_client::save::insecure_uuid(&mut own);
+            assert_eq!(
+                super::rocket_draws(&mut own, flight).1,
+                lifetime,
+                "seed {seed}"
+            );
+        }
+    }
+
     /// A flying rocket's vertices carry its own id for frame generation's and a temporal
     /// upscaler's motion vectors (`Frame::entity_motion`), so the motion matched between
     /// two frames is its flight, not only the camera's.
@@ -1060,5 +1110,9 @@ mod tests {
         assert_eq!(packet.sound.1.unwrap().0, "minecraft:item.lead.break");
     }
 }
+#[cfg(test)]
+#[path = "fireworks/hit_attempt_tests.rs"]
+mod hit_attempt_tests;
+
 horizon_client::impl_joined!(Rocket);
 horizon_mod_runtime::impl_attachment_lifetime!(Rocket);

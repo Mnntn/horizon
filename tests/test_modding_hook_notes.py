@@ -45,6 +45,18 @@ class HookNotes(unittest.TestCase):
         self.assertTrue(run.call_args.kwargs["check"])
         self.assertIn("Latest.", result["sections"][0]["Chapter"]["sub_items"][0]["Chapter"]["content"])
 
+    def test_coverage_chapter_comes_from_the_generator_at_its_published_url(self):
+        book = {"sections": [{"Chapter": dict(name="Wasm boundary coverage", path=None,
+            source_path=None, content="", number=[2], parent_names=[], sub_items=[])}]}
+        with patch.object(notes.subprocess, "run", return_value=subprocess.CompletedProcess(
+                [], 0, stdout="# Wire boundary coverage\n\nRequired gap total: 0.")) as run:
+            result = notes.coverage({"root": "/checkout/docs/modding"}, book)
+        self.assertEqual(run.call_args.args[0][-2:], ["mod-api", "coverage"])
+        self.assertEqual(run.call_args.kwargs["cwd"], Path("/checkout").resolve())
+        chapter = result["sections"][0]["Chapter"]
+        self.assertEqual(chapter["path"], "wasm-coverage.md")
+        self.assertIn("Required gap total: 0.", chapter["content"])
+
 
 if __name__ == "__main__":
     unittest.main()

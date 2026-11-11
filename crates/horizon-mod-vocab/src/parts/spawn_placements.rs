@@ -110,7 +110,7 @@ pub trait SpawnPlacementsRegistrar {
     /// reinforcements. Code that must decide per check is the separate
     /// `mob_spawn_placement_check` hook, which still hears the rule's answer.
     ///
-    /// Resolved once, at load: an id outside the mod's namespace, a tag that is
+    /// Resolved once, at load: an id outside the mod's manifest-owned namespaces, a tag that is
     /// not a namespaced name or a second declaration of the same type refuses
     /// the mods, naming the mod; a type no content file defines refuses the
     /// resource load, naming the type.
@@ -127,12 +127,14 @@ impl SpawnPlacementsRegistrar for PartRegistrar {
         path: &str,
         rule: crate::SpawnPlacementRule,
     ) -> Result<(), crate::SpawnPlacementError> {
-        let result = (|| {
-            let (namespace, name) = path.split_once(':').unwrap_or((self.mod_id, path));
-            if namespace.is_empty() || name.is_empty() || namespace != self.mod_id {
+        let id = match self.owned_declaration_id(path) {
+            Ok(id) => id,
+            Err(reason) => {
+                self.refused.push(reason);
                 return Err(crate::SpawnPlacementError::InvalidId);
             }
-            let id = format!("{namespace}:{name}");
+        };
+        let result = (|| {
             if self.spawn_placements.iter().any(|d| d.id == id) {
                 return Err(crate::SpawnPlacementError::Duplicate);
             }

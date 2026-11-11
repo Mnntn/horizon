@@ -1,5 +1,7 @@
 //! Content declaration conversion. Admission retains the content loader's validation.
 use super::TryIntoEngine;
+#[path = "arm_pose.rs"]
+mod arm_pose;
 use horizon_mod_package::content as engine;
 
 impl TryIntoEngine<()> for mod_api::BlockProperties {
@@ -149,7 +151,10 @@ impl TryIntoEngine<()> for mod_api::Item {
             components: component_patch(&self.components)?,
             crafting_remainder: self.crafting_remainder.clone(),
             block: self.block.clone(),
-            arm_pose: self.arm_pose,
+            arm_pose: self
+                .arm_pose
+                .map(|pose| pose.try_into_engine(&()))
+                .transpose()?,
         })
     }
 }

@@ -1,7 +1,8 @@
 //! Game builds the player imports: a `horizon-client` they already have (one built on their
 //! fork's Actions, to try a merged change before the next Nightly), installed as its own
 //! version beside the releases. The program alone can't start: it needs a version folder's
-//! game files. So an import is a copy of an installed release or Nightly's folder (its
+//! game files. So an import copies an installed base's folder (a signed release/Nightly, or an
+//! explicitly selected unsigned developer base), including its
 //! research-lock.json, preparer sources and prepared resources) with the picked program in
 //! place of that version's own, as a native build is (`native_mods::install`).
 //!
@@ -36,7 +37,7 @@ pub fn label(version: &str) -> Option<String> {
 /// What an imported build was made from: its `imported.json`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct About {
-    /// The release or Nightly whose game files it plays with.
+    /// The installed base whose game files it plays with; a developer base remains unsigned.
     pub base: String,
     /// The file the player picked.
     pub file: String,
@@ -57,30 +58,32 @@ pub fn about(version: &str) -> Option<About> {
     })
 }
 
-/// A version Horizon published and signed: a release or a Nightly.
-fn official(version: &str) -> bool {
-    backend::is_game_tag(version) || crate::nightly::date_of(version).is_some()
+/// A supported base: a signed release/Nightly, or an explicitly chosen unsigned developer build.
+fn eligible_base(version: &str) -> bool {
+    backend::is_game_tag(version)
+        || crate::nightly::date_of(version).is_some()
+        || crate::developer_install::is_developer(version)
 }
 
 /// The installed version an import takes its game files from: `requested` (`--version`), else
-/// `selected` when Horizon published it, else the newest installed release or Nightly.
+/// `selected` when it is an eligible base, else the newest installed release or Nightly.
+/// Developer bases never enter that automatic fallback.
 fn base_for(
     installed: &[String],
     requested: Option<&str>,
     selected: Option<&str>,
 ) -> Result<String, String> {
-    let usable = |v: &str| official(v) && installed.iter().any(|t| t == v);
+    let usable = |v: &str| eligible_base(v) && installed.iter().any(|t| t == v);
     match requested {
         Some(b) if usable(b) => Ok(b.to_owned()),
-        Some(b) => Err(format!("{b} is not an installed release or Nightly.")),
+        Some(b) => Err(trf("{version} is not an installed base. Choose an installed release, Nightly or local unsigned developer build.", &[("version", b)])),
         None => {
             selected
                 .filter(|s| usable(s))
                 .map(str::to_owned)
                 .or_else(|| native_mods::newest_installed(installed).cloned())
                 .ok_or_else(|| {
-                    tr("Install a release or Nightly first: an imported build plays with its game \
-                    files.")
+                    tr("Install a release or Nightly, or explicitly select a local unsigned developer base first: an imported build reuses its game files.")
                 .to_string()
                 })
         }
@@ -419,7 +422,7 @@ mod tests {
             tag.starts_with("imported-2026-11-01-") && tag.len() == 27,
             "{tag}"
         );
-        assert!(is_imported(&tag) && !official(&tag));
+        assert!(is_imported(&tag) && !eligible_base(&tag));
         assert_eq!(label(&tag).as_deref(), Some("Imported · 2026-11-01"));
         let dir = versions.join(&tag);
         assert_eq!(fs::read(dir.join(CLIENT)).unwrap(), built);
@@ -599,7 +602,21 @@ mod tests {
             assert_eq!(base_for(&installed, None, selected), newest);
         }
         assert!(base_for(&installed[2..], None, None).is_err());
-        // --version: an installed release or Nightly, never another local build.
+        let developer = "developer-0123456789abcdef";
+        let local = [developer.to_string()];
+        assert!(base_for(&local, None, None).is_err());
+        assert_eq!(
+            base_for(&local, None, Some(developer)),
+            Ok(developer.to_string())
+        );
+        assert_eq!(
+            base_for(&local, Some(developer), None),
+            Ok(developer.to_string())
+        );
+        let mut mixed = installed.to_vec();
+        mixed.insert(0, developer.to_string());
+        assert_eq!(base_for(&mixed, None, None), newest);
+        // --version can explicitly name a developer base, but not an imported or native derivative.
         let asked = |b| base_for(&installed, Some(b), Some("v0.2.95"));
         assert_eq!(asked("nightly-2026-11-01-c9d474d"), newest);
         for b in [

@@ -46,10 +46,22 @@ fn reload_resolves_parts_against_reloaded_tags() {
             &game.pack.additional_data,
         );
         let root = game.options.resources.clone();
+        let previous = std::sync::Arc::new(mod_api::DatapackRegistrySet::first(
+            mod_api::DatapackCandidate::build(&[], &[]).unwrap(),
+            horizon_client::datapack_net::next_session(),
+        ));
+        horizon_client::datapack_net::serve(Some(previous.clone()));
         let prepared = game
             .prepare_world_reload(&stack, &root, game.mods.data_switched)
             .unwrap();
+        // Preparation must not publish to joining clients.
+        assert!(std::sync::Arc::ptr_eq(
+            &previous,
+            &horizon_client::datapack_net::served().unwrap(),
+        ));
         game.install_world_tables(prepared);
+        // A successful empty publication clears the previous world's served registries too.
+        assert!(horizon_client::datapack_net::served().is_none());
         game.run_native_advancement_grants();
         assert_eq!(stone_key.id(game), name);
         assert_eq!(

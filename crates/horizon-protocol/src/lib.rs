@@ -52,12 +52,28 @@ pub enum Direction {
 
 /// A malformed or unsupported packet.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Error(pub String);
+pub struct Error(pub String, Option<packets::custom_payload::PayloadTooLarge>);
 impl Error {
     const TIMED_OUT: &str = "Timed out";
     const END_OF_STREAM: &str = "Connection closed by the server";
     pub fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
+        Self(message.into(), None)
+    }
+    /// A directional custom payload exceeded its body capacity.
+    pub fn payload_too_large(id: &str, size: usize, limit: usize) -> Self {
+        let detail = packets::custom_payload::PayloadTooLarge {
+            id: id.into(),
+            size,
+            limit,
+        };
+        Self(
+            format!("PayloadTooLarge {{ id: {id}, size: {size}, limit: {limit} }}"),
+            Some(detail),
+        )
+    }
+    /// Structured size refusal, retained for callers that expose their own error vocabulary.
+    pub fn payload_limit(&self) -> Option<&packets::custom_payload::PayloadTooLarge> {
+        self.1.as_ref()
     }
     /// The read timeout passed with nothing received (netty's
     /// `ReadTimeoutException`, which `Connection.exceptionCaught` reports as
@@ -84,7 +100,7 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
-        Self(e.to_string())
+        Self::new(e.to_string())
     }
 }
 pub type Result<T> = std::result::Result<T, Error>;

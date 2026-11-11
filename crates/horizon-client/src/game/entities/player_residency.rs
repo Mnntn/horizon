@@ -346,8 +346,7 @@ impl Game<'_> {
                 };
                 SlotAccess::Done(visit(hook.attachment_lifetime()))
             }
-            Source::DragonPart(_) => SlotAccess::UnsupportedKind(Kind::DragonPart),
-            Source::Ordinary => SlotAccess::Missing,
+            Source::DragonPart(_) | Source::Ordinary => SlotAccess::Missing,
         }
     }
 

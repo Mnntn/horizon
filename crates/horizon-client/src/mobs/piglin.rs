@@ -843,38 +843,36 @@ fn hoglin_hurt(
         m.ai.last_hurt_by = None;
     } else {
         for &mob in &m.extra.piglin.adults {
-            events.push(MobEvent::HoglinAttackTarget { mob, target: by });
+            events.push(MobEvent::HoglinAttackTarget {
+                mob,
+                target: by,
+                player: None,
+            });
         }
     }
 }
 /// `HoglinAi.setAttackTargetIfCloserThanCurrent` for a hoglin that received a
 /// broadcast: nothing while pacified; otherwise `BehaviorUtils.getNearestTarget`,
 /// the new target unless the current one is strictly nearer
-/// (`getTargetNearestMe`). `position` gives a live mob target's place; a
-/// current target it cannot place counts as absent. A player on either side
-/// is not compared (`Who::Player` is each mob's own player): the current
-/// target stays.
-pub fn receive_attack_target(m: &mut Mob, target: Who, position: impl Fn(Who) -> Option<Vec3>) {
+/// (`getTargetNearestMe`). `position` gives the current (true) or incoming (false) target's place; a
+/// current target it cannot place counts as absent. Player positions must resolve the corresponding concrete identity. Returns a proposal for the event dispatcher to approve before
+/// committing the target, without changing the receiving mob.
+pub fn receive_attack_target(
+    m: &Mob,
+    target: Who,
+    position: impl Fn(Who, bool) -> Option<Vec3>,
+) -> Option<Who> {
     if m.extra.ints[0] > 0 {
-        return;
+        return None;
     }
     let Some(current) = m.ai.target else {
-        m.ai.target = Some(target);
-        return;
+        return Some(target);
     };
-    if current == Who::Player || target == Who::Player {
-        return;
-    }
-    let Some(now) = position(current) else {
-        m.ai.target = Some(target);
-        return;
+    let Some(now) = position(current, true) else {
+        return Some(target);
     };
-    let Some(new) = position(target) else {
-        return;
-    };
-    if m.distance_sqr(now) >= m.distance_sqr(new) {
-        m.ai.target = Some(target);
-    }
+    let new = position(target, false)?;
+    (m.distance_sqr(now) >= m.distance_sqr(new)).then_some(target)
 }
 /// `PiglinAi.stopHoldingOffHandItem` without bartering (`wasHurtBy`): a gold
 /// ingot is not bartered and is gone; anything else ends its admiring next
@@ -2428,6 +2426,46 @@ mod hurt_broadcast_tests {
         let mut kind = kind();
         Arc::make_mut(&mut kind).species = species;
         Mob::new(id, kind, at, 0.0)
+    }
+
+    #[test]
+    fn hoglin_broadcast_selection_proposes_without_mutating() {
+        let mut receiver = mob(1, Species::Hoglin, Vec3::ZERO);
+        let near = Who::Mob(2);
+        let far = Who::Mob(3);
+        let position = |who, _current| match who {
+            Who::Mob(2) => Some(Vec3::new(2.0, 0.0, 0.0)),
+            Who::Mob(3) => Some(Vec3::new(4.0, 0.0, 0.0)),
+            Who::Player => Some(Vec3::new(4.0, 0.0, 0.0)),
+            _ => None,
+        };
+        assert_eq!(receive_attack_target(&receiver, far, position), Some(far));
+        assert_eq!(receiver.ai.target, None);
+        receiver.extra.ints[0] = 1;
+        assert_eq!(receive_attack_target(&receiver, near, position), None);
+        receiver.extra.ints[0] = 0;
+        receiver.ai.target = Some(near);
+        assert_eq!(receive_attack_target(&receiver, far, position), None);
+        receiver.ai.target = Some(far);
+        assert_eq!(receive_attack_target(&receiver, near, position), Some(near));
+        assert_eq!(receiver.ai.target, Some(far));
+        assert_eq!(
+            receive_attack_target(&receiver, near, |_, _| position(near, false)),
+            Some(near)
+        );
+        assert_eq!(
+            receive_attack_target(&receiver, Who::Mob(4), position),
+            None
+        );
+        receiver.ai.target = Some(Who::Mob(4));
+        assert_eq!(receive_attack_target(&receiver, near, position), Some(near));
+        receiver.ai.target = Some(Who::Player);
+        assert_eq!(receive_attack_target(&receiver, near, position), Some(near));
+        receiver.ai.target = Some(far);
+        assert_eq!(
+            receive_attack_target(&receiver, Who::Player, position),
+            Some(Who::Player)
+        );
     }
 
     /// `PiglinBruteAi.wasHurtBy` is `PiglinAi.maybeRetaliate`, which calls the adult piglins

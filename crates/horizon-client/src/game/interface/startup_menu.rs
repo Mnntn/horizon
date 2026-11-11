@@ -469,11 +469,15 @@ impl Loading {
     /// The startup menu's Browse mods, as `Game::drive_mod_browser`.
     fn drive_menu_mod_browser(&mut self) {
         let menu = &mut self.menu;
-        if menu.mod_jobs.poll(
+        let (installed, changed) = menu.mod_jobs.poll(
             &mut menu.options.mod_browser,
             &mut self.settings.mods,
             false,
-        ) {
+        );
+        if changed {
+            menu.options.layout_changed();
+        }
+        if installed {
             self.settings.save(&Game::options_path());
         }
     }
@@ -574,6 +578,7 @@ impl Loading {
                 Event::DebugEntriesChanged => {}
                 Event::Changed => {
                     self.save_menu_settings();
+                    self.settings.keys.sync_action_bindings();
                     self.apply_menu_settings();
                 }
                 Event::SliderDrag => {
@@ -769,6 +774,7 @@ impl Loading {
             return;
         }
         let was_disabled = super::narrator::cycle_status(&mut self.settings);
+        self.menu.options.layout_changed();
         super::narrator::update_status(
             self.settings.narrator(),
             &mut self.menu.pending_narrator_toast,

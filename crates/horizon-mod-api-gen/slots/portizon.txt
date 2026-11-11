@@ -1,0 +1,5 @@
+# Farmer's Delight native internals call sites, compiled into the prebuilt game.
+horizon_client_lib::mobs::villager_brain::secondary::sense_secondary | horizon_client_lib::mobs::villager_brain::farmland | 0 | 88fb00429ac8116f
+horizon_client::game::sign_edit::Game<'_>::draw_sign_editor | horizon_client_render::signs::editor_sprite | 0 | 3025a7117400e422
+horizon_client::game::sign_edit::Game<'_>::draw_sign_editor | horizon_client_render::signs::editor_sprite | 1 | e525507cb7eecc79
+horizon_client::game::machines::Game<'_>::dispense_from | horizon_client::game::Game::dispense_item | 0 | c283fcbfc355cc70

@@ -78,11 +78,7 @@ fn target<'a>(
     internals: &'a [ListedInternal],
     inject: &horizon_mod_package::manifest::inject::Inject,
 ) -> Option<&'a ListedInternal> {
-    let kind = if inject.kind == Kind::Field {
-        "struct"
-    } else {
-        "fn"
-    };
+    let kind = "fn";
     internals.iter().find(|i| {
         i.path == inject.at
             && !i.shape_only

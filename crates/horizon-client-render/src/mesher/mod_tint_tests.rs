@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn resources() -> Option<std::path::PathBuf> {
+pub(super) fn resources() -> Option<std::path::PathBuf> {
     let root = std::env::var_os("HORIZON_TEST_RESOURCES")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
@@ -20,7 +20,7 @@ fn resources() -> Option<std::path::PathBuf> {
 }
 
 // Independent API fixture for the air, stone and two leaf states exercised below.
-fn tint_values(registry: &BlockRegistry) -> ModTintValues {
+pub(super) fn tint_values(registry: &BlockRegistry) -> ModTintValues {
     use horizon_mod_runtime::block_definitions::BlockDefinition;
     mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
     let empty = BTreeMap::new();

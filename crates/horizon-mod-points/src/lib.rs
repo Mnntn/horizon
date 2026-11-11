@@ -81,29 +81,39 @@ macro_rules! replace {
         .replacing()
     };
     ($constructor:path, cancel, host, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
-        $constructor($id, $priority, $inject, |host, args| {
-            $listener(host, args);
-            args.cancel = true;
-        })
+        $constructor(
+            $id,
+            $priority,
+            $inject,
+            mod_api::replacement_listener!(cancel, host, $listener),
+        )
         .replacing()
     };
     ($constructor:path, cancel, none, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
-        $constructor($id, $priority, $inject, |args| {
-            $listener(args);
-            args.cancel = true;
-        })
+        $constructor(
+            $id,
+            $priority,
+            $inject,
+            mod_api::replacement_listener!(cancel, none, $listener),
+        )
         .replacing()
     };
     ($constructor:path, result, host, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
-        $constructor($id, $priority, $inject, |host, args| {
-            args.result = ::core::option::Option::Some($listener(host, args));
-        })
+        $constructor(
+            $id,
+            $priority,
+            $inject,
+            mod_api::replacement_listener!(result, host, $listener),
+        )
         .replacing()
     };
     ($constructor:path, result, none, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
-        $constructor($id, $priority, $inject, |args| {
-            args.result = ::core::option::Option::Some($listener(args));
-        })
+        $constructor(
+            $id,
+            $priority,
+            $inject,
+            mod_api::replacement_listener!(result, none, $listener),
+        )
         .replacing()
     };
 }

@@ -28,6 +28,7 @@ struct Cells {
     time: i64,
     analog: HashMap<BlockPos, i32>,
 }
+impl horizon_world::level::BlockEntityNeighbors for Cells {}
 impl LevelAccess for Cells {
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
         self.cells.get(&pos).copied().unwrap_or(self.air)

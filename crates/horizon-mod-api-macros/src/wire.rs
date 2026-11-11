@@ -6,10 +6,18 @@ use syn::{Data, DeriveInput, Fields, Type, parse_quote, visit::Visit};
 pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let mut via: Option<Type> = None;
+    let mut contract: Option<syn::Path> = None;
     let mut internal_field_layouts = false;
     for attr in &input.attrs {
         if attr.path().is_ident("wire") {
             attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("crate") {
+                    if contract.is_some() {
+                        return Err(meta.error("duplicate Wire contract path"));
+                    }
+                    contract = Some(meta.value()?.parse()?);
+                    return Ok(());
+                }
                 if meta.path.is_ident("internal_field_layouts") && !internal_field_layouts {
                     internal_field_layouts = true;
                     return Ok(());
@@ -22,6 +30,7 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
             })?;
         }
     }
+    let w = contract.unwrap_or_else(|| parse_quote!(::mod_api::wire));
     if via.is_some() && internal_field_layouts {
         return Err(syn::Error::new_spanned(
             name,
@@ -30,14 +39,12 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
     }
     if via.is_none() {
         for param in input.generics.type_params_mut() {
-            param.bounds.push(parse_quote!(::mod_api::wire::Wire));
+            param.bounds.push(parse_quote!(#w::Wire));
         }
     }
     if let Some(via) = &via {
         let where_clause = input.generics.make_where_clause();
-        where_clause
-            .predicates
-            .push(parse_quote!(#via: ::mod_api::wire::Wire));
+        where_clause.predicates.push(parse_quote!(#via: #w::Wire));
         where_clause
             .predicates
             .push(parse_quote!(#via: for<'__wire> ::core::convert::From<&'__wire Self>));
@@ -46,7 +53,6 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
             .push(parse_quote!(Self: ::core::convert::TryFrom<#via>));
     }
     let (imp, ty, clause) = input.generics.split_for_impl();
-    let w = quote!(::mod_api::wire);
     if let Some(via) = via {
         return Ok(quote! {
             #[automatically_derived]
@@ -94,7 +100,7 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
                 check_owned(&field.ty)?;
                 let ft = &field.ty;
                 min = quote!(#min + <#ft as #w::Wire>::MIN);
-                layout = field_layout(layout, field, name);
+                layout = field_layout(layout, field, &w);
                 puts.push(quote!(out.put(#bind);));
                 owned.push(quote!(out.put_owned(#bind);));
             }
@@ -133,7 +139,7 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
                     let ft = &field.ty;
                     schema.push(quote!((#label, <#ft as #w::Wire>::layout(&mut vec![]))));
                     check_owned(&field.ty)?;
-                    layout = field_layout(layout, field, name);
+                    layout = field_layout(layout, field, &w);
                     ps.push(quote!(out.put(#bind);));
                     os.push(quote!(out.put_owned(#bind);));
                 }
@@ -150,10 +156,25 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
         Data::Union(_) => return Err(syn::Error::new_spanned(name, "Wire cannot encode a union")),
     }
     layout = quote!(#w::layout_mix(#w::layout_name(#shape), #layout));
+    // Unit enum variants have no child layouts or recursion to evaluate. Fold
+    // their constant hash chain here rather than leaving its loops to LLVM.
+    if matches!(&input.data, Data::Enum(_)) && !nested {
+        layout = quote!(const { #layout });
+    }
     let take = if nested {
         quote!(input.nested(|input| Ok(#(#takes)*)))
     } else {
         quote!(Ok(#(#takes)*))
+    };
+    let put = if nested {
+        quote!(out.nested(|out| { #(#puts)* }))
+    } else {
+        quote!(#(#puts)*)
+    };
+    let put_owned = if nested {
+        quote!(out.nested(|out| { #(#owned)* }))
+    } else {
+        quote!(#(#owned)*)
     };
     // Explicit internal opt-in: do not emit a cfg(test) trait method in external
     // derives, whose mod_api dependency is compiled without cfg(test).
@@ -178,8 +199,8 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
                 visiting.pop();
                 hash
             }
-            fn put(&self, out: &mut #w::Writer) { #(#puts)* }
-            fn put_owned(self, out: &mut #w::Writer) { #(#owned)* }
+            fn put(&self, out: &mut #w::Writer) { #put }
+            fn put_owned(self, out: &mut #w::Writer) { #put_owned }
             fn take(input: &mut #w::Reader<'_>) -> Result<Self, #w::WireError> { #take }
         }
     })
@@ -216,14 +237,14 @@ fn construct(fields: &Fields, prefix: TokenStream) -> TokenStream {
     }
 }
 
-fn field_layout(previous: TokenStream, field: &syn::Field, _: &syn::Ident) -> TokenStream {
+fn field_layout(previous: TokenStream, field: &syn::Field, w: &syn::Path) -> TokenStream {
     let ty = &field.ty;
     let name = field
         .ident
         .as_ref()
         .map(ToString::to_string)
         .unwrap_or_default();
-    quote!(::mod_api::wire::layout_mix(::mod_api::wire::layout_mix(#previous, ::mod_api::wire::layout_name(#name)), <#ty as ::mod_api::wire::Wire>::layout(visiting)))
+    quote!(#w::layout_mix(#w::layout_mix(#previous, #w::layout_name(#name)), <#ty as #w::Wire>::layout(visiting)))
 }
 
 fn check_owned(ty: &Type) -> syn::Result<()> {
@@ -291,6 +312,28 @@ mod tests {
             let expanded = expand(syn::parse_str(source).unwrap()).unwrap();
             syn::parse2::<syn::ItemImpl>(expanded).unwrap_or_else(|e| panic!("{source}: {e}"));
         }
+    }
+
+    #[test]
+    fn contract_path_reaches_bounds_fields_and_via() {
+        for source in [
+            "#[wire(crate = ::mod_vocab::wire)] struct Generic<T> { value: T }",
+            "#[wire(crate = ::mod_vocab::wire, via = String)] struct Checked(String);",
+            "#[wire(crate = ::mod_vocab::wire)] enum Payload { A(String), B }",
+        ] {
+            let output = expand(syn::parse_str(source).unwrap()).unwrap();
+            syn::parse2::<syn::ItemImpl>(output.clone()).unwrap();
+            let output = output.to_string();
+            assert!(output.contains("mod_vocab"));
+            assert!(!output.contains("mod_api"));
+        }
+        assert!(
+            expand(syn::parse_quote!(
+                #[wire(crate = a, crate = b)]
+                struct Duplicate;
+            ))
+            .is_err()
+        );
     }
 
     #[test]

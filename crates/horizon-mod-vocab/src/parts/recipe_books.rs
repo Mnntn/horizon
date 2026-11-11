@@ -5,7 +5,7 @@ use crate::item::recipe_book::RecipeBookTypeKey;
 
 /// Operations available during the existing shared mod registration phase.
 pub trait RecipeBooksRegistrar {
-    /// Register an explicit lowercase `namespace:path` owned by this mod.
+    /// Register an explicit lowercase `namespace:path` in any manifest-owned namespace.
     /// IDs are limited to 256 bytes and 1024 books in total. Invalid or duplicate
     /// declarations refuse installation even if the caller ignores the error.
     /// The registry freezes when registration ends, before player state is loaded.
@@ -39,7 +39,7 @@ impl RecipeBooksRegistrar for PartRegistrar {
                     self.mod_id
                 ));
             }
-            if namespace == "minecraft" || namespace != self.mod_id {
+            if namespace == "minecraft" || !owns_namespace(self.mod_id, namespace) {
                 return Err("namespace must be owned by the registering mod, not minecraft".into());
             }
             if self.recipe_book_types.len() >= 1024 {

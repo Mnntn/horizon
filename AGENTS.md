@@ -157,6 +157,8 @@ python3 tools/agent_control_e2e.py         # horizon-ctl / MCP end to end
 python3 tools/lang_coverage.py --summary   # the keys each language still misses, and its English leftovers
 ```
 
+- For a player-facing change, drive the game once with `horizon-ctl` (launch, the action, a `state` or `screenshot`)
+  and report the result in the PR's "Tried in game" line; never claim it when it was not run.
 - Harnesses and the game need the vanilla data in `.local/` (`minecraft/`, `horizon-client/26.3`, `datagen/`,
   `tools/`): see [docs/parity-workflow.md](docs/parity-workflow.md). Without it, pr_ready lists the
   harnesses for CI.

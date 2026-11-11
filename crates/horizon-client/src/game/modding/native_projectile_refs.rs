@@ -96,7 +96,7 @@ impl Game<'_> {
 
     /// Resolves hit credit, persistent identity, and a separate non-living
     /// vehicle identity for collision exclusion. None for a stale owner or hook.
-    fn native_projectile_owner_fields(
+    pub(super) fn native_projectile_owner_fields(
         &mut self,
         owner: Option<EntityRef>,
     ) -> Option<(OwnerFields, Option<u32>)> {
@@ -658,8 +658,7 @@ mod tests {
     /// A player entity for the tests: the host's player standing in for a guest.
     fn player(game: &mut Game<'_>) -> EntityRef {
         game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-        game.lan_acting_uuid = Some(123);
-        game.lan_acting_entity = Some(20);
+        crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
         game.entity(20).unwrap()
     }
 

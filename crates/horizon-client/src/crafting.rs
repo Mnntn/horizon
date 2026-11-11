@@ -1198,7 +1198,7 @@ impl Special {
     }
 }
 /// `DyedItemColor.applyDyes` over dye indexes.
-pub(crate) fn apply_dyes(current: Option<i32>, dyes: &[usize]) -> i32 {
+pub fn apply_dyes(current: Option<i32>, dyes: &[usize]) -> i32 {
     let (mut r, mut g, mut b, mut intensity, mut n) = (0i32, 0i32, 0i32, 0i32, 0i32);
     let mut add = |rgb: u32| {
         let (red, green, blue) = (
@@ -1442,27 +1442,31 @@ pub struct ResolvedSources {
 /// the sets takes: the cooking, station and brewing acceptance and the
 /// network copy.
 #[derive(Clone, Debug, Default)]
-pub struct PropertyAdditions(HashMap<&'static str, HashSet<String>>);
+pub struct PropertyAdditions(HashMap<String, HashSet<String>>);
+#[cfg(test)]
+#[path = "crafting/property_sets_tests.rs"]
+mod property_sets_tests;
 impl PropertyAdditions {
     /// Asks the `recipe_property_sets` hook once. An unknown set key and an
     /// item that is air are logged and skipped.
     fn ask(context: &horizon_world::native_load_context::LoadContext) -> Self {
         let mut asked = Vec::new();
         native_hooks::native_recipe_property_sets(context, &mut asked);
-        let mut sets = HashMap::<&'static str, HashSet<String>>::new();
+        let mut sets = HashMap::<String, HashSet<String>>::new();
         for addition in asked {
             let key = addition
                 .set
                 .strip_prefix("minecraft:")
                 .unwrap_or(&addition.set);
-            let Some((key, ..)) = crate::lan::recipes::PROPERTY_SETS
-                .iter()
-                .find(|(set, ..)| *set == key)
-            else {
+            if !key.contains(':')
+                && !crate::lan::recipes::PROPERTY_SETS
+                    .iter()
+                    .any(|(set, ..)| *set == key)
+            {
                 log::warn!("recipe_property_sets: unknown set {}", addition.set);
                 continue;
-            };
-            let set = sets.entry(key).or_default();
+            }
+            let set = sets.entry(key.to_owned()).or_default();
             for item in addition.items {
                 if item == "minecraft:air" {
                     log::warn!("recipe_property_sets: air skipped in {key}");
@@ -1476,6 +1480,14 @@ impl PropertyAdditions {
     /// The items mods added to the set `key` (`furnace_input`).
     pub fn get(&self, key: &str) -> Option<&HashSet<String>> {
         self.0.get(key)
+    }
+    /// Custom sets, with fully qualified keys. Vanilla additions are read by
+    /// their owning recipe projections instead.
+    pub fn custom(&self) -> impl Iterator<Item = (&str, &HashSet<String>)> {
+        self.0
+            .iter()
+            .filter(|(key, _)| key.contains(':'))
+            .map(|(key, items)| (key.as_str(), items))
     }
     /// Whether a mod added `item` to the set `key`.
     pub fn adds(&self, key: &str, item: &str) -> bool {
@@ -2160,6 +2172,10 @@ impl Recipes {
                 .get(*i)
                 .filter(|c| c.ingredient.test_in(context, input))
         })
+    }
+    /// The mod-created sets of this load, with fully qualified keys.
+    pub fn custom_property_sets(&self) -> impl Iterator<Item = (&str, &HashSet<String>)> {
+        self.property_additions.custom()
     }
     /// What mods added to the property set `key` (`furnace_input`).
     pub fn property_set(&self, key: &str) -> Option<&HashSet<String>> {

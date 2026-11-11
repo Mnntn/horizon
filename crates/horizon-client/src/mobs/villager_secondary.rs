@@ -2,14 +2,20 @@
 use super::*;
 
 pub(super) fn sense_secondary(m: &mut Mob, w: &MobWorld) {
-    let index = m.extra.profession.index();
+    let index = w.professions.state_index(&m.extra.profession);
+    let custom = index
+        .and_then(|index| w.professions.entry(index))
+        .filter(|_| index.is_some_and(|i| i >= 15));
     let farmer = super::super::villager::is_farmer(m);
     // Tags are resolved with the world's item generation. Borrow its membership
     // set once; the scan performs only constant-time block membership checks.
     let additions = index
-        .and_then(|index| TAGS.get(usize::from(index)))
+        .and_then(|index| TAGS.get(index))
         .and_then(|tag| w.block_tags.get(*tag));
-    if !farmer && additions.is_none_or(|set| set.is_empty()) {
+    if !farmer
+        && additions.is_none_or(|set| set.is_empty())
+        && custom.is_none_or(|p| p.secondary_blocks.is_empty())
+    {
         mem(m).secondary_job_site.clear();
         return;
     }
@@ -23,6 +29,11 @@ pub(super) fn sense_secondary(m: &mut Mob, w: &MobWorld) {
                 let p = [c[0] + x, c[1] + y, c[2] + z];
                 if farmer && farmland(w, p)
                     || additions.is_some_and(|set| set.contains(w.block_name(p[0], p[1], p[2])))
+                    || custom.is_some_and(|entry| {
+                        entry
+                            .secondary_blocks
+                            .contains(w.block_name(p[0], p[1], p[2]))
+                    })
                 {
                     sites.push(p);
                 }

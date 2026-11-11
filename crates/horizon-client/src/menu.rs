@@ -2454,7 +2454,7 @@ impl Menu {
 
 /// `ItemStack.getMaxStackSize`: the stack's component, else the item's; a removed
 /// component (`!minecraft:max_stack_size`) uses vanilla's fallback of one.
-pub(crate) fn item_max_stack(items: &Items, stack: &ItemStack) -> u32 {
+pub fn item_max_stack(items: &Items, stack: &ItemStack) -> u32 {
     let patched = stack.data().and_then(|d| {
         if d.other("!minecraft:max_stack_size").is_some() {
             return Some(1);
@@ -4964,6 +4964,9 @@ pub(crate) mod tests {
                 block_speed_factor: |context, _, factor| {
                     *factor += context.setting("rules_mod", "stack").map_or(0.0, |_| 5.0);
                 },
+                is_ladder: |context, _, _, _, ladder| {
+                    *ladder |= context.setting("rules_mod", "stack").is_some();
+                },
                 player_stays_on_ground_surface: |context, _, staying| {
                     *staying |= context.setting("rules_mod", "stack").is_some();
                 },
@@ -5112,6 +5115,20 @@ pub(crate) mod tests {
         };
         assert_eq!(factors(&before), (0.5, 0.4));
         assert_eq!(factors(&after), (4.5, 5.4));
+        // The ladder test of a block reads it too.
+        let ladder = |context: &LoopContext| {
+            let mut ladder = false;
+            crate::motion::native_is_ladder(
+                context,
+                1,
+                horizon_core::position::BlockPos::new(0, 0, 0),
+                horizon_world::registry::BlockStateId(0),
+                &mut ladder,
+            );
+            ladder
+        };
+        assert!(!ladder(&before));
+        assert!(ladder(&after));
         // The edge backoff and the fluid current read it too.
         let movement = |context: &LoopContext| {
             let (mut staying, mut flow) = (false, [0.25, 0.0, 0.0]);

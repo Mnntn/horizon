@@ -102,14 +102,23 @@ impl Group<()> {
 impl<T: 'static> Group<T> {
     /// Links `members`, which must be in dependency order.
     pub fn link_with(
+        store: Store<T>,
+        members: &[Member<'_>],
+        host: impl FnMut(&mut Store<T>, &str, &str) -> Option<Extern>,
+    ) -> Result<Self, LinkError> {
+        Self::link_cached_with(store, members, None, host)
+    }
+
+    pub(crate) fn link_cached_with(
         mut store: Store<T>,
         members: &[Member<'_>],
+        cache: Option<&crate::module_cache::ModuleCache>,
         mut host: impl FnMut(&mut Store<T>, &str, &str) -> Option<Extern>,
     ) -> Result<Self, LinkError> {
         let engine = store.engine();
         let mut parsed = Vec::with_capacity(members.len());
         for member in members {
-            parsed.push(Layout::read(engine, member)?);
+            parsed.push(Layout::read(engine, member, cache)?);
         }
         let mut next = STACK;
         let mut table_next = 1u64;
@@ -365,7 +374,12 @@ impl<T: 'static> Group<T> {
                     || name.starts_with("__wasm_")
                     || matches!(
                         name.as_str(),
-                        "horizon_layout" | "horizon_layout_ext" | "horizon_in" | "horizon_hook"
+                        "horizon_layout"
+                            | "horizon_layout_ext"
+                            | "horizon_in"
+                            | "horizon_hook"
+                            | "horizon_mod_points_register"
+                            | "horizon_mod_points_seal"
                     )
                     || name == "memory"
                     || !matches!(extern_, Extern::Func(_) | Extern::Global(_))
@@ -446,7 +460,11 @@ struct Layout {
 }
 
 impl Layout {
-    fn read(engine: &Engine, member: &Member<'_>) -> Result<Self, LinkError> {
+    fn read(
+        engine: &Engine,
+        member: &Member<'_>,
+        cache: Option<&crate::module_cache::ModuleCache>,
+    ) -> Result<Self, LinkError> {
         let malformed = |why: String| LinkError::Malformed {
             member: member.name.to_owned(),
             why,
@@ -506,7 +524,13 @@ impl Layout {
             });
         }
         let info = info.ok_or_else(|| malformed("dylink.0 has no memory info".into()))?;
-        let module = Module::new(engine, member.module).map_err(|e| malformed(format!("{e:#}")))?;
+        let module = match cache {
+            Some(cache) => cache
+                .load_or_compile(engine, member.module)
+                .map(|(module, _)| module),
+            None => Module::new(engine, member.module),
+        }
+        .map_err(|e| malformed(format!("{e:#}")))?;
         let got_funcs = module
             .imports()
             .filter(|import| import.module() == "GOT.func")

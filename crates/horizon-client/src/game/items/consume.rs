@@ -97,7 +97,7 @@ impl Game<'_> {
         // the client's listener, particles and sounds above still run there.
         if self.is_logical_server() {
             for effect in &consumable.effects {
-                self.apply_consume_effect(stack, effect, None, true);
+                self.apply_consume_effect(stack, effect, None);
             }
         }
         let event = if consumable.animation == UseAnimation::Drink {
@@ -370,6 +370,40 @@ impl Game<'_> {
         let Some(id) = self.riding else {
             return;
         };
+        let removed_y = self
+            .persist
+            .removed_vehicles
+            .get(&id)
+            .map(|vehicle| vehicle.position().y)
+            .or_else(|| {
+                use super::commands::Target;
+                let boat = Target::Boat(id);
+                let cart = Target::Cart(id);
+                if self.persist.removals.contains(&boat)
+                    || self.persist.destroying_vehicles.contains(&boat)
+                {
+                    self.boats
+                        .iter()
+                        .find(|vehicle| vehicle.id == id)
+                        .map(|vehicle| vehicle.position.y)
+                } else if self.persist.removals.contains(&cart)
+                    || self.persist.destroying_vehicles.contains(&cart)
+                {
+                    self.carts
+                        .iter()
+                        .find(|vehicle| vehicle.id == id)
+                        .map(|vehicle| vehicle.position.y)
+                } else {
+                    None
+                }
+            });
+        if let Some(y) = removed_y {
+            if self.native_may_leave(id) && self.riding == Some(id) {
+                self.dismount_removed_vehicle(y);
+                self.release_removed_vehicle(id);
+            }
+            return;
+        }
         if let Some(i) = self.boats.iter().position(|b| b.id == id) {
             self.dismount(i);
         } else if let Some(i) = self.carts.iter().position(|c| c.id == id) {

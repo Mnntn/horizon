@@ -35,6 +35,13 @@ mod inject_cache;
 mod inject_text;
 mod internals;
 mod internals_sync;
+mod registry_compile;
+mod registry_generate;
+mod registry_inventory;
+mod registry_lock;
+mod registry_plan;
+mod registry_runtime;
+mod registry_rustc;
 pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
 mod isolate;
 mod mod_points;
@@ -43,13 +50,13 @@ mod picker;
 mod prebuilt;
 mod sites;
 mod slots;
-mod source;
 #[cfg(all(test, target_os = "linux"))]
 mod source_server;
 
 pub use isolate::LeftOut;
 pub use picker::{needs_picker, Route, Routes};
 pub use prebuilt::{prebuilt_availability, SourceReason};
+pub use registry_inventory::Inventory as RegistryInventory;
 
 // Settings and logs are shared by native-build and diagnostics tests.
 #[cfg(test)]
@@ -541,7 +548,7 @@ fn logged<T>(
 
 /// Dispatch Cargo's discovery-only rustc wrapper before normal launcher startup.
 pub fn internals_rustc_wrapper() -> Option<i32> {
-    internals_sync::rustc_wrapper()
+    registry_rustc::wrapper().or_else(internals_sync::rustc_wrapper)
 }
 
 pub fn sync_internals(
@@ -641,10 +648,12 @@ impl Bundle {
             .expect("validated code package")
     }
 
-    /// Whether horizon-mixins adds supporting modules to the game's source.
-    /// Unified injects are routed separately by the launcher.
+    /// Whether horizon-mixins reads source to transform the game.
     fn needs_mixins(&self) -> bool {
-        !self.native().module.is_empty()
+        !self.native().mixin.is_empty()
+            || !self.native().module.is_empty()
+            || !self.native().bridge.is_empty()
+            || !self.native().state.is_empty()
     }
 }
 
@@ -658,6 +667,16 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
         ));
     }
     Ok(found)
+}
+
+/// Generate only registry pins; never compiles source or modifies manifests.
+pub fn registry_lock(folder: &Path, update: bool) -> Result<(), String> {
+    let bundles = bundles(folder)?;
+    if bundles.len() != 1 {
+        return Err("native-lock requires one mod folder".into());
+    }
+    fs::create_dir_all(root()).map_err(|e| e.to_string())?;
+    registry_generate::generate(&bundles[0], update)
 }
 
 fn scan_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
@@ -845,6 +864,9 @@ fn mismatch_error(list: &str) -> String {
 
 /// The Horizon commit `version` (an installed release or Nightly) was built from, from GitHub.
 pub fn revision_of(version: &str) -> Result<String, String> {
+    if crate::developer_install::is_developer(version) {
+        return crate::developer_install::revision(version);
+    }
     let reference = match version.strip_prefix("nightly-") {
         // nightly-2026-10-28-0c02067: the commit is its last word.
         Some(rest) => rest.rsplit('-').next().unwrap_or(rest),
@@ -1017,7 +1039,6 @@ pub fn version_for(
         hash.update(target.name().as_bytes());
         hash.update([0]);
     }
-    // Private rows derive from the pinned SDK and inject declarations, all salted/hashed here.
     // bundles() reads folders in path order, which with their manifests decides trait dispatch
     // order: hashed in that order, a different order is another build.
     for b in bundles {
@@ -1166,7 +1187,7 @@ impl Step {
             ),
             Self::Mixins => tr("Applying the mixins").into(),
             Self::CachedMixins => tr("Reusing patched game source").into(),
-            Self::Crates => tr("Checking the mods' crates against Horizon's Cargo.lock").into(),
+            Self::Crates => tr("Checking native dependency pins and the game graph").into(),
             Self::PrebuiltGame(revision) => trf(
                 "Downloading the prebuilt game at {revision} (once)",
                 &[("revision", &revision[..7])],
@@ -1211,7 +1232,7 @@ impl Step {
 /// An error ends with its first `error` lines and the last lines: a failed build script's output
 /// alone could push the line naming its crate out of the last ones.
 fn run(cmd: Command, what: &str, line: impl FnMut(&str)) -> Result<(), String> {
-    run_checked(cmd, what, line, None).map_err(|e| e.error)
+    run_checked(cmd, what, line, None, None).map_err(|e| e.error)
 }
 
 /// A failed command, with diagnostic ownership for build isolation.
@@ -1226,6 +1247,7 @@ fn run_checked(
     what: &str,
     mut line: impl FnMut(&str),
     compiler: Option<diagnostics::Compiler<'_>>,
+    stdout_file: Option<fs::File>,
 ) -> Result<(), Ran> {
     let ran = |error: String| Ran {
         error,
@@ -1245,7 +1267,10 @@ fn run_checked(
         cmd.stdout(Stdio::piped());
         Some(log.try_clone().map_err(|e| ran(e.to_string()))?)
     } else {
-        cmd.stdout(log.try_clone().map_err(|e| ran(e.to_string()))?);
+        cmd.stdout(match stdout_file {
+            Some(file) => file,
+            None => log.try_clone().map_err(|e| ran(e.to_string()))?,
+        });
         None
     };
     #[cfg(unix)]
@@ -1536,40 +1561,69 @@ fn cargo(rust: &Toolchain, dir: &Path, subcommand: &str) -> Command {
     cmd
 }
 
-/// Check staged crates against Horizon's own Cargo.lock before fetching dependencies.
-/// Their requested packages and every downloaded package must belong to that lock.
+fn read_lock(dir: &Path) -> Result<String, String> {
+    let path = dir.join("Cargo.lock");
+    fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 fn lock_crates(
     rust: &Toolchain,
-    source: &Path,
+    game: &registry_lock::RegistryLock,
     stage: &Path,
-    mods: &[Bundle],
-    wanted: &[crates::Wanted],
+    allowed: &registry_lock::RegistryLock,
 ) -> Result<(), String> {
-    let read = |dir: &Path| {
-        let path = dir.join("Cargo.lock");
-        fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
-    };
-    let horizon = crates::downloaded(&read(source)?)?;
-    let staged_lock = read(stage)?;
-    crates::check_game_graph(stage, &staged_lock)?;
-    let staged = crates::downloaded(&staged_lock)?;
-    let api_ids: Vec<&str> = mods.iter().map(|m| m.manifest.id.as_str()).collect();
-    if let Some(why) = crates::refused(&horizon, Some(&staged), wanted, &api_ids) {
-        return Err(why);
-    }
-    // Only this computer's crates: the build needs no others.
+    let text = read_lock(stage)?;
+    crates::check_game_graph(stage, &text)?;
+    allowed.check_resolution(&registry_lock::RegistryLock::parse(&text)?, game)?;
     let mut fetch = cargo(rust, stage, "fetch");
     fetch.arg("--locked");
-    if let Some(host) = rust_toolchain::host() {
-        fetch.args(["--target", host.target]);
-    }
-    run(fetch, "Downloading the crates", |_| {}).map_err(crates::locked)
+    run(fetch, "Downloading the crates", |_| {})
 }
 
 /// Horizon's source at commit `revision`: GitHub's archive of it, unpacked once, with the commit in
 /// `.horizon-revision` (bundles pin it). A Nightly's commit stays downloadable after the Nightly
 /// is gone: its `nightly-source/…` tag keeps it (docs/release-flow.md). Links are left out:
 /// horizon-mixins refuses them, and none is needed to build.
+fn source_for(base: &str, revision: &str) -> Result<PathBuf, String> {
+    let archive = crate::developer_install::is_developer(base)
+        .then(|| backend::version_dir(base).join("developer-source.tar"));
+    source_or_local(
+        archive.as_deref(),
+        &root().join("developer-source").join(base),
+        revision,
+        || source(revision),
+    )
+}
+
+fn source_or_local(
+    archive: Option<&Path>,
+    destination: &Path,
+    revision: &str,
+    remote: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<PathBuf, String> {
+    match archive {
+        Some(archive) => local_source(archive, destination, revision),
+        None => remote(),
+    }
+}
+
+fn local_source(archive: &Path, destination: &Path, revision: &str) -> Result<PathBuf, String> {
+    if destination.join(".horizon-revision").is_file() {
+        return Ok(destination.to_owned());
+    }
+    let parent = destination.parent().unwrap();
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let partial = tempfile::Builder::new()
+        .prefix(".source-")
+        .tempdir_in(parent)
+        .map_err(|e| e.to_string())?;
+    let file = fs::File::open(archive).map_err(|e| e.to_string())?;
+    unpack_source(file, partial.path())?;
+    fs::write(partial.path().join(".horizon-revision"), revision).map_err(|e| e.to_string())?;
+    fs::rename(partial.path(), destination).map_err(|e| e.to_string())?;
+    Ok(destination.to_owned())
+}
+
 fn source(revision: &str) -> Result<PathBuf, String> {
     let dir = root().join("source").join(revision);
     if dir.join(".horizon-revision").is_file() {
@@ -1592,22 +1646,34 @@ fn source(revision: &str) -> Result<PathBuf, String> {
 
 /// GitHub's archive (`.tar.gz`) at `url`, unpacked into the fresh folder `partial`: the archive's
 /// one top folder, which is returned. Links are left out; at most `limit` bytes are unpacked.
+fn unpack_source(reader: impl std::io::Read, partial: &Path) -> Result<(), String> {
+    let mut archive = tar::Archive::new(reader);
+    for entry in archive.entries().map_err(|e| e.to_string())? {
+        let mut entry =
+            entry.map_err(|e| trf("Source interrupted: {error}", &[("error", &e.to_string())]))?;
+        let kind = entry.header().entry_type();
+        // Match downloaded sources: horizon-mixins refuses links, which the build does not need.
+        if !(kind.is_file() || kind.is_dir()) {
+            continue;
+        }
+        if !entry.unpack_in(partial).map_err(|e| {
+            trf(
+                "Could not unpack the source: {error}",
+                &[("error", &e.to_string())],
+            )
+        })? {
+            return Err(tr("The source archive contains a path outside its folder.").into());
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn unpack_archive(url: &str, partial: &Path, limit: u64) -> Result<PathBuf, String> {
     use std::io::Read;
     let _ = fs::remove_dir_all(partial);
     fs::create_dir_all(partial).map_err(|e| e.to_string())?;
     let reader = flate2::read::GzDecoder::new(backend::get(url)?.into_reader()).take(limit);
-    let mut tar = tar::Archive::new(reader);
-    for entry in tar.entries().map_err(|e| e.to_string())? {
-        let mut entry = entry.map_err(|e| format!("Download interrupted: {e}"))?;
-        let kind = entry.header().entry_type();
-        if !(kind.is_file() || kind.is_dir()) {
-            continue;
-        }
-        entry
-            .unpack_in(partial)
-            .map_err(|e| format!("Could not unpack the source: {e}"))?;
-    }
+    unpack_source(reader, partial)?;
     // The archive's one top folder (<repo>-<commit>/) is the source's root.
     fs::read_dir(partial)
         .map_err(|e| e.to_string())?
@@ -1728,7 +1794,7 @@ impl std::fmt::Display for Failed {
         match self {
             Self::Mods { error, .. } | Self::Other(error) => f.write_str(error),
             Self::Nothing => Ok(()),
-            Self::NoConsent => f.write_str(tr("Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.")),
+            Self::NoConsent => f.write_str(tr("Native mods run inside your game with your rights; mixins compile code into the game. Allow native mods in Settings, Storage, or pass --trust-native-code.")),
         }
     }
 }
@@ -1754,6 +1820,7 @@ struct BuildOptions<'a> {
     allow_jar_downloads: bool,
     skip: &'a [LeftOut],
     isolate: bool,
+    registry_consent: Option<&'a dyn Fn(&RegistryInventory) -> bool>,
 }
 
 /// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
@@ -1901,12 +1968,15 @@ fn pipeline(
         Some(MIXINS_REV),
         |r| committed("horizon-rust/horizon-mixins", r),
     )?;
+    // Keep developer provenance distinct from a signed base at the same source commit.
+    let developer_key = crate::developer_install::is_developer(origin)
+        .then(|| format!("{}:{origin}", platform.cache_key().unwrap_or_default()));
     let version = version_for(
         &revision,
         &mixins,
         profile,
         target,
-        platform.cache_key(),
+        developer_key.as_deref().or(platform.cache_key()),
         &requested,
     )?;
     let now = Record {
@@ -1919,7 +1989,10 @@ fn pipeline(
     };
     let exists = target.directory(&version).join(".installed").is_file();
     // The route, chosen before anything compiles: the prebuilt game when it serves these mods.
-    let prebuilt = if exists || profile != Profile::Optimized {
+    let prebuilt = if exists
+        || profile != Profile::Optimized
+        || crate::developer_install::is_developer(origin)
+    {
         None
     } else {
         let game = match prebuilt::refusal(&projects) {
@@ -2006,6 +2079,7 @@ fn pipeline(
             &projects,
             &declared,
             &resolution,
+            options.registry_consent,
         )
         .map_err(blame)?;
         check_cancelled()?;
@@ -2050,7 +2124,7 @@ fn pipeline(
             }
         }
         progress(Step::Source(revision.clone()));
-        let source = source(&revision)?;
+        let source = source_for(origin, &revision)?;
         // `root()` is already the form horizon-mixins and MinGW take: resolved (no link, which
         // it refuses) and, on Windows, ASCII (which they can't read past), both by build_dir.
         let real = root();
@@ -2073,6 +2147,7 @@ fn pipeline(
                     apply(&rust, &tool, &mixin_source, &mixin_input, &fresh),
                     "horizon-mixins",
                     |_| {},
+                    None,
                     None,
                 );
                 let _ = fs::remove_dir_all(&mixin_input);
@@ -2100,62 +2175,80 @@ fn pipeline(
         } else {
             sync(&source, &fresh)?;
         }
-        // Stage beside `fresh` and publish the tree and catalog only after the mods' sites
-        // check, as the prebuilt route validates before it creates its output.
+        // Publish the staged tree and catalog after validating the mods' sites.
         let pending = real.join("stage.pending");
         let catalog_dir = real.join("catalog.partial");
         let _ = fs::remove_dir_all(&pending);
         let _ = fs::remove_dir_all(&catalog_dir);
         fs::create_dir_all(&catalog_dir).map_err(|e| e.to_string())?;
         sync(&fresh, &pending)?;
-        let mut pass = cargo(&rust, &pending, "run");
-        pass.args([
-            "--locked",
-            "--release",
-            "-q",
-            "-p",
-            "horizon-mod-api-gen",
-            "--bin",
-            "horizon-stage",
-            "--",
-        ])
-        .arg(&pending)
-        .arg(catalog_dir.join(inject::POINTS))
-        .arg(catalog_dir.join(internals::INTERNALS))
-        .env("CARGO_TARGET_DIR", real.join("target"));
-        fn discard(pending: &Path, catalog: &Path, error: impl std::fmt::Display) -> String {
-            let _ = fs::remove_dir_all(pending);
-            let _ = fs::remove_dir_all(catalog);
-            error.to_string()
+        let mark = |tree: &Path, catalog: &Path| {
+            let mut pass = cargo(&rust, tree, "run");
+            pass.args([
+                "--locked",
+                "--release",
+                "-q",
+                "-p",
+                "horizon-mod-api-gen",
+                "--bin",
+                "horizon-stage",
+                "--",
+            ])
+            .arg(tree)
+            .arg(catalog.join(inject::POINTS))
+            .arg(catalog.join(internals::INTERNALS))
+            .arg(horizon_mod_package::manifest::API)
+            .env("CARGO_TARGET_DIR", real.join("target"));
+            run(pass, "Marking the game's injection points", |_| {})?;
+            internals::Catalog::read(catalog).and_then(|catalog| catalog.with_mods(mods.iter()))
+        };
+        // A mod pins the game as its revision ships it. horizon-mixins reprints each file it
+        // edits and may add fields, which moves fingerprints, so a mixin build's catalog keeps
+        // the unpatched source's fingerprint for every declaration that source has.
+        let pristine = real.join("stage.pinned");
+        let pinned_catalog = real.join("catalog.pinned");
+        let discard = |error: String| {
+            for dir in [&pending, &catalog_dir, &pristine, &pinned_catalog] {
+                let _ = fs::remove_dir_all(dir);
+            }
+            error
+        };
+        let mut catalog = mark(&pending, &catalog_dir).map_err(discard)?;
+        if needs_mixins {
+            let _ = fs::remove_dir_all(&pinned_catalog);
+            fs::create_dir_all(&pinned_catalog).map_err(|e| discard(e.to_string()))?;
+            sync(&source, &pristine).map_err(discard)?;
+            mark(&pristine, &pinned_catalog).map_err(discard)?;
+            internals::keep_pins(&catalog_dir, &pinned_catalog).map_err(discard)?;
+            let _ = fs::remove_dir_all(&pristine);
+            let _ = fs::remove_dir_all(&pinned_catalog);
+            catalog = internals::Catalog::read(&catalog_dir)
+                .and_then(|catalog| catalog.with_mods(mods.iter()))
+                .map_err(discard)?;
         }
-        run(pass, "Marking the game's injection points", |_| {})
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        source::stage(&pending, &catalog_dir, &ordered)
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        let catalog = internals::Catalog::read(&catalog_dir)
-            .and_then(|catalog| catalog.with_mods(mods.iter()))
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
         mods.iter()
             .try_for_each(|bundle| catalog.check(&bundle.manifest))
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+            .map_err(|error| discard(error.to_string()))?;
         let _ = fs::remove_dir_all(&fresh);
-        fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
+        fs::rename(&pending, &fresh).map_err(|error| discard(error.to_string()))?;
         for name in [
             inject::POINTS,
+            horizon_mod_package::SDK_CATALOG_FILE,
             internals::INTERNALS,
-            horizon_platform::mod_build::api_gen::points::source::FILE,
-            horizon_platform::mod_build::api_gen::sites::source::FILE,
         ] {
             fs::rename(catalog_dir.join(name), real.join(name))
-                .map_err(|error| discard(&pending, &catalog_dir, error))?;
+                .map_err(|error| discard(error.to_string()))?;
         }
         let _ = fs::remove_dir_all(&catalog_dir);
         if !mods.is_empty() {
-            // Offline metadata resolves all targets, including packages not fetched for this host.
             let mut fetch = cargo(&rust, &source, "fetch");
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
+        // Source generators add trusted game path edges. Freeze their lock before api::stage
+        // inserts mod projects, and before Cargo resolves any mod-controlled dependencies.
+        let game_lock = read_lock(&fresh)?;
+        let game = registry_lock::RegistryLock::parse(&game_lock)?;
         let catalog = internals::Catalog::read(&real)?.with_mods(mods.iter())?;
         let has_api = api::stage(&fresh, &projects, &declared, &resolution, &catalog)?;
         for project in &projects {
@@ -2176,11 +2269,26 @@ fn pipeline(
             })
             .collect();
         let wanted = crates::wanted(&fresh, &paths)?;
+        let dependency_plan = registry_plan::Plan::read(&game_lock, &projects, &wanted)?;
+        dependency_plan.fetch(&rust, &real.join("registry-fetch"))?;
+        fs::write(
+            fresh.join("Cargo.lock"),
+            dependency_plan.allowed.seed(&read_lock(&fresh)?)?,
+        )
+        .map_err(|e| e.to_string())?;
         if has_api {
-            // Add path packages to Cargo.lock before the locked dependency check.
-            let mut metadata = cargo(&rust, &fresh, "metadata");
-            metadata.args(["--offline", "--format-version", "1"]);
-            run(metadata, "Resolving trait mod crates", |_| {})?;
+            let metadata = registry_inventory::read(&rust, &fresh)
+                .map_err(|error| dependency_plan.explain_resolution(error))?;
+            dependency_plan
+                .check_mods(&registry_lock::RegistryLock::parse(&read_lock(&fresh)?)?)?;
+            let inventory = metadata.inventory(&dependency_plan.game, &[])?;
+            if inventory.added_crates > 0
+                && !options.registry_consent.is_some_and(|ask| ask(&inventory))
+            {
+                return Err(tr("Registry dependency compilation was not approved")
+                    .to_owned()
+                    .into());
+            }
         }
         // Absolute: the compiler runs from elsewhere (`compile`).
         let stage = stage_dir(&real)?;
@@ -2188,7 +2296,7 @@ fn pipeline(
         let _ = fs::remove_dir_all(&fresh);
         if crates::any(&stage) || has_api {
             progress(Step::Crates);
-            lock_crates(&rust, &source, &stage, &mods, &wanted)?;
+            lock_crates(&rust, &game, &stage, &dependency_plan.allowed)?;
         }
         let mut target_dir = real.join("target");
         if let Some(cache_dir) = platform.cache_dir {
@@ -2202,12 +2310,7 @@ fn pipeline(
             .map_err(|error| Failed::Other(cache_error(error)))?;
         crate::run_leases::publish(&profile_dir).map_err(cache_error)?;
         let (mut crates, mut total, mut name) = (0, None, String::new());
-        let mut declared_injections = diagnostics::Declared::expressions(
-            &horizon_platform::mod_build::api_gen::sites::source::read(&real)?,
-        );
-        declared_injections.extend(diagnostics::Declared::fields(
-            mods.iter().map(|bundle| &bundle.manifest),
-        ));
+        let declared_injections = Vec::new();
         let identities: Vec<_> = mods
             .iter()
             .map(|m| (m.manifest.id.clone(), m.manifest.version.clone()))
@@ -2250,6 +2353,7 @@ fn pipeline(
                 mods: &identities,
                 declared: &declared_injections,
             }),
+            None,
         )
         .map_err(|ran| {
             let error = blame(crates::locked(ran.error));
@@ -2395,6 +2499,7 @@ pub fn build(
     instance: &Instance,
     profile: Option<Profile>,
     progress: impl Fn(Step),
+    registry_consent: impl Fn(&RegistryInventory) -> bool,
 ) -> Result<String, Failed> {
     require_consent()?;
     CANCEL.store(false, Ordering::Relaxed);
@@ -2419,6 +2524,7 @@ pub fn build(
                     BuildOptions {
                         skip,
                         isolate: true,
+                        registry_consent: Some(&registry_consent),
                         ..BuildOptions::default()
                     },
                     &progress,
@@ -2460,6 +2566,7 @@ pub fn build_server(
     profile: Profile,
     allow_jar_downloads: bool,
     progress: impl Fn(Step),
+    registry_consent: impl Fn(&RegistryInventory) -> bool,
 ) -> Result<PathBuf, Failed> {
     require_consent()?;
     logged(|_| {
@@ -2494,6 +2601,7 @@ pub fn build_server(
             Target::Server,
             BuildOptions {
                 allow_jar_downloads,
+                registry_consent: Some(&registry_consent),
                 ..BuildOptions::default()
             },
             &progress,
@@ -2634,6 +2742,90 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn source_archive_escape_is_refused_without_writing_outside() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut header = tar::Header::new_gnu();
+        header.set_size(1);
+        header.set_mode(0o644);
+        header.as_mut_bytes()[..10].copy_from_slice(b"../outside");
+        header.set_cksum();
+        let mut archive = tar::Builder::new(Vec::new());
+        archive.append(&header, &b"x"[..]).unwrap();
+        let bytes = archive.into_inner().unwrap();
+        let inside = folder.path().join("inside");
+        fs::create_dir(&inside).unwrap();
+        assert!(unpack_source(bytes.as_slice(), &inside).is_err());
+        assert!(!folder.path().join("outside").exists());
+    }
+
+    #[test]
+    fn developer_native_build_uses_local_only_commit_without_source_network() {
+        let folder = tempfile::tempdir().unwrap();
+        let repo = folder.path().join("checkout");
+        fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        git(&["init", "-q"]);
+        fs::write(repo.join("Cargo.toml"), "[workspace]\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("Cargo.toml", repo.join("CLAUDE.md")).unwrap();
+        git(&["add", "--all"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "local only",
+        ]);
+        let revision = String::from_utf8(git(&["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_owned();
+        // Git archive applies core.autocrlf even though the blob is LF. Exercise the real
+        // developer snapshot boundary with Windows-style config and keep the byte assertion.
+        git(&["config", "core.autocrlf", "true"]);
+        let (snapshot_revision, snapshot) =
+            crate::developer_install::committed_snapshot(&repo).unwrap();
+        assert_eq!(snapshot_revision, revision);
+        let archive = folder.path().join("source.tar");
+        fs::write(&archive, snapshot).unwrap();
+        let destination = folder.path().join("cache/source");
+        let result = source_or_local(Some(&archive), &destination, &revision, || {
+            panic!("developer source must never request GitHub")
+        })
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(result.join("Cargo.toml")).unwrap(),
+            "[workspace]\n"
+        );
+        assert_eq!(
+            fs::read_to_string(result.join(".horizon-revision")).unwrap(),
+            revision
+        );
+        assert!(!result.join("CLAUDE.md").exists());
+        assert!(source_or_local(
+            Some(&folder.path().join("missing.tar")),
+            &folder.path().join("missing-cache"),
+            &revision,
+            || panic!("missing local source must not fall back to GitHub")
+        )
+        .is_err());
+    }
 
     /// The player's route, from a fresh data folder with nothing registered by hand: the
     /// launcher's own install of a release, a native build on it, then an update to a newer
@@ -3426,23 +3618,20 @@ mod tests {
         );
         let path = d.join("horizon-mod.toml");
         let original = fs::read_to_string(&path).unwrap();
-        let declaration = "\n[[inject]]\nid='source'\nat='horizon_client::game::Game::unlisted'\nkind='head'\naccess='internals'\nwith='hook'\nhash='0000000000000000'\n";
+        let declaration = "\n[[inject]]\nid='listener'\nat='horizon_client::game::Game::tick'\nkind='head'\naccess='internals'\nwith='hook'\nhash='0000000000000000'\n";
         fs::write(&path, format!("{original}{declaration}")).unwrap();
-        let source = key(A);
-        assert_ne!(
-            first, source,
-            "source adapters require another game artifact"
-        );
-        assert_eq!(source, key(A), "unchanged private rows reuse the artifact");
+        let declared = key(A);
+        assert_ne!(first, declared, "a declaration is part of the build");
+        assert_eq!(declared, key(A), "an unchanged manifest reuses the build");
         fs::write(
             &path,
             format!(
                 "{original}{}",
-                declaration.replace("id='source'", "id='changed'")
+                declaration.replace("id='listener'", "id='changed'")
             ),
         )
         .unwrap();
-        assert_ne!(source, key(A), "private point identity is part of the key");
+        assert_ne!(declared, key(A), "an inject's id is part of the key");
         fs::write(path, original).unwrap();
         assert_ne!(first, key(B));
         assert_ne!(
@@ -3504,6 +3693,7 @@ mod tests {
         fs::write(d.join("src/salt.rs"), "pub const SALT: u32 = 42;\n").unwrap();
         fs::create_dir_all(d.join("data/crate_demo")).unwrap();
         fs::write(d.join("data/crate_demo/greeting.txt"), "hello").unwrap();
+        fs::write(d.join("Cargo.lock"), format!("version=4\n[[package]]\nname='itoa'\nversion='0.4.8'\nsource='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='{}'\n", "a".repeat(64))).unwrap();
         let key = || {
             version_for(
                 A,
@@ -3522,10 +3712,18 @@ mod tests {
             "src/lib.rs",
             "src/salt.rs",
             "Cargo.toml",
+            "Cargo.lock",
             "data/crate_demo/greeting.txt",
         ] {
             let mut bytes = fs::read(d.join(file)).unwrap();
-            bytes.extend_from_slice(b"\n");
+            if file == "Cargo.lock" {
+                bytes = String::from_utf8(bytes)
+                    .unwrap()
+                    .replace(&"a".repeat(64), &"b".repeat(64))
+                    .into_bytes();
+            } else {
+                bytes.extend_from_slice(b"\n");
+            }
             fs::write(d.join(file), bytes).unwrap();
             let now = key();
             assert!(!seen.contains(&now), "{file} is in the key");
@@ -3831,6 +4029,7 @@ mod tests {
             Profile::Balanced,
             false,
             |_| {},
+            |_| false,
         )
         .unwrap_err();
         let err = String::from(err);
@@ -3844,6 +4043,7 @@ mod tests {
             Profile::Balanced,
             false,
             |_| {},
+            |_| false,
         )
         .unwrap_err();
         let err = String::from(err);
@@ -3931,7 +4131,7 @@ mod tests {
         fs::write(&file, stored).unwrap();
         let instance = instances::find("horizon").unwrap();
         let folder = dir("automatic-profile");
-        let error = build("v2099.09.09", &folder, &instance, None, |_| {}).unwrap_err();
+        let error = build("v2099.09.09", &folder, &instance, None, |_| {}, |_| false).unwrap_err();
         assert!(String::from(error).contains("is not prepared yet"));
         assert_eq!(fs::read(&file).unwrap(), stored);
         if let Some(previous) = previous {
@@ -3989,9 +4189,24 @@ mod tests {
         }
         let profile = Profile::Optimized;
         let base = "uninstalled";
-        denied(build_server(base, &folder, &output, profile, false, |_| {}));
+        denied(build_server(
+            base,
+            &folder,
+            &output,
+            profile,
+            false,
+            |_| {},
+            |_| false,
+        ));
         for choice in [Some(profile), None] {
-            denied(build(base, &folder, &instances::selected(), choice, |_| {}));
+            denied(build(
+                base,
+                &folder,
+                &instances::selected(),
+                choice,
+                |_| {},
+                |_| false,
+            ));
         }
         denied(sync_internals(&folder));
         let expected = require_consent().unwrap_err().to_string();
@@ -4051,6 +4266,7 @@ mod tests {
             Profile::Balanced,
             false,
             |_| {},
+            |_| false,
         )
         .unwrap_err();
         let err = String::from(err);
@@ -4581,3 +4797,7 @@ mod registry_binary_tests {
 #[cfg(all(test, unix))]
 #[path = "native_mods/tests/runtime_leases.rs"]
 mod runtime_leases_tests;
+
+#[cfg(test)]
+#[path = "native_mods/tests/staged_lock.rs"]
+mod staged_lock_tests;

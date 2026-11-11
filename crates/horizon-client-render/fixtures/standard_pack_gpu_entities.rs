@@ -165,7 +165,8 @@ fn slot_ns(mut call: impl FnMut()) -> f64 {
 
 fn benchmark_slots() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     use native_render::{built, wgpu};
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env());
     let adapter = pollster::block_on(instance.request_adapter(&Default::default()))?;
     let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))?;
     let texture = |format| {

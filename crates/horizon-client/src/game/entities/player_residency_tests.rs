@@ -356,7 +356,7 @@ fn production_login_and_local_body_constructor_admit_profile_and_real_loan() {
 fn actual_dragon_admits_exactly_eight_checked_parts_with_independent_uuids() {
     const VALUE: mod_api::AttachmentType<i32> = mod_api::AttachmentType {
         namespace: "source_test",
-        name: "part_refusal",
+        name: "part_lifetime",
         default: || 0,
         codec: None,
         copy_on_death: false,
@@ -368,7 +368,7 @@ fn actual_dragon_admits_exactly_eight_checked_parts_with_independent_uuids() {
         let parent = game
             .spawn_dragon_spawned([0.0; 3], crate::game::creatures::SpawnSite::Plain)
             .unwrap();
-        let uuids = game.dragon.as_ref().unwrap().residency.part_uuids;
+        let uuids = std::array::from_fn::<_, 8, _>(|i| game.dragon.as_ref().unwrap().parts[i].3);
         let parts: Vec<_> = game
             .resident_entities
             .table
@@ -392,16 +392,70 @@ fn actual_dragon_admits_exactly_eight_checked_parts_with_independent_uuids() {
             assert!(game.level_entity(id as i32).is_none());
             assert_eq!(game.level_dragon_part(id), Some(Target::DragonPart(id)));
             assert_eq!(
-                game.with_resident_slot::<()>(
-                    &game.dim.key(),
-                    NonZeroU32::new(id).unwrap(),
-                    |_| panic!("part aliased parent lifetime")
-                ),
-                SlotAccess::UnsupportedKind(Kind::DragonPart)
+                game.with_resident_slot(&game.dim.key(), NonZeroU32::new(id).unwrap(), |slot| slot
+                    .is_bound()),
+                SlotAccess::Done(false)
             );
             assert_eq!(
-                VALUE.set(game, mod_api::Holder::Entity(id), 7),
-                Err(mod_api::AttachmentError::UnsupportedHolder("dragonpart")),
+                VALUE.set(game, mod_api::Holder::Entity(id), i32::from(offset) + 7),
+                Ok(())
+            );
+            assert_eq!(
+                VALUE.get(game, mod_api::Holder::Entity(id)),
+                Ok(i32::from(offset) + 7)
+            );
+        }
+        assert_eq!(VALUE.set(game, mod_api::Holder::Entity(parent), 99), Ok(()));
+        for offset in 0..8u8 {
+            assert_eq!(
+                VALUE.get(
+                    game,
+                    mod_api::Holder::Entity(parent + 1 + u32::from(offset))
+                ),
+                Ok(i32::from(offset) + 7)
+            );
+            use horizon_mod_runtime::attachments::HasAttachmentLifetime;
+            assert!(
+                game.dragon.as_mut().unwrap().parts[usize::from(offset)]
+                    .attachment_lifetime()
+                    .is_bound()
+            );
+        }
+        assert_eq!(VALUE.get(game, mod_api::Holder::Entity(parent)), Ok(99));
+        let index = game.attachment_indexes[&game.dim].clone();
+        let key = ("source_test".into(), "part_lifetime".into());
+        let retained = index.lock().unwrap().snapshot(&key);
+        assert_eq!(retained.len(), 8);
+        assert_eq!(
+            VALUE.remove(game, mod_api::Holder::Entity(parent + 1)),
+            Ok(Some(7))
+        );
+        assert_eq!(index.lock().unwrap().snapshot(&key).len(), 7);
+        assert_eq!(VALUE.get(game, mod_api::Holder::Entity(parent + 2)), Ok(8));
+        assert_eq!(VALUE.get(game, mod_api::Holder::Entity(parent)), Ok(99));
+        VALUE
+            .set(game, mod_api::Holder::Entity(parent + 1), 7)
+            .unwrap();
+        let home = game.dim;
+        game.enter_level(crate::game::Dim::Nether).unwrap();
+        game.prune_entity_attachments();
+        game.prune_entity_memory();
+        for id in parent + 1..=parent + 8 {
+            assert_eq!(
+                game.with_resident_slot(&home.key(), NonZeroU32::new(id).unwrap(), |slot| slot
+                    .is_bound()),
+                SlotAccess::Done(true)
+            );
+        }
+        assert_eq!(index.lock().unwrap().snapshot(&key).len(), 8);
+        game.enter_level(home).unwrap();
+        for offset in 0..8u8 {
+            assert_eq!(
+                VALUE.get_existing(
+                    game,
+                    mod_api::Holder::Entity(parent + 1 + u32::from(offset))
+                ),
+                Ok(Some(i32::from(offset) + 7))
             );
         }
         assert_eq!(
@@ -412,5 +466,114 @@ fn actual_dragon_admits_exactly_eight_checked_parts_with_independent_uuids() {
         for id in parent..=parent + 8 {
             assert_eq!(game.server_resident_entity(id), EntityLookup::Missing);
         }
+        assert!(index.lock().unwrap().snapshot(&key).is_empty());
+        assert_eq!(retained.len(), 8);
+        assert_eq!(
+            VALUE.set(game, mod_api::Holder::Entity(parent + 1), 42),
+            Err(mod_api::AttachmentError::MissingHolder)
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn dragon_part_registrations_retire_on_replacement_command_and_chunk_unload() {
+    const VALUE: mod_api::AttachmentType<i32> = mod_api::AttachmentType {
+        namespace: "source_test",
+        name: "part_retirement",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+    for operation in 0..3 {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.native_level_opened(game.dim);
+            game.spawn_remote_dragon(420, [1.0, 80.0, 1.0], 0.0);
+            for id in 421..=428 {
+                VALUE
+                    .set(game, mod_api::Holder::Entity(id), id as i32)
+                    .unwrap();
+            }
+            let index = game.attachment_indexes[&game.dim].clone();
+            let key = ("source_test".into(), "part_retirement".into());
+            let retained = index.lock().unwrap().snapshot(&key);
+            assert_eq!(retained.len(), 8);
+            // Keeping the maps and snapshot alive must not keep registrations alive.
+            let maps = game.entity_attachments.clone();
+            match operation {
+                0 => game.spawn_remote_dragon(840, [1.0, 80.0, 1.0], 0.0),
+                1 => {
+                    game.kill_target(Target::Dragon(420));
+                }
+                _ => {
+                    game.entity_chunks(&[(0, 0)].into_iter().collect(), true);
+                }
+            }
+            assert!(index.lock().unwrap().snapshot(&key).is_empty());
+            assert_eq!(retained.len(), 8);
+            assert!(maps.contains_key(&421));
+            game.prune_entity_attachments();
+            game.prune_entity_memory();
+            for id in 421..=428 {
+                assert!(!game.entity_attachments.contains_key(&id));
+            }
+            for id in 421..=428 {
+                assert_eq!(game.server_resident_entity(id), EntityLookup::Missing);
+                assert_eq!(
+                    game.with_resident_slot(&game.dim.key(), NonZeroU32::new(id).unwrap(), |_| ()),
+                    SlotAccess::Missing
+                );
+            }
+            if operation == 0 {
+                assert_eq!(VALUE.get(game, mod_api::Holder::Entity(841)), Ok(0));
+                VALUE.set(game, mod_api::Holder::Entity(841), 17).unwrap();
+                assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
+            } else {
+                game.spawn_remote_dragon(420, [1.0, 80.0, 1.0], 0.0);
+                assert_eq!(
+                    VALUE.get_existing(game, mod_api::Holder::Entity(421)),
+                    Ok(None)
+                );
+                VALUE.set(game, mod_api::Holder::Entity(421), 17).unwrap();
+                assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
+            }
+        });
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn parked_mob_attachment_values_survive_other_level_cleanup() {
+    const VALUE: mod_api::AttachmentType<i32> = mod_api::AttachmentType {
+        namespace: "source_test",
+        name: "parked_cleanup",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.options.dedicated = Some(Vec::new());
+        game.native_level_opened(game.dim);
+        let home = game.dim;
+        let id = game
+            .spawn_mob_spawned(
+                "cow",
+                [1.0, 70.0, 3.0],
+                crate::game::creatures::SpawnSite::Plain,
+            )
+            .unwrap();
+        VALUE.set(game, mod_api::Holder::Entity(id), 73).unwrap();
+        game.enter_level(crate::game::Dim::Nether).unwrap();
+        game.prune_entity_attachments();
+        game.prune_entity_memory();
+        assert!(game.entity_attachments.contains_key(&id));
+        game.enter_level(home).unwrap();
+        assert_eq!(
+            VALUE.get_existing(game, mod_api::Holder::Entity(id)),
+            Ok(Some(73))
+        );
     });
 }

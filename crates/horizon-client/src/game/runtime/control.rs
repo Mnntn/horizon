@@ -216,8 +216,9 @@ impl Game<'_> {
         if self.screen == Screen::Options
             && self.ui.options.page() == horizon_client::options_ui::Page::Agent
         {
-            self.ui.options.agent_status = self.agent_status_lines();
-            self.ui.options.agent_recording = self.repro.recording_active();
+            self.ui
+                .options
+                .set_agent_status(self.agent_status_lines(), self.repro.recording_active());
         }
     }
 

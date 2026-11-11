@@ -179,6 +179,7 @@ fn ordered_id(
     table.read().ok()?.as_ref()?.id(slot).map(str::to_owned)
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn ordered_slot_is_live(
     table: &std::sync::RwLock<Option<horizon_mod_runtime::registry_keys::Names>>,
     slot: u32,

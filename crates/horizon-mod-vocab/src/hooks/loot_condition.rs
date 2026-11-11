@@ -6,11 +6,13 @@ pub trait Hooks {
     /// namespace outside `minecraft:`. The kind, the JSON, the context and
     /// whether it holds are here (`holds` starts `false`; a mod that claims
     /// the kind sets it). The context is an owned snapshot, captured after the subscription guard.
+    /// `tags` reads membership and ordered members by key from this evaluation's
+    /// authoritative merged tags. No enumeration or full Host is exposed.
     #[hook(
         side = "server",
         contract = "collect",
         out = "holds",
-        target = "horizon_world::loot::native_loot_condition",
+        target = "mod_api::loot_callbacks::native_loot_condition",
         neoforge = "RegisterEvent"
     )]
     fn loot_condition();

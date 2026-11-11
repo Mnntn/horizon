@@ -170,8 +170,6 @@ pub struct ArrowBonus {
     pub damage: f32,
     /// Punch: knockback levels.
     pub punch: u32,
-    /// Flame: sets the target on fire.
-    pub flame: bool,
     /// Piercing: entities an arrow passes through.
     pub pierce: u32,
 }
@@ -184,7 +182,6 @@ pub fn arrow_bonus(m: &Mob) -> ArrowBonus {
             0.0
         },
         punch: level(m, MAIN, "minecraft:punch"),
-        flame: level(m, MAIN, "minecraft:flame") > 0,
         pierce: level(m, MAIN, "minecraft:piercing"),
     }
 }

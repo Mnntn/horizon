@@ -32,6 +32,52 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn all_entities_uses_lookup_order_without_bounds_or_parts() {
+        with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(
+                90,
+                kind.clone(),
+                Vec3::new(1.0e12, 64.0, 0.0),
+                0.0,
+            ));
+            let mut dragon = Dragon::new(Vec3::new(0.0, 80.0, 0.0), 0.0, 0);
+            dragon.id = 20;
+            game.dragon.replace(dragon);
+            game.mobs.push(Mob::new(3, kind, Vec3::ZERO, 0.0));
+            let level = game.level(game.dim.id()).unwrap();
+            let ids: Vec<_> = game
+                .level_all_entities(level)
+                .unwrap()
+                .into_iter()
+                .map(|e| e.id())
+                .filter(|id| [90, 20, 3].contains(id) || (21..=28).contains(id))
+                .collect();
+            assert_eq!(ids, vec![90, 20, 3]);
+            use horizon_client::join_seq::Joined;
+            let join = game.mobs[0].join_seq();
+            let extracted = game.mobs.extract(join).unwrap();
+            assert_eq!(game.level_all_entities(level), None);
+            game.mobs.put_back(0, extracted);
+            assert!(game.level_all_entities(level).is_some());
+            assert_eq!(
+                game.level_all_entities(LevelRef::new(
+                    mod_api::WorldEpoch::new(level.epoch().get() + 1),
+                    level.dimension()
+                )),
+                None
+            );
+            assert_eq!(
+                game.level_all_entities(LevelRef::new(level.epoch(), DimensionKey::NETHER)),
+                None
+            );
+            game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
+            assert_eq!(game.level_all_entities(level), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn ordinary_entities_precede_dragon_parts() {
         with_game(|game| {
             let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();

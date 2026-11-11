@@ -23,14 +23,11 @@ impl Game<'_> {
 
     /// `ItemEntity.getItem`: the complete stack, or None if unavailable.
     pub(super) fn item_entity_stack(&self, item: ItemEntityRef) -> Option<ItemStack> {
-        Some(
-            self.dropped
-                .get(self.native_item_entity_index(item)?)?
-                .stack
-                .clone(),
-        )
+        if self.block_entity_tick_items.is_some() {
+            return self.scoped_item_entity_stack(item);
+        }
+        self.unscoped_item_entity_stack(item)
     }
-
     /// Writes a nonempty complete stack using `ItemEntity.setItem`. Empty
     /// stacks are refused: vanilla discards the item on its next tick. To
     /// remove an item entity, use the removal handle. False also for an
@@ -126,6 +123,8 @@ impl Game<'_> {
         self.entity(id)
     }
 }
+
+include!("native_item_entity_refs/tick_item_read.rs");
 
 #[cfg(test)]
 mod tests {

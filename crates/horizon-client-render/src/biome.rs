@@ -165,6 +165,8 @@ pub struct Biomes {
     /// The data packs' biome files (new biomes and replaced built-in ones),
     /// for the tables that read more of a biome than `BiomeInfo` keeps.
     packs: BTreeMap<String, Arc<Value>>,
+    /// The built-in biomes' own files, to tell a server's data that differs.
+    files: Arc<BTreeMap<String, Value>>,
 }
 /// The grass, foliage and dry foliage colormaps.
 struct Colormaps {
@@ -287,6 +289,31 @@ pub fn identifier_order(a: &str, b: &str) -> std::cmp::Ordering {
     }
     split(a).cmp(&split(b))
 }
+/// The content mods' own biomes (every id outside `minecraft`) from the content root's
+/// `worldgen/biomes.json` bundle (id to file text), in registry order; none when the root has
+/// no bundle. A file that does not parse is warned and left out.
+pub fn mod_biome_files(prepared: &std::path::Path) -> Vec<(String, Value)> {
+    let Ok(bytes) = std::fs::read(prepared.join("worldgen/biomes.json")) else {
+        return Vec::new();
+    };
+    let bundle: BTreeMap<String, Value> = serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+        log::warn!("worldgen/biomes.json: {e}");
+        Default::default()
+    });
+    let mut out: Vec<(String, Value)> = bundle
+        .into_iter()
+        .filter(|(id, _)| !id.starts_with("minecraft:"))
+        .filter_map(|(id, text)| match serde_json::from_str(text.as_str()?) {
+            Ok(v) => Some((id, v)),
+            Err(e) => {
+                log::warn!("mod biome {id}: {e}");
+                None
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| identifier_order(&a.0, &b.0));
+    out
+}
 impl Biomes {
     pub fn load(root: &ResourceRoot) -> Result<Self> {
         let maps = Colormaps {
@@ -295,6 +322,7 @@ impl Biomes {
             dry: colormap(root.source(), "dry_foliage")?,
         };
         let mut list = Vec::new();
+        let mut files_by_name = BTreeMap::new();
         // The folder's own files (not its subfolders'), by file name: through `json_folder`,
         // from the prepared data file when there is one.
         let folder = horizon_world::json_folder::read(
@@ -313,6 +341,12 @@ impl Biomes {
                 &v,
                 &maps,
             ));
+            files_by_name.insert(format!("minecraft:{}", file.name), v);
+        }
+        // Content mods' own biomes follow the built-in ones, so the built-in ids never move.
+        for (name, v) in mod_biome_files(root.prepared()) {
+            list.push(BiomeInfo::from_json(name.clone(), &v, &maps));
+            files_by_name.insert(name, v);
         }
         let index = list
             .iter()
@@ -325,6 +359,7 @@ impl Biomes {
             index,
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
+            files: Arc::new(files_by_name),
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
         })
     }
@@ -363,10 +398,18 @@ impl Biomes {
         out.packs.clear();
         out
     }
-    /// The data pack file a world's biome `name` came from, if a pack added
-    /// or replaced it.
+    /// The file a world's biome `name` came from, if a pack added or replaced it or a content
+    /// mod added it (a mod's biome is no built-in: no client has its file).
     pub fn pack_file(&self, name: &str) -> Option<&Value> {
-        self.packs.get(name).map(|v| &**v)
+        self.packs.get(name).map(|v| &**v).or_else(|| {
+            self.files
+                .get(name)
+                .filter(|_| !name.starts_with("minecraft:"))
+        })
+    }
+    /// The file the game's own copy of built-in biome `name` was read from.
+    pub fn builtin_file(&self, name: &str) -> Option<&Value> {
+        self.files.get(name)
     }
     /// Whether data packs added or replaced any biome.
     pub fn has_packs(&self) -> bool {
@@ -403,6 +446,42 @@ impl Biomes {
         self.list
             .get(usize::from(id))
             .map_or("minecraft:plains", |b| b.name.as_str())
+    }
+    /// A biome's natural spawners by category, sorted by category name; None for a name this
+    /// table lacks.
+    pub fn spawners(&self, name: &str) -> Option<Vec<mod_api::world::biome::BiomeSpawners>> {
+        let info = self.list.get(usize::from(*self.index.get(name)?))?;
+        let mut categories: Vec<_> = info
+            .spawns
+            .iter()
+            .map(|(category, entries)| mod_api::world::biome::BiomeSpawners {
+                category: category.clone(),
+                entries: entries.clone(),
+            })
+            .collect();
+        categories.sort_by(|a, b| a.category.cmp(&b.category));
+        Some(categories)
+    }
+    /// Biome colours, with omitted water fog defaulted to 0x050533; not dimension-resolved.
+    /// Returns None for a name this table lacks.
+    pub fn effects(&self, name: &str) -> Option<mod_api::world::biome::BiomeEffects> {
+        let info = self.list.get(usize::from(*self.index.get(name)?))?;
+        Some(mod_api::world::biome::BiomeEffects {
+            sky: info.sky,
+            fog: info.fog,
+            water: info.water,
+            water_fog: info.water_fog,
+        })
+    }
+    /// A biome's `Biome.ClimateSettings` by name; None for a name this table lacks.
+    pub fn properties(&self, name: &str) -> Option<mod_api::BiomeProperties> {
+        let info = self.list.get(usize::from(*self.index.get(name)?))?;
+        Some(mod_api::BiomeProperties {
+            temperature: info.temperature,
+            downfall: info.downfall,
+            has_precipitation: info.precipitation,
+            frozen: info.frozen,
+        })
     }
     pub fn grass(&self, id: u16, x: f64, z: f64) -> u32 {
         let b = self.get(id);
@@ -565,6 +644,7 @@ mod pack_tests {
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
+            files: Arc::default(),
         }
     }
 
@@ -664,6 +744,12 @@ impl Biomes {
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
+            files: Arc::new(
+                entries
+                    .iter()
+                    .map(|(n, v)| ((*n).to_owned(), v.clone()))
+                    .collect(),
+            ),
         }
     }
 }
@@ -703,6 +789,7 @@ mod color_tests {
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
+            files: Arc::default(),
         }
     }
 
@@ -800,5 +887,157 @@ mod source_tests {
         )]));
         assert_eq!(colormap(&source, "grass").unwrap(), [0x0c2238]);
         assert!(colormap(&source, "missing").is_err());
+    }
+}
+
+#[cfg(test)]
+mod read_tests {
+    use super::*;
+    use mod_api::world::biome::{BiomeEffects, SpawnEntry};
+    use serde_json::json;
+
+    fn table() -> Biomes {
+        Biomes::from_jsons(&[
+            (
+                "minecraft:plains",
+                json!({
+                    "effects": {"water_color": 0x3F76E4},
+                    "attributes": {
+                        "minecraft:gameplay/natural_mob_spawns": {"spawns_by_category": {
+                            "monster": [
+                                {"type": "minecraft:zombie", "weight": 95, "count": {"min_inclusive": 4, "max_inclusive": 4}},
+                                {"type": "minecraft:spider", "weight": 100, "count": 2}
+                            ],
+                            "creature": [{"type": "minecraft:horse", "weight": 5,
+                                "count": {"min_inclusive": 2, "max_inclusive": 6}}]
+                        }}
+                    }
+                }),
+            ),
+            (
+                "minecraft:the_void",
+                json!({
+                    "effects": {"water_color": 0x123456},
+                    "attributes": {
+                        "minecraft:visual/sky_color": "#78A7FF",
+                        "minecraft:visual/fog_color": 0xC0D8FF,
+                        "minecraft:visual/water_fog_color": 0x123456
+                    }
+                }),
+            ),
+        ])
+    }
+
+    #[test]
+    fn spawners_are_the_biome_files_by_category_name() {
+        let spawners = table().spawners("minecraft:plains").unwrap();
+        let entry = |entity: &str, weight, min, max, constant| SpawnEntry {
+            entity: entity.into(),
+            weight,
+            min,
+            max,
+            constant,
+        };
+        assert_eq!(
+            spawners
+                .iter()
+                .map(|s| s.category.as_str())
+                .collect::<Vec<_>>(),
+            ["creature", "monster"]
+        );
+        assert_eq!(
+            spawners[0].entries,
+            [entry("minecraft:horse", 5, 2, 6, false)]
+        );
+        assert_eq!(
+            spawners[1].entries,
+            [
+                entry("minecraft:zombie", 95, 4, 4, false),
+                entry("minecraft:spider", 100, 2, 2, true)
+            ]
+        );
+        // A biome with no natural spawns has an empty list; an unknown one has none.
+        assert_eq!(table().spawners("minecraft:the_void"), Some(Vec::new()));
+        assert_eq!(table().spawners("minecraft:nowhere"), None);
+    }
+
+    #[test]
+    fn effects_are_the_biome_files_own_colours() {
+        assert_eq!(
+            table().effects("minecraft:the_void"),
+            Some(BiomeEffects {
+                sky: Some(0x78A7FF),
+                fog: Some(0xC0D8FF),
+                water: 0x123456,
+                water_fog: 0x123456,
+            })
+        );
+        // A biome that leaves sky and fog out has none, and the default water fog.
+        assert_eq!(
+            table().effects("minecraft:plains"),
+            Some(BiomeEffects {
+                sky: None,
+                fog: None,
+                water: 0x3F76E4,
+                water_fog: 0x050533,
+            })
+        );
+        assert_eq!(table().effects("minecraft:nowhere"), None);
+    }
+}
+
+#[cfg(test)]
+mod climate_tests {
+    use super::*;
+    use mod_api::BiomeProperties;
+    use serde_json::json;
+
+    /// Climates as Mojang's biome files declare them, so a dropped or swapped field fails.
+    #[test]
+    fn properties_are_the_biome_files_climate() {
+        let biomes = Biomes::from_jsons(&[
+            (
+                "minecraft:plains",
+                json!({"temperature": 0.8, "downfall": 0.4, "has_precipitation": true}),
+            ),
+            (
+                "minecraft:desert",
+                json!({"temperature": 2.0, "downfall": 0.0, "has_precipitation": false}),
+            ),
+            (
+                "minecraft:snowy_plains",
+                json!({"temperature": 0.0, "downfall": 0.5, "has_precipitation": true}),
+            ),
+            (
+                "minecraft:frozen_ocean",
+                json!({"temperature": 0.0, "downfall": 0.5, "has_precipitation": true,
+                    "temperature_modifier": "frozen"}),
+            ),
+            (
+                "minecraft:ocean",
+                json!({"temperature": 0.5, "downfall": 0.5, "has_precipitation": true}),
+            ),
+        ]);
+        let climate = |name: &str| biomes.properties(name).unwrap();
+        let want = |temperature, downfall, has_precipitation, frozen| BiomeProperties {
+            temperature,
+            downfall,
+            has_precipitation,
+            frozen,
+        };
+        assert_eq!(climate("minecraft:plains"), want(0.8, 0.4, true, false));
+        assert_eq!(climate("minecraft:desert"), want(2.0, 0.0, false, false));
+        assert_eq!(
+            climate("minecraft:snowy_plains"),
+            want(0.0, 0.5, true, false)
+        );
+        assert_eq!(climate("minecraft:ocean"), want(0.5, 0.5, true, false));
+        // The only biome that catches a dropped `frozen`.
+        assert_eq!(
+            climate("minecraft:frozen_ocean"),
+            want(0.0, 0.5, true, true)
+        );
+        assert_eq!(biomes.properties("minecraft:nowhere"), None);
+        assert_eq!(biomes.properties(""), None);
     }
 }

@@ -70,11 +70,15 @@ impl Wire for crate::LoadedMods {
     }
 }
 impl Wire for crate::RegistrationContext {
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::RegistrationContext));
-    const MIN: usize = 0;
-    fn put(&self, _: &mut Writer) {}
-    fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
-        Ok(Self::new())
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed("RegistrationContext.instance_dir.v1");
+    const MIN: usize = <Option<crate::InstanceDirectory> as Wire>::MIN;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.instance_dir);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        let mut context = Self::new();
+        context.instance_dir = input.take()?;
+        Ok(context)
     }
 }
 
@@ -91,6 +95,9 @@ mod resource_wire_tests {
             8,
             "a transaction crosses as its frame token"
         );
+        let mut context = crate::RegistrationContext::new();
+        context.instance_dir = Some(crate::InstanceDirectory::Unix(vec![b'/', 0xff, b'x']));
+        out.put(&context);
         let mut input = Reader::new(out.bytes());
         let tx: crate::Transaction = input.take().unwrap();
         assert_eq!(tx, crate::Transaction(7));
@@ -99,6 +106,10 @@ mod resource_wire_tests {
             let context: crate::RegistrationContext = input.take().unwrap();
             assert_eq!(mods.ids().collect::<Vec<_>>(), ["test_mod"]);
             assert_eq!(context.mods().ids().collect::<Vec<_>>(), ["test_mod"]);
+            assert_eq!(
+                context.instance_dir().unwrap(),
+                &crate::InstanceDirectory::Unix(vec![b'/', 0xff, b'x'])
+            );
         });
         let package = crate::PackageInfo::new(
             "test".into(),
@@ -301,6 +312,18 @@ impl Wire for crate::ModelRef {
         Self::from_parts(input.take()?, input.take()?).map_err(WireError::Invalid)
     }
 }
+impl Wire for crate::RenderPipelineRef {
+    layout_fields!("generation" => u64, "slot" => u32);
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::RenderPipelineRef));
+    const MIN: usize = 12;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.0);
+        out.put(&self.1);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Self::from_parts(input.take()?, input.take()?).map_err(WireError::Invalid)
+    }
+}
 impl Wire for crate::InstanceGroupRef {
     layout_fields!("generation" => u64, "slot" => u32);
     const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::InstanceGroupRef));
@@ -427,64 +450,66 @@ impl Wire for crate::ItemPlace {
     const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::ItemPlace));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
-        use crate::ItemPlace::*;
-        match self {
-            PlayerSlot { player, slot } => {
-                out.put(&0u32);
-                out.put(player);
-                out.put(slot)
+        out.nested(|out| {
+            use crate::ItemPlace::*;
+            match self {
+                PlayerSlot { player, slot } => {
+                    out.put(&0u32);
+                    out.put(player);
+                    out.put(slot)
+                }
+                PlayerHand { player, hand } => {
+                    out.put(&1u32);
+                    out.put(player);
+                    out.put(hand)
+                }
+                PlayerCursor { menu } => {
+                    out.put(&2u32);
+                    out.put(menu)
+                }
+                BlockEntity {
+                    level,
+                    pos,
+                    side,
+                    slot,
+                } => {
+                    out.put(&3u32);
+                    out.put(level);
+                    out.put(pos);
+                    out.put(side);
+                    out.put(slot)
+                }
+                ItemEntity { id } => {
+                    out.put(&4u32);
+                    out.put(id)
+                }
+                EntitySlot { entity, slot } => {
+                    out.put(&5u32);
+                    out.put(entity);
+                    out.put(slot)
+                }
+                Nested { parent, slot } => {
+                    out.put(&6u32);
+                    out.put(parent);
+                    out.put(slot)
+                }
+                MenuSlot { menu, slot } => {
+                    out.put(&7u32);
+                    out.put(menu);
+                    out.put(slot)
+                }
+                Equipment { entity, slot } => {
+                    out.put(&9u32);
+                    out.put(entity);
+                    out.put(slot)
+                }
+                Mod { provider, key } => {
+                    out.put(&8u32);
+                    out.put_str(provider);
+                    out.put(key)
+                }
             }
-            PlayerHand { player, hand } => {
-                out.put(&1u32);
-                out.put(player);
-                out.put(hand)
-            }
-            PlayerCursor { menu } => {
-                out.put(&2u32);
-                out.put(menu)
-            }
-            BlockEntity {
-                level,
-                pos,
-                side,
-                slot,
-            } => {
-                out.put(&3u32);
-                out.put(level);
-                out.put(pos);
-                out.put(side);
-                out.put(slot)
-            }
-            ItemEntity { id } => {
-                out.put(&4u32);
-                out.put(id)
-            }
-            EntitySlot { entity, slot } => {
-                out.put(&5u32);
-                out.put(entity);
-                out.put(slot)
-            }
-            Nested { parent, slot } => {
-                out.put(&6u32);
-                out.put(parent);
-                out.put(slot)
-            }
-            MenuSlot { menu, slot } => {
-                out.put(&7u32);
-                out.put(menu);
-                out.put(slot)
-            }
-            Equipment { entity, slot } => {
-                out.put(&9u32);
-                out.put(entity);
-                out.put(slot)
-            }
-            Mod { provider, key } => {
-                out.put(&8u32);
-                out.put_str(provider);
-                out.put(key)
-            }
-        }
+        });
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         use crate::ItemPlace::*;
@@ -700,133 +725,15 @@ impl crate::wire::Wire for crate::Tag {
     layout_fields!("tag" => u32, "0:End" => (), "1:Byte" => i8, "2:Short" => i16, "3:Int" => i32, "4:Long" => i64, "5:Float" => f32, "6:Double" => f64, "7:ByteArray" => Vec<u8>, "8:String" => horizon_core::nbt::JavaString, "9:List" => Vec<crate::Tag>, "10:Compound" => horizon_core::nbt::Compound, "11:IntArray" => Vec<i32>, "12:LongArray" => Vec<i64>);
     const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::Tag));
     const MIN: usize = 4;
-    fn put(&self, out: &mut crate::wire::Writer) {
-        match self {
-            Self::End => out.put(&0u32),
-            Self::Byte(f0) => {
-                out.put(&1u32);
-                out.put(f0);
-            }
-            Self::Short(f0) => {
-                out.put(&2u32);
-                out.put(f0);
-            }
-            Self::Int(f0) => {
-                out.put(&3u32);
-                out.put(f0);
-            }
-            Self::Long(f0) => {
-                out.put(&4u32);
-                out.put(f0);
-            }
-            Self::Float(f0) => {
-                out.put(&5u32);
-                out.put(f0);
-            }
-            Self::Double(f0) => {
-                out.put(&6u32);
-                out.put(f0);
-            }
-            Self::ByteArray(f0) => {
-                out.put(&7u32);
-                out.put(f0);
-            }
-            Self::String(f0) => {
-                out.put(&8u32);
-                out.put(f0);
-            }
-            Self::List(f0) => {
-                out.put(&9u32);
-                out.put(f0);
-            }
-            Self::Compound(f0) => {
-                out.put(&10u32);
-                out.put(f0);
-            }
-            Self::IntArray(f0) => {
-                out.put(&11u32);
-                out.put(f0);
-            }
-            Self::LongArray(f0) => {
-                out.put(&12u32);
-                out.put(f0);
-            }
-        }
+    fn put(&self, out: &mut Writer) {
+        super::tag_tree::put(self, out);
     }
-    fn put_owned(self, out: &mut crate::wire::Writer) {
-        match self {
-            Self::End => out.put_owned(0u32),
-            Self::Byte(f0) => {
-                out.put_owned(1u32);
-                out.put_owned(f0);
-            }
-            Self::Short(f0) => {
-                out.put_owned(2u32);
-                out.put_owned(f0);
-            }
-            Self::Int(f0) => {
-                out.put_owned(3u32);
-                out.put_owned(f0);
-            }
-            Self::Long(f0) => {
-                out.put_owned(4u32);
-                out.put_owned(f0);
-            }
-            Self::Float(f0) => {
-                out.put_owned(5u32);
-                out.put_owned(f0);
-            }
-            Self::Double(f0) => {
-                out.put_owned(6u32);
-                out.put_owned(f0);
-            }
-            Self::ByteArray(f0) => {
-                out.put_owned(7u32);
-                out.put_owned(f0);
-            }
-            Self::String(f0) => {
-                out.put_owned(8u32);
-                out.put_owned(f0);
-            }
-            Self::List(f0) => {
-                out.put_owned(9u32);
-                out.put_owned(f0);
-            }
-            Self::Compound(f0) => {
-                out.put_owned(10u32);
-                out.put_owned(f0);
-            }
-            Self::IntArray(f0) => {
-                out.put_owned(11u32);
-                out.put_owned(f0);
-            }
-            Self::LongArray(f0) => {
-                out.put_owned(12u32);
-                out.put_owned(f0);
-            }
-        }
+    fn put_owned(self, out: &mut Writer) {
+        super::tag_tree::put(&self, out);
+        horizon_core::nbt::discard_tag(self);
     }
-    fn take(
-        input: &mut crate::wire::Reader<'_>,
-    ) -> ::std::result::Result<Self, crate::wire::WireError> {
-        input.nested(|input| {
-            Ok(match input.take::<u32>()? {
-                0 => Self::End,
-                1 => Self::Byte(input.take()?),
-                2 => Self::Short(input.take()?),
-                3 => Self::Int(input.take()?),
-                4 => Self::Long(input.take()?),
-                5 => Self::Float(input.take()?),
-                6 => Self::Double(input.take()?),
-                7 => Self::ByteArray(input.take()?),
-                8 => Self::String(input.take()?),
-                9 => Self::List(input.take()?),
-                10 => Self::Compound(input.take()?),
-                11 => Self::IntArray(input.take()?),
-                12 => Self::LongArray(input.take()?),
-                tag => return Err(crate::wire::WireError::Tag(tag)),
-            })
-        })
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        super::tag_tree::take(input)
     }
 }
 impl crate::wire::Wire for serde_json::Value {
@@ -834,14 +741,19 @@ impl crate::wire::Wire for serde_json::Value {
     const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(serde_json::Value));
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
-        out.put_str(&::serde_json::to_string(self).unwrap_or_default());
+        if !super::json_tree::value_depth([self], 0) {
+            out.fail(WireError::Depth);
+            return;
+        }
+        match serde_json::to_string(self) {
+            Ok(text) => out.put_str(&text),
+            Err(_) => out.fail(WireError::Invalid("not valid JSON")),
+        }
     }
     fn take(
         input: &mut crate::wire::Reader<'_>,
     ) -> ::std::result::Result<Self, crate::wire::WireError> {
-        let text: ::std::string::String = input.take()?;
-        ::serde_json::from_str(&text)
-            .map_err(|_| crate::wire::WireError::Invalid("not valid JSON for its type"))
+        super::json_tree::take(input)
     }
 }
 impl crate::wire::Wire for crate::Direction {
@@ -1085,52 +997,19 @@ impl crate::wire::Wire for serde_json::Map<String, serde_json::Value> {
         crate::wire::layout_seed(stringify!(serde_json::Map<String, serde_json::Value>));
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
-        out.put_str(&::serde_json::to_string(self).unwrap_or_default());
+        if !super::json_tree::value_depth(self.values(), 1) {
+            out.fail(WireError::Depth);
+            return;
+        }
+        match serde_json::to_string(self) {
+            Ok(text) => out.put_str(&text),
+            Err(_) => out.fail(WireError::Invalid("not valid JSON")),
+        }
     }
     fn take(
         input: &mut crate::wire::Reader<'_>,
     ) -> ::std::result::Result<Self, crate::wire::WireError> {
-        let text: ::std::string::String = input.take()?;
-        ::serde_json::from_str(&text)
-            .map_err(|_| crate::wire::WireError::Invalid("not valid JSON for its type"))
-    }
-}
-impl crate::wire::Wire for crate::ArmPose {
-    layout_fields!("tag" => u32, "0:Empty" => (), "1:Item" => (), "2:Block" => (), "3:Bow" => (), "4:CrossbowHold" => (), "5:CrossbowCharge" => (), "6:ThrowTrident" => (), "7:TootHorn" => (), "8:Spyglass" => (), "9:Spear" => (), "10:Brush" => ());
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::ArmPose));
-    const MIN: usize = 4;
-    fn put(&self, out: &mut crate::wire::Writer) {
-        out.put(&match self {
-            Self::Empty => 0u32,
-            Self::Item => 1u32,
-            Self::Block => 2u32,
-            Self::Bow => 3u32,
-            Self::CrossbowHold => 4u32,
-            Self::CrossbowCharge => 5u32,
-            Self::ThrowTrident => 6u32,
-            Self::TootHorn => 7u32,
-            Self::Spyglass => 8u32,
-            Self::Spear => 9u32,
-            Self::Brush => 10u32,
-        });
-    }
-    fn take(
-        input: &mut crate::wire::Reader<'_>,
-    ) -> ::std::result::Result<Self, crate::wire::WireError> {
-        Ok(match input.take::<u32>()? {
-            0 => Self::Empty,
-            1 => Self::Item,
-            2 => Self::Block,
-            3 => Self::Bow,
-            4 => Self::CrossbowHold,
-            5 => Self::CrossbowCharge,
-            6 => Self::ThrowTrident,
-            7 => Self::TootHorn,
-            8 => Self::Spyglass,
-            9 => Self::Spear,
-            10 => Self::Brush,
-            tag => return Err(crate::wire::WireError::Tag(tag)),
-        })
+        super::json_tree::take(input)
     }
 }
 impl crate::wire::Wire for crate::UseAnimation {

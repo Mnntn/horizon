@@ -18,6 +18,14 @@ use crate::health::DamageLevel;
 use crate::projectiles::{Projectile, ProjectileKind};
 use horizon_core::{geometry::Vec3, random::RandomSource};
 
+/// `ZombifiedPiglin.alertOthers` keeps the source's player identity.
+#[derive(Clone, Debug)]
+pub struct PiglinAlert {
+    pub mob: u32,
+    pub source: u32,
+    pub target: Who,
+}
+
 /// `Zombie.hurtServer`, once the hit landed: a zombie with a target (its own,
 /// else a living attacker) asks the game to try calling a reinforcement; the
 /// difficulty, chance and spawn tests are the game's (`call_reinforcements`).
@@ -477,26 +485,15 @@ fn drowned_close_to_next_pos(m: &Mob) -> bool {
 /// `ZombifiedPiglin.customServerAiStep`: faster and loud while angry,
 /// forgetting the player when the anger runs out, rallying the others.
 fn zombified_piglin_step(m: &mut Mob, cx: &mut Cx) {
-    let base = 0.23;
-    // NeutralMob.updatePersistentAnger: a new target starts 20-39 s of anger.
-    if m.ai.target.is_some() && !m.extra.flag2 {
-        m.extra.flag2 = true;
-        m.extra.anger = 400 + m.random.next_int_bound(380).unwrap_or(0);
-        m.extra.counter = m.random.next_int_bound(21).unwrap_or(0).max(1);
-        m.extra.counter2 = 80 + m.random.next_int_bound(41).unwrap_or(0);
-    } else if m.ai.target.is_none() {
-        m.extra.flag2 = false;
-    }
-    // The anger's target is whoever the piglin holds as its target, so a
-    // piglin hit by another mob is angry at that mob and not at the player
-    // (`NearestAttackableTargetGoal` tests `isAngryAt`).
-    if m.ai.target.is_some() {
-        m.extra.angry_at = m.ai.target;
-    }
+    use super::finalize::{self, Attr, Op};
+    let speed = Attr::MovementSpeed;
+    let attacking = "minecraft:attacking";
+    let has_speed = finalize::has_modifier(m, speed, attacking)
+        || finalize::has_transient_modifier(m, speed, attacking);
     if m.extra.anger > 0 {
         m.extra.anger -= 1;
-        if !m.is_baby() {
-            m.attrs.speed = base + 0.05;
+        if !m.is_baby() && !has_speed {
+            finalize::add_transient_modifier(m, speed, attacking, 0.05, Op::AddValue);
         }
         // playFirstAngerSoundIn
         if m.extra.counter > 0 {
@@ -512,14 +509,23 @@ fn zombified_piglin_step(m: &mut Mob, cx: &mut Cx) {
                 ));
             }
         }
-        if m.extra.anger == 0 {
+        if m.extra.anger == 0 && m.ai.target.is_none() {
             m.set_ai_target(cx.w, None);
             m.extra.angry_at = None;
             m.extra.anger_end = -1;
             m.extra.flag2 = false;
         }
+    } else if has_speed {
+        finalize::remove_modifier(m, speed, attacking);
+    }
+    // NeutralMob.updatePersistentAnger(level, true): an existing target
+    // refreshes the persistent anger on every server AI step.
+    if let Some(target) = m.ai.target {
+        m.extra.flag2 = true;
+        m.extra.angry_at = Some(target);
+        m.extra.anger = 400 + m.random.next_int_bound(381).unwrap_or(0);
     } else {
-        m.attrs.speed = base;
+        m.extra.flag2 = false;
     }
     // maybeAlertOthers every 4 to 6 seconds while seeing the target.
     if let Some(target) = m.ai.target {
@@ -544,7 +550,11 @@ fn zombified_piglin_step(m: &mut Mob, cx: &mut Cx) {
                         .map(|s| s.id)
                         .collect();
                 for other in others {
-                    cx.events.push(MobEvent::SetTarget { mob: other, target });
+                    cx.events.push(MobEvent::PiglinAlertTarget(PiglinAlert {
+                        mob: other,
+                        source: m.id,
+                        target,
+                    }));
                 }
             }
             m.extra.counter2 = 80 + m.random.next_int_bound(41).unwrap_or(0);

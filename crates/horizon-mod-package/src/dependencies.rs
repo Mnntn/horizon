@@ -3,6 +3,17 @@ use semver::{Version, VersionReq};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
+/// Parse an installed mod version, padding omitted minor and patch components.
+/// This is also the comparison used for saved-world mod versions.
+pub fn parse_version(version: &str) -> Result<Version, semver::Error> {
+    let padded = match version.matches('.').count() {
+        0 => format!("{version}.0.0"),
+        1 => format!("{version}.0"),
+        _ => version.to_owned(),
+    };
+    Version::parse(&padded)
+}
+
 #[derive(Debug)]
 pub enum Error {
     Manifest {
@@ -166,12 +177,7 @@ fn resolve_with_api(mods: &[Mod<'_>], require_api: bool) -> Result<Resolution, E
             }
             // A `[mod] version` may leave out minor and patch (`"1"`, `"1.2"`), as Cargo's
             // requirements do: they count as zero.
-            let padded = match other.version.matches('.').count() {
-                0 => format!("{}.0.0", other.version),
-                1 => format!("{}.0", other.version),
-                _ => other.version.to_owned(),
-            };
-            let version = Version::parse(&padded).map_err(|e| Error::Manifest {
+            let version = parse_version(other.version).map_err(|e| Error::Manifest {
                 owner: item.id.into(),
                 target: dep.id.clone(),
                 reason: format!("invalid installed version {:?}: {e}", other.version),

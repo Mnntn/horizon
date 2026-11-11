@@ -404,6 +404,10 @@ fn summon_refuses_a_tree_holding_a_live_uuid() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
 fn a_resident_below_an_offlevel_passenger_round_trips_and_resumes_after_dismount() {
     with_game(|game, _| {
+        crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+            game,
+            ChunkPos::new(0, 0),
+        );
         let baby = |tag: &str, n: i32, passengers: &str| {
             pig(tag, n, passengers).replace("NoAI:1b", "Age:-1000,NoAI:1b")
         };
@@ -489,6 +493,10 @@ fn a_resident_below_an_offlevel_passenger_round_trips_and_resumes_after_dismount
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
 fn removed_root_retains_its_geometry_until_offlevel_passengers_dismount() {
     with_game(|game, _| {
+        crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+            game,
+            ChunkPos::new(0, 0),
+        );
         game.options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
         let baby = |tag: &str, n: i32, passengers: &str| {
             pig(tag, n, passengers).replace("NoAI:1b", "Age:-1000,NoAI:1b")
@@ -694,4 +702,194 @@ fn summon_skips_a_uuid_taken_earlier_in_the_same_tree() {
             "summon in-tree UUID admission: {failures:#?}"
         );
     });
+}
+
+/// Where each pig of a boat or minecart root's tree stands in the Nether, by
+/// the official 26.3 server (`tools/observe_summon_uuid.py --cases root_child
+/// --action travel --root-type oak_boat|minecart --final-restart`, with and
+/// without `--dismount-after-travel grandchild|rejected`).
+/// Heights are the rejected pig's, then its grandchild's.
+struct RootTravel {
+    root: &'static str,
+    /// After `Entity.teleportCrossDimension` ejected and remounted them. A
+    /// grandchild that leaves the pig stays where it is, and so does the pig.
+    seated: [f64; 2],
+    /// After the pig leaves the retained root: it is seated on the pig again.
+    rejected_dismounted: [f64; 2],
+}
+
+const OAK_BOAT_TRAVEL: RootTravel = RootTravel {
+    root: "minecraft:oak_boat",
+    seated: [200.5625, 201.01249998807907],
+    rejected_dismounted: [200.5625, 201.0625],
+};
+
+const MINECART_TRAVEL: RootTravel = RootTravel {
+    root: "minecraft:minecart",
+    seated: [200.69999998807907, 201.14999997615814],
+    rejected_dismounted: [200.69999998807907, 201.19999998807907],
+};
+
+fn age(game: &mut Game<'_>, id: u32) -> Option<Tag> {
+    game.command_target_nbt(Target::Mob(id))
+        .unwrap()
+        .get("Age")
+        .cloned()
+}
+
+/// Write and read back the entities of chunk 0 0, as an unload or a restart does.
+fn reload_chunk(game: &mut Game<'_>) {
+    let chunks = game.entity_chunks(&HashSet::from([(0, 0)]), true);
+    game.world.loaded_entities.extend(chunks);
+    game.spawn_loaded_entities();
+}
+
+/// A boat or minecart root whose pig passenger shares its UUID travels by
+/// command after a save and reload. Passengers are admitted before their
+/// copied vehicle, so the pig takes the UUID and the copied root is retained
+/// off-level: unselectable, never ticked, yet still the pig's vehicle.
+fn vehicle_root_travel(expected: &RootTravel, dismount: Option<&str>) {
+    with_game(|game, _| {
+        game.options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        game.world_root = game.save.root.clone();
+        let ticking = crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood;
+        ticking(game, ChunkPos::new(0, 0));
+        game.enter_level(super::super::Dim::Nether).unwrap();
+        ticking(game, ChunkPos::new(0, 0));
+        assert!(game.run_command("forceload add 0 0"));
+        game.enter_level(super::super::Dim::Overworld).unwrap();
+        let baby = |tag: &str, n: i32, passengers: &str| {
+            pig(tag, n, passengers).replace("NoAI:1b", "Age:-1000,NoAI:1b")
+        };
+        let grandchild = baby("root_travel_grandchild", 242, "");
+        let rejected = baby("root_travel_rejected", 240, &riders(&[grandchild]));
+        assert!(game.run_command(&format!(
+            "summon {} 1.5 200 1.5 {{UUID:[I;160,0,0,240],Tags:[\"root_travel_root\"],NoGravity:1b,Passengers:[{rejected}]}}",
+            expected.root
+        )));
+        for _ in 0..5 {
+            game.tick_world(true).unwrap();
+        }
+        reload_chunk(game);
+        assert!(mob_tagged(game, "root_travel_rejected").is_empty());
+        assert_eq!(mob_tagged(game, "root_travel_grandchild").len(), 1);
+
+        let source_root = match (game.boats.first(), game.carts.first()) {
+            (Some(boat), _) => Target::Boat(boat.id),
+            (_, Some(cart)) => Target::Cart(cart.id),
+            _ => panic!("the summoned root is resident in the source"),
+        };
+        // `TeleportCommand` into another level: `Entity.teleportCrossDimension`.
+        assert!(
+            game.teleport_vehicle_across(
+                source_root,
+                super::super::Dim::Nether,
+                [1.5, 200.0, 1.5],
+                None,
+                false,
+            )
+            .unwrap()
+        );
+        // The source keeps none of the transferred objects.
+        assert!(!game.run_command("data get entity @e[tag=root_travel_root,limit=1]"));
+        assert!(mob_tagged(game, "root_travel_grandchild").is_empty());
+        assert!(game.persist.off_level.is_empty());
+
+        game.enter_level(super::super::Dim::Nether).unwrap();
+        assert!(!game.run_command("data get entity @e[tag=root_travel_root,limit=1]"));
+        let rejected = mob_tagged(game, "root_travel_rejected");
+        let grandchild = mob_tagged(game, "root_travel_grandchild");
+        assert_eq!((rejected.len(), grandchild.len()), (1, 1));
+        let (rejected, grandchild) = (rejected[0], grandchild[0]);
+        assert_eq!(live(game, 240), vec![rejected]);
+        assert_eq!(mount(game, grandchild), Some(rejected));
+        let root = mount(game, rejected).expect("the copied root stays the pig's vehicle");
+        assert!(game.level_entity(root as i32).is_none());
+        assert!(game.boats.iter().all(|b| b.id != root));
+        assert!(game.carts.iter().all(|c| c.id != root));
+        assert!(game.boat_object(root).is_some() || game.cart_object(root).is_some());
+        let y = |game: &Game<'_>, id: u32| game.mob_object(id).unwrap().position.y;
+        assert_eq!([y(game, rejected), y(game, grandchild)], expected.seated);
+        for _ in 0..5 {
+            game.tick_world(true).unwrap();
+        }
+        // Neither the retained root nor its passengers are ticked.
+        assert_eq!(mount(game, rejected), Some(root));
+        assert_eq!([y(game, rejected), y(game, grandchild)], expected.seated);
+        for id in [rejected, grandchild] {
+            assert_eq!(age(game, id), Some(Tag::Int(-1000)));
+        }
+
+        let survivors: &[u32] =
+            match dismount {
+                None => &[],
+                Some("grandchild") => {
+                    assert!(game.run_command(
+                        "execute as @e[tag=root_travel_grandchild] run ride @s dismount"
+                    ));
+                    assert_eq!(mount(game, grandchild), None);
+                    assert_eq!([y(game, rejected), y(game, grandchild)], expected.seated);
+                    for _ in 0..5 {
+                        game.tick_world(true).unwrap();
+                    }
+                    assert_eq!(age(game, rejected), Some(Tag::Int(-1000)));
+                    assert_eq!(age(game, grandchild), Some(Tag::Int(-995)));
+                    &[grandchild]
+                }
+                Some(_) => {
+                    assert!(game.run_command(
+                        "execute as @e[tag=root_travel_rejected] run ride @s dismount"
+                    ));
+                    assert_eq!(mount(game, rejected), None);
+                    assert_eq!(mount(game, grandchild), Some(rejected));
+                    assert_eq!(
+                        [y(game, rejected), y(game, grandchild)],
+                        expected.rejected_dismounted
+                    );
+                    for _ in 0..5 {
+                        game.tick_world(true).unwrap();
+                    }
+                    for id in [rejected, grandchild] {
+                        assert_eq!(age(game, id), Some(Tag::Int(-995)));
+                    }
+                    &[rejected, grandchild]
+                }
+            };
+
+        // The retained root is never saved; a passenger saves only under its root.
+        reload_chunk(game);
+        assert!(!game.run_command("data get entity @e[tag=root_travel_root,limit=1]"));
+        assert!(game.persist.off_level.is_empty());
+        let rejected_after = mob_tagged(game, "root_travel_rejected");
+        let grandchild_after = mob_tagged(game, "root_travel_grandchild");
+        assert_eq!(
+            (rejected_after.len(), grandchild_after.len()),
+            (
+                usize::from(survivors.contains(&rejected)),
+                usize::from(survivors.contains(&grandchild))
+            )
+        );
+        if let ([rejected], [grandchild]) = (&rejected_after[..], &grandchild_after[..]) {
+            assert_eq!(mount(game, *grandchild), Some(*rejected));
+        }
+        for id in rejected_after.into_iter().chain(grandchild_after) {
+            assert_eq!(age(game, id), Some(Tag::Int(-995)));
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+fn boat_root_refused_by_its_passenger_uuid_stays_off_level_through_travel() {
+    for dismount in [None, Some("grandchild"), Some("rejected")] {
+        vehicle_root_travel(&OAK_BOAT_TRAVEL, dismount);
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+fn minecart_root_refused_by_its_passenger_uuid_stays_off_level_through_travel() {
+    for dismount in [None, Some("grandchild"), Some("rejected")] {
+        vehicle_root_travel(&MINECART_TRAVEL, dismount);
+    }
 }

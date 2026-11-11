@@ -3,14 +3,19 @@
 use crate::*;
 use serde_json::Value;
 use std::collections::HashSet;
+#[path = "recipe_property_validation.rs"]
+mod recipe_property_validation;
+pub(crate) use recipe_property_validation::validate_recipe_properties;
 /// Items a mod adds to one of the recipe property sets: the items a furnace,
 /// blast furnace, smoker, campfire, smithing table slot or brewing stand slot
-/// accepts (`RecipeManager.RECIPE_PROPERTY_SETS`).
+/// accepts (`RecipeManager.RECIPE_PROPERTY_SETS`), or a mod-created menu input
+/// set. New keys must belong to a namespace owned by the listener's manifest;
+/// later listeners may extend sets created by earlier listeners.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct RecipePropertyAddition {
-    /// The set's key, `minecraft:furnace_input` for instance.
+    /// The set's key, such as `minecraft:furnace_input` or `mymod:pot_input`.
     pub set: String,
     /// The item ids to add.
     pub items: Vec<String>,
@@ -26,8 +31,8 @@ impl RecipePropertyAddition {
 }
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
-#[derive(Clone, Debug)]
-// exhaustive: the game builds it with a literal; mods only read it
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: placement providers and the game construct complete ingredient values
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct Ingredient {
     /// The items it accepts, however the source shape named them.
@@ -43,7 +48,7 @@ pub struct Ingredient {
     pub children: Option<(Shape, Vec<Self>)>,
 }
 /// How a shape's children combine at match time.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 // exhaustive: a closed set the game matches without a wildcard
 #[derive(horizon_mod_api_macros::Wire)]
 pub enum Shape {

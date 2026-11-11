@@ -3,95 +3,75 @@
 //! side, filled and drained in millibuckets. They act where the world is simulated, never on a
 //! client's copy, and only on the level in place.
 use super::Game;
+use super::cauldron_contents::{self, CauldronContent, CauldronContents, EMPTY_CAULDRON};
 use horizon_client::containers::{BlockEntity, ModFluidTanks};
 use horizon_core::geometry::Direction;
 use horizon_core::nbt::{Compound, JavaString, Tag};
 use mod_api::{BlockSide, FluidStack, Transaction};
 use std::sync::Arc;
 
-/// A cauldron level's contents: level `level` holds `level * 1000 / 3`
-/// millibuckets (`LayeredCauldronBlock` has no finer unit than a bottle's
-/// third of a bucket).
-fn third(level: u8) -> i32 {
-    i32::from(level) * 1000 / 3
-}
-
-/// The level a fill of `given` millibuckets raises `level` to: a level
-/// rises only while its whole third fits what is left of the give, so no
-/// sum ever grows past a bucket.
-fn fill_level(level: u8, given: i32) -> u8 {
-    let mut new = level;
-    while new < 3 && third(new + 1) - third(level) <= given {
-        new += 1;
-    }
-    new
-}
-
-/// What a drain of at most `amount` takes out of water level `level`, in
-/// whole thirds — never more than was asked, as `IFluidHandler.drain`'s
-/// `maxDrain`: less than the topmost whole third takes nothing. Answers
-/// what it took and the level it left.
-fn drain_take(level: u8, amount: i32) -> (i32, u8) {
-    let mut taken = 0;
-    let mut left = level;
-    while left > 0 {
-        let step = third(left) - third(left - 1);
-        if taken + step > amount {
-            break;
-        }
-        taken += step;
-        left -= 1;
-    }
-    (taken, left)
-}
-
 /// What holds fluids at a position: a mod block's tanks, or a cauldron
-/// (`CauldronFluids`). An empty cauldron is fillable; powder snow is not a
-/// fluid (`FluidKind` has none), so a powder snow cauldron holds none.
+/// (`CauldronFluids`). An empty cauldron is fillable; a cauldron block with no
+/// content in the table holds none: powder snow is not a fluid (`FluidKind`
+/// has none), so a powder snow cauldron has no content.
 enum FluidAt {
     Mod(Arc<ModFluidTanks>),
     Cauldron(CauldronFluids),
 }
-#[derive(Clone, Copy)]
-enum CauldronFluids {
-    Empty,
-    Water(u8),
-    Lava,
+/// A cauldron: the table of contents, and what it holds, a content's index
+/// in that table and its level; none for an empty cauldron.
+#[derive(Clone)]
+struct CauldronFluids {
+    contents: Arc<CauldronContents>,
+    held: Option<(usize, u32)>,
 }
 impl CauldronFluids {
-    /// What a fill of `amount` of `fluid` takes, and what the cauldron then holds: water rises
-    /// by whole thirds, lava fills an empty cauldron only whole. None when it takes nothing.
-    fn fill(self, fluid: &str, amount: i32) -> Option<(i32, CauldronFluids)> {
-        match (self, fluid) {
-            (Self::Empty | Self::Water(_), "minecraft:water") => {
-                let level = match self {
-                    Self::Water(level) => level,
-                    _ => 0,
-                };
-                let new = fill_level(level, amount.max(0));
-                (new > level).then(|| (third(new) - third(level), Self::Water(new)))
-            }
-            // Water into lava would turn it to stone in vanilla's world, not in a tank.
-            (Self::Empty, "minecraft:lava") => (amount >= 1000).then_some((1000, Self::Lava)),
-            _ => None,
+    /// What it holds, and at which level.
+    fn held(&self) -> Option<(&CauldronContent, u32)> {
+        let (index, level) = self.held?;
+        Some((self.contents.get(index), level))
+    }
+    /// The same cauldron holding `held`.
+    fn with(&self, held: Option<(usize, u32)>) -> Self {
+        Self {
+            contents: self.contents.clone(),
+            held,
         }
     }
+    /// What a fill of `amount` of `fluid` takes, and what the cauldron then holds: whole
+    /// levels of the content `fluid` has, into an empty cauldron or one holding that content,
+    /// so a content only ever full fills an empty cauldron only whole. None when it takes
+    /// nothing.
+    fn fill(&self, fluid: &str, amount: i32) -> Option<(i32, CauldronFluids)> {
+        let (index, content) = self.contents.of_fluid(fluid)?;
+        let level = match self.held {
+            None => 0,
+            Some((held, level)) if held == index => level,
+            // Water into lava would turn it to stone in vanilla's world, not in a tank.
+            Some(_) => return None,
+        };
+        let new = content.fill_level(level, amount.max(0));
+        (new > level).then(|| {
+            (
+                content.amount(new) - content.amount(level),
+                self.with(Some((index, new))),
+            )
+        })
+    }
     /// What a drain of at most `amount` takes: the fluid, how much, and what the cauldron then
-    /// holds. Water drains in whole thirds, lava only whole. None when it gives nothing.
-    fn drain(self, amount: i32) -> Option<(&'static str, i32, CauldronFluids)> {
-        match self {
-            Self::Water(level) => {
-                let (taken, left) = drain_take(level, amount);
-                let left = if left > 0 {
-                    Self::Water(left)
-                } else {
-                    Self::Empty
-                };
-                (taken > 0).then_some(("minecraft:water", taken, left))
-            }
-            Self::Lava => (amount >= 1000).then_some(("minecraft:lava", 1000, Self::Empty)),
-            Self::Empty => None,
-        }
+    /// holds. Whole levels, so a content only ever full drains only whole, and the last level
+    /// leaves the cauldron empty. None when it gives nothing.
+    fn drain(&self, amount: i32) -> Option<(&str, i32, CauldronFluids)> {
+        let (index, level) = self.held?;
+        let content = self.contents.get(index);
+        let (taken, left) = content.drain_take(level, amount);
+        (taken > 0).then(|| {
+            (
+                content.fluid.as_str(),
+                taken,
+                self.with((left > 0).then_some((index, left))),
+            )
+        })
     }
 }
 
@@ -108,7 +88,7 @@ fn side_tanks(tanks: &ModFluidTanks, side: Option<Direction>) -> impl Iterator<I
 
 /// Whether the tanks at `at` take `fluid`. A mod block's saved tanks keep an id and an amount,
 /// so they take vanilla's fluids and a mod's own, without components. A cauldron takes only
-/// water and lava, discarding their components:
+/// the fluids that have a content (water, lava, and the mods'), discarding their components:
 /// the one place a fluid's components are dropped, and what comes out of a cauldron is plain.
 fn game_holds(fluid: &FluidStack, at: &FluidAt) -> bool {
     match at {
@@ -116,10 +96,10 @@ fn game_holds(fluid: &FluidStack, at: &FluidAt) -> bool {
             !fluid.has_components()
                 && fluid.key().and_then(mod_api::__private::fluid_id) != Some("minecraft:empty")
         }
-        FluidAt::Cauldron(_) => fluid
+        FluidAt::Cauldron(cauldron) => fluid
             .key()
             .and_then(mod_api::__private::fluid_id)
-            .is_some_and(|id| matches!(id, "minecraft:water" | "minecraft:lava")),
+            .is_some_and(|id| cauldron.contents.of_fluid(id).is_some()),
     }
 }
 
@@ -216,30 +196,31 @@ impl Game<'_> {
             .then(|| FluidAt::Mod(Arc::clone(tanks)));
         }
         let info = self.pack.assets.registry.state(state)?;
-        match &*info.name {
-            "minecraft:cauldron" => Some(FluidAt::Cauldron(CauldronFluids::Empty)),
-            "minecraft:water_cauldron" => {
-                let level = info
-                    .properties
-                    .get("level")
-                    .and_then(|l| l.parse::<u8>().ok())?;
-                Some(FluidAt::Cauldron(CauldronFluids::Water(level)))
-            }
-            "minecraft:lava_cauldron" => Some(FluidAt::Cauldron(CauldronFluids::Lava)),
-            _ => None,
-        }
-    }
-    /// The cauldron at `pos` set to hold `to`. Whether it changed.
-    fn cauldron_set(&mut self, pos: [i32; 3], to: CauldronFluids) -> bool {
-        let (name, level) = match to {
-            CauldronFluids::Empty | CauldronFluids::Water(0) => ("minecraft:cauldron", None),
-            CauldronFluids::Water(level) => ("minecraft:water_cauldron", Some(level)),
-            CauldronFluids::Lava => ("minecraft:lava_cauldron", None),
+        let contents = cauldron_contents::current();
+        let held = if info.name == EMPTY_CAULDRON {
+            None
+        } else {
+            let (index, content) = contents.of_block(&info.name)?;
+            let level = match &content.level {
+                Some((property, _)) => info.properties.get(property.as_str())?.parse().ok()?,
+                None => 1,
+            };
+            Some((index, level))
         };
+        Some(FluidAt::Cauldron(CauldronFluids { contents, held }))
+    }
+    /// The cauldron at `pos` set to hold what `to` holds. Whether it changed.
+    fn cauldron_set(&mut self, pos: [i32; 3], to: &CauldronFluids) -> bool {
         let mut properties = std::collections::BTreeMap::new();
-        if let Some(level) = level {
-            properties.insert("level".to_owned(), level.to_string());
-        }
+        let name = match to.held() {
+            None | Some((_, 0)) => EMPTY_CAULDRON,
+            Some((content, level)) => {
+                if let Some((property, _)) = &content.level {
+                    properties.insert(property.clone(), level.to_string());
+                }
+                content.block.as_str()
+            }
+        };
         let state = horizon_world::chunk::BlockState {
             name: name.to_owned(),
             properties: properties.into(),
@@ -326,21 +307,21 @@ impl Game<'_> {
                     components: None,
                 })
             }
-            // All a cauldron holds is what a bucket's drain takes.
-            FluidAt::Cauldron(kind) if tank == 0 => {
-                let (fluid, amount, _) = kind.drain(1000)?;
+            // All a cauldron holds is its content's whole levels.
+            FluidAt::Cauldron(cauldron) if tank == 0 => {
+                let (content, level) = cauldron.held()?;
                 Some(FluidStack::new(
-                    mod_api::__private::fluid_key(fluid)?,
-                    amount.unsigned_abs(),
+                    mod_api::__private::fluid_key(&content.fluid)?,
+                    content.amount(level).unsigned_abs(),
                 ))
             }
             FluidAt::Cauldron(_) => None,
         }
     }
     /// How much of `fluid` tank `tank` of those `at`'s side reaches holds when empty: a mod
-    /// block's fillable tank its capacity, a cauldron a bucket; none for another tank, a
-    /// drain-only one, or a fluid the tanks there don't take: other than water and lava, or
-    /// with components into a mod block's tanks.
+    /// block's fillable tank its capacity, a cauldron what its content of `fluid` holds when
+    /// full; none for another tank, a drain-only one, or a fluid the tanks there don't take:
+    /// one with no cauldron content, or with components into a mod block's tanks.
     pub(in crate::game) fn fluid_tank_capacity(
         &self,
         at: BlockSide,
@@ -353,14 +334,18 @@ impl Game<'_> {
                 .nth(tank)
                 .filter(|real| tanks.inputs.contains(real))
                 .map_or(0, |real| tanks.tanks[real].max(0).unsigned_abs()),
-            Some(FluidAt::Cauldron(_)) if tank == 0 => 1000,
+            Some(FluidAt::Cauldron(cauldron)) if tank == 0 => fluid
+                .key()
+                .and_then(mod_api::__private::fluid_id)
+                .and_then(|id| cauldron.contents.of_fluid(id))
+                .map_or(0, |(_, content)| content.total),
             _ => 0,
         }
     }
     /// Puts as much of `fluid` as tank `tank` of those `at`'s side reaches takes: a mod
     /// block's fillable tank, empty or holding that fluid, up to its capacity; a cauldron by
-    /// whole thirds, lava only whole into an empty one, discarding the fluid's components.
-    /// What didn't fit. The write is kept by
+    /// its content's whole levels (water's thirds, lava only whole into an empty one),
+    /// discarding the fluid's components. What didn't fit. The write is kept by
     /// transaction `tx`.
     pub(in crate::game) fn fluid_tank_insert(
         &mut self,
@@ -408,12 +393,12 @@ impl Game<'_> {
                 }
                 add
             }
-            Some(FluidAt::Cauldron(kind)) if tank == 0 => match kind.fill(
+            Some(FluidAt::Cauldron(cauldron)) if tank == 0 => match cauldron.fill(
                 mod_api::__private::fluid_id(fluid.key().expect("validated cauldron fluid"))
                     .expect("resolved fluid key"),
                 amount,
             ) {
-                Some((took, to)) if self.cauldron_set(at.pos, to) => took,
+                Some((took, to)) if self.cauldron_set(at.pos, &to) => took,
                 _ => 0,
             },
             _ => 0,
@@ -422,8 +407,8 @@ impl Game<'_> {
         (rest > 0).then(|| fluid.with_amount(rest))
     }
     /// Takes up to `max` out of tank `tank` of those `at`'s side reaches: a mod block's
-    /// drainable tank, a cauldron by whole thirds and lava only whole. What came out. The
-    /// write is kept by transaction `tx`.
+    /// drainable tank, a cauldron by its content's whole levels (water's thirds, lava only
+    /// whole). What came out. The write is kept by transaction `tx`.
     pub(in crate::game) fn fluid_tank_extract(
         &mut self,
         at: BlockSide,
@@ -460,10 +445,10 @@ impl Game<'_> {
                     components: None,
                 })
             }
-            FluidAt::Cauldron(kind) if tank == 0 => {
-                let (fluid, took, to) = kind.drain(max)?;
+            FluidAt::Cauldron(cauldron) if tank == 0 => {
+                let (fluid, took, to) = cauldron.drain(max)?;
                 let key = mod_api::__private::fluid_key(fluid)?;
-                self.cauldron_set(at.pos, to)
+                self.cauldron_set(at.pos, &to)
                     .then(|| FluidStack::new(key, took.unsigned_abs()))
             }
             FluidAt::Cauldron(_) => None,
@@ -477,80 +462,82 @@ mod tests {
     use mod_api::HostTransaction;
     use mod_api::ServerHost;
 
-    #[test]
-    fn a_cauldron_level_holds_a_third_of_a_bucket() {
-        assert_eq!(third(1), 333);
-        assert_eq!(third(2), 666);
-        assert_eq!(third(3), 1000);
-    }
-
-    #[test]
-    fn a_cauldron_never_hands_out_more_than_was_asked() {
-        // The top third of a full cauldron is 334, then 333, 333.
-        assert_eq!(drain_take(3, 1), (0, 3));
-        assert_eq!(drain_take(3, 333), (0, 3));
-        assert_eq!(drain_take(3, 334), (334, 2));
-        assert_eq!(drain_take(3, 500), (334, 2));
-        assert_eq!(drain_take(3, 666), (334, 2));
-        assert_eq!(drain_take(3, 667), (667, 1));
-        assert_eq!(drain_take(3, 1000), (1000, 0));
-        assert_eq!(drain_take(1, 332), (0, 1));
-        assert_eq!(drain_take(1, 333), (333, 0));
-        assert_eq!(drain_take(1, i32::MAX), (333, 0));
-    }
-
-    #[test]
-    fn a_cauldron_fill_stays_within_a_bucket_whatever_the_amount() {
-        assert_eq!(fill_level(0, 332), 0);
-        assert_eq!(fill_level(0, 333), 1);
-        assert_eq!(fill_level(1, 332), 1);
-        assert_eq!(fill_level(1, 333), 2);
-        assert_eq!(fill_level(1, 666), 2);
-        assert_eq!(fill_level(1, 667), 3);
-        assert_eq!(fill_level(0, i32::MAX), 3);
-        assert_eq!(fill_level(2, i32::MAX), 3);
+    /// Vanilla's table, with an empty cauldron, water at `level` and lava on it: what the
+    /// cauldron holds as (water level, lava) for the assertions.
+    fn vanilla_cauldrons() -> (
+        CauldronFluids,
+        impl Fn(u32) -> CauldronFluids,
+        CauldronFluids,
+        impl Fn(&CauldronFluids) -> (u32, bool),
+    ) {
+        let contents = Arc::new(CauldronContents::vanilla());
+        let water = contents.of_block("minecraft:water_cauldron").unwrap().0;
+        let lava = contents.of_block("minecraft:lava_cauldron").unwrap().0;
+        let empty = CauldronFluids {
+            contents,
+            held: None,
+        };
+        let level = move |cauldron: &CauldronFluids| match cauldron.held {
+            None => (0, false),
+            Some((index, level)) if index == water => (level, false),
+            Some(_) => (0, true),
+        };
+        (
+            empty.clone(),
+            {
+                let empty = empty.clone();
+                move |level| empty.with(Some((water, level)))
+            },
+            empty.with(Some((lava, 1))),
+            level,
+        )
     }
 
     #[test]
     fn a_cauldron_takes_and_gives_water_by_whole_thirds_and_lava_only_whole() {
-        use super::CauldronFluids::{Empty, Lava, Water};
-        let level = |fluids| match fluids {
-            Empty => (0, false),
-            Water(level) => (level, false),
-            Lava => (0, true),
-        };
-        let fill = |kind: super::CauldronFluids, fluid, amount| {
-            kind.fill(fluid, amount).map(|(took, to)| (took, level(to)))
+        let (empty, water, lava, level) = vanilla_cauldrons();
+        let fill = |kind: &CauldronFluids, fluid, amount| {
+            kind.fill(fluid, amount)
+                .map(|(took, to)| (took, level(&to)))
         };
         // 500 mB raises an empty cauldron one level, 333 mB; a full one takes none.
-        assert_eq!(fill(Empty, "minecraft:water", 500), Some((333, (1, false))));
         assert_eq!(
-            fill(Water(1), "minecraft:water", 1000),
+            fill(&empty, "minecraft:water", 500),
+            Some((333, (1, false)))
+        );
+        assert_eq!(
+            fill(&water(1), "minecraft:water", 1000),
             Some((667, (3, false)))
         );
-        assert_eq!(fill(Water(3), "minecraft:water", 1000), None);
-        assert_eq!(fill(Empty, "minecraft:lava", 999), None);
-        assert_eq!(fill(Empty, "minecraft:lava", 1500), Some((1000, (0, true))));
-        assert_eq!(fill(Water(1), "minecraft:lava", 1000), None);
-        assert_eq!(fill(Lava, "minecraft:water", 1000), None);
-        let drain = |kind: super::CauldronFluids, amount| {
+        assert_eq!(fill(&water(3), "minecraft:water", 1000), None);
+        assert_eq!(fill(&empty, "minecraft:lava", 999), None);
+        assert_eq!(
+            fill(&empty, "minecraft:lava", 1500),
+            Some((1000, (0, true)))
+        );
+        assert_eq!(fill(&water(1), "minecraft:lava", 1000), None);
+        assert_eq!(fill(&lava, "minecraft:water", 1000), None);
+        // A fluid with no content, powder snow's or a mod's, never goes in.
+        assert_eq!(fill(&empty, "minecraft:powder_snow", 1000), None);
+        let drain = |kind: &CauldronFluids, amount| {
             kind.drain(amount)
-                .map(|(fluid, took, to)| (fluid, took, level(to)))
+                .map(|(fluid, took, to)| (fluid.to_owned(), took, level(&to)))
         };
         assert_eq!(
-            drain(Water(3), 500),
-            Some(("minecraft:water", 334, (2, false)))
+            drain(&water(3), 500),
+            Some(("minecraft:water".to_owned(), 334, (2, false)))
         );
-        assert_eq!(drain(Water(1), 332), None);
+        assert_eq!(drain(&water(1), 332), None);
         assert_eq!(
-            drain(Water(2), 1000),
-            Some(("minecraft:water", 666, (0, false)))
+            drain(&water(2), 1000),
+            Some(("minecraft:water".to_owned(), 666, (0, false)))
         );
-        assert_eq!(drain(Lava, 999), None);
+        assert_eq!(drain(&lava, 999), None);
         assert_eq!(
-            drain(Lava, 1000),
-            Some(("minecraft:lava", 1000, (0, false)))
+            drain(&lava, 1000),
+            Some(("minecraft:lava".to_owned(), 1000, (0, false)))
         );
+        assert_eq!(drain(&empty, i32::MAX), None);
     }
 
     #[test]
@@ -565,7 +552,7 @@ mod tests {
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             let level = game.level("minecraft:overworld").unwrap();
-            let water = |game: &Game<'_>, n: u8| {
+            let water = |game: &Game<'_>, n: u32| {
                 let state = horizon_world::chunk::BlockState {
                     name: "minecraft:water_cauldron".to_owned(),
                     properties: [("level".to_owned(), n.to_string())].into_iter().collect(),
@@ -591,9 +578,259 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mods_cauldron_fills_and_drains_by_its_levels_and_a_refusal_names_both_sides() {
+        use super::super::super::native_entity_refs::tests::{
+            record_key, run_fresh_cases, with_game_at,
+        };
+        if run_fresh_cases(
+            "game::machines::native_fluids::tests::a_mods_cauldron_fills_and_drains_by_its_levels_and_a_refusal_names_both_sides",
+            "HORIZON_CAULDRON_CONTENT_CHILD",
+            &["valid"],
+        ) {
+            return;
+        }
+        use horizon_client::chunk::Chunk;
+        use mod_api::{
+            BlockKey, BlockUpdateFlags, FLUIDS, FluidKey, FluidResource, Hooks, ModEntry, Mods,
+            RegisterCauldronFluidContentEvent, Registrar, RegistrationContext,
+        };
+
+        /// The keys the mod's `register` requested, as a real mod keeps them for its hooks.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        struct Keys {
+            snow_cauldron: BlockKey,
+            water_cauldron: BlockKey,
+            composter: BlockKey,
+            stone: BlockKey,
+            syrup: FluidKey,
+            honey: FluidKey,
+            water: FluidKey,
+        }
+        #[derive(Default)]
+        struct SyrupCauldron(std::sync::OnceLock<Keys>);
+        #[mod_api::__subscriptions]
+        impl Hooks for SyrupCauldron {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                let keys = Keys {
+                    snow_cauldron: r.block_key("minecraft:powder_snow_cauldron"),
+                    water_cauldron: r.block_key("minecraft:water_cauldron"),
+                    composter: r.block_key("minecraft:composter"),
+                    stone: r.block_key("minecraft:stone"),
+                    syrup: r.declare_fluid("syrup"),
+                    honey: r.declare_fluid("honey"),
+                    water: r.fluid_key("minecraft:water"),
+                };
+                record_key(&self.0, keys);
+            }
+            fn register_cauldron_fluid_content(
+                &self,
+                _: &RegistrationContext,
+                event: &mut RegisterCauldronFluidContentEvent<'_>,
+            ) {
+                let keys = self.0.get().unwrap();
+                // The powder snow cauldron holds no fluid here, so it can be the syrup
+                // cauldron: 3000 mB over its `level` 1..3.
+                event
+                    .contents
+                    .register(keys.snow_cauldron, keys.syrup, 3000, Some("level"));
+                // Refused: the water cauldron already has a content, water already has a
+                // cauldron, and stone has no level property.
+                event
+                    .contents
+                    .register(keys.water_cauldron, keys.honey, 1000, Some("level"));
+                event
+                    .contents
+                    .register(keys.composter, keys.water, 8000, Some("level"));
+                event
+                    .contents
+                    .register(keys.stone, keys.honey, 1000, Some("level"));
+            }
+        }
+        let mods: Mods = vec![ModEntry::new(
+            "cauldron_test",
+            Box::new(SyrupCauldron::default()),
+        )]
+        .into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            let base =
+                std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+            let root = super::super::super::mods::content_root(&base, &Default::default())
+                .unwrap()
+                .prepared()
+                .to_path_buf();
+            with_game_at(root, |game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let level = game.level("minecraft:overworld").unwrap();
+                let flags = BlockUpdateFlags::NEIGHBORS;
+                let block = |game: &Game<'_>, name: &str, level: Option<u32>| {
+                    let state = horizon_world::chunk::BlockState {
+                        name: name.to_owned(),
+                        properties: level
+                            .map(|n| ("level".to_owned(), n.to_string()))
+                            .into_iter()
+                            .collect(),
+                    };
+                    game.pack.assets.registry.resolve(&state).unwrap()
+                };
+                let resource = |fluid: &str| {
+                    FluidResource::of(&FluidStack::new(
+                        mod_api::__private::fluid_key(fluid).unwrap(),
+                        1,
+                    ))
+                };
+                let (syrup, water, lava) = (
+                    resource("cauldron_test:syrup"),
+                    resource("minecraft:water"),
+                    resource("minecraft:lava"),
+                );
+
+                // The refusals name both sides; the rest of the mod's contents still apply,
+                // and water and lava keep theirs.
+                let (contents, refusals) =
+                    super::super::super::mods::collect_cauldron_fluid_contents(
+                        game.pack.assets.registry,
+                    );
+                assert_eq!(refusals.len(), 3, "{refusals:?}");
+                for (refusal, named) in refusals.iter().zip([
+                    [
+                        "minecraft:water_cauldron",
+                        "minecraft:water",
+                        "cauldron_test:honey",
+                    ],
+                    [
+                        "minecraft:water",
+                        "minecraft:water_cauldron",
+                        "minecraft:composter",
+                    ],
+                    ["minecraft:stone", "level", "cauldron_test:honey"],
+                ]) {
+                    assert!(
+                        named.iter().all(|name| refusal.contains(name)),
+                        "{refusal}: names {named:?}"
+                    );
+                }
+                let content = |block: &str| {
+                    contents.of_block(block).map(|(_, content)| {
+                        (content.fluid.clone(), content.total, content.levels())
+                    })
+                };
+                assert_eq!(
+                    content("minecraft:powder_snow_cauldron"),
+                    Some(("cauldron_test:syrup".to_owned(), 3000, 3))
+                );
+                assert_eq!(
+                    content("minecraft:water_cauldron"),
+                    Some(("minecraft:water".to_owned(), 1000, 3))
+                );
+                assert_eq!(
+                    content("minecraft:lava_cauldron"),
+                    Some(("minecraft:lava".to_owned(), 1000, 1))
+                );
+                assert_eq!(content("minecraft:composter"), None);
+                assert_eq!(content("minecraft:stone"), None);
+
+                // The handler on the syrup cauldron reports syrup and a whole number of
+                // levels, 1000 mB each, at each level, with room for 3000 mB of syrup.
+                let pos = [0, 64, 0];
+                let mut handler = None;
+                for (n, held) in [(1, 1000), (2, 2000), (3, 3000)] {
+                    let cauldron = block(game, "minecraft:powder_snow_cauldron", Some(n));
+                    assert_eq!(game.level_set_block(level, pos, cauldron, flags), Ok(true));
+                    // The handler is the position's: one answers every cauldron there.
+                    let handler = handler
+                        .get_or_insert_with(|| level.capability(game, &FLUIDS, pos, None).unwrap());
+                    assert_eq!(handler.size(game), 1);
+                    assert_eq!(handler.resource(game, 0), Some(syrup.clone()));
+                    assert_eq!(handler.amount(game, 0), held);
+                    assert_eq!(handler.capacity(game, 0, &syrup), 3000);
+                    assert_eq!(handler.capacity(game, 0, &water), 1000);
+                }
+                let handler = handler.unwrap();
+                let extract = |game: &mut Game<'_>, resource: &FluidResource, amount| {
+                    game.transaction(|host, tx| {
+                        Ok::<_, ()>(handler.extract(host, tx, 0, resource, amount))
+                    })
+                    .unwrap()
+                };
+                let insert = |game: &mut Game<'_>, resource: &FluidResource, amount| {
+                    game.transaction(|host, tx| {
+                        Ok::<_, ()>(handler.insert(host, tx, 0, resource, amount))
+                    })
+                    .unwrap()
+                };
+                let at = |game: &Game<'_>| game.world.block(pos[0], pos[1], pos[2]);
+                // A drain takes whole levels: 1500 mB asked takes one level, 999 none, and the
+                // last level leaves an empty cauldron.
+                assert_eq!(extract(game, &syrup, 1500), 1000);
+                assert_eq!(
+                    at(game),
+                    block(game, "minecraft:powder_snow_cauldron", Some(2))
+                );
+                assert_eq!(extract(game, &syrup, 999), 0);
+                assert_eq!(extract(game, &water, 1000), 0);
+                assert_eq!(
+                    at(game),
+                    block(game, "minecraft:powder_snow_cauldron", Some(2))
+                );
+                assert_eq!(extract(game, &syrup, 2000), 2000);
+                assert_eq!(at(game), block(game, "minecraft:cauldron", None));
+                assert_eq!(handler.resource(game, 0), None);
+                assert_eq!(handler.amount(game, 0), 0);
+                // An empty cauldron filled with syrup becomes the syrup cauldron at the level
+                // the amount reaches; honey has no content and goes nowhere.
+                assert_eq!(insert(game, &resource("cauldron_test:honey"), 3000), 0);
+                assert_eq!(at(game), block(game, "minecraft:cauldron", None));
+                assert_eq!(insert(game, &syrup, 2500), 2000);
+                assert_eq!(
+                    at(game),
+                    block(game, "minecraft:powder_snow_cauldron", Some(2))
+                );
+                assert_eq!(insert(game, &water, 1000), 0);
+                assert_eq!(insert(game, &syrup, 1000), 1000);
+                assert_eq!(
+                    at(game),
+                    block(game, "minecraft:powder_snow_cauldron", Some(3))
+                );
+                assert_eq!(insert(game, &syrup, 1000), 0);
+
+                // Water and lava answer exactly as before: water by thirds of a bucket, the
+                // top third 334 mB, lava a bucket only whole, and syrup into neither.
+                assert_eq!(extract(game, &syrup, 3000), 3000);
+                assert_eq!(insert(game, &water, 500), 333);
+                assert_eq!(at(game), block(game, "minecraft:water_cauldron", Some(1)));
+                assert_eq!(insert(game, &syrup, 1000), 0);
+                assert_eq!(insert(game, &water, 1000), 667);
+                assert_eq!(at(game), block(game, "minecraft:water_cauldron", Some(3)));
+                assert_eq!(handler.resource(game, 0), Some(water.clone()));
+                assert_eq!(handler.amount(game, 0), 1000);
+                assert_eq!(extract(game, &water, 500), 334);
+                assert_eq!(at(game), block(game, "minecraft:water_cauldron", Some(2)));
+                assert_eq!(extract(game, &water, 1000), 666);
+                assert_eq!(at(game), block(game, "minecraft:cauldron", None));
+                assert_eq!(insert(game, &lava, 999), 0);
+                assert_eq!(insert(game, &lava, 1500), 1000);
+                assert_eq!(at(game), block(game, "minecraft:lava_cauldron", None));
+                assert_eq!(handler.resource(game, 0), Some(lava.clone()));
+                assert_eq!(handler.amount(game, 0), 1000);
+                assert_eq!(handler.capacity(game, 0, &lava), 1000);
+                assert_eq!(insert(game, &syrup, 1000), 0);
+                assert_eq!(extract(game, &lava, 999), 0);
+                assert_eq!(extract(game, &lava, 1000), 1000);
+                assert_eq!(at(game), block(game, "minecraft:cauldron", None));
+            })
+        });
+    }
+
+    #[test]
     fn a_cauldron_takes_water_and_lava_whatever_their_components_and_a_mod_tank_none_with_them() {
-        use super::{CauldronFluids, FluidAt, FluidStack, game_holds};
+        use super::{FluidAt, FluidStack, game_holds};
         mod_api::__private::part_tests::game_thread();
+        let (empty, water, _, _) = vanilla_cauldrons();
         let potion = |fluid| {
             use horizon_core::nbt::{Compound, Tag};
             let mut potion = Compound::new();
@@ -605,7 +842,7 @@ mod tests {
                 ..FluidStack::new(mod_api::__private::fluid_key(fluid).unwrap(), 1000)
             }
         };
-        let cauldron = FluidAt::Cauldron(CauldronFluids::Empty);
+        let cauldron = FluidAt::Cauldron(empty);
         let tank = FluidAt::Mod(Arc::default());
         for fluid in ["minecraft:water", "minecraft:lava"] {
             assert!(game_holds(&potion(fluid), &cauldron), "{fluid}");
@@ -620,7 +857,8 @@ mod tests {
         }
         assert!(!game_holds(&potion("test:potion"), &cauldron));
         // What a cauldron gives is named by its fluid alone: its components are gone.
-        let (fluid, amount, _) = CauldronFluids::Water(3).drain(1000).unwrap();
+        let full = water(3);
+        let (fluid, amount, _) = full.drain(1000).unwrap();
         assert_eq!(
             FluidStack::new(
                 mod_api::__private::fluid_key(fluid).unwrap(),

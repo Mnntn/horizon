@@ -407,7 +407,15 @@ impl Game<'_> {
                     if g.legacy_rules() {
                         g.legacy_extra_knockback(f64::from(strength), (xd, zd));
                     } else {
-                        g.knock_back_player(f64::from(strength), xd, zd, PVP_SOURCE, &attack);
+                        g.knock_back_player_full(
+                            f64::from(strength),
+                            xd,
+                            zd,
+                            PVP_SOURCE,
+                            &attack,
+                            s.amount,
+                            true,
+                        );
                     }
                 }
                 // Entity.igniteForSeconds on the victim: the fire timer only
@@ -658,7 +666,7 @@ impl Game<'_> {
                     "minecraft:player_attack",
                     sweep.creative,
                 ) {
-                    g.knock_back_player(0.4, xd, zd, PVP_SOURCE, &attack);
+                    g.knock_back_player(0.4, xd, zd, PVP_SOURCE, &attack, damage);
                     if sweep.ignite > 0.0
                         && let Some(p) = g.player.as_mut()
                     {

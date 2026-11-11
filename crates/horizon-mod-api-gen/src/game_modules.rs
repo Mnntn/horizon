@@ -139,7 +139,7 @@ pub fn materialize_game_modules(root: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn parse(path: &Path, source: &str) -> Result<syn::File, String> {
-    syn::parse_file(&expand(path, source)?).map_err(|e| format!("{}: {e}", path.display()))
+    crate::interface_cache::parse(path, &expand(path, source)?)
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@
 //! `#[derive(Wire)]` (or a hand-written `impl Wire`), as [`crate::wire_types`] finds them. Nothing adds the derive: any other parameter makes the point's API
 //! listeners refuse, naming it, and leaves its `internals` form.
 use super::{Found, GamePoint, WireTypes, file_functions, imports, module_files, unraw};
-pub use horizon_mod_package::manifest::inject::mod_points::Catalog;
+use point_shape::catalog::Catalog;
 use quote::{ToTokens, quote};
 use std::collections::BTreeSet;
 use std::fs;
@@ -114,7 +114,8 @@ fn api_types(
 }
 
 /// The point's name: its path from the crate root, the `impl`'s type snake-cased, then the
-/// function (`tanks_tank_fill` for `chemlib::tanks::Tank::fill`).
+/// function (`tanks_tank_fill` for `chemlib::tanks::Tank::fill`). The form is not injective
+/// (`a::b_c` and `a_b::c` collide): `listed` refuses two points of one name, naming both.
 fn name(found: &Found<'_>, krate: &str) -> String {
     let mut parts: Vec<String> = found
         .module
@@ -276,22 +277,20 @@ fn catalog(krate: String, files: &[File], mut points: Vec<GamePoint>) -> Catalog
         opted_out: opted_out(files),
         points: points
             .into_iter()
-            .map(
-                |point| horizon_mod_package::manifest::inject::mod_points::Point {
-                    hash: point.hash.unwrap_or_default(),
-                    signature: point.signature.unwrap_or_default(),
-                    raw: point.raw,
-                    at_return: point.at_return,
-                    api_refusal: point.api_refusal,
-                    returns: point.returns.to_owned(),
-                    host: point.host.to_owned(),
-                    return_ty: point.return_ty,
-                    listener: point.listener,
-                    return_listener: point.return_listener,
-                    name: point.name,
-                    target: point.target,
-                },
-            )
+            .map(|point| point_shape::catalog::Point {
+                hash: point.hash.unwrap_or_default(),
+                signature: point.signature.unwrap_or_default(),
+                raw: point.raw,
+                at_return: point.at_return,
+                api_refusal: point.api_refusal,
+                returns: point.returns.to_owned(),
+                host: point.host.to_owned(),
+                return_ty: point.return_ty,
+                listener: point.listener,
+                return_listener: point.return_listener,
+                name: point.name,
+                target: point.target,
+            })
             .collect(),
     }
 }
@@ -402,7 +401,7 @@ pub(crate) fn table(points: &[GamePoint]) -> String {
     let listeners = points.iter().map(|point| parse(&point.api[0]));
     let variants = points.iter().map(|point| parse(&point.api[1]));
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
-    let raw = points.iter().filter(|point| point.raw).flat_map(|point| {
+    let raw: Vec<_> = points.iter().filter(|point| point.raw).flat_map(|point| {
         let head = point.listener.clone().map(|listener| (point.name.clone(), listener));
         let back = point
             .return_listener
@@ -421,13 +420,65 @@ pub(crate) fn table(points: &[GamePoint]) -> String {
                 }
             }
         })
-    });
+    }).collect();
+    // The wrapper executes in the library member, whose private mod_api owns its registry.
+    // Only typed function pointers and scalar metadata cross the dynamic-link boundary.
+    let mut registration = Vec::new();
+    for (module, source) in [
+        (
+            "listeners",
+            points.iter().map(|p| p.api[0].clone()).collect::<Vec<_>>(),
+        ),
+        ("raw", raw.iter().map(ToString::to_string).collect()),
+    ] {
+        for source in source {
+            let file: syn::File = syn::parse_str(&source).expect("generated constructors");
+            for item in file.items {
+                let syn::Item::Fn(function) = item else {
+                    continue;
+                };
+                let name = &function.sig.ident;
+                let bridge = quote::format_ident!("register_{module}_{name}");
+                let mut listener = function
+                    .sig
+                    .inputs
+                    .last()
+                    .expect("listener parameter")
+                    .clone();
+                if module == "listeners"
+                    && let syn::FnArg::Typed(argument) = &mut listener
+                {
+                    let ty = &argument.ty;
+                    *argument.ty = syn::parse_quote!(listeners::#ty);
+                }
+                let module = quote::format_ident!("{module}");
+                let constructor = if module == "raw" {
+                    quote!(#module::#name(id, listener).ordered(priority, injection))
+                } else {
+                    quote!(#module::#name(id, priority, injection, listener))
+                };
+                registration.push(quote! {
+                    /// Registers in this library member's registry; false means registration was refused.
+                    #[inline(never)]
+                    pub fn #bridge(id: &'static str, priority: i32, injection: &'static str, replace: bool, #listener) -> bool {
+                        let slot = #constructor;
+                        let slot = if replace { slot.replacing() } else { slot };
+                        ::mod_api::__private::points::register(&slot).is_ok()
+                    }
+                });
+            }
+        }
+    }
     let doc =
         "A mod's injection points (#2339): a slot per place, set at load where an addon listens.";
     quote! {
         #![doc = #doc]
         #![allow(missing_docs, dead_code, clippy::all)]
         #(#records)*
+        #(#registration)*
+        /// Seals this library member's registry after all group members registered.
+        #[inline(never)]
+        pub fn seal() { ::mod_api::__private::points::seal(); }
         /// A point's place: its head and return.
         #[repr(usize)]
         #[derive(Clone, Copy, PartialEq, Eq, Debug)]

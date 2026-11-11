@@ -1,4 +1,3 @@
 # path<TAB>regeneration command
-docs/modding/src/wasm-coverage.md	HORIZON_UPDATE_WIRE_COVERAGE=1 cargo test -p horizon-mod-api-gen coverage_document_is_current
 ROADMAP.md	python3 tools/roadmap.py build
 roadmap/roadmap.json	python3 tools/roadmap.py build

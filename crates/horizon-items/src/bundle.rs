@@ -57,7 +57,7 @@ pub const INSERT_FAIL: &str = "minecraft:item.bundle.insert_fail";
 pub const REMOVE_ONE: &str = "minecraft:item.bundle.remove_one";
 pub const DROP_CONTENTS: &str = "minecraft:item.bundle.drop_contents";
 
-fn max_stack(items: &Items, stack: &ItemStack) -> u32 {
+pub(crate) fn max_stack(items: &Items, stack: &ItemStack) -> u32 {
     let info = items.get(&stack.item);
     if !stack.carries_component(info, "minecraft:max_stack_size") {
         return 1;

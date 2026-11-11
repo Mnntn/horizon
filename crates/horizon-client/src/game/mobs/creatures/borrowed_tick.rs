@@ -22,6 +22,16 @@ fn route_player_events(
             };
             events.insert(k, *event);
         }
+        // A hoglin broadcast carries the source's player, not the receiving
+        // hoglin's independently selected player.
+        if let MobEvent::HoglinAttackTarget {
+            target: Who::Player,
+            player,
+            ..
+        } = &mut events[k]
+        {
+            *player = conn;
+        }
         // ShulkerBullet stores a target for later projectile ticks. Preserve
         // the selected guest's entity ID instead of the host-player sentinel.
         if let Some(conn) = conn
@@ -79,7 +89,7 @@ impl Game<'_> {
         Option<Box<dyn std::any::Any + Send>>,
     ) {
         let passenger_objects = state.passenger_objects;
-        let blocked = state.blocked;
+        let mut blocked = std::borrow::Cow::Borrowed(state.blocked);
         let mut mobs = state.mobs.take_owned_pass();
         let mut snapshot = std::mem::take(state.snapshot);
         let mut events = std::mem::take(state.events);
@@ -124,6 +134,9 @@ impl Game<'_> {
         }
         let mut cursor = 0;
         let mut resuming = false;
+        // An invalid removed vehicle is retried once at this rider's own
+        // eligible entity tick, never from the later global positioning pass.
+        let mut retried_rider = None;
         let mut resume_from = 0;
         let mut resume_credit_expiring = false;
         let mut resume_was_on_fire = false;
@@ -131,6 +144,7 @@ impl Game<'_> {
         let mut resume_guest = None;
         loop {
             let mut pause = None;
+            let mut retry_rider = None;
             {
                 let ticking = self.entity_ticking_area();
                 let players = self.level_players();
@@ -172,6 +186,7 @@ impl Game<'_> {
                         }
                     };
                     let m = &mut mobs[i];
+                    let retried = retried_rider.take() == Some(m.id);
                     if blocked.contains(&m.id) {
                         cursor += 1;
                         resuming = false;
@@ -220,6 +235,7 @@ impl Game<'_> {
                     // event, patched into `Mob.checkDespawn`, never fires for it;
                     // a mannequin is no `Mob` and never checks despawning.
                     if !resuming
+                        && !retried
                         && mod_api::__private::listened(mod_api::HookId::MobDespawn)
                         && !matches!(
                             m.species(),
@@ -287,6 +303,15 @@ impl Game<'_> {
                         m.despawn = mod_api::Despawn::default();
                         cursor += 1;
                         continue;
+                    }
+                    if !resuming
+                        && !retried
+                        && m.extra.mount.is_some_and(|vehicle| {
+                            self.persist.removed_vehicles.contains_key(&vehicle)
+                        })
+                    {
+                        retry_rider = Some(m.id);
+                        break;
                     }
                     // getCurrentDifficultyAt(blockPosition()): the mob's own chunk,
                     // not the local player's (a server thread has no player).
@@ -545,7 +570,9 @@ impl Game<'_> {
                     cursor += 1;
                 }
             }
-            let Some(decision) = pause else { break };
+            if pause.is_none() && retry_rider.is_none() {
+                break;
+            }
             // No MobWorld, DamageLevel or navigation loan crosses this boundary.
             // The callback sees the real owning rows and level RNG/attachments,
             // and its writes are the state the continuation will resume from.
@@ -572,9 +599,16 @@ impl Game<'_> {
                 std::mem::swap(&mut host.mob_players, &mut bindings);
             }
             let callback_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.apply_fox_consumption(&decision);
+                if let Some(id) = retry_rider {
+                    self.dismount_mob(id);
+                } else if let Some(decision) = pause.as_ref() {
+                    self.apply_fox_consumption(decision);
+                }
             }))
             .err();
+            if retry_rider.is_some() {
+                blocked = std::borrow::Cow::Owned(self.mobs_below_off_level());
+            }
             mobs = self.mobs.lift();
             std::mem::swap(&mut self.last_hurt_by_player, &mut player_credit);
             std::mem::swap(&mut self.died, &mut died);
@@ -634,7 +668,8 @@ impl Game<'_> {
                 path_writes.append(writes);
             }
             lent = horizon_client::health::LentLevel::take(&mut self.world);
-            resuming = true;
+            resuming = retry_rider.is_none();
+            retried_rider = retry_rider;
         }
         laps.lap("creature_loop");
         if dispatch_panic.is_none() {
@@ -725,9 +760,8 @@ impl Game<'_> {
             self.persist
                 .off_level
                 .values()
-                .map(|object| match object {
-                    crate::game::persist::OffLevel::Mob(m) => seen(m, uuid),
-                })
+                .filter_map(crate::game::persist::OffLevel::as_mob)
+                .map(|m| seen(m, uuid))
                 .collect()
         }
     }
@@ -808,5 +842,37 @@ mod off_level_tests {
             game.tick_creature_entities().unwrap();
             assert_eq!(game.mob_object(73).unwrap().age, 20);
         });
+    }
+}
+
+#[cfg(test)]
+mod hoglin_routing_tests {
+    use super::*;
+
+    #[test]
+    fn broadcast_keeps_source_player_connection() {
+        for (seen_guest, tag, expected) in [
+            (Some(12), None, Some(12)),
+            (None, None, None),
+            (Some(12), Some(Some(13)), Some(13)),
+            (Some(12), Some(None), None),
+        ] {
+            let event = MobEvent::HoglinAttackTarget {
+                mob: 9001,
+                target: Who::Player,
+                player: None,
+            };
+            let mut events = vec![match tag {
+                Some(conn) => MobEvent::ForPlayer {
+                    conn,
+                    event: Box::new(event),
+                },
+                None => event,
+            }];
+            route_player_events(&mut events, 0, seen_guest, &[], &mut Vec::new(), 9000);
+            assert!(matches!(events[0], MobEvent::HoglinAttackTarget {
+                player, ..
+            } if player == expected));
+        }
     }
 }

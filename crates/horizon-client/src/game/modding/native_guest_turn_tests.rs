@@ -69,6 +69,97 @@ pub(in crate::game) fn with_guests(test: impl FnOnce(&mut super::Game<'_>)) {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn player_dimensions_validate_identity_on_both_server_roles() {
+    use super::execution_role::ExecutionRole;
+    let previous_extra = super::EXTRA_DIMS.read().unwrap().clone();
+    with_guests(|game| {
+        super::Dim::add_extra("test:pocket");
+        for role in [
+            ExecutionRole::DedicatedServer,
+            ExecutionRole::IntegratedServer,
+        ] {
+            game.options.execution_role = role;
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| {
+                    guest.dimension = "minecraft:overworld".to_owned();
+                })
+                .unwrap();
+            let player = game.player(12).unwrap();
+            let other = game.player(13).unwrap();
+            let epoch = player.entity().epoch();
+            let unknown = mod_api::__private::game::player_ref(player.entity(), 999);
+            let stale = mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(
+                    mod_api::WorldEpoch::new(epoch.get() + 1),
+                    player.entity().id(),
+                ),
+                player.uuid(),
+            );
+            let replaced = mod_api::__private::game::player_ref(other.entity(), player.uuid());
+            for invalid in [unknown, stale, replaced] {
+                assert_eq!(game.player_level(invalid), None, "{role:?}");
+                assert_eq!(game.player_dimension(invalid), None, "{role:?}");
+            }
+            assert_eq!(
+                game.player_level(player).unwrap().dimension_id(),
+                "minecraft:overworld"
+            );
+            game.as_guest(12, |game| {
+                assert_eq!(
+                    game.player_dimension(player).unwrap().to_string(),
+                    "minecraft:overworld"
+                );
+                game.as_guest(13, |game| {
+                    assert_eq!(
+                        game.player_level(player).unwrap().dimension_id(),
+                        "minecraft:overworld"
+                    );
+                })
+                .unwrap();
+            })
+            .unwrap();
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| {
+                    guest.dimension = "minecraft:the_nether".to_owned();
+                })
+                .unwrap();
+            assert_eq!(
+                game.player_dimension(player).unwrap().to_string(),
+                "minecraft:the_nether"
+            );
+            assert_eq!(
+                game.player_level(player).unwrap().dimension_id(),
+                "minecraft:the_nether"
+            );
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| {
+                    guest.dimension = "test:pocket".to_owned();
+                })
+                .unwrap();
+            assert_eq!(
+                game.player_dimension(player).unwrap().to_string(),
+                "test:pocket"
+            );
+            assert_eq!(
+                game.player_level(player).unwrap().dimension_id(),
+                "test:pocket"
+            );
+        }
+    });
+    *super::EXTRA_DIMS.write().unwrap() = previous_extra;
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn refused_wire_reload_preserves_hub_and_engine_generation() {
     with_guests(|game| {
         let before = game.lan.as_ref().unwrap().hub.lan.shared.sync();

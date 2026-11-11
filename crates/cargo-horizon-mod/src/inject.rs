@@ -197,7 +197,7 @@ fn library(
     horizon_mod_api_gen::points::mod_crate::mod_points(root, wire).map(Some)
 }
 
-type ModPoints = horizon_mod_package::manifest::inject::mod_points::Catalog;
+type ModPoints = point_shape::catalog::Catalog;
 
 /// The `[[inject]]` for a mod point: its head or return, pinned to the function's hash.
 fn append_mod_point(
@@ -277,22 +277,17 @@ fn append(
     catalog: &Catalog,
 ) -> Result<String, String> {
     let missing = || {
-        InjectError::Missing {
+        InjectError::NoSlot {
             id: manifest.id.clone(),
-            at: request.at.into(),
+            reason: horizon_mod_package::manifest::inject::NoSlotReason::NotListed,
+            declaration: request.at.into(),
         }
         .to_string()
     };
     let item = internals
         .iter()
         .find(|i| {
-            i.path == request.at
-                && !i.shape_only
-                && if request.kind == Kind::Field {
-                    i.kind == "struct"
-                } else {
-                    matches!(i.kind.as_str(), "fn" | "method")
-                }
+            i.path == request.at && !i.shape_only && matches!(i.kind.as_str(), "fn" | "method")
         })
         .ok_or_else(missing)?;
     let item = horizon_mod_package::internals::resolve(
@@ -302,10 +297,7 @@ fn append(
         Some(&item.kind),
     )
     .map_err(|e| e.to_string())?;
-    let needs_call = !matches!(
-        request.kind,
-        Kind::Head | Kind::Return | Kind::Replace | Kind::Field | Kind::Expression
-    );
+    let needs_call = !matches!(request.kind, Kind::Head | Kind::Return | Kind::Replace);
     let selected = if needs_call {
         let candidates: Vec<_> = catalog
             .sites
@@ -355,6 +347,14 @@ fn append(
         }
         None
     };
+    if selected.is_none()
+        && !catalog
+            .points
+            .iter()
+            .any(|point| point.target == request.at)
+    {
+        return Err(missing());
+    }
     let mut doc: DocumentMut = text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
     if doc.get("inject").is_none() {
         doc["inject"] = toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
@@ -487,8 +487,48 @@ mod tests {
         assert!(
             append(TEXT, &manifest, &request, &internals, &catalog)
                 .unwrap_err()
-                .contains("E_INJECT_MISSING")
+                .contains("E_INJECT_NO_SLOT")
         );
+    }
+
+    #[test]
+    fn inject_add_never_stages_an_unlisted_place() {
+        let manifest = parse_manifest(TEXT);
+        let (internals, mut catalog) = fixture();
+        catalog.points.clear();
+        let args = ["add", "game::tick", "--kind", "head"].map(String::from);
+        let error = append(
+            TEXT,
+            &manifest,
+            &request(&args).unwrap(),
+            &internals,
+            &catalog,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("E_INJECT_NO_SLOT")
+                && error.contains("[[native.mixin]]")
+                && error.contains("request the slot"),
+            "{error}"
+        );
+        let args = [
+            "add",
+            "game::tick",
+            "--kind",
+            "before_call",
+            "--call",
+            "game::absent",
+        ]
+        .map(String::from);
+        let error = append(
+            TEXT,
+            &manifest,
+            &request(&args).unwrap(),
+            &internals,
+            &catalog,
+        )
+        .unwrap_err();
+        assert!(error.contains("E_INJECT_NO_SLOT"), "{error}");
     }
 
     #[test]
@@ -525,7 +565,7 @@ mod tests {
             assert!(edit(TEXT, args).is_err(), "{args}");
         }
         let error = edit(TEXT, "add missing::place --kind head").unwrap_err();
-        assert!(error.contains("E_INJECT_MISSING") && error.contains("missing::place"));
+        assert!(error.contains("E_INJECT_NO_SLOT") && error.contains("missing::place"));
         let first = edit(TEXT, "add game::tick --kind head").unwrap();
         assert!(edit(&first, "add game::tick --kind head").is_err());
     }
@@ -562,7 +602,11 @@ mod tests {
             dir.join("target/horizon-mod/prebuilt/0123456789012345678901234567890123456789");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("internals.json"), r#"[{"path":"game::tick","kind":"method","signature":"fn tick(&mut self)","hash":"signature-fixture"}]"#).unwrap();
-        fs::write(cache.join("points.json"), r#"{"sites":[]}"#).unwrap();
+        fs::write(
+            cache.join("points.json"),
+            r#"{"points":[{"target":"game::tick"}],"sites":[]}"#,
+        )
+        .unwrap();
         fs::write(dir.join(MANIFEST), TEXT).unwrap();
         dir
     }

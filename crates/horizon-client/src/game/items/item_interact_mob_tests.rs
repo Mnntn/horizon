@@ -18,6 +18,7 @@ use std::sync::{
 struct Probe {
     calls: Arc<Mutex<Vec<(i32, String, String)>>>,
     answer: Arc<AtomicU8>,
+    hands: Arc<Mutex<Vec<mod_api::Hand>>>,
     claim_entity: Arc<AtomicBool>,
     discard: Arc<AtomicBool>,
 }
@@ -29,7 +30,8 @@ impl Hooks for Probe {
             r.item_part(key, self.clone());
         }
     }
-    fn entity_interact(&self, _: &mut dyn ServerHost, _: &mut EntityInteractEvent<'_>) -> Flow {
+    fn entity_interact(&self, _: &mut dyn ServerHost, event: &mut EntityInteractEvent<'_>) -> Flow {
+        self.hands.lock().unwrap().push(event.hand);
         if self.claim_entity.load(Ordering::Relaxed) {
             Flow::Cancel
         } else {
@@ -76,7 +78,7 @@ fn setup(game: &mut Game<'_>, probe: &Probe, kind: &str, id: u32) {
     game.offhand = Some(ItemStack::new("minecraft:paper", 3));
     game.swing = Default::default();
     game.swings_started = 0;
-    game.tick_hit = None;
+    game.tick_hit.set(None);
     game.tick_mob = None;
     game.riding = None;
     probe.calls.lock().unwrap().clear();
@@ -148,6 +150,26 @@ fn actual_item_interact_mob_fallback_priority_and_filters_isolated() {
         game.pitch = 0.0;
         game.selected = 0;
         game.set_mode_id(0);
+
+        // The actual click sequence must distinguish identical stacks, including
+        // empty hands. A claimed main-hand interaction ends before the off hand.
+        for occupied in [false, true] {
+            for claimed in [false, true] {
+                setup(&mut game, &probe, "minecraft:zombie", 42);
+                game.inventory[0] = occupied.then(|| ItemStack::new("minecraft:stick", 1));
+                game.offhand = game.inventory[0].clone();
+                probe.answer.store(0, Ordering::Relaxed);
+                probe.claim_entity.store(claimed, Ordering::Relaxed);
+                probe.hands.lock().unwrap().clear();
+                game.use_item_as_player().unwrap();
+                let expected = if claimed {
+                    vec![mod_api::Hand::Main]
+                } else {
+                    vec![mod_api::Hand::Main, mod_api::Hand::Off]
+                };
+                assert_eq!(*probe.hands.lock().unwrap(), expected);
+            }
+        }
 
         // A custom item willing to own every mob still cannot preempt trading.
         setup(&mut game, &probe, "minecraft:villager", 42);

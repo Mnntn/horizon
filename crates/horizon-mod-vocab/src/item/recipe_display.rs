@@ -78,4 +78,8 @@ pub struct RecipeBookDisplayEntry {
     /// Recipe id in the owning category's recipe type.
     pub recipe: String,
     pub displays: Vec<RecipeBookDisplay>,
+    /// Authoritative ingredient cells for this recipe, independent of its
+    /// pictures. Required when the owning recipe type is bound to a menu's
+    /// placement layout. `None` is not an inference from display alternatives.
+    pub placement: Option<crate::PlacementInfo>,
 }

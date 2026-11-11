@@ -10,6 +10,12 @@ fn desktop_entry(home: &Path, wrapper: Option<&str>, args: &[&str]) {
         .arg("desktop-entry")
         .args(args)
         .env("HORIZON_LAUNCHER_HOME", home.join("launcher"))
+        .env("HORIZON_HOME", home.join("game"))
+        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env("HORIZON_LAUNCHER_TRASH", home.join("trash"))
+        .env("HORIZON_LAUNCHER_CLIPBOARD", home.join("clipboard"))
+        .env("HORIZON_LAUNCHER_DESKTOP", home.join("desktop"))
+        .env("HORIZON_NO_AUDIO", "1")
         .env("XDG_DATA_HOME", home.join("data"))
         .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1")
         .env_remove("HORIZON_LAUNCHER_DESKTOP_EXEC");
@@ -28,7 +34,22 @@ fn desktop_entry(home: &Path, wrapper: Option<&str>, args: &[&str]) {
 fn menu_registration_preserves_the_package_wrapper() {
     let home = std::env::temp_dir().join(format!("horizon-desktop-wrapper-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
-    let entry = home.join("data/applications/horizon-launcher.desktop");
+    let entry = home
+        .join("data/applications")
+        .join(if cfg!(horizon_fork_launcher) {
+            "io.github.arismoko.horizonfork.launcher.desktop"
+        } else {
+            "horizon-launcher.desktop"
+        });
+    let other = home
+        .join("data/applications")
+        .join(if cfg!(horizon_fork_launcher) {
+            "horizon-launcher.desktop"
+        } else {
+            "io.github.arismoko.horizonfork.launcher.desktop"
+        });
+    std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+    std::fs::write(&other, "other launcher registration").unwrap();
 
     // Migrate a registration that pointed at the private executable.
     desktop_entry(&home, None, &[]);
@@ -51,5 +72,9 @@ fn menu_registration_preserves_the_package_wrapper() {
     // An unset or empty override keeps standalone installations working.
     desktop_entry(&home, Some(""), &[]);
     assert_eq!(std::fs::read_to_string(&entry).unwrap(), original);
+    assert_eq!(
+        std::fs::read_to_string(&other).unwrap(),
+        "other launcher registration"
+    );
     std::fs::remove_dir_all(&home).unwrap();
 }

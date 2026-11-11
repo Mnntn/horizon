@@ -7,11 +7,13 @@ pub trait Hooks {
     /// The kind and JSON file input accompany owned API context and candidate snapshots.
     /// Candidate counts remain signed; ordered NBT patches preserve removals and types.
     /// Conversion happens only for subscribed hooks, and refused writeback leaves the roll unchanged.
+    /// `tags` reads membership and ordered members by key from this evaluation's
+    /// authoritative merged tags. No enumeration or full Host is exposed.
     #[hook(
         side = "server",
         contract = "collect",
         out = "stack",
-        target = "horizon_world::loot::native_loot_function",
+        target = "mod_api::loot_callbacks::native_loot_function",
         neoforge = "RegisterEvent"
     )]
     fn loot_function();

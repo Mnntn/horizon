@@ -419,7 +419,7 @@ impl Mob {
     }
     /// `LivingEntity.onClimbable` (`Spider.onClimbable`: the climbing flag):
     /// the block it stands in is `#minecraft:climbable` (vines, ladders,
-    /// scaffolding...), or an open trapdoor over a ladder facing the same way
+    /// scaffolding...) or its mod parts' `is_ladder` says it is, or an open trapdoor over a ladder facing the same way
     /// (`trapdoorUsableAsLadder`). A mob gliding (`isFallFlying`) through a
     /// `#minecraft:can_glide_through` block (vines) is not on it: that test
     /// comes first.
@@ -437,7 +437,16 @@ impl Mob {
         if self.extra.fall_flying && w.has_tag("minecraft:can_glide_through", &facts.name) {
             return false;
         }
-        if w.has_tag("minecraft:climbable", &facts.name) {
+        // `IBlockExtension.isLadder`: the block's parts answer after the tag.
+        let mut ladder = w.has_tag("minecraft:climbable", &facts.name);
+        crate::motion::native_is_ladder(
+            w.loop_context,
+            self.id,
+            BlockPos::new(x, y, z),
+            state,
+            &mut ladder,
+        );
+        if ladder {
             return true;
         }
         facts.has_class("TrapDoorBlock")
@@ -936,6 +945,13 @@ impl Mob {
         if !self.fluids.in_water {
             self.update_fluids(w, events);
         }
+        // Strider.checkFallDamage: in lava the fall is reset and the base never
+        // runs, so a strider that drops into a lava sea lands with no damage and
+        // no dust, and walks out of it owing nothing.
+        if self.species() == super::Species::Strider && self.fluids.in_lava {
+            self.fall_distance = 0.0;
+            return;
+        }
         if !self.fluids.in_water && moved.y < 0.0 {
             self.fall_distance -= f64::from(moved.y as f32);
         }
@@ -1003,7 +1019,12 @@ impl Mob {
     }
     /// Entity.applyMovementEmissionAndPlaySound: walked distance, footsteps
     /// and swimming sounds.
-    fn movement_emission(&mut self, w: &MobWorld, moved: Vec3, events: &mut Vec<MobEvent>) {
+    pub(super) fn movement_emission(
+        &mut self,
+        w: &MobWorld,
+        moved: Vec3,
+        events: &mut Vec<MobEvent>,
+    ) {
         if !super::ai::emits_movement(self) || self.extra.mount.is_some() {
             return;
         }
@@ -1034,7 +1055,7 @@ impl Mob {
                         super::equine::play_step(self, w, legacy, legacy_state, events);
                     }
                 } else if let Some((sound, volume, pitch)) =
-                    super::ai::step_sound(self, w, legacy, legacy_state)
+                    super::entity_sounds::step(self, w, legacy, legacy_state)
                     && heard
                     && !self.silent
                 {
@@ -2527,6 +2548,7 @@ mod tests {
                 goal_host: None,
                 live_mobs: None,
                 teams: Default::default(),
+                professions: crate::mobs::villager::profession_table(),
                 loop_context: crate::test_resources::server_loop_context(),
                 world: &world,
                 registry,
@@ -2667,6 +2689,7 @@ mod tests {
             goal_host: None,
             live_mobs: None,
             teams: Default::default(),
+            professions: crate::mobs::villager::profession_table(),
             loop_context: crate::test_resources::server_loop_context(),
             world: &world,
             registry,
@@ -2724,17 +2747,7 @@ mod tests {
         for ridden in [false, true] {
             let mut m = Mob::new(1, kind.clone(), Vec3::new(8.5, 64.0, 8.5), 0.0);
             if ridden {
-                m.rider = Some(super::super::equine::Rider {
-                    strafe: 0.0,
-                    forward: 0.0,
-                    yaw: 0.0,
-                    pitch: 0.0,
-                    jump: 0.0,
-                    steer: false,
-                    sprint: false,
-                    jumping: false,
-                    client: false,
-                });
+                m.rider = Some(super::super::equine::Rider::default());
             }
             m.fluids.in_water = true;
             m.fluids.water = 1.0;
@@ -2808,6 +2821,7 @@ mod tests {
         let mut landing = |below: &Mob| -> f64 {
             let others = [below.seen(None)];
             let w = MobWorld {
+                professions: crate::mobs::villager::profession_table(),
                 loop_context: crate::test_resources::server_loop_context(),
                 attributes: &motion.attributes,
                 player_identity: None,

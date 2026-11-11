@@ -1254,6 +1254,39 @@ mod tests {
     use horizon_world::native_load_context::DataLoadOrigin;
     use std::fs;
 
+    /// Item definitions are read again on every load: a node of a registered type keeps its
+    /// `models` as the packs now give them, and a definition with a type no mod registered isn't
+    /// loaded, so its item draws the missing model.
+    #[test]
+    fn a_registered_item_model_type_is_read_again_on_each_load() {
+        use horizon_assets::resource_source::Resource;
+        horizon_assets::item_model::register_item_models(vec!["loadtest:cell".into()]);
+        let source = |full: &str| {
+            let cell = format!(
+                r#"{{"model":{{"type":"loadtest:cell","models":{{"full":{{"type":"minecraft:model","model":"{full}"}}}}}}}}"#
+            );
+            ResourceSource::indexed(BTreeMap::from([
+                (
+                    "assets/loadtest/items/cell.json".to_owned(),
+                    Resource::bytes(cell.into_bytes()),
+                ),
+                (
+                    "assets/loadtest/items/other.json".to_owned(),
+                    Resource::bytes(br#"{"model":{"type":"loadtest:unregistered"}}"#.to_vec()),
+                ),
+            ]))
+        };
+        let models = |full: &str| {
+            let loaded = load_definitions(&source(full));
+            assert!(!loaded.contains_key("loadtest:other"));
+            let mut models = Vec::new();
+            loaded["loadtest:cell"].model.dependencies(&mut models);
+            models
+        };
+        assert_eq!(models("loadtest:item/a"), ["loadtest:item/a"]);
+        assert_eq!(models("loadtest:item/b"), ["loadtest:item/b"]);
+    }
+
     #[test]
     #[ignore = "requires HORIZON_TEST_RESOURCES with prepared vanilla tables"]
     fn archive_item_models_use_real_prepared_tables_without_unpacking() -> crate::Result<()> {

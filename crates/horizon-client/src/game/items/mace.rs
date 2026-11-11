@@ -697,7 +697,7 @@ impl Game<'_> {
                     self.native_kill_event(i);
                 }
                 let level = crate::game::entity::damage_level_of!(self, &attack);
-                self.mobs[i].knockback(level, 0.4, xd, zd, &source);
+                self.mobs[i].knockback(level, 0.4, xd, zd, &source, amount);
                 self.remember_mob_player_credit(self.mobs[i].id);
                 self.post_attack(i);
             }
@@ -769,5 +769,34 @@ mod tests {
         // baseDamageScaleFactor at 0.95 strength.
         let scaled = sweep_base_damage(0.5, 8.0, 0.95);
         assert!((scaled - (1.0 + 0.5 * 8.0 * (0.2 + 0.95 * 0.95 * 0.8))).abs() < 1e-6);
+    }
+
+    /// A hit takes the mace one point (`Weapon.itemDamagePerAttack`): a part of the mace that
+    /// multiplies the wear by 5 makes it 5, one that halves it leaves 0 (the item stays whole), one
+    /// that cancels it none; an iron sword without a part wears as vanilla.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+    fn a_damage_item_part_changes_the_wear_of_a_weapon_hit() {
+        use crate::game::damage_item_tests::{Rule, with_wear_part};
+        with_wear_part("minecraft:mace", Rule::Times(5), |game, wear| {
+            let hit = |game: &mut Game<'_>, item: &str| {
+                game.creative = false;
+                game.selected = 0;
+                let weapon = ItemStack::new(item, 1);
+                game.inventory[0] = Some(weapon.clone());
+                game.weapon_wear(&weapon);
+                game.inventory[0].as_ref().unwrap().damage
+            };
+            assert_eq!(hit(game, "minecraft:mace"), 5);
+            assert_eq!(wear.take_asked(), [1]);
+            wear.set(Rule::Halve);
+            assert_eq!(hit(game, "minecraft:mace"), 0);
+            assert_eq!(wear.take_asked(), [1]);
+            wear.set(Rule::Cancel);
+            assert_eq!(hit(game, "minecraft:mace"), 0);
+            assert_eq!(wear.take_asked(), [1]);
+            assert_eq!(hit(game, "minecraft:iron_sword"), 1);
+            assert!(wear.take_asked().is_empty());
+        });
     }
 }

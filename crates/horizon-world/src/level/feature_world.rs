@@ -372,6 +372,7 @@ mod dungeon_spawner_default_tests {
         random: LegacyRandom,
         loads: usize,
     }
+    impl crate::level::BlockEntityNeighbors for Unbound {}
     impl LevelAccess for Unbound {
         fn block_state(&self, _: BlockPos) -> BlockStateId {
             BlockStateId(0)

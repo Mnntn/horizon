@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""mdBook preprocessor: discover concept sources, retain published aggregate chapters."""
+"""mdBook preprocessor: discover concept sources, retain published aggregate chapters, and add every
+page of the folders in FOLDERS under its part, so a new page needs no edit to SUMMARY.md."""
 import argparse
 from collections import Counter
 from html.parser import HTMLParser
@@ -18,6 +19,9 @@ MARKER = "<!-- concept-pages -->"
 LINK = re.compile(r"(\!?\[[^\n]*?\]\()([^\s)]+)(\))")
 REFERENCE = re.compile(r"^( {0,3}\[[^\]\n]+\]:[ \t]*<?)([^\s>]+)(>?)", re.MULTILINE)
 INCLUDE = re.compile(r"(\{\{#(?:rustdoc_)?include )([^ }]+)(\s*\}\})")
+# Each page directly in one of these folders is a chapter of the part: the pages SUMMARY.md lists keep
+# their place, the rest follow in title order.
+FOLDERS = {"Concepts": "concepts", "How-to": "how-to"}
 TITLE = re.compile(r"<!-- chapter: (.+) -->\n(?:<!-- separator: (\d+) -->\n)?\n")
 
 
@@ -147,7 +151,63 @@ def expand(book, src):
             chapter["sub_items"] = children
     visit(book["sections"])
     assert seen == set(GROUPS), "SUMMARY must list both aggregate chapters"
+    discover(book, src, contents)
+    missing = unrendered(book, src)
+    assert not missing, f"pages the book doesn't render (list them in SUMMARY.md): {missing}"
     return book
+
+
+def chapters(items):
+    """Every chapter of the book, depth first."""
+    for item in items:
+        if "Chapter" in item:
+            yield item["Chapter"]
+            yield from chapters(item["Chapter"]["sub_items"])
+
+
+def page_title(text, path):
+    return next((title for title, _ in headings(text)), path.stem.replace("-", " ").capitalize())
+
+
+def discover(book, src, contents):
+    """Adds each page of FOLDERS that SUMMARY.md doesn't list at the end of its part, by title,
+    then numbers the book's chapters again as mdBook does: in order, across parts."""
+    items = book["sections"]
+    listed = {chapter["path"] for chapter in chapters(items) if chapter["path"]}
+    for part, folder in FOLDERS.items():
+        start = next((i for i, item in enumerate(items) if item.get("PartTitle") == part), None)
+        assert start is not None, f"SUMMARY must have a # {part} part"
+        end = next((i for i in range(start + 1, len(items)) if "PartTitle" in items[i]), len(items))
+        found = []
+        for path in (src / folder).glob("*.md"):
+            relative = path.relative_to(src).as_posix()
+            if relative not in listed:
+                text = path.read_text()
+                found.append((page_title(text, path), relative, text))
+        found.sort(key=lambda page: (page[0].casefold(), page[1]))
+        for title, relative, text in found:
+            validate(text, relative, src, contents)
+        items[end:end] = [{"Chapter": dict(name=title.replace("`", ""), content=text, path=relative,
+            source_path=relative, number=[], parent_names=[], sub_items=[])} for title, relative, text in found]
+    renumber(items, [])
+
+
+def renumber(items, prefix):
+    index = 0
+    for item in items:
+        chapter = item.get("Chapter")
+        if chapter is None or chapter.get("number") is None:
+            continue
+        index += 1
+        chapter["number"] = prefix + [index]
+        renumber(chapter["sub_items"], chapter["number"])
+
+
+def unrendered(book, src):
+    """The Markdown sources under `src` that no chapter of `book` renders."""
+    rendered = {chapter["path"] for chapter in chapters(book["sections"]) if chapter["path"]}
+    return sorted(path.relative_to(src).as_posix() for path in src.rglob("*.md")
+                  if path.name != "SUMMARY.md" and path.relative_to(src).as_posix() not in rendered)
 
 
 class HtmlLinks(HTMLParser):
@@ -167,6 +227,8 @@ class HtmlLinks(HTMLParser):
 def check_html(directory, src=SRC):
     pages = [p for g in GROUPS for p in [g, *(p for p, _, _ in fragments(src, g))]]
     pages.extend(["reference/hook-notes.md", "reference/neoforge-counterparts.md"])
+    pages.extend(p.relative_to(src).as_posix() for f in FOLDERS.values() for p in sorted((src / f).glob("*.md"))
+                 if p.relative_to(src).as_posix() not in pages)
     for page in pages:
         path = directory / Path(page).with_suffix(".html")
         html = HtmlLinks(path.read_text())

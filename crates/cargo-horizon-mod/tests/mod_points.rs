@@ -1,8 +1,9 @@
 //! Mod points (#2339) end to end on native: the chemicals fixture library is staged by the build
 //! tool's pass, an addon's api and internals listeners are routed and registered with the same
 //! emitters the launcher's generated `main` uses, and a real binary runs the patched library.
-use horizon_mod_package::manifest::inject::mod_points::{self, Catalog, Library};
+use horizon_mod_package::manifest::inject::mod_points::{self, Library};
 use horizon_mod_package::manifest::inject::{Access, Inject, Kind};
+use point_shape::catalog::Catalog;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -60,10 +61,6 @@ fn inject(id: &str, at: &str, kind: Kind, access: Access, with: &str, hash: &str
         call: None,
         nth: None,
         ctx: None,
-        local: None,
-        local_type: None,
-        position: None,
-        expr: None,
     }
 }
 
@@ -295,7 +292,6 @@ fn an_addon_patches_a_library_through_its_mod_points() {
                 let emitted = horizon_mod_point_emit::Point {
                     name: point.name.clone(),
                     target: point.target.clone(),
-                    private: false,
                     at_return: point.at_return,
                     api_refusal: point.api_refusal.clone(),
                     returns: point.returns.clone(),
@@ -346,4 +342,181 @@ fn an_addon_patches_a_library_through_its_mod_points() {
         String::from_utf8_lossy(&output.stdout).trim(),
         "10 20 20 20 100 1 20"
     );
+}
+
+/// Requires the pinned shared std built by `cargo horizon-mod wasm-std`.
+#[test]
+#[ignore = "requires HORIZON_WASM_STD and the pinned wasm toolchain"]
+fn wasm_addon_routes_api_and_internals_into_library_registry() {
+    let scratch = repo().join("target/mod-points-wasm-e2e");
+    let library = scratch.join("chemlib");
+    let addon = scratch.join("chem_addon");
+    // Preserve compiler artifacts, not source or package metadata, between fixture runs.
+    let cache = scratch.join("build-cache");
+    if addon.join("target").is_dir() {
+        std::fs::rename(addon.join("target"), &cache).unwrap();
+    }
+    copy("chemlib", &library);
+    copy("chem_addon", &addon);
+    if cache.is_dir() {
+        std::fs::rename(cache, addon.join("target")).unwrap();
+    }
+    std::fs::write(
+        scratch.join("Cargo.toml"),
+        "[workspace]\nmembers=['chemlib','chem_addon']\nresolver='3'\n",
+    )
+    .unwrap();
+    let catalog =
+        horizon_mod_api_gen::points::mod_crate::mod_points(&library, &Default::default()).unwrap();
+    for root in [&library, &addon] {
+        let path = root.join("horizon-mod.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(path, text.split("[native]").next().unwrap()).unwrap();
+        // The regular guest entry points are emitted by the hooks macro.
+        let source = root.join("src/lib.rs");
+        let mut text = std::fs::read_to_string(&source).unwrap();
+        text.push_str("\n#[derive(Default)] pub struct Mod;\n#[mod_api::horizon_mod] impl mod_api::Hooks for Mod {}\n");
+        std::fs::write(source, text).unwrap();
+    }
+    let path = addon.join("horizon-mod.toml");
+    let mut manifest = std::fs::read_to_string(&path).unwrap();
+    let hash = &catalog
+        .points
+        .iter()
+        .find(|p| p.target == "chemlib::transfer")
+        .unwrap()
+        .hash;
+    manifest.push_str(&format!("\n[[inject]]\nid='double'\nat='chemlib::transfer'\nkind='head'\naccess='api'\nwith='double_rate'\nhash={hash:?}\n[[inject]]\nid='observe'\nat='chemlib::transfer'\nkind='return'\naccess='internals'\nwith='saw_moved'\nhash={hash:?}\n"));
+    std::fs::write(&path, &manifest).unwrap();
+    let source = addon.join("src/lib.rs");
+    let mut text = std::fs::read_to_string(&source).unwrap();
+    text.push_str(
+        r#"
+#[mod_api::no_point]
+pub fn probe() -> u32 {
+    let chemical = chemlib::Chemical { id: 1, viscosity: 1 };
+    let mut from = chemlib::Tank { chemical, amount: 100, capacity: 100 };
+    let mut to = chemlib::Tank { chemical, amount: 0, capacity: 100 };
+    let moved = chemlib::transfer(&mut from, &mut to, 10);
+    moved * 1000 + MOVED.load(Ordering::Relaxed)
+}
+"#,
+    );
+    text = text.replace("impl mod_api::Hooks for Mod {}", "impl mod_api::Hooks for Mod { fn register(&self, _: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) { assert_eq!(probe(), 20020); } }");
+    std::fs::write(source, text).unwrap();
+    let build = || {
+        Command::new(env!("CARGO_BIN_EXE_cargo-horizon-mod"))
+            .args(["horizon-mod", "build", "--wasm"])
+            .current_dir(&addon)
+            .output()
+            .unwrap()
+    };
+    let built = build();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let std_bytes = std::fs::read(std::env::var("HORIZON_WASM_STD").unwrap()).unwrap();
+    let lib_bytes = std::fs::read(library.join("mod.wasm")).unwrap();
+    let addon_bytes = std::fs::read(addon.join("mod.wasm")).unwrap();
+    use horizon_mod_wasm::link::{Group, Member};
+    let engine = wasmtime::Engine::default();
+    let mut group = Group::link_with(
+        wasmtime::Store::new(&engine, ()),
+        &[
+            Member {
+                name: "std",
+                module: &std_bytes,
+            },
+            Member {
+                name: "chemlib",
+                module: &lib_bytes,
+            },
+            Member {
+                name: "chem_addon",
+                module: &addon_bytes,
+            },
+        ],
+        |store, module, name| {
+            if module != "horizon" {
+                return None;
+            }
+            Some(wasmtime::Extern::Func(match name {
+                "host" => {
+                    wasmtime::Func::wrap(store, |_: u32, _: u32, _: u32, _: u32, _: u32| -> u32 {
+                        panic!("unexpected host call")
+                    })
+                }
+                "host_reply" => wasmtime::Func::wrap(store, |_: u32| -> wasmtime::Result<()> {
+                    Err(wasmtime::Error::msg("unexpected host reply"))
+                }),
+                _ => panic!("unexpected import {name}"),
+            }))
+        },
+    )
+    .unwrap();
+    for member in ["chemlib", "chem_addon"] {
+        let mut result = [wasmtime::Val::I32(0)];
+        group
+            .call(member, "horizon_mod_points_register", &[], &mut result)
+            .unwrap();
+        assert_eq!(result[0].i32(), Some(0));
+    }
+    for member in ["chemlib", "chem_addon"] {
+        group
+            .call(member, "horizon_mod_points_seal", &[], &mut [])
+            .unwrap();
+    }
+    // Sealed registries refuse the addon's first injection, reported as index plus one.
+    let mut refused = [wasmtime::Val::I32(0)];
+    group
+        .call(
+            "chem_addon",
+            "horizon_mod_points_register",
+            &[],
+            &mut refused,
+        )
+        .unwrap();
+    assert_eq!(refused[0].i32(), Some(1));
+    let export = wasmparser::Parser::new(0)
+        .parse_all(&addon_bytes)
+        .filter_map(|p| match p.unwrap() {
+            wasmparser::Payload::ExportSection(exports) => Some(
+                exports
+                    .into_iter()
+                    .map(|e| e.unwrap().name.to_owned())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .flatten()
+        .find(|name| {
+            rustc_demangle::try_demangle(name)
+                .is_ok_and(|s| format!("{s:#}") == "chem_addon::probe")
+        })
+        .unwrap();
+    let mut result = [wasmtime::Val::I32(0)];
+    group.call("chem_addon", &export, &[], &mut result).unwrap();
+    assert_eq!(result[0].i32(), Some(20020));
+    // The production loader must finish both phases before the addon's register hook probes.
+    let packages = [(&library, lib_bytes), (&addon, addon_bytes)]
+        .into_iter()
+        .map(|(root, module)| horizon_mod_wasm::WasmPackage {
+            manifest: horizon_mod_package::Manifest::parse(
+                &std::fs::read_to_string(root.join("horizon-mod.toml")).unwrap(),
+            )
+            .unwrap(),
+            module,
+        })
+        .collect();
+    let loaded = horizon_mod_wasm::load(&std_bytes, packages);
+    assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
+    assert!(loaded.initialize(&[]).is_ok());
+    // A pinned signature change refuses before compiling any guest code.
+    let current = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, current.replace(hash, "0000000000000000")).unwrap();
+    let refused = build();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("E_INJECT_CHANGED"));
 }

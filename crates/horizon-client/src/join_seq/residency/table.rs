@@ -40,6 +40,7 @@ pub struct UnbalancedPass {
 struct ResidentRow {
     location: Location,
     details: IdentityDetails,
+    admission: JoinSeq,
 }
 
 /// One game's index, shared by active and parked dimensions through the journal.
@@ -130,6 +131,10 @@ impl EntityTable {
                     let row = ResidentRow {
                         location,
                         details: identity.details,
+                        admission: self
+                            .rows
+                            .get(&identity.id)
+                            .map_or_else(JoinSeq::next, |row| row.admission),
                     };
                     if let Some(old) = self.rows.insert(identity.id, row) {
                         debug_assert_eq!(old.location, location, "duplicate loaded entity id");
@@ -209,6 +214,31 @@ impl EntityTable {
         self.rows
             .iter()
             .map(|(id, row)| (id.get(), row.location, row.details))
+    }
+
+    /// Candidates in lookup insertion order, independent of family and runtime id.
+    /// Extraction/restoration preserves order; removal and re-admission moves to the end.
+    /// Dragon parts are not members of vanilla's entity lookup.
+    pub fn level_entities(&mut self, dimension: DimensionKey) -> Vec<u32> {
+        self.drain();
+        let mut rows: Vec<_> = self
+            .rows
+            .iter()
+            .filter(|(_, row)| {
+                row.location.owner.dimension == dimension
+                    && row.location.owner.kind != super::Kind::DragonPart
+            })
+            .map(|(id, row)| (row.admission, id.get()))
+            .collect();
+        rows.sort_unstable_by_key(|(admission, _)| *admission);
+        rows.into_iter().map(|(_, id)| id).collect()
+    }
+
+    /// Each admitted id's lookup admission: what an `EntitySection` keeps its
+    /// entities in, so a chunk saved in this order loads back in it.
+    pub fn admission_order(&mut self) -> impl Fn(u32) -> Option<JoinSeq> + '_ {
+        self.drain();
+        |id| Some(self.rows.get(&NonZeroU32::new(id)?)?.admission)
     }
 
     /// Clone the current producer authority when binding storage.
@@ -292,6 +322,60 @@ mod tests {
                 self.source.get(&location).copied()
             })
         }
+    }
+
+    #[test]
+    fn lookup_iteration_preserves_insertion_order_not_id_or_family_order() {
+        let mut f = Fixture::new();
+        let first = f.admit(90, HOME);
+        let boat = Owner {
+            kind: Kind::Boat,
+            ..HOME
+        };
+        f.admit(3, boat);
+        f.admit(40, HOME);
+        f.admit(
+            2,
+            Owner {
+                kind: Kind::DragonPart,
+                ..HOME
+            },
+        );
+        f.admit(
+            1,
+            Owner {
+                dimension: DimensionKey::NETHER,
+                ..HOME
+            },
+        );
+        // Also compared to the runtime vanilla EntityLookup by the parity harness.
+        println!("lookup-order: {:?}", f.table.level_entities(HOME.dimension));
+        assert_eq!(f.table.level_entities(HOME.dimension), vec![90, 3, 40]);
+        let identity = Identity::new(90, first.join).unwrap();
+        f.emit(first, Change::Extract(identity));
+        f.emit(first, Change::PutBack(identity));
+        println!("lookup-order: {:?}", f.table.level_entities(HOME.dimension));
+        assert_eq!(f.table.level_entities(HOME.dimension), vec![90, 3, 40]);
+        f.emit(first, Change::Remove(identity));
+        f.emit(first, Change::Install(identity));
+        println!("lookup-order: {:?}", f.table.level_entities(HOME.dimension));
+        assert_eq!(f.table.level_entities(HOME.dimension), vec![3, 40, 90]);
+        f.emit(first, Change::Remove(identity));
+        let away = f.admit(
+            90,
+            Owner {
+                dimension: DimensionKey::NETHER,
+                ..HOME
+            },
+        );
+        println!("lookup-order: {:?}", f.table.level_entities(HOME.dimension));
+        println!(
+            "lookup-order: {:?}",
+            f.table.level_entities(DimensionKey::NETHER)
+        );
+        f.emit(away, Change::Remove(Identity::new(90, away.join).unwrap()));
+        f.admit(90, HOME);
+        println!("lookup-order: {:?}", f.table.level_entities(HOME.dimension));
     }
 
     #[test]

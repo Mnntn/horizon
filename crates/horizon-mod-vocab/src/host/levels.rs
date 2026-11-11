@@ -74,11 +74,83 @@ pub trait LevelsBackend {
     /// stale handle or an unloaded selected noise column. Never generates or loads chunks.
     #[access(WorldOnly)]
     fn level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
+    /// Side: both.
+    /// The entry ids (`addon:fire`) of a datapack registry a mod declared
+    /// (`declare_datapack_registry`), sorted, as this world session last loaded them. On a client
+    /// they are the ones its server sent at the join and after each reload, and only for a
+    /// registry declared `Required` or `Optional`. None for a stale or parked level and a
+    /// registry no mod declared (or, on a client, one the server did not send). Reads nothing
+    /// from disk.
+    #[access(WorldOnly)]
+    fn level_datapack_entries(&self, level: LevelRef, registry: &str) -> Option<Vec<String>>;
+    /// Side: both.
+    /// A handle to `entry` of `registry` at the generation now loaded (on a client, the one its
+    /// server last sent). A handle kept across a reload fails its next read with
+    /// `StaleGeneration`, one from an earlier world session with `WrongSession`. A stale or parked
+    /// level and a registry no mod declared are `UnknownRegistry`; an entry no pack defines is
+    /// `MissingEntry`.
+    #[access(WorldOnly)]
+    fn level_datapack_handle(
+        &self,
+        level: LevelRef,
+        registry: &str,
+        entry: &str,
+    ) -> Result<DatapackHandle, DatapackReadError>;
+    /// Side: both.
+    /// The decoded fields of the entry a handle names, in the registry's schema order, as plain
+    /// values: a copy, which carries no authority after the read. The handle is checked first
+    /// (session, then generation), then the entry; the errors are those of
+    /// [`level_datapack_handle`](Self::level_datapack_handle).
+    #[access(WorldOnly)]
+    fn level_datapack_read(
+        &self,
+        level: LevelRef,
+        handle: &DatapackHandle,
+    ) -> Result<Vec<(String, DatapackValue)>, DatapackReadError>;
+    /// Side: both.
+    /// How fast `tool` (None is an empty hand) mines the block at `pos`: the tool's own mining
+    /// speed on that block (`ItemStack.getDestroySpeed`, 1.0 for no tool; for a block it has no
+    /// rule for, the tool's default mining speed), before the player's enchantments, attributes, water, ground and
+    /// `player_break_speed` hooks, which `player_break_speed` itself hears. None for a stale
+    /// handle or an unloaded or out-of-height position. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_block_break_speed(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        tool: Option<&ItemStack>,
+    ) -> Option<f32>;
     /// Side: client.
     /// The biome in the client's current level (`LevelReader.getBiome`). None before
     /// login, for a stale or foreign dimension, or an unloaded selected column. Never loads chunks.
     #[access(WorldOnly)]
     fn level_client_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
+    /// Side: both.
+    /// A biome's natural spawners by category (`MobSpawnSettings.getMobs`), from the level's
+    /// biome table, data packs and biome modifiers included, categories sorted by name. None for a
+    /// stale handle or an unknown biome. This is the biome's own list; `potential_spawns` is
+    /// what a position gets after mods edit it. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_spawners(&self, level: LevelRef, biome: &str) -> Option<Vec<BiomeSpawners>>;
+    /// Side: both.
+    /// A biome's own sky, fog and water colours (`BiomeSpecialEffects`), from the level's biome
+    /// table. None for a stale handle or an unknown biome. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_effects(&self, level: LevelRef, biome: &str) -> Option<BiomeEffects>;
+    /// Side: both.
+    /// Whether a biome is in a biome tag (`Holder.is(TagKey)`), by the level's tag tables: the
+    /// vanilla tags, the world's data packs and mods' biome tags merged. `tag` is a namespaced
+    /// id (`minecraft:is_forest`), with or without a leading `#`. A tag no pack defines holds
+    /// nothing, so false. None for a stale handle, an unknown biome or a level that has no tag
+    /// tables loaded. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_in_tag(&self, level: LevelRef, biome: &str, tag: &str) -> Option<bool>;
+    /// Side: both.
+    /// A biome's climate by id (`minecraft:plains`), from the level's biome table, data packs
+    /// included: temperature, downfall, whether it has precipitation and the frozen modifier
+    /// (`Biome.ClimateSettings`). None for a stale handle or an unknown biome. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_properties(&self, level: LevelRef, biome: &str) -> Option<BiomeProperties>;
     /// Side: both.
     /// The dimension's logical height (`ServerLevel.getLogicalHeight`), which may differ
     /// from build height. Reads active and parked server levels or the client's current level.
@@ -155,6 +227,26 @@ pub trait LevelsBackend {
         recipe_type: &Identifier,
         inputs: &RecipeInput,
     ) -> Result<Option<RecipeMatch>, RecipeLookupError>;
+    /// Side: server.
+    /// Every available member of the server level's entity lookup
+    /// (`ServerLevel.getAllEntities`), including spectators and entities outside
+    /// any spatial query. Dragon parts are not lookup members.
+    /// Returns None on a remote client, for a stale handle or a parked level.
+    /// Returns None while any lookup member is temporarily extracted, rather
+    /// than returning an incomplete list.
+    /// Order is lookup admission order, preserved across temporary extraction;
+    /// removal and re-admission moves an entity to the end. A chunk's entities
+    /// join in the order it stored them: section by section, each in admission
+    /// order, as vanilla stores them. An entity that moved into another section
+    /// since it joined keeps its admission place there, where vanilla moves it
+    /// to the end of that section. Zero runtime IDs fall back to stable storage
+    /// join order, not runtime admission order. Unregistered entity kinds have
+    /// no authoritative lookup handle and are omitted. These limitations mean
+    /// saved-world and whole-level ordering parity is not yet complete (#2703).
+    /// Allocates a result buffer, not one allocation per entity; sorting is
+    /// O(n log n), followed by one authoritative handle lookup per candidate.
+    #[access(WorldOnly)]
+    fn level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>>;
     /// Side: server.
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
@@ -280,14 +372,18 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_fluid_flow(&self, level: LevelRef, pos: [i32; 3]) -> Option<Vec3>;
     /// Side: server.
-    /// Block-local outline or collision boxes with an empty context. Interaction,
-    /// visual, occlusion and support shapes are not exposed. Returns None on a
-    /// client, for a stale handle, or for a closed level. Unloaded blocks read
-    /// as air; collision errors return no boxes, like `native_block_collision`.
+    /// The supplied state's block-local outline or collision boxes at `pos`,
+    /// with an empty context (`BlockState.getShape` / `getCollisionShape`).
+    /// The state need not be the block stored there; level-dependent shapes
+    /// still read the real level. Pass `block_state(host, pos)` to query the
+    /// state at that position. Interaction, visual, occlusion and support shapes
+    /// are not exposed. Returns None on a client, for an unknown state, a stale
+    /// handle or a closed level. Collision errors return no boxes.
     #[access(WorldOnly)]
     fn level_block_shape(
         &self,
         level: LevelRef,
+        state: BlockState,
         pos: [i32; 3],
         kind: BlockShapeKind,
     ) -> Option<Vec<[f64; 6]>>;
@@ -859,6 +955,25 @@ pub trait LevelsBackendMut {
         entity: Option<EntityRef>,
     ) -> Result<Option<Vec<ItemStack>>, StackWriteError>;
     /// Side: server.
+    /// One roll of the loot table `table` (`mymod:sifting/gravel`, the world's data packs
+    /// merged), handed back instead of dropped: `LootTable.getRandomItems(LootParams)` with
+    /// `origin` as ORIGIN, `tool` as TOOL when given and `entity` as THIS_ENTITY when given,
+    /// the context `/loot … fish <table> <pos> <tool>` gives. The roll draws from the table's
+    /// random sequence, else the level random, as vanilla's does, so it moves later draws: that
+    /// is why this is a write. The stacks come split to their stack sizes, empties left out.
+    /// Mods' loot kinds see `origin` and this level; no `loot_drops` event, since nothing
+    /// drops. None for a table that isn't there, a stale or parked handle, a client, and a
+    /// stale `entity`.
+    #[access(WorldOnly)]
+    fn level_roll_loot(
+        &mut self,
+        level: LevelRef,
+        table: &str,
+        origin: [f64; 3],
+        tool: Option<&ItemStack>,
+        entity: Option<EntityRef>,
+    ) -> Result<Option<Vec<ItemStack>>, StackWriteError>;
+    /// Side: server.
     /// Send `ServerLevel.destroyBlockProgress` in this level: stages 0..9 show a crack,
     /// any other stage removes it. A machine uses a stable negative breaker id.
     #[access(WorldOnly)]
@@ -869,6 +984,15 @@ pub trait LevelsBackendMut {
         pos: [i32; 3],
         progress: i32,
     ) -> bool;
+    /// Side: server.
+    /// Tell the clients the block at `pos` changed (`Level.sendBlockUpdated`): its state and
+    /// block entity data are sent again at the end of the tick, without writing anything, for
+    /// a mod that changed what a block shows by other means than a block write. False, with
+    /// nothing queued, for a stale or parked handle, a client, and an unloaded or out-of-height
+    /// position. True with no player to notify (no one is in the level) when the position is
+    /// valid: the chunk is marked changed and nothing is sent.
+    #[access(WorldOnly)]
+    fn level_send_block_updated(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
     /// Side: server.
     /// Plays sound event `sound` at `at` for the players in this level
     /// within range (16 blocks, times the volume above 1), as
@@ -891,7 +1015,8 @@ pub trait LevelsBackendMut {
     /// within 32 blocks, as `ServerLevel.sendParticles` does: each offset is
     /// a Gaussian times `spread`, and `speed` scales their motion (a zero
     /// count sends one particle moving along `spread`). Block particle types
-    /// need `state`; item, trail and vibration particles aren't supported.
+    /// need `state`; item particles need `options.item_stack` (validated against
+    /// the item registry and stack limits). Trail and vibration remain unsupported.
     /// True means queued, not drawn.
     #[access(WorldOnly)]
     fn level_send_particles(
@@ -915,11 +1040,18 @@ pub trait LevelsBackendMut {
     fn level_level_event(&mut self, level: LevelRef, id: i32, pos: [i32; 3], data: i32) -> bool;
     /// Side: server.
     /// Sends game event `event` (`minecraft:block_change`...) from `at`, as
-    /// `Level.gameEvent(null, event, at)` does: sculk sensors, shriekers,
-    /// wardens and allays in range hear it. False for an event vanilla
-    /// doesn't have.
+    /// `Level.gameEvent(event, at, context)` does: sculk sensors, shriekers,
+    /// wardens and allays receive the optional source and affected state.
+    /// Returns false without emitting for an unknown event, invalid position,
+    /// stale or foreign source, unregistered state, client or inactive level.
     #[access(WorldOnly)]
-    fn level_game_event(&mut self, level: LevelRef, event: &str, at: [f64; 3]) -> bool;
+    fn level_game_event(
+        &mut self,
+        level: LevelRef,
+        event: &str,
+        at: [f64; 3],
+        context: GameEventContext,
+    ) -> bool;
     /// Side: server.
     /// Queues block event `a`, `b` for `block` at `pos`, as `ServerLevel.blockEvent(pos, block,
     /// a, b)` does: after this tick's scheduled ticks the level runs the block's
@@ -1084,4 +1216,30 @@ pub trait LevelsBackendMut {
     /// client, an unknown biome and an unchanged cell.
     #[access(WorldOnly)]
     fn level_set_biome(&mut self, level: LevelRef, pos: [i32; 3], biome: &str) -> bool;
+}
+/// The handles' client writes of the `levels` area, implemented by the game and reached through [`ClientBackendMut`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
+#[doc(hidden)]
+#[horizon_mod_api_macros::host_area]
+pub trait LevelsClientBackendMut {
+    /// Side: client.
+    /// Show or clear the crack of `breaker` on the block at `pos` in this client's own view
+    /// (`LevelRenderer.destroyBlockProgress`): stages 0..9 show a crack, any other stage removes
+    /// it. Nothing is sent to the server or to other players, and a crack not updated for 400
+    /// ticks goes away. False for a stale or foreign level or before login.
+    ///
+    /// ```compile_fail
+    /// use mod_api::{LevelRef, ServerHost};
+    /// fn wrong_side(level: LevelRef, host: &mut dyn ServerHost) {
+    ///     level.set_client_break_progress(host, -1, [0, 64, 0], 3);
+    /// }
+    /// ```
+    #[access(WorldOnly)]
+    fn level_set_client_break_progress(
+        &mut self,
+        level: LevelRef,
+        breaker: i32,
+        pos: [i32; 3],
+        progress: i32,
+    ) -> bool;
 }

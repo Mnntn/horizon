@@ -17,6 +17,7 @@ impl Game<'_> {
         self.native_lifecycle.begin_close();
         self.native_lifecycle_world_closed();
         self.recipe_ui.server_properties = Default::default();
+        self.refresh_recipe_property_context();
     }
 
     pub(super) fn remote_recipe_properties(
@@ -24,5 +25,6 @@ impl Game<'_> {
         packet: horizon_protocol::packets::recipes::UpdateRecipes,
     ) {
         self.recipe_ui.server_properties.replace(packet);
+        self.refresh_recipe_property_context();
     }
 }

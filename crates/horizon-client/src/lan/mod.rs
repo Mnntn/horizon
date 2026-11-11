@@ -32,6 +32,8 @@ pub mod hub;
 pub mod import;
 mod io_pool;
 pub mod menu;
+#[cfg(test)]
+mod payload_bounds_tests;
 pub mod playerdata;
 pub mod prediction;
 pub mod recipes;

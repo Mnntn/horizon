@@ -102,8 +102,12 @@ impl ClientHost for TestHost {}
 #[allow(dead_code)]
 mod generated {
     pub(super) mod mod_api {
-        pub struct Block;
-        pub struct Item;
+        pub struct Block {
+            pub id: String,
+        }
+        pub struct Item {
+            pub id: String,
+        }
         pub(super) use super::super::ItemStack;
         pub(super) use super::super::{
             Command, Config, Dispensed, InteractionResult, MapDecoration, MapInfo, Minimap, Screen,
@@ -530,8 +534,11 @@ mod stubs {
     pub(super) struct HudBatch(pub Vec<u32>);
     #[derive(Clone, Copy)]
     pub(super) struct TooltipPlace;
-    #[derive(Clone, Copy)]
-    pub(super) struct Hand;
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) enum Hand {
+        Main,
+        Off,
+    }
     #[derive(Clone, Copy)]
     pub(super) struct BlockHit;
     pub(super) struct BlockClick<'a>(pub &'a ());
@@ -584,7 +591,9 @@ mod stubs {
     }
     pub(super) struct LootStack;
     pub(super) struct LootContext;
+    pub(super) trait Tags {}
     pub(super) struct NativeReloadListener;
+    #[derive(Clone)]
     pub(super) struct RecipePropertyAddition;
     pub(super) struct AdvancementProgress {
         pub done: bool,

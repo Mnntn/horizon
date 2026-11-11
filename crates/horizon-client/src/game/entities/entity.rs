@@ -1039,6 +1039,7 @@ macro_rules! save_lists {
                         &mut tag, $game$(.$list)+[i].id(), &$game.entity_attachments);
                 }
                 $out.entry(key).or_default().push((
+                    $game$(.$list)+[i].id(),
                     $game$(.$list)+[i].join_seq(),
                     tag,
                 ));
@@ -1049,7 +1050,7 @@ macro_rules! save_lists {
 pub(crate) use save_lists;
 
 /// Saves every entity of every list in `entity_lists!` into `$out` by chunk,
-/// each with its join number (`$out` maps a chunk to `(JoinSeq, Tag)` pairs),
+/// each with its id and join number (`$out` maps a chunk to `(id, JoinSeq, Tag)`),
 /// each through its own `Entity::save_nbt`: one loop per list, static dispatch,
 /// nothing allocated beyond the tags. A kind added to the lists cannot be left
 /// out, since `save_nbt` has no default.
@@ -1168,6 +1169,15 @@ impl Game<'_> {
             .chain(self.fangs.list.iter().map(|e| e.id))
             .chain(self.crystals.iter().map(|e| e.id))
             .chain(self.dragon.iter().map(|e| e.id))
+            .chain(
+                self.dragon
+                    .iter()
+                    .filter(|dragon| dragon.id != 0)
+                    .flat_map(|dragon| {
+                        (0..dragon.parts.len())
+                            .filter_map(move |offset| dragon.id.checked_add(offset as u32 + 1))
+                    }),
+            )
             .chain(self.ominous_spawners.iter().map(|e| e.id))
             .chain(self.resident_entities.knots.iter().map(|e| e.id))
             // Cast hooks live with their players, not in the saveable lists.
@@ -1189,18 +1199,9 @@ impl Game<'_> {
     pub(super) fn save_every_entity(
         &mut self,
         keys: &HashSet<ChunkKey>,
-        out: &mut HashMap<ChunkKey, Vec<Tag>>,
+        out: &mut HashMap<ChunkKey, Vec<(u32, JoinSeq, Tag)>>,
     ) {
-        // Saved by chunk in the order they joined, so a reload adds them in
-        // that order (a chunk's entity list is in insertion order in vanilla).
-        let mut staged: HashMap<ChunkKey, Vec<(JoinSeq, Tag)>> = HashMap::new();
-        save_entities_of_every_kind!(self, keys, staged);
-        for (key, mut tags) in staged {
-            tags.sort_by_key(|(seq, _)| *seq);
-            out.entry(key)
-                .or_default()
-                .extend(tags.into_iter().map(|(_, tag)| tag));
-        }
+        save_entities_of_every_kind!(self, keys, out);
     }
 }
 

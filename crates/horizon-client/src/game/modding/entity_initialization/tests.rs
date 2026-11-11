@@ -703,3 +703,77 @@ fn cancelled_mob_creation_forgets_constructor_payload_and_identity() {
         },
     );
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn dragon_part_constructor_first_read_indexes_payload_and_same_id_replacement_reconstructs() {
+    use mod_api::AttachmentQueries;
+    observe(|calls| {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.native_level_opened(Dim::Overworld);
+            game.spawn_remote_dragon(420, [1.0, 80.0, 1.0], 0.0);
+            let holder = Holder::Entity(421);
+            // Only an inspection outside dispatch: the constructor listener
+            // performs the store, and there is no subsequent explicit store.
+            assert_eq!(VALUE.get_existing(game, holder), Ok(Some(41)));
+            assert!(game.dragon.as_mut().unwrap().parts[0].2.is_bound());
+            let batch = game.query(&VALUE).unwrap();
+            let rows: Vec<_> = batch.iter().collect();
+            assert_eq!(rows.len(), 1);
+            let row = rows[0].as_ref().unwrap();
+            assert_eq!(row.value, &41);
+            assert_eq!(
+                row.holder,
+                mod_api::AttachmentHolder::Entity(game.entity(421).unwrap())
+            );
+            game.prune_entity_attachments();
+            game.prune_entity_memory();
+            assert!(game.entity_attachments.contains_key(&421));
+            assert!(game.entity_initialization.initialized.contains(&holder));
+            assert_eq!(
+                calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, h)| *h == holder)
+                    .count(),
+                1
+            );
+
+            game.spawn_remote_dragon(420, [1.0, 80.0, 1.0], 0.0);
+            assert!(!game.entity_attachments.contains_key(&421));
+            assert!(!game.entity_initialization.initialized.contains(&holder));
+            assert!(game.query(&VALUE).unwrap().iter().next().is_none());
+            assert_eq!(VALUE.get_existing(game, holder), Ok(Some(41)));
+            assert_eq!(
+                calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, h)| *h == holder)
+                    .count(),
+                2
+            );
+            assert_eq!(game.query(&VALUE).unwrap().iter().count(), 1);
+            game.remove_remote_dragon(420);
+            // No prune pass between removal and network-ID reuse.
+            assert!(!game.entity_attachments.contains_key(&421));
+            assert!(!game.entity_initialization.initialized.contains(&holder));
+            game.spawn_remote_dragon(420, [1.0, 80.0, 1.0], 0.0);
+            assert!(!game.entity_attachments.contains_key(&421));
+            assert!(game.query(&VALUE).unwrap().iter().next().is_none());
+            assert_eq!(VALUE.get_existing(game, holder), Ok(Some(41)));
+            assert_eq!(
+                calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, h)| *h == holder)
+                    .count(),
+                3
+            );
+            assert_eq!(game.query(&VALUE).unwrap().iter().count(), 1);
+        });
+    });
+}

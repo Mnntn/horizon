@@ -1,6 +1,8 @@
 //! Runtime block-state IDs imported from a version-pinned registry data export.
 //! This supplies identities and default properties, not block behavior.
+mod data;
 mod facts;
+mod intern;
 mod json;
 pub(crate) mod snapshot;
 use horizon_core::fast_hash::FxHashMap;
@@ -27,14 +29,7 @@ pub struct BlockRegistry {
     /// Game-owned, immutable mod worker metadata for this numeric registry snapshot.
     /// Filled at resource resolution before any worker can use it; never shared across registries.
     pub mod_worker_resource: std::sync::OnceLock<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
-    states: Vec<BlockState>,
-    /// Ids by a hash of their state, checked against `states`: 12 bytes per
-    /// state instead of a second copy of every name and property map (about
-    /// 125 MB for a registry of 190,000 states).
-    ids: HashMap<u64, u32>,
-    /// States whose hash an earlier state already took (none in vanilla).
-    collided: BTreeMap<BlockState, BlockStateId>,
-    defaults: BTreeMap<String, BlockStateId>,
+    data: std::sync::Arc<data::Data>,
     /// Saved palette entries by the NBT they came from ([`Self::saved_state_id`]).
     /// A saved area repeats the same dozen states in every section of every
     /// column; this outlives one column, unlike the cache it replaces.
@@ -160,13 +155,11 @@ impl BlockRegistry {
         if states.is_empty() || states.len() > i32::MAX as usize {
             return Err(invalid("invalid registry size"));
         }
-        let mut result = Self {
-            mod_worker_resource: std::sync::OnceLock::new(),
+        let mut result = data::Data {
             states: Vec::with_capacity(states.len()),
             ids: HashMap::with_capacity(states.len()),
             collided: BTreeMap::new(),
             defaults: BTreeMap::new(),
-            saved_states: RwLock::new(FxHashMap::default()),
         };
         // The states' property names and values: a few hundred strings, shared.
         let mut strings = crate::block_state_properties::SharedStrings::default();
@@ -207,22 +200,23 @@ impl BlockRegistry {
         {
             return Err(invalid("registry is missing block defaults"));
         }
-        Ok(result)
+        Ok(Self {
+            data: std::sync::Arc::new(result),
+            mod_worker_resource: std::sync::OnceLock::new(),
+            saved_states: RwLock::new(FxHashMap::default()),
+        })
     }
     pub fn len(&self) -> usize {
-        self.states.len()
+        self.data.states.len()
     }
     pub fn is_empty(&self) -> bool {
-        self.states.is_empty()
+        self.data.states.is_empty()
     }
     pub fn state(&self, id: BlockStateId) -> Option<&BlockState> {
-        self.states.get(id.0 as usize)
+        self.data.states.get(id.0 as usize)
     }
     pub fn id(&self, state: &BlockState) -> Option<BlockStateId> {
-        match self.ids.get(&state_key(state)) {
-            Some(&id) if self.states[id as usize] == *state => Some(BlockStateId(id)),
-            _ => self.collided.get(state).copied(),
-        }
+        self.data.id(state)
     }
 
     /// The id a saved palette entry resolves to, with `decode_column`'s rules:
@@ -267,7 +261,7 @@ impl BlockRegistry {
         id
     }
     pub fn default_state(&self, name: &str) -> Option<BlockStateId> {
-        self.defaults.get(name).copied()
+        self.data.defaults.get(name).copied()
     }
 
     /// The values `property` takes on `block`, in `Property.getPossibleValues`
@@ -277,6 +271,7 @@ impl BlockRegistry {
     pub fn property_values(&self, block: &str, property: &str) -> Vec<&str> {
         let mut values: Vec<&str> = Vec::new();
         for state in self
+            .data
             .states
             .iter()
             .filter(|state| state.name.as_str() == block)

@@ -10,7 +10,6 @@ use horizon_client::{
     items::ItemStack,
     mobs::Who,
     projectiles::{Projectile, ProjectileKind},
-    random_source,
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
 
@@ -341,10 +340,12 @@ impl Game<'_> {
             let rocket = &*ammo.item == FIREWORK_ROCKET;
             if rocket {
                 let at = Vec3::new(eye[0], eye[1] - f64::from(0.15f32), eye[2]);
-                let mut shot = Projectile::new(ProjectileKind::Snowball, at, None);
-                shot.shoot(&mut random_source::entity(), dir.to_array(), power, 1.0);
                 // Its first tick posts the shot (Projectile.tick).
-                self.launch_angled_rocket(at, shot.velocity, ammo, Some(Who::Player));
+                self.launch_angled_rocket(at, ammo, Some(Who::Player), |own| {
+                    let mut shot = Projectile::new(ProjectileKind::Snowball, at, None);
+                    shot.shoot(own, dir.to_array(), power, 1.0);
+                    shot.velocity
+                });
             }
             if !rocket {
                 let effect = super::dispenser::tipped_effect(ammo).or_else(|| {
@@ -367,10 +368,8 @@ impl Game<'_> {
                     a.fired_from_weapon = Some(weapon.clone());
                     a.pierce = pierce;
                 }
-                // Flame: the arrow is spawned burning (EnchantmentHelper.onProjectileSpawned).
-                self.ignite_spawned_arrow(&weapon, &mut arrow);
                 arrow.shoot(&mut self.world.random, dir.to_array(), power, 1.0);
-                self.add_projectile(arrow);
+                self.spawn_projectile(arrow, ammo);
                 let (player, name, projectile) = (
                     horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
                     self.acting_player_name().to_owned(),
@@ -493,8 +492,8 @@ mod tests {
         assert_eq!(at, vec![feet]);
     }
 
-    /// `AbstractArrow`'s constructor runs `EnchantmentHelper.onProjectileSpawned`
-    /// for the weapon the arrow is fired from, bow or crossbow, so a Flame
+    /// `Projectile.applyOnProjectileSpawned` runs `EnchantmentHelper.onProjectileSpawned`
+    /// for the weapon an arrow is fired from, bow or crossbow, so a Flame
     /// crossbow shoots burning arrows: Flame's `Ignite(constant(100))` is 100
     /// seconds, 2000 ticks, on every arrow of a Multishot volley (#10482).
     #[test]

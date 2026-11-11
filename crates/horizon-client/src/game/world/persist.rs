@@ -11,6 +11,9 @@ mod object_memory;
 #[cfg(test)]
 #[path = "persist/anger_tests.rs"]
 mod anger_tests;
+#[cfg(test)]
+#[path = "persist/lookup_order_tests.rs"]
+mod lookup_order_tests;
 
 use super::{FallingBlock, Game};
 use horizon_client::{
@@ -40,21 +43,81 @@ use {
 
 /// An entity object retained by passenger links but refused level residency.
 /// Queries and tracking never visit this store; internal topology and saving do.
-/// Other rejected object kinds can be added without changing residency ownership.
+/// A boat or minecart is only ever a root here: mobs are the only modeled riders.
 pub(super) enum OffLevel {
     Mob(Mob),
+    Boat(super::boats::Boat),
+    Cart(super::minecarts::Minecart),
+}
+
+/// Formerly resident vehicles kept solely by surviving passenger edges.
+pub(super) enum RemovedVehicle {
+    Boat(super::boats::Boat),
+    Cart(super::minecarts::Minecart),
+}
+
+impl RemovedVehicle {
+    pub(super) fn position(&self) -> Vec3 {
+        match self {
+            Self::Boat(boat) => boat.position,
+            Self::Cart(cart) => cart.position,
+        }
+    }
+
+    pub(super) fn retire_attachment_registration(&self) {
+        match self {
+            Self::Boat(boat) => {
+                boat.attachment_lifetime.retire();
+            }
+            Self::Cart(cart) => {
+                cart.attachment_lifetime.retire();
+            }
+        }
+    }
+
+    pub(super) fn kind(&self) -> String {
+        match self {
+            Self::Boat(boat) => boat.entity_type(),
+            Self::Cart(cart) => cart.kind.id().into(),
+        }
+    }
 }
 
 impl OffLevel {
-    fn as_mob(&self) -> Option<&Mob> {
+    pub(super) fn as_mob(&self) -> Option<&Mob> {
         match self {
             Self::Mob(mob) => Some(mob),
+            Self::Boat(_) | Self::Cart(_) => None,
         }
     }
 
     fn as_mob_mut(&mut self) -> Option<&mut Mob> {
         match self {
             Self::Mob(mob) => Some(mob),
+            Self::Boat(_) | Self::Cart(_) => None,
+        }
+    }
+
+    fn as_boat(&self) -> Option<&super::boats::Boat> {
+        match self {
+            Self::Boat(boat) => Some(boat),
+            Self::Mob(_) | Self::Cart(_) => None,
+        }
+    }
+
+    fn as_cart(&self) -> Option<&super::minecarts::Minecart> {
+        match self {
+            Self::Cart(cart) => Some(cart),
+            Self::Mob(_) | Self::Boat(_) => None,
+        }
+    }
+
+    /// Only a retained mob can be removed while dependents keep it: a boat or
+    /// cart is never selectable, so it leaves only with its passenger graph.
+    pub(super) fn is_removed(&self) -> bool {
+        match self {
+            Self::Mob(mob) => mob.removed,
+            Self::Boat(_) | Self::Cart(_) => false,
         }
     }
 }
@@ -104,10 +167,16 @@ pub struct EntityMemory {
     /// Full rejected passenger objects, not resident entities or frozen NBT copies.
     /// Kept with the level while any live object graph still refers to them.
     pub(super) off_level: HashMap<u32, OffLevel>,
+    /// Removed boat/cart objects are never part of level residency.
+    pub(super) removed_vehicles: HashMap<u32, RemovedVehicle>,
     /// Destruction callbacks already consumed for geometry retained after removal.
     score_destroyed: HashSet<u32>,
     /// Mount notifications currently on the callback stack, keyed by object IDs.
     pub(super) mount_notifications: HashSet<(u32, u32, bool)>,
+    /// Deferred native removals already notified their passenger edges.
+    pub(super) notified_vehicle_removals: HashSet<u32>,
+    /// Vehicle destruction is logically visible before its passenger callbacks.
+    pub(super) destroying_vehicles: HashSet<super::commands::Target>,
     /// Synched entity-data entries dirtied by forced writes since the last sync.
     pub(super) forced_meta: HashMap<u32, [u64; 4]>,
     /// Passengers that ride a vehicle, in load order: live entity IDs or unspawned tags.
@@ -354,6 +423,15 @@ fn block_entity_pos(tag: &Tag) -> [i32; 3] {
     [tag.get("x"), tag.get("y"), tag.get("z")]
         .map(|v| horizon_client::save::number(v).unwrap_or(0) as i32)
 }
+/// `EntitySectionStorage.getExistingSectionsInChunk`: a chunk's sections in
+/// packed `SectionPos` order, whose low 20 bits are the section Y: section 0
+/// upward, then the negative sections. A record without a position goes last.
+fn section_order(tag: &Tag) -> u32 {
+    entity_nbt::position(tag).map_or(u32::MAX, |at| {
+        ((at.y.floor() as i32 >> 4) as u32) & 0xF_FFFF
+    })
+}
+
 fn chunk_of(p: Vec3) -> (i32, i32) {
     ((p.x.floor() as i32) >> 4, (p.z.floor() as i32) >> 4)
 }
@@ -941,17 +1019,6 @@ impl Game<'_> {
             self.persist.unknown.entry(key).or_default().push(tag);
         }
     }
-    pub(super) fn warn_missing_profession(&mut self, mob: &horizon_client::mobs::Mob) {
-        if let horizon_client::mobs::villager::ProfessionState::Unresolved(id) =
-            &mob.extra.profession
-            && self.missing_professions.insert(id.clone())
-        {
-            log::warn!(
-                "Unknown villager profession {id} at {:?}; preserving its saved identity",
-                mob.position
-            );
-        }
-    }
 
     /// `Entity.load`: adopt the bounded TAG_LIST_CODEC input as a set.
     /// Keep that adopted Mob state in the retained compound for commands and saves.
@@ -1149,8 +1216,8 @@ impl Game<'_> {
     fn vehicle_of(&self, id: u32) -> Option<u32> {
         let v = self.mob_object(id)?.extra.mount?;
         let there = self.mob_objects().any(|m| m.id == v)
-            || self.boats.iter().any(|b| b.id == v)
-            || self.carts.iter().any(|c| c.id == v);
+            || self.boat_object(v).is_some()
+            || self.cart_object(v).is_some();
         there.then_some(v)
     }
     /// The root vehicle `root` with its passengers (`Entity.save`).
@@ -1158,19 +1225,25 @@ impl Game<'_> {
         if let Some(object) = self.mob_object_slot(root) {
             return Some(self.mob_object_tree_nbt(object));
         }
-        if self.boats.iter().any(|b| b.id == root) {
+        if self.boats.iter().any(|b| b.id == root)
+            && self
+                .resident_source_target_visible(self.dim.key(), super::commands::Target::Boat(root))
+        {
             let uuid = self.uuid_for(root);
-            let b = self.boats.iter().find(|b| b.id == root)?;
+            let b = self.boat_object(root)?;
             let mut tag = b.to_nbt(uuid, self.persist.raw.get(&root));
             self.put_mob_passengers(&mut tag, root);
             write_attachments(&mut tag, root, &self.entity_attachments);
             return Some(tag);
         }
-        if !self.carts.iter().any(|c| c.id == root) {
+        if !self.carts.iter().any(|c| c.id == root)
+            || !self
+                .resident_source_target_visible(self.dim.key(), super::commands::Target::Cart(root))
+        {
             return None;
         }
         let uuid = self.uuid_for(root);
-        let c = self.carts.iter().find(|c| c.id == root)?;
+        let c = self.cart_object(root)?;
         let mut tag = c.to_nbt(uuid, self.persist.raw.get(&root));
         self.put_mob_passengers(&mut tag, root);
         write_attachments(&mut tag, root, &self.entity_attachments);
@@ -1218,8 +1291,16 @@ impl Game<'_> {
         self.persist.uuids.iter().find_map(|(&id, &found)| {
             (found == uuid
                 && (self.mobs.iter().any(|mob| mob.id == id && !mob.removed)
-                    || self.boats.iter().any(|boat| boat.id == id)
-                    || self.carts.iter().any(|cart| cart.id == id)))
+                    || (self.boats.iter().any(|boat| boat.id == id)
+                        && self.resident_source_target_visible(
+                            self.dim.key(),
+                            super::commands::Target::Boat(id),
+                        ))
+                    || (self.carts.iter().any(|cart| cart.id == id)
+                        && self.resident_source_target_visible(
+                            self.dim.key(),
+                            super::commands::Target::Cart(id),
+                        ))))
             .then_some(id)
         })
     }
@@ -1337,6 +1418,7 @@ impl Game<'_> {
     }
     /// Detach a travelling entity without discarding its in-memory attachments.
     pub(super) fn detach_entity(&mut self, id: u32) {
+        self.combat.death_weapons.remove(&id);
         self.persist.score_destroyed.remove(&id);
         self.persist.uuids.remove(&id);
         self.persist.raw.remove(&id);
@@ -1500,25 +1582,24 @@ impl Game<'_> {
         keys: &HashSet<(i32, i32)>,
         remove: bool,
     ) -> Vec<((i32, i32), Vec<Tag>)> {
-        let mut out: HashMap<(i32, i32), Vec<Tag>> =
-            keys.iter().map(|k| (*k, Vec::new())).collect();
+        use horizon_client::join_seq::{JoinSeq, Joined};
+        // Each root with its id and join number, ordered once all are in.
+        let mut roots: HashMap<(i32, i32), Vec<(u32, JoinSeq, Tag)>> = HashMap::new();
         // Every kind in `entity_lists!` saves itself (`Entity::save_nbt`).
-        self.save_every_entity(keys, &mut out);
+        self.save_every_entity(keys, &mut roots);
         if let Some(d) = self.dragon.as_ref()
             && keys.contains(&chunk_of(d.position))
         {
             let raw = anon_raw(&self.persist, "minecraft:ender_dragon", d.position);
             let uuid = saved_uuid(&self.persist, d.id);
-            out.entry(chunk_of(d.position))
+            // The fields kept with it (`remember_tags`: Silent, Tags, a
+            // name...) once it has flown from where it was loaded.
+            let mut tag = with_raw(d.to_nbt(uuid, raw.as_ref()), self.persist.raw.get(&d.id));
+            write_attachments(&mut tag, d.id, &self.entity_attachments);
+            roots
+                .entry(chunk_of(d.position))
                 .or_default()
-                // The fields kept with it (`remember_tags`: Silent, Tags, a
-                // name...) once it has flown from where it was loaded.
-                .push({
-                    let mut tag =
-                        with_raw(d.to_nbt(uuid, raw.as_ref()), self.persist.raw.get(&d.id));
-                    write_attachments(&mut tag, d.id, &self.entity_attachments);
-                    tag
-                });
+                .push((d.id, d.join_seq(), tag));
         }
         for c in &self.crystals {
             if keys.contains(&chunk_of(c.position)) {
@@ -1526,7 +1607,10 @@ impl Game<'_> {
                 let uuid = saved_uuid(&self.persist, c.id);
                 let mut tag = with_raw(c.to_nbt(uuid, raw.as_ref()), self.persist.raw.get(&c.id));
                 write_attachments(&mut tag, c.id, &self.entity_attachments);
-                out.entry(chunk_of(c.position)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(c.position))
+                    .or_default()
+                    .push((c.id, c.join_seq(), tag));
             }
         }
         for s in &self.ominous_spawners {
@@ -1540,7 +1624,10 @@ impl Game<'_> {
                     s.raw.as_deref(),
                 );
                 write_attachments(&mut tag, s.id, &self.entity_attachments);
-                out.entry(chunk_of(at)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(at))
+                    .or_default()
+                    .push((s.id, s.join_seq(), tag));
             }
         }
         for f in &self.item_frames {
@@ -1559,7 +1646,10 @@ impl Game<'_> {
                     .unwrap_or_else(random_uuid);
                 let mut tag = entity_nbt::item_frame_to_nbt(f, uuid, self.persist.raw.get(&f.id));
                 write_attachments(&mut tag, f.id, &self.entity_attachments);
-                out.entry(chunk_of(at)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(at))
+                    .or_default()
+                    .push((f.id, f.join_seq(), tag));
             }
         }
         for c in &self.cushions {
@@ -1572,7 +1662,10 @@ impl Game<'_> {
                     .unwrap_or_else(random_uuid);
                 let mut tag = entity_nbt::cushion_to_nbt(c, uuid, self.persist.raw.get(&c.id));
                 write_attachments(&mut tag, c.id, &self.entity_attachments);
-                out.entry(chunk_of(c.position)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(c.position))
+                    .or_default()
+                    .push((c.id, c.join_seq(), tag));
             }
         }
         for p in &self.paintings {
@@ -1586,7 +1679,10 @@ impl Game<'_> {
                     .unwrap_or_else(random_uuid);
                 let mut tag = entity_nbt::painting_to_nbt(p, uuid, self.persist.raw.get(&p.id));
                 write_attachments(&mut tag, p.id, &self.entity_attachments);
-                out.entry(chunk_of(at)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(at))
+                    .or_default()
+                    .push((p.id, p.join_seq(), tag));
             }
         }
         for f in &self.fangs.list {
@@ -1600,7 +1696,10 @@ impl Game<'_> {
                     .unwrap_or_else(random_uuid);
                 let mut tag = self.fangs_to_nbt(f, uuid);
                 write_attachments(&mut tag, f.id, &self.entity_attachments);
-                out.entry(chunk_of(at)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(at))
+                    .or_default()
+                    .push((f.id, f.join_seq(), tag));
             }
         }
         // `AreaEffectCloud.addAdditionalSaveData`: a lingering potion's cloud is
@@ -1619,7 +1718,10 @@ impl Game<'_> {
                 .unwrap_or_else(random_uuid);
             let mut tag = super::potions::potion_cloud_to_nbt(c, uuid, self.persist.raw.get(&c.id));
             write_attachments(&mut tag, c.id, &self.entity_attachments);
-            out.entry(chunk_of(at)).or_default().push(tag);
+            roots
+                .entry(chunk_of(at))
+                .or_default()
+                .push((c.id, c.join_seq(), tag));
         }
         for o in &self.others {
             if keys.contains(&chunk_of(o.position)) {
@@ -1631,7 +1733,26 @@ impl Game<'_> {
                     .unwrap_or_else(random_uuid);
                 let mut tag = self.other_to_nbt(o, uuid);
                 write_attachments(&mut tag, o.id, &self.entity_attachments);
-                out.entry(chunk_of(o.position)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(o.position))
+                    .or_default()
+                    .push((o.id, o.join_seq(), tag));
+            }
+        }
+        // `PersistentEntitySectionManager.storeChunkSections`: section by
+        // section, each in the order its entities joined it. An entity not
+        // yet given an id is not a lookup member: its join stands in.
+        let mut out: HashMap<(i32, i32), Vec<Tag>> =
+            keys.iter().map(|k| (*k, Vec::new())).collect();
+        {
+            let admission = self.resident_entities.table.get_mut().admission_order();
+            for (key, mut tags) in roots {
+                tags.sort_by_cached_key(|(id, join, tag)| {
+                    (section_order(tag), admission(*id).unwrap_or(*join))
+                });
+                out.entry(key)
+                    .or_default()
+                    .extend(tags.into_iter().map(|(_, _, tag)| tag));
             }
         }
         for key in keys {
@@ -1659,7 +1780,7 @@ impl Game<'_> {
             self.ominous_spawners
                 .retain(|s| !gone(Vec3::new(s.position[0], s.position[1], s.position[2])));
             if self.dragon.as_ref().is_some_and(|d| gone(d.position)) {
-                self.dragon.discard();
+                self.discard_resident_dragon();
             }
             self.carts.retain(|c| {
                 let keep = !gone(c.position) || Some(c.id) == riding;
@@ -1751,6 +1872,22 @@ impl Game<'_> {
                 }
                 keep
             });
+            if !self.persist.off_level.is_empty() {
+                // A retained boat or cart root is in no section and never saved:
+                // it lives only while a passenger or player still rides it.
+                let ridden: HashSet<u32> = self
+                    .mob_objects()
+                    .filter_map(|m| m.extra.mount)
+                    .chain(riding)
+                    .collect();
+                self.persist.off_level.retain(|id, object| {
+                    let keep = object.as_mob().is_some() || ridden.contains(id);
+                    if !keep {
+                        removed.push(*id);
+                    }
+                    keep
+                });
+            }
             self.dropped.retain(|e| {
                 let keep = !gone(e.position);
                 if !keep {
@@ -1794,6 +1931,16 @@ impl Game<'_> {
             self.save.save_entities_later(chunks)
         }
     }
+    /// Complete a removed vehicle's scoreboard callback at logical removal,
+    /// even when physical removal waits for the native-removal sweep.
+    pub(super) fn score_destroyed_vehicle_once(&mut self, id: u32) {
+        if self.persist.score_destroyed.insert(id)
+            && let Some(uuid) = self.persist.uuids.get(&id)
+        {
+            self.score.board.entity_removed(&uuid_text(*uuid));
+        }
+    }
+
     /// `ServerLevel.EntityCallbacks.onDestroyed` → `Scoreboard.entityRemoved`
     /// for every kind of entity: a mob's body once it is removed, an item
     /// picked up or killed, an expired cloud, a discarded projectile leaves
@@ -1805,12 +1952,19 @@ impl Game<'_> {
     pub(super) fn score_destroyed_entities(&mut self) {
         if !self.persist.off_level.is_empty() {
             for (&id, object) in &self.persist.off_level {
-                if matches!(object, OffLevel::Mob(mob) if mob.removed)
+                if object.is_removed()
                     && self.persist.score_destroyed.insert(id)
                     && let Some(uuid) = self.persist.uuids.get(&id)
                 {
                     self.score.board.entity_removed(&uuid_text(*uuid));
                 }
+            }
+        }
+        for &id in self.persist.removed_vehicles.keys() {
+            if self.persist.score_destroyed.insert(id)
+                && let Some(uuid) = self.persist.uuids.get(&id)
+            {
+                self.score.board.entity_removed(&uuid_text(*uuid));
             }
         }
         let board = &self.score.board;
@@ -1841,9 +1995,12 @@ impl Game<'_> {
         if !self.persist.off_level.is_empty() {
             // Query residency is not destruction. Rejected objects still own
             // their UUID state until removed, just like registered objects.
-            alive.extend(self.persist.off_level.iter().filter_map(|(&id, object)| {
-                matches!(object, OffLevel::Mob(mob) if !mob.removed).then_some(id)
-            }));
+            alive.extend(
+                self.persist
+                    .off_level
+                    .iter()
+                    .filter_map(|(&id, object)| (!object.is_removed()).then_some(id)),
+            );
         }
         for (id, uuid) in candidates {
             if !alive.contains(&id) {
@@ -1852,12 +2009,8 @@ impl Game<'_> {
         }
     }
     pub(super) fn prune_entity_memory(&mut self) {
-        if !self.persist.off_level.is_empty()
-            && self
-                .persist
-                .off_level
-                .values()
-                .any(|object| matches!(object, OffLevel::Mob(mob) if mob.removed))
+        if !self.persist.removed_vehicles.is_empty()
+            || self.persist.off_level.values().any(OffLevel::is_removed)
         {
             // Complete the former resident's destruction before graph GC can
             // forget the UUID retained solely for dismount geometry.
@@ -1865,7 +2018,7 @@ impl Game<'_> {
         }
         // Forget entities that no longer exist.
         let mut alive = self.live_entity_ids();
-        if !self.persist.off_level.is_empty() {
+        if !self.persist.off_level.is_empty() || !self.persist.removed_vehicles.is_empty() {
             self.retain_off_level_objects(&mut alive);
         }
         for id in self.persist.uuids.keys() {
@@ -1933,10 +2086,12 @@ impl Game<'_> {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         let m = &self.mobs[i];
+        // `Entity.shouldBeSaved`: a passenger saves only under its root, even
+        // when that root is a boat or cart retained off-level and never saved.
         let saves = self.mob_root(MobObject::Resident(i)) == MobObject::Resident(i)
-            && m.extra.mount.is_none_or(|v| {
-                self.boats.iter().all(|b| b.id != v) && self.carts.iter().all(|c| c.id != v)
-            })
+            && m.extra
+                .mount
+                .is_none_or(|v| self.boat_object(v).is_none() && self.cart_object(v).is_none())
             && keys.contains(&chunk_of(m.position))
             && !m.removed;
         saves.then(|| (chunk_of(self.mobs[i].position), self.mob_tree_nbt(i)))

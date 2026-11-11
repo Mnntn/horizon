@@ -51,10 +51,10 @@ ROOT = lab.ROOT
 REPORT_FORMAT, REPORT_VERSION = "horizon-build-times", 1
 WORK = Path(".local") / "build-times"
 MARKER = ".horizon-build-times"
-PACKAGE = "horizon-client"
+PACKAGE = "horizon-game"
 PROFILES = ["dev", "fast"]
 # The files an edit goes to by default: large, often changed, and each in a different layer. horizon-client's
-# game.rs belongs to the game binary, the others to libraries the binary links. Any other crate in the
+# game.rs belongs to the gameplay library, which the platform binary links. Any other crate in the
 # workspace gets its lib.rs; --file crate=path picks another file.
 EDIT_FILES = {
     "horizon-world": "crates/horizon-world/src/level/mod.rs",

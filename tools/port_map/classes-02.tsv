@@ -106,7 +106,7 @@ ShapedCraftingRecipeDisplay.isEnabled	skip:data		feature flags: Horizon's recipe
 ShapelessCraftingRecipeDisplay.isEnabled	skip:data		feature flags: Horizon's recipe set is the pinned pack's, with no flags to check
 SlotDisplays.bootstrap	skip:data		registry bootstrap
 ConditionalEffect.codec	skip:java		
-ConditionalEffect.matches	inline	crates/horizon-client/src/game/items/enchant_effects.rs::Game::post_attack	the requirements check is repeated per hook: post_attack, post_attack_bursts, thorns_damage, projectile_spawned_ignite
+ConditionalEffect.matches	inline	crates/horizon-client/src/game/items/enchant_effects.rs::Game::post_attack	the requirements check is repeated per hook: post_attack, post_attack_bursts, thorns_damage, on_projectile_spawned
 ItemEnchantments.addToTooltip	port	crates/horizon-client/src/game/blocks/stations.rs::Game::stack_tooltip_lines	enchantment lines; stored enchantments for books
 ItemEnchantments.equals	skip:java		
 ItemEnchantments.getTagOrEmpty	skip:java		
@@ -117,7 +117,7 @@ AllOf.EntityEffects.apply	inline	crates/horizon-client/src/game/items/enchant_ef
 AllOf.LocationBasedEffects.onChangedBlock	inline	crates/horizon-client/src/game/items/enchant_effects.rs::Game::location_changed_effects	gap: minor: only the replace_disk effect is handled; the nested list is not walked
 AllOf.LocationBasedEffects.onDeactivated	inline	crates/horizon-client/src/game/items/enchant_effects.rs::Game::location_changed_effects	gap: minor: only the replace_disk effect is handled; the nested list is not walked
 AllOf.ValueEffects.process	port	crates/horizon-items/src/enchant.rs::Enchantments::modify_value_with	each value effect in turn
-ApplyEntityImpulse.apply	port	crates/horizon-client/src/game/items/enchant_effects.rs::Game::apply_piercing_effect	impulse along the look direction on the post-piercing hook
+ApplyEntityImpulse.apply	port	crates/horizon-client/src/game/items/enchant_effects.rs::look_impulse	impulse along the look direction, for the post-piercing hook and a new projectile
 ApplyExhaustion.apply	port	crates/horizon-client/src/game/items/enchant_effects.rs::Game::apply_piercing_effect	food exhaustion on the post-piercing hook
 DamageEntity.apply	port	crates/horizon-client/src/game/items/enchant_effects.rs::Game::thorns_damage	thorns damage, random between min and max
 ExplodeEffect.apply	port	crates/horizon-client/src/game/items/enchant_effects.rs::Game::post_attack_bursts	wind burst at the player's feet

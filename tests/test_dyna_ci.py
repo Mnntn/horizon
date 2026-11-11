@@ -101,6 +101,34 @@ class DynaRoutingTests(unittest.TestCase):
                 self.assertNotIn(key, exports)
             self.assertIn(str(cargo_home / "bin"), pathfile.read_text())
 
+    @unittest.skipUnless(POSIX_BASH and os.name != "nt", "needs the runner's bash")
+    def test_baked_packages_skip_the_download_and_a_partial_image_falls_back(self):
+        script = ROOT / "tools/ci/dyna_ci_deps.sh"
+        for missing in (False, True):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                stubs = root / "stubs"
+                stubs.mkdir()
+                (stubs / "dpkg-query").write_text(
+                    '#!/bin/bash\nif [ "$MISSING" = 1 ] && [ "${!#}" = libudev-dev ]; then exit 1; fi\nprintf installed\n')
+                (stubs / "apt-get").write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$APT_CALLS"\n')
+                (stubs / "dpkg-deb").write_text("#!/bin/bash\n")
+                for stub in stubs.iterdir():
+                    stub.chmod(0o755)
+                (root / "build").mkdir()
+                env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", HOME=str(root / "home"),
+                           DYNA_CI_BUILD=str(root / "build"), CARGO_HOME=str(root / "cargo"),
+                           GITHUB_ENV=str(root / "env"), GITHUB_PATH=str(root / "path"),
+                           MISSING=str(int(missing)), APT_CALLS=str(root / "apt-calls"), DYNA_CI_APT_TRIES="1")
+                result = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+                calls = (root / "apt-calls").read_text() if (root / "apt-calls").exists() else ""
+                if missing:
+                    self.assertTrue(calls, "a missing package must run the download fallback")
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(calls, "")
+                    self.assertIn("already installed", result.stdout)
+
     def run_deps_with_stub_apt(self, failures):
         """Run the script with an apt-get that fails `failures` times per command, then succeeds."""
         script = ROOT / "tools/ci/dyna_ci_deps.sh"
@@ -113,6 +141,8 @@ class DynaRoutingTests(unittest.TestCase):
                 f'n=$(cat "{root}/count" 2>/dev/null || echo 0); echo $((n + 1)) > "{root}/count"\n'
                 f'if [ "$n" -lt {failures} ]; then echo "E: File has unexpected size (mirror sync)" >&2; exit 100; fi\n')
             (stubs / "dpkg-deb").write_text("#!/usr/bin/env bash\n")
+            # No baked packages: the rootless download fallback is what these cases exercise.
+            (stubs / "dpkg-query").write_text("#!/usr/bin/env bash\nexit 1\n")
             for stub in stubs.iterdir():
                 stub.chmod(0o755)
             home = root / "home"
@@ -141,6 +171,17 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertEqual(count, 3)
         self.assertEqual(result.stderr.count("E: File has unexpected size"), 3)
         self.assertIn("apt-get failed after 3 tries (exit 100)", result.stderr)
+
+    def test_lint_enforces_api_boundary_under_central_selection(self):
+        from test_ci_runners import jobs
+        lint = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["lint"]
+        self.assertIn("if: ${{ always() && !cancelled()", lint)
+        # Pin the executable contract, including the selection and source-only mode:
+        # deleting the step or making it unconditional must fail this test.
+        self.assertIn(
+            "      - name: Check mod API boundary\n"
+            "        if: needs.changes.outputs.rust_required != 'false'\n"
+            "        run: python3 tools/ci/check_api_boundary.py --source-only\n", lint)
 
     def test_workflow_wires_route_and_keeps_privileges_off_pool(self):
         from test_ci_runners import jobs
@@ -186,6 +227,16 @@ class DynaRoutingTests(unittest.TestCase):
                     self.assertIn("live=unreadable", summary.read_text())
                     self.assertIn(f"Shard result: {result}", summary.read_text())
                     summary.unlink()
+
+    def test_tooling_tests_run_only_after_every_earlier_verify_step_succeeded(self):
+        # After a failed step the Rust install is skipped, so the Python tests that launch rustc can't run (#2920).
+        from test_ci_runners import jobs
+        verify = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["verify"]
+        step = verify.split("- name: Test offline research tooling\n", 1)[1].split("\n      - ", 1)[0]
+        condition = step.split("if:", 1)[1].split("\n", 1)[0]
+        self.assertIn("success()", condition)
+        self.assertNotIn("cancelled()", condition)
+        self.assertNotIn("always()", condition)
 
     @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
     def test_missing_prepared_data_fails_push_and_nightly_dispatch(self):

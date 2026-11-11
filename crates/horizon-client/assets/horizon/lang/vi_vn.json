@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s trong %2$s, đến %3$s",
   "horizon.tempban.usage": "/tempban <người chơi> <thời gian> [lý do]",
   "horizon.title.not_affiliated": "Không liên kết với Mojang hoặc Microsoft",
-  "key.emote": "Vòng biểu cảm"
+  "key.emote": "Vòng biểu cảm",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

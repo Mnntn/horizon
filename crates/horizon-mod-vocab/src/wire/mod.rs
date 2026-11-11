@@ -86,11 +86,10 @@ pub fn intern(value: &str) -> Result<&'static str, WireError> {
 
 /// The deepest nesting of one value (a component of a component of…) a reader accepts.
 ///
-/// It must not refuse anything its type accepts natively. The deepest such value is a `Tag`:
-/// vanilla allows 512 nested lists or compounds, with a leaf in the innermost, and a nested
-/// compound costs two levels here (the tag, then its map), so 2 × 512 + 1 for the leaf, with a
-/// little headroom for the value that carries the tag.
-pub const MAX_DEPTH: u16 = 1040;
+/// Structural codecs refuse before entering level 33. `Tag` and `Text` use
+/// stack-independent tree codecs to preserve their vanilla depth of 512.
+/// Container iteration does not itself consume reader depth.
+pub const MAX_DEPTH: u16 = 32;
 
 /// Why a buffer is not a value of the type it was read as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,6 +136,7 @@ pub struct Writer {
     bytes: Vec<u8>,
     error: Option<WireError>,
     limit: Option<usize>,
+    depth: u16,
 }
 
 impl Writer {
@@ -233,6 +233,19 @@ impl Writer {
         if self.error.is_none() {
             value.put_owned(self);
         }
+    }
+    /// Writes one structural level, refusing before recursing past [`MAX_DEPTH`].
+    pub fn nested(&mut self, write: impl FnOnce(&mut Self)) {
+        if self.error.is_some() {
+            return;
+        }
+        if self.depth >= MAX_DEPTH {
+            self.fail(WireError::Depth);
+            return;
+        }
+        self.depth += 1;
+        write(self);
+        self.depth -= 1;
     }
     /// The first encoding failure; callers refuse the call rather than sending partial bytes.
     pub fn error(&self) -> Option<WireError> {
@@ -913,10 +926,10 @@ impl<T: Wire> Wire for Box<T> {
     }
     const MIN: usize = T::MIN;
     fn put(&self, out: &mut Writer) {
-        (**self).put(out);
+        out.nested(|out| (**self).put(out));
     }
     fn put_owned(self, out: &mut Writer) {
-        out.put_owned(*self);
+        out.nested(|out| out.put_owned(*self));
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         input.nested(T::take).map(Box::new)
@@ -930,7 +943,7 @@ impl<T: Wire> Wire for Arc<T> {
     }
     const MIN: usize = T::MIN;
     fn put(&self, out: &mut Writer) {
-        (**self).put(out);
+        out.nested(|out| (**self).put(out));
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         input.nested(T::take).map(Arc::new)
@@ -1137,6 +1150,20 @@ macro_rules! layout_fields {
 pub(crate) use layout_fields;
 
 #[cfg(test)]
+fn hook_id_runtime_reference() -> u64 {
+    let names: &[&str] = &include!(concat!(env!("OUT_DIR"), "/hook_id_variant_names.rs"));
+    let mut hash = layout_name("HookId");
+    // Keep the independent reference as a runtime loop even in optimized tests.
+    for name in std::hint::black_box(names) {
+        hash = layout_mix(hash, layout_name(name));
+    }
+    layout_mix(layout_name("enum"), hash)
+}
+
+#[cfg(test)]
+mod fieldless_enum_goldens;
+
+#[cfg(test)]
 mod tests {
     #[test]
     fn derive_shapes_roundtrip_with_golden_bytes() {
@@ -1186,6 +1213,13 @@ mod tests {
         );
         check(Tuple(7), &[7, 0, 0, 0]);
         check(Unit, &[]);
+        // Independent FNV-1a fixture: enum shape, Plain seed, First then Second.
+        // Explicit discriminants do not replace declaration-order wire tags.
+        assert_eq!(Plain::layout(&mut vec![]), 0xc2ea_ba70_1b5e_e4a0);
+        let mut visiting = vec![std::any::type_name::<Plain>()];
+        assert_eq!(Plain::layout(&mut visiting), 0x1923_c164_45af_9a57);
+        assert_eq!(visiting, [std::any::type_name::<Plain>()]);
+        check(Plain::First, &[0, 0, 0, 0]);
         check(Plain::Second, &[1, 0, 0, 0]);
         check(Payload::Tuple(5), &[1, 0, 0, 0, 5]);
         check(Payload::Named { value: 7 }, &[2, 0, 0, 0, 7, 0, 0, 0]);
@@ -1657,6 +1691,11 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod depth_tests;
+mod json_tree;
+mod tag_tree;
+mod text_tree;
 pub(crate) mod wire_handlers;
 pub(crate) mod wire_slots;
 pub(crate) mod wire_types;

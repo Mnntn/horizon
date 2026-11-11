@@ -2,6 +2,41 @@
 
 These effects change what a player hears, not the server's world. They do nothing until a mod asks for them. See the [API reference](../reference/api.md) for the generated signatures.
 
+## Reading the tooltip preference
+
+Read `ClientHost::gui_options().advanced_item_tooltips` for the current
+`advancedItemTooltips` preference (F3+H). The snapshot reflects the current client
+setting on native and wasm; request a new snapshot after a toggle. This is separate
+from the advanced flag supplied to an individual tooltip request.
+
+## Adding tooltip lines
+
+Use `ItemPart::tooltip` for an attached item's own lines at the vanilla
+`Item.appendHoverText` position, after the name and before component lines.
+Use `Hooks::item_tooltip` for NeoForge's global `ItemTooltipEvent` moment: it
+receives every item's finished tooltip, including the parts' earlier lines,
+component lines and advanced information. No attached part is needed for a
+global listener, so this is also how a mod edits vanilla or other mods' tooltips.
+The global event supplies the stack, display settings, player IDs, and the
+request's `advanced` and `creative` flags on native and wasm alike.
+
+## Drawing a second world camera
+
+Native internals mods can request extra world cameras through `world_views` and
+consume their textures in `world_view_drawn`. These are raw renderer places, not
+portable API callbacks: wasm mods cannot use them. Construct a `WorldView` with a
+stable ID, camera, yaw, pitch, field of view and pixel size. Return the same
+requests whenever the frame asks; at most four valid, distinct IDs draw, with
+sides limited to 4096 pixels and the device limit.
+
+Use `world_view_drawn` to copy a still to your own buffer or draw into the supplied
+target with its encoder. Copy a picture you need to preserve: targets are reused
+while requested and retired when absent. Views draw before `world_drawn`, where
+you can composite their pictures into the player's frame. Extra cameras increase
+rendering work and do not include particles, weather, hands or shader-pack passes.
+See the generated `world_views` hook notes for the full rendering contract and
+`tools/run_world_views.py` for the offscreen fixture.
+
 ## Muffling sounds
 
 `ClientHost::muffle_sounds(amount, lowpass, ticks, exempt)` temporarily muffles the sound output, for example to accompany ringing ears after a nearby blast:

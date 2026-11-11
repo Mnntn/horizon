@@ -58,7 +58,11 @@ fn farmer(types: &super::super::MobTypes) -> Mob {
         Vec3::new(0.5, 1.0, 0.5),
         0.0,
     );
-    super::super::villager::set_profession(&mut m, 5);
+    super::super::villager::set_profession(
+        &mut m,
+        horizon_client::mobs::villager::profession_table(),
+        5,
+    );
     m
 }
 

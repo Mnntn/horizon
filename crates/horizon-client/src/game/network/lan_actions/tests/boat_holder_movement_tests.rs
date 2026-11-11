@@ -60,6 +60,7 @@ fn scene<'a>(
     )
     .unwrap();
     let (tx, rx) = mpsc::channel();
+    let guest_entity_id = g.take_entity_id() as i32;
     let mut guest = Guest::new(
         Joined {
             conn: 1,
@@ -73,7 +74,7 @@ fn scene<'a>(
             address: "127.0.0.1:1".parse().unwrap(),
             expected: false,
         },
-        1,
+        guest_entity_id,
         [0.5, 100.0, 0.5],
         2,
     );

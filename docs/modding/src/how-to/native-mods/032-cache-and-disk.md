@@ -3,6 +3,9 @@
 
 ## Cache and disk
 
+Game source edits below come from mixins and their support tables, not injects.
+An `[[inject]]` fills a compiled slot or is refused; it never compiles game code.
+
 The key hashes the commit, the horizon-mixins commit, Rust's version, the profile and features, and every file of
 every bundle. The same set on the same commit is never built twice. A change gives a new build, and
 `native/target/` stays, so a rebuild compiles only `horizon-client` and what the mods touched.

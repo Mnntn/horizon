@@ -542,7 +542,7 @@ fn save_with_metadata(
     Some(data)
 }
 
-fn save_without_metadata(
+pub(super) fn save_without_metadata(
     world: &World,
     pos: (i32, i32, i32),
     entity: &BlockEntity,

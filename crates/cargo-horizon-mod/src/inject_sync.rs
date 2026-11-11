@@ -1,9 +1,6 @@
 //! Publish a native mod's requested slots through the game's shared slot parser.
 use horizon_mod_api_gen::sites::Slots;
-use horizon_mod_package::{
-    Manifest,
-    manifest::{MANIFEST, inject::Kind},
-};
+use horizon_mod_package::{Manifest, manifest::MANIFEST};
 use std::{collections::BTreeSet, fs, path::Path};
 
 #[cfg(test)]
@@ -77,14 +74,13 @@ fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
                     manifest.id, entry.id
                 ));
             }
-            Ok(if entry.kind == Kind::Field {
-                format!("type {}", entry.at)
-            } else if let (Some(call), Some(nth), Some(ctx)) = (&entry.call, entry.nth, &entry.ctx)
-            {
-                format!("{} | {call} | {nth} | {ctx}", entry.at)
-            } else {
-                entry.at.clone()
-            })
+            Ok(
+                if let (Some(call), Some(nth), Some(ctx)) = (&entry.call, entry.nth, &entry.ctx) {
+                    format!("{} | {call} | {nth} | {ctx}", entry.at)
+                } else {
+                    entry.at.clone()
+                },
+            )
         })
         .collect::<Result<BTreeSet<_>, String>>()?
         .into_iter()
@@ -113,11 +109,6 @@ fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
             owned.functions.insert(at, origin);
         }
     }
-    for (at, origin) in requested.types {
-        if !existing.types.contains_key(&at) {
-            owned.types.insert(at, origin);
-        }
-    }
     for call in requested.calls {
         if !existing.calls.iter().any(|c| {
             c.target == call.target && c.selector == call.selector && c.ordinal == call.ordinal
@@ -130,7 +121,6 @@ fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
     checked.extend(&output, &lines).map_err(|e| e.to_string())?;
     let mut sorted = BTreeSet::new();
     sorted.extend(owned.functions.into_keys());
-    sorted.extend(owned.types.into_keys().map(|at| format!("type {at}")));
     for call in owned.calls {
         let nth = call.ordinal.map(|n| n.to_string()).unwrap_or_default();
         sorted.insert(format!(

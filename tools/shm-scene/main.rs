@@ -55,6 +55,7 @@ fn main() {
         );
         return;
     }
+    let startup = horizon_client::entry::prepare();
     log::set_logger(&EARLY_LOG).unwrap();
     log::set_max_level(log::LevelFilter::Warn);
     if std::env::var_os("BENCH_NATIVE").is_some() {
@@ -64,13 +65,13 @@ fn main() {
                 version: "0.1.0",
                 side: horizon_mod_package::Side::Both,
             }];
-        horizon_client::entry::main_with(
+        horizon_mod_host::main_with(
             vec![mod_api::ModEntry::new("machine_sample", hooks())],
             &[],
             BUILT,
-            None,
+            startup,
         );
     } else {
-        horizon_client::entry::main(None);
+        horizon_mod_host::main_with(Vec::new(), &[], &[], startup);
     }
 }

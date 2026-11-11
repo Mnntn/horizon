@@ -71,30 +71,44 @@ impl Jobs {
         });
     }
 
-    /// What finished since the last frame, into `ui`. An installed mod is
+    /// What the worker finished: `(installed, changed)`. An installed mod is
     /// turned on in `mods`; the caller saves the settings and lists the mods
-    /// again when this returns true. Completion waits while a world owns its frozen registry set.
-    pub(super) fn poll(&mut self, ui: &mut ModBrowser, mods: &mut ModList, in_world: bool) -> bool {
+    /// again for `installed`, and lays the Browse mods page out again for
+    /// `changed`, which covers a listing's content too, not just its count.
+    /// Completion waits while a world owns its frozen registry set.
+    pub(super) fn poll(
+        &mut self,
+        ui: &mut ModBrowser,
+        mods: &mut ModList,
+        in_world: bool,
+    ) -> (bool, bool) {
         if in_world {
-            return false;
+            return (false, false);
         }
         let Some(running) = &self.running else {
-            return false;
+            return (false, false);
         };
         let finished = match running.try_recv() {
             Ok(finished) => finished,
-            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Empty) => return (false, false),
             Err(TryRecvError::Disconnected) => {
                 self.running = None;
+                let changed = ui.installing.is_some() || ui.status == Status::Loading;
                 ui.installing = None;
                 if ui.status == Status::Loading {
                     ui.status = Status::Failed("the worker stopped".into());
                 }
-                return false;
+                return (false, changed);
             }
         };
+        let before = (
+            ui.status.clone(),
+            ui.listings.clone(),
+            ui.installing.clone(),
+            ui.message.clone(),
+        );
         self.running = None;
-        match finished {
+        let installed = match finished {
             Finished::Index(Ok((index, listings))) => {
                 self.index = Some(index);
                 ui.listings = listings;
@@ -136,7 +150,15 @@ impl Jobs {
                     }
                 }
             }
-        }
+        };
+        let changed = before
+            != (
+                ui.status.clone(),
+                ui.listings.clone(),
+                ui.installing.clone(),
+                ui.message.clone(),
+            );
+        (installed, changed)
     }
 }
 
@@ -149,11 +171,16 @@ fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
 impl Game<'_> {
     /// Each frame: what the browser's worker finished.
     pub(super) fn drive_mod_browser(&mut self) {
-        let installed = self.mod_jobs.poll(
+        // The Browse mods page's layout reads the browser: a worker's answer
+        // arriving makes the built page again at its next draw.
+        let (installed, changed) = self.mod_jobs.poll(
             &mut self.ui.options.mod_browser,
             &mut self.settings.mods,
             self.player.is_some(),
         );
+        if changed {
+            self.ui.options.layout_changed();
+        }
         if installed {
             self.settings.save(&Self::options_path());
             self.start_mods();
@@ -175,6 +202,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn browser_completions_and_disconnects_report_visible_changes() {
+        let (send, receive) = channel();
+        let mut jobs = Jobs {
+            running: Some(receive),
+            index: None,
+        };
+        let mut ui = ModBrowser {
+            status: Status::Loading,
+            ..ModBrowser::default()
+        };
+        let mut mods = ModList::default();
+        assert_eq!(jobs.poll(&mut ui, &mut mods, false), (false, false));
+        send.send(Finished::Index(Err("offline".into()))).unwrap();
+        assert_eq!(jobs.poll(&mut ui, &mut mods, false), (false, true));
+        assert_eq!(ui.status, Status::Failed("offline".into()));
+        assert_eq!(jobs.poll(&mut ui, &mut mods, false), (false, false));
+
+        let (send, receive) = channel();
+        jobs.running = Some(receive);
+        ui.status = Status::Loading;
+        ui.installing = Some("ruby".into());
+        drop(send);
+        assert_eq!(jobs.poll(&mut ui, &mut mods, false), (false, true));
+        assert!(ui.installing.is_none());
+        assert_eq!(ui.status, Status::Failed("the worker stopped".into()));
+        assert_eq!(jobs.poll(&mut ui, &mut mods, false), (false, false));
+
+        let (send, receive) = channel();
+        jobs.running = Some(receive);
+        ui.status = Status::Ready;
+        drop(send);
+        assert_eq!(jobs.poll(&mut ui, &mut mods, false), (false, false));
+        assert_eq!(ui.status, Status::Ready);
+
+        let (send, receive) = channel();
+        jobs.running = Some(receive);
+        ui.installing = Some("ruby".into());
+        send.send(Finished::Installed(Err("offline".into()), Vec::new()))
+            .unwrap();
+        assert_eq!(jobs.poll(&mut ui, &mut mods, false), (false, true));
+        assert!(ui.installing.is_none());
+        assert!(matches!(ui.message, Some((_, false))));
+        assert!(mods.enabled.is_empty());
+    }
+
+    #[test]
     fn an_install_finishing_after_world_open_waits_to_enable_its_content() {
         let (send, receive) = channel();
         let mut jobs = Jobs {
@@ -193,11 +266,11 @@ mod tests {
             Vec::new(),
         ))
         .unwrap();
-        assert!(!jobs.poll(&mut ui, &mut mods, true));
+        assert_eq!(jobs.poll(&mut ui, &mut mods, true), (false, false));
         assert!(mods.enabled.is_empty());
         assert!(mods.disabled.contains("ruby"));
         assert!(jobs.running.is_some());
-        assert!(jobs.poll(&mut ui, &mut mods, false));
+        assert!(jobs.poll(&mut ui, &mut mods, false).0);
         assert!(mods.enabled.contains("ruby"));
         assert!(!mods.disabled.contains("ruby"));
         assert!(jobs.running.is_none());

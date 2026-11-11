@@ -3,6 +3,7 @@
 //! assets (`content_root`), and the Mods page's rows. Code mods are native (`native_hooks.rs`)
 //! or wasm (`horizon-mod-wasm`, loaded at startup); any other executable file is refused.
 use super::{Game, execution_role::ExecutionRole};
+mod menu_books;
 use horizon_client::{
     lang,
     mod_list::{self, Installed},
@@ -71,6 +72,8 @@ pub(super) struct CodeSwitches {
 
 #[derive(Clone, Default)]
 pub(super) struct ModsState {
+    pub(super) profession_declarations:
+        Arc<std::sync::OnceLock<Vec<(String, mod_api::ProfessionDefinition)>>>,
     /// Saved switches gate the first data inventory while registration keeps
     /// its existing startup ordering. Runtime dispatch owns later switches.
     pub(super) code_switches: Option<Arc<CodeSwitches>>,
@@ -98,6 +101,12 @@ pub(super) struct ModsState {
     pub(super) data_switched: bool,
     /// Structured load refusals, rendered only at the existing Mods-page boundary.
     pub(super) refused: Arc<Mutex<Vec<MissingJar>>>,
+    /// The entries of the mods' datapack registries this world session has published, at the
+    /// generation of the load or reload that built them; `None` when no mod declared one.
+    pub(super) datapack_registries: Option<Arc<mod_api::DatapackRegistrySet>>,
+    /// The entries a table load decoded and checked, until its world open or reload takes them
+    /// to publish.
+    pub(super) datapack_candidate: Option<mod_api::DatapackCandidate>,
 }
 
 impl ModsState {
@@ -224,12 +233,24 @@ fn builtin_registry_names(root: &Path) -> horizon_client::Result<BTreeMap<String
 /// hook runs, so every step sees the same values.
 pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<()> {
     let packages = mod_api::__private::loaded_mods();
+    let directory = Game::game_dir();
+    #[cfg(unix)]
+    let directory = {
+        use std::os::unix::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Unix(directory.as_os_str().as_bytes().to_vec())
+    };
+    #[cfg(windows)]
+    let directory = {
+        use std::os::windows::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Windows(directory.as_os_str().encode_wide().collect())
+    };
     mod_api::__private::install_registration_data(mod_api::__private::RegistrationData::new(
         builtin_registry_names(root)?,
         horizon_world::native_load_context::capture_settings(
             &Game::mod_data_root(),
             packages.ids(),
         ),
+        directory,
     ));
     Ok(())
 }
@@ -261,8 +282,12 @@ pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Res
 }
 
 /// Finish every once-only content declaration on the registration thread.
-pub(super) fn freeze_declarations() {
-    let _ = native_declared();
+pub(super) fn freeze_declarations() -> horizon_client::Result<()> {
+    let declared = native_declared();
+    if !declared.errors.is_empty() {
+        return Err(declared.errors.join("\n").into());
+    }
+    Ok(())
 }
 
 struct NativeDeclared {
@@ -278,11 +303,12 @@ fn native_declared() -> &'static NativeDeclared {
     static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
     DECLARED.get_or_init(|| {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
-        Game::native_blocks(&RegistrationContext::new(), &mut blocks);
-        Game::native_items(&RegistrationContext::new(), &mut items);
+        let context = RegistrationContext::new();
+        Game::native_blocks(&context, &mut blocks);
+        Game::native_items(&context, &mut items);
+        let mut errors = mod_api::__private::take_declaration_refusals(&context);
         let types = super::api_values::block_entity_declarations();
         use super::api_values::TryIntoEngine;
-        let mut errors = Vec::new();
         let mut blocks: Vec<horizon_mod_package::content::Block> = blocks
             .iter()
             .filter_map(|v| {
@@ -449,8 +475,11 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
 /// The types native mods register for resource definitions, kept once at start, before
 /// resources load: item tint sources (`native_register_item_tint_sources`), so `tints` entries on
 /// them read the mod's colour; atlas sprite sources (`native_register_sprite_sources`), so atlas
-/// definitions' entries on them list the mod's sprites; and model loaders
-/// (`native_register_model_loaders`), so models naming one get the mod's quads.
+/// definitions' entries on them list the mod's sprites; model loaders
+/// (`native_register_model_loaders`), so models naming one get the mod's quads; item model node
+/// types (`native_register_item_models`), so item definitions' nodes of them draw what the mod
+/// answers; and animation targets and interpolations (`native_register_json_animation_types`), so
+/// animation files may name them.
 pub(super) fn register_resource_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
@@ -464,6 +493,12 @@ pub(super) fn register_resource_sources(role: ExecutionRole) {
     let mut loaders = Vec::new();
     Game::native_register_model_loaders(&RegistrationContext::new(), &mut loaders);
     horizon_client_render::mod_model_loaders::register(loaders);
+    let mut models = Vec::new();
+    Game::native_register_item_models(&RegistrationContext::new(), &mut models);
+    horizon_assets::item_model::register_item_models(models);
+    let mut types = Vec::new();
+    Game::native_register_json_animation_types(&RegistrationContext::new(), &mut types);
+    horizon_client_render::mod_animations::register(types);
 }
 /// The client presentation registrations, resolved once before the first level opens: the
 /// dimension transition screens and the entity spectator shaders.
@@ -471,6 +506,7 @@ pub(super) fn register_client_presentations(role: ExecutionRole) {
     register_preset_editors(role);
     register_dimension_transition_screens(role);
     register_entity_spectator_shaders(role);
+    register_render_pipelines(role);
 }
 
 /// Resolve client dimension-transition registrations once, before the first level opens.
@@ -502,9 +538,28 @@ pub(super) fn register_preset_editors(role: ExecutionRole) {
     horizon_client::title::preset_editors::register(editors);
 }
 
+/// Keep the mods' render pipeline registrations once at startup, before resources load: every
+/// load builds them from its own shader files.
+pub(super) fn register_render_pipelines(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut pipelines = Vec::new();
+    Game::native_register_render_pipelines(&RegistrationContext::new(), &mut pipelines);
+    horizon_client_render::mod_pipelines::register(pipelines);
+}
+
+/// The native mods' meshing registrations, kept once at start, before resources load: colour
+/// resolvers, then the block tint sources that read them, then section geometry renderers.
+pub(super) fn register_meshing(role: ExecutionRole) {
+    register_color_resolvers(role);
+    register_block_tint_sources(role);
+    add_section_geometry(role);
+}
+
 /// The native mods' colour resolvers (`native_register_color_resolvers`), kept once at start,
 /// before the block tint sources that read them and before resources load.
-pub(super) fn register_color_resolvers(role: ExecutionRole) {
+fn register_color_resolvers(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
@@ -515,13 +570,23 @@ pub(super) fn register_color_resolvers(role: ExecutionRole) {
 
 /// The native mods' block tint sources (`native_register_block_tint_sources`), kept once at
 /// start, before resources load; every resource load applies them to its mesh tables.
-pub(super) fn register_block_tint_sources(role: ExecutionRole) {
+fn register_block_tint_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut registry = mod_api::BlockTintRegistry::default();
     Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_block_tint_sources(registry.into_layers());
+}
+/// The native mods' section geometry renderers (`native_add_section_geometry`), kept once at
+/// start, before resources load; every mesh of a section asks them to add their quads.
+fn add_section_geometry(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::SectionGeometryRegistry::default();
+    Game::native_add_section_geometry(&RegistrationContext::new(), &mut registry);
+    horizon_client::mesher::register_section_geometry(registry.into_renderers());
 }
 /// The native mods' particle providers (`native_register_particle_providers`) and render groups
 /// (`native_register_particle_groups`), kept once at start, before resources load; every particle
@@ -654,14 +719,8 @@ pub(super) fn content_overlay(
         .iter()
         .map(|&index| {
             let source = &packages[index];
-            let declared = native_items
-                .iter()
-                .filter(|i| {
-                    i.id.split_once(':')
-                        .is_some_and(|(ns, _)| ns == source.manifest.id)
-                })
-                .map(|i| i.id.clone())
-                .collect::<Vec<_>>();
+            let declared =
+                super::native_content_items::owned_item_ids(source.manifest, native_items);
             (source.path, source.manifest, declared)
         })
         .collect();
@@ -892,7 +951,7 @@ pub(super) fn content_root(
             .join("\n")
     })?;
     register_entity_types(&overlay.mods);
-    register_menu_types(&overlay.mods);
+    register_menu_types(&overlay.mods)?;
     register_iterated_registries(overlay.root.prepared())?;
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);
     Ok(overlay.root)
@@ -1115,9 +1174,12 @@ fn register_entity_types(mods: &[horizon_client::mod_content::ContentMod]) {
 
 /// the mods' menu types, as their entity types: set once, from the startup
 /// root.
-fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
+fn register_menu_types(
+    mods: &[horizon_client::mod_content::ContentMod],
+) -> horizon_client::Result<()> {
     use horizon_client::containers;
     let menus = horizon_client::mod_content::menu_types(mods);
+    menu_books::validate_registered(&menus)?;
     let set = containers::register_mod_menu_types(menus.iter().map(|m| {
         let results = m.results.iter().map(|&r| usize::from(r)).collect();
         let crafting = m.crafting.map(|c| containers::ModCrafting {
@@ -1146,6 +1208,7 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
     {
         log::warn!("Horizon: the mods' menu types changed; restart the game to use them");
     }
+    Ok(())
 }
 
 /// The embedded inventory, formatted for the crash report.
@@ -1311,10 +1374,8 @@ impl Game<'_> {
 
     pub(super) fn install_loop_context(&mut self, context: PreparedLoopContext) {
         self.loop_context = context.game;
+        self.refresh_recipe_property_context();
         self.setting_overrides.borrow_mut().clear();
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.loop_context = self.loop_context.clone();
-        }
         if let Some(audio) = context.audio {
             self.audio.set_loop_context(audio);
         }
@@ -1568,6 +1629,115 @@ pub(super) fn living_mod_types()
         .into_iter()
         .map(|(id, t)| (id, std::sync::Arc::new(t)))
         .collect()
+}
+
+/// The block states native mods add to vanilla POI types (`native_extend_poi_types`),
+/// resolved against `registry` once its block definitions are published and before any
+/// world's POI tables are built; collected again when the resources reload. Each refusal
+/// is logged once.
+pub(super) fn extend_poi_types(registry: &horizon_world::registry::BlockRegistry) {
+    let (additions, refusals) = collect_poi_extensions(registry);
+    for refusal in refusals
+        .into_iter()
+        .chain(horizon_world::poi::extend(additions))
+    {
+        log::warn!("Horizon: POI type extension refused: {refusal}");
+    }
+}
+
+/// Ask the mods, then turn each predicate into the complete states of `registry` it
+/// selects, in registration order. A tag predicate is refused here: additions name blocks.
+pub(in crate::game) fn collect_poi_extensions(
+    registry: &horizon_world::registry::BlockRegistry,
+) -> (Vec<horizon_world::poi::PoiExtension>, Vec<String>) {
+    let Some(metadata) = mod_api::__private::block_definitions() else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut extensions = mod_api::PoiTypeExtensionRegistry::new(metadata);
+    Game::native_extend_poi_types(&RegistrationContext::new(), &mut extensions);
+    let mut additions = Vec::new();
+    let mut refusals = Vec::new();
+    for (poi, predicate) in extensions.into_entries() {
+        let record = mod_api::StatePredicateRecord::from(&predicate);
+        let block = match record.target {
+            mod_api::StatePredicateTarget::Block(block) => block,
+            mod_api::StatePredicateTarget::Tag(_) => {
+                refusals.push(format!(
+                    "{poi} asked for a block tag's states; an addition names a block"
+                ));
+                continue;
+            }
+        };
+        // The predicate was built on this metadata, so its block is known.
+        let Ok(name) = mod_api::BlockMetadata::name(metadata, block) else {
+            continue;
+        };
+        for index in 0..registry.len() {
+            let state = registry
+                .state(horizon_world::registry::BlockStateId(index as u32))
+                .expect("registry index is in bounds");
+            if state.name == name
+                && record.constraints.iter().all(|constraint| {
+                    state.properties.get(constraint.name.as_str()) == Some(&constraint.value)
+                })
+            {
+                additions.push(horizon_world::poi::PoiExtension {
+                    state: state.clone(),
+                    poi: poi.to_string(),
+                });
+            }
+        }
+    }
+    (additions, refusals)
+}
+
+/// The fluid contents native mods give their cauldron blocks
+/// (`native_register_cauldron_fluid_content`), resolved against `registry` once its block
+/// definitions are published, in one table with vanilla's water and lava, which the fluid
+/// capability reads; collected again when the resources reload. Each refusal is logged once.
+pub(super) fn register_cauldron_fluid_contents(registry: &horizon_world::registry::BlockRegistry) {
+    let (contents, refusals) = collect_cauldron_fluid_contents(registry);
+    for refusal in refusals {
+        log::warn!("Horizon: cauldron fluid content refused: {refusal}");
+    }
+    crate::game::machines::cauldron_contents::install(contents);
+}
+
+/// Ask the mods, then resolve each registration against `registry` into the table after
+/// vanilla's contents, in registration order: a block or fluid already in the table, an
+/// unknown block or fluid, a level property the block lacks or that isn't an integer, and a
+/// total of 0 or one the levels don't divide evenly are refused, with their reasons.
+pub(in crate::game) fn collect_cauldron_fluid_contents(
+    registry: &horizon_world::registry::BlockRegistry,
+) -> (
+    crate::game::machines::cauldron_contents::CauldronContents,
+    Vec<String>,
+) {
+    use crate::game::machines::cauldron_contents::{CauldronContent, CauldronContents};
+    let mut registrations = mod_api::CauldronFluidContentRegistry::default();
+    Game::native_register_cauldron_fluid_content(&RegistrationContext::new(), &mut registrations);
+    let mut contents = CauldronContents::vanilla();
+    let mut refusals = Vec::new();
+    for registration in registrations.into_entries() {
+        let resolved = match (
+            mod_api::__private::block_key_id(registration.block),
+            mod_api::__private::fluid_id(registration.fluid),
+        ) {
+            (None, _) => Err("an unknown block was given a cauldron fluid content".to_owned()),
+            (Some(block), None) => Err(format!("{block} was given an unknown fluid")),
+            (Some(block), Some(fluid)) => CauldronContent::resolve(
+                registry,
+                block,
+                fluid,
+                registration.total,
+                registration.level.as_deref(),
+            ),
+        };
+        if let Err(refusal) = resolved.and_then(|content| contents.add(content)) {
+            refusals.push(refusal);
+        }
+    }
+    (contents, refusals)
 }
 
 /// Registered callbacks indexed directly by the slots resolved in enchantment content.

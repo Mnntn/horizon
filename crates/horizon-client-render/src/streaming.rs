@@ -700,6 +700,9 @@ pub struct Streaming {
     /// Set while `update` runs, after it refreshed `cover`: nothing else can
     /// change `extra` meanwhile, so `cover` answers without comparing them.
     cover_current: bool,
+    /// The combined `forced` set as each column's distance to the nearest one, made again when
+    /// they change; read like `cover`, while `cover_current`.
+    forced_cover: Option<ForcedCover>,
     /// Mesh the sections for drawing (false on a server thread).
     pub mesh: bool,
     /// The pregeneration band (`set_band`).
@@ -897,6 +900,7 @@ impl GenerationScan {
                 extra: input.ranges.extra,
                 forced: input.ranges.forced,
                 cover: input.ranges.cover,
+                forced_cover: None,
                 band: input.ranges.band,
             };
             self.remember(ranges, input.world);
@@ -1168,8 +1172,10 @@ pub struct WorkerContext {
     pub hidden_states: Arc<[bool]>,
 }
 mod bounded;
+mod forced_cover;
 mod relight_now;
 use bounded::nearest_first;
+use forced_cover::ForcedCover;
 impl Streaming {
     pub fn new<G: ChunkGenerator>(
         generator: Arc<G>,
@@ -1279,6 +1285,7 @@ impl Streaming {
             extra: Vec::new(),
             cover: None,
             cover_current: false,
+            forced_cover: None,
             mesh: true,
             band: None,
             band_ranked: None,
@@ -1810,6 +1817,7 @@ impl Streaming {
             });
         }
         ExtraCover::refresh(&mut self.cover, &self.extra);
+        ForcedCover::refresh(&mut self.forced_cover, &self.forced);
         self.cover_current = true;
         // The sweeps below walk every loaded column and proto chunk. Run them
         // at once when the view moves and every eighth tick otherwise: a
@@ -2080,6 +2088,7 @@ impl Streaming {
                 extra: &self.extra,
                 forced: &self.forced,
                 cover: ExtraCover::current(&self.cover, &self.extra, self.cover_current),
+                forced_cover: self.forced_cover.as_ref().filter(|_| self.cover_current),
                 band: self.band.as_ref(),
             };
             let (protos, generating) = (&self.protos, &self.generating);
@@ -2245,6 +2254,7 @@ impl Streaming {
                 extra: &self.extra,
                 forced: &self.forced,
                 cover: ExtraCover::current(&self.cover, &self.extra, self.cover_current),
+                forced_cover: self.forced_cover.as_ref().filter(|_| self.cover_current),
                 band: self.band.as_ref(),
             };
             self.waiting.retain(|&(x, sy, z)| {
@@ -2349,6 +2359,7 @@ impl Streaming {
                 extra: &self.extra,
                 forced: &self.forced,
                 cover: ExtraCover::current(&self.cover, &self.extra, self.cover_current),
+                forced_cover: self.forced_cover.as_ref().filter(|_| self.cover_current),
                 band: self.band.as_ref(),
             },
             world,
@@ -2486,6 +2497,7 @@ impl Streaming {
             extra: &self.extra,
             forced: &self.forced,
             cover: ExtraCover::current(&self.cover, &self.extra, self.cover_current),
+            forced_cover: self.forced_cover.as_ref().filter(|_| self.cover_current),
             band: self.band.as_ref(),
         }
     }
@@ -2933,6 +2945,8 @@ struct Ranges<'a> {
     /// `extra` indexed by a grid or buckets: coverage queries without a
     /// scan of every area.
     cover: Option<&'a ExtraCover>,
+    /// The combined `forced` set by distance (`Streaming::forced_cover`), while it matches.
+    forced_cover: Option<&'a ForcedCover>,
     band: Option<&'a Band>,
 }
 /// The chunks a pregeneration task (`/pregen`) wants lit now: rows `z0..=z1`
@@ -2981,6 +2995,7 @@ impl Band {
             + i64::from(x - self.x0 + 8).max(0)
     }
 }
+
 /// For every column near the extra areas, how far it lies outside the
 /// nearest one's square (Chebyshev distance less its radius; 0 inside). A server has an area per player, and streaming asks of every
 /// loaded and wanted column whether one reaches it, several times a tick:
@@ -3299,19 +3314,7 @@ impl Ranges<'_> {
         if self.radius >= 0 && dx * dx + dz * dz <= r * r {
             return true;
         }
-        // A forced chunk holds a FORCED ticket at level 31
-        // (`ChunkMap.FORCED_TICKET_LEVEL`), and the level rises one per ring
-        // (`ChunkTracker.computeLevelFromNeighbor`): the margin is the
-        // vanilla status ring the caller asks for.
-        let reach = match margin {
-            1 => FORCED_FULL_RING,
-            2 => FORCED_FEATURES_RING,
-            3 => FORCED_TERRAIN_RING,
-            _ => margin + 1,
-        };
-        self.forced
-            .iter()
-            .any(|f| (x - f.0).abs() <= reach && (z - f.1).abs() <= reach)
+        self.near_forced(x, z, margin)
     }
 }
 impl Drop for Streaming {
@@ -4050,6 +4053,7 @@ mod tests {
             extra: &[],
             forced: &forced,
             cover: None,
+            forced_cover: None,
             band: None,
         };
         let generate = |x, z, priority, order| Queued {
@@ -4289,6 +4293,7 @@ mod tests {
                     extra: &self.extra,
                     forced: &self.forced,
                     cover: None,
+                    forced_cover: None,
                     band: None,
                 },
                 world: &self.world,
@@ -4671,6 +4676,7 @@ mod tests {
                     extra: &[],
                     forced: &forced,
                     cover: None,
+                    forced_cover: None,
                     band: None,
                 };
                 let square = |x: i32, z: i32, n: i32| {
@@ -4727,6 +4733,7 @@ mod tests {
                     extra: &[((radius * 2 + 9, 3), 4)],
                     forced: &forced,
                     cover: None,
+                    forced_cover: None,
                     band: None,
                 };
                 let span = radius * 3 + 20;
@@ -4763,6 +4770,7 @@ mod tests {
             extra: &extra,
             forced: &forced,
             cover: None,
+            forced_cover: None,
             band: None,
         };
         for x in -5i32..=15 {
@@ -4796,6 +4804,7 @@ mod tests {
                 extra: &extra,
                 forced: &forced,
                 cover: None,
+                forced_cover: None,
                 band: None,
             };
             let level = |x: i32, z: i32| 31 + ((x - 40).abs().max((z + 9).abs()) - view).max(0);
@@ -4850,6 +4859,7 @@ mod tests {
             extra: &[],
             forced: &forced,
             cover: None,
+            forced_cover: None,
             band: None,
         };
         let level = |x: i32, z: i32| 31 + (x - 40).abs().max((z + 40).abs());
@@ -4989,6 +4999,7 @@ mod cover_tests {
                 extra: &extra,
                 forced: &forced,
                 cover,
+                forced_cover: None,
                 band: None,
             };
             let (scan, grid) = (ranges(None), ranges(Some(&cover)));
@@ -5031,6 +5042,7 @@ mod cover_tests {
                 extra: &extra,
                 forced: &forced,
                 cover,
+                forced_cover: None,
                 band: None,
             };
             let (scan, buckets) = (ranges(None), ranges(Some(&cover)));
@@ -5096,6 +5108,7 @@ mod cover_tests {
                 extra: &extra,
                 forced: &forced,
                 cover,
+                forced_cover: None,
                 band: None,
             };
             // The columns streaming asks about: everything kept, and the

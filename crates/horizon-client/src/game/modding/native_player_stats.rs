@@ -17,12 +17,12 @@ fn qualified(id: &str) -> String {
 
 impl Game<'_> {
     /// Whether `player` still names the same player on this server.
-    fn native_player_current(&self, player: PlayerRef) -> bool {
+    pub(super) fn native_player_current(&self, player: PlayerRef) -> bool {
         self.player_handle_read(player).is_some()
     }
     /// The guest record `player` reads from outside their turn, or None
     /// when their state is in the game (they act, or they are the host).
-    fn native_player_resting(
+    pub(super) fn native_player_resting(
         &self,
         player: PlayerRef,
     ) -> Option<&horizon_client::lan::guest::Guest> {

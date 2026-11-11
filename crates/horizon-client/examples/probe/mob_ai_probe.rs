@@ -287,7 +287,7 @@ fn villager_flag(m: &mut Mob, flag: &str) {
     match k {
         "profession" => {
             let p = villager::profession_index(v).expect("profession");
-            villager::set_profession(m, p);
+            villager::set_profession(m, villager::profession_table(), usize::from(p));
         }
         "level" => m.extra.villager_level = v.parse().unwrap(),
         "xp" => {
@@ -393,9 +393,14 @@ fn villager_events(
             MobEvent::VillagerMeet { mob, other } => {
                 events.remove(i);
                 if let (Some(a), Some(b)) = (index(mobs, mob), index(mobs, other)) {
-                    let meeting = villager::meet(mobs, a, b, w.game_time, |item| {
-                        items.get(item).map_or(64, |i| i.max_stack)
-                    });
+                    let meeting = villager::meet(
+                        mobs,
+                        a,
+                        b,
+                        w.game_time,
+                        |item| items.get(item).map_or(64, |i| i.max_stack),
+                        w.professions,
+                    );
                     assert!(
                         meeting.thrown.is_empty(),
                         "villagers toss items: not modelled here"
@@ -1200,6 +1205,7 @@ pub fn main() -> horizon_client::Result<()> {
                 MobWorld {
                     goal_host: None,
                     teams: Default::default(),
+                    professions: horizon_client::mobs::villager::profession_table(),
                     loop_context: crate::test_resources::server_loop_context(),
                     world: &world,
                     registry,

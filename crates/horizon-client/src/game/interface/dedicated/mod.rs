@@ -1454,18 +1454,13 @@ impl Game<'_> {
         }
     }
 
-    /// A dedicated server of its own, not single player's server thread
-    /// (which runs with `options.dedicated` too).
-    pub(super) fn standalone_server(&self) -> bool {
-        self.options.dedicated.is_some() && self.serving.is_none()
-    }
     /// Load the spawn area and find the world spawn as single player does,
     /// without keeping a player there. A dedicated server only finds the world
     /// spawn (MinecraftServer.setInitialSpawn): a player's spawn is found as
     /// one joins.
     pub(super) fn settle_spawn(&mut self) -> Result<()> {
         let deadline = Instant::now() + Duration::from_secs(600);
-        if self.standalone_server() {
+        if self.is_dedicated_server() {
             if self.level.spawn.is_none() {
                 let [x, y, z] = loop {
                     self.update_world();
@@ -1514,7 +1509,7 @@ impl Game<'_> {
                 .loading_chunks(|g| super::game_mode::loads_chunks(rule, g.spectator()))
                 .next()
         });
-        if self.standalone_server() {
+        if self.is_dedicated_server() {
             self.streaming.radius = if guest.is_some() {
                 self.settings.render_distance
             } else {
@@ -2476,6 +2471,29 @@ fn console_level(active: super::Dim) -> Option<super::Dim> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn broadcast_console_destination_follows_role_not_launch_marker() {
+        use crate::game::execution_role::ExecutionRole;
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
+        game.options.dedicated = Some(Vec::new());
+        for (role, expected) in [
+            (
+                ExecutionRole::DedicatedServer,
+                vec!["destination probe".to_owned()],
+            ),
+            (ExecutionRole::IntegratedServer, Vec::new()),
+            (ExecutionRole::Client, Vec::new()),
+        ] {
+            game.options.execution_role = role;
+            let lines = capture_log(|| {
+                game.native_broadcast(horizon_client::text::Text::literal("destination probe"))
+            });
+            assert_eq!(lines, expected, "{role:?}");
+        }
+    }
+
     use super::{
         capture_log, log, log_from, overload_warning, panic_message, parse_whitelist_bypass,
     };

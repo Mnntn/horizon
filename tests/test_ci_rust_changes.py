@@ -4,7 +4,9 @@ import subprocess
 import tempfile
 import unittest
 
-from tools.ci.rust_changes import UNKNOWN_CHANGE, changed_paths, needs_launcher, needs_rust
+from tools.ci.rust_changes import (
+    UNKNOWN_CHANGE, changed_entries, changed_paths, needs_launcher, needs_rust, needs_tooling, selections,
+)
 
 
 class RustChangesTests(unittest.TestCase):
@@ -59,6 +61,92 @@ class RustChangesTests(unittest.TestCase):
                 os.chdir(previous)
             self.assertIn("source.rs", paths)
             self.assertTrue(needs_rust(paths))
+
+    def test_tooling_keeps_watched_markdown_and_non_documentation(self):
+        for path in [
+            "tools/README.md", "tests/fixtures/example.md", ".github/pull_request_template.md",
+            "docs/modding/src/introduction.md", "roadmap/journal/example.md",
+            "README.md", "ROADMAP.md", "docs/README.md",
+            "crates/horizon-client/src/game.rs", "packaging/server/start.sh", "research-lock.json",
+            "unknown-file",
+        ]:
+            with self.subTest(path=path):
+                self.assertTrue(needs_tooling([("M", path)]))
+                self.assertTrue(needs_tooling([("M", "docs/setup.md"), ("M", path)]))
+        self.assertFalse(needs_tooling([("M", "docs/setup.md")]))
+        self.assertFalse(needs_tooling([]))
+
+    def test_documentation_membership_changes_keep_link_checks(self):
+        for status in ["A", "D", "T", "R100", "?"]:
+            with self.subTest(status=status):
+                self.assertTrue(needs_tooling([(status, "docs/setup.md")]))
+        self.assertTrue(needs_tooling([("D", "docs/old.md"), ("A", "docs/new.md")]))
+
+    def test_boundary_uses_fail_closed_rust_selection(self):
+        # The lint boundary step consumes this same central decision.
+        for path in ["Cargo.toml", "crates/example/Cargo.toml", "launcher/Cargo.toml",
+                     "crates/example/src/lib.rs", UNKNOWN_CHANGE]:
+            with self.subTest(path=path):
+                self.assertTrue(selections([("M", path)])["rust_required"])
+        self.assertFalse(selections([("M", "docs/setup.md")])["rust_required"])
+
+    def test_shared_selections_preserve_launcher_and_sample_requirements(self):
+        self.assertEqual(selections([("M", "docs/setup.md")]), {
+            "rust_required": False, "launcher_required": False,
+            "tooling_required": False, "sample_required": False,
+        })
+        for path in ["Cargo.lock", "tools/ci/rust_changes.py", ".github/workflows/dyna-ci.yml"]:
+            selected = selections([("M", path)])
+            self.assertTrue(selected["rust_required"])
+            self.assertTrue(selected["launcher_required"])
+            self.assertTrue(selected["tooling_required"])
+        # A sample-selected API change must not run its compiler without installing Rust.
+        selected = selections([("M", "crates/horizon-mod-api/README.md")])
+        self.assertTrue(selected["sample_required"])
+        self.assertTrue(selected["rust_required"])
+
+    def test_git_status_and_cli_selections_for_actual_documentation_changes(self):
+        selector = Path(__file__).resolve().parents[1] / "tools/ci/rust_changes.py"
+        with tempfile.TemporaryDirectory() as directory:
+            def git(*args):
+                return subprocess.check_output(["git", "-C", directory, *args])
+
+            git("init", "--quiet")
+            docs = Path(directory, "docs")
+            docs.mkdir()
+            for name in ["modified.md", "deleted.md", "old.md", "type.md"]:
+                (docs / name).write_text("old\n")
+            git("add", ".")
+            commit = ["-c", "user.name=CI test", "-c", "user.email=ci@example.invalid",
+                      "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture"]
+            git(*commit)
+            base = git("rev-parse", "HEAD").decode().strip()
+            (docs / "modified.md").write_text("new\n")
+            (docs / "deleted.md").unlink()
+            (docs / "old.md").rename(docs / "renamed.md")
+            (docs / "added.md").write_text("added\n")
+            (docs / "type.md").unlink()
+            (docs / "type.md").symlink_to("modified.md")
+            git("add", "-A")
+            git(*commit)
+            previous = Path.cwd()
+            try:
+                os.chdir(directory)
+                entries = changed_entries(base, "HEAD")
+            finally:
+                os.chdir(previous)
+            self.assertEqual(set(entries), {
+                ("M", "docs/modified.md"), ("D", "docs/deleted.md"), ("D", "docs/old.md"),
+                ("A", "docs/renamed.md"), ("A", "docs/added.md"), ("T", "docs/type.md"),
+            })
+            import sys
+            output = subprocess.check_output(
+                [sys.executable, str(selector), "--all", base, "HEAD"], cwd=directory, text=True,
+            )
+            self.assertEqual(dict(line.split("=") for line in output.splitlines()), {
+                "rust_required": "false", "launcher_required": "false",
+                "tooling_required": "true", "sample_required": "false",
+            })
 
     def test_a_base_missing_from_the_checkout_means_everything_changed(self):
         with tempfile.TemporaryDirectory() as directory:

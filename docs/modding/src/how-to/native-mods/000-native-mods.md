@@ -40,8 +40,8 @@ The client hook `native_render_name_tag(entity_id, kind, vanilla_visible, visibl
 Native mods are Rust projects that implement the game's typed hook API (`impl Hooks`). Start with
 `cargo horizon-mod new my_mod --template native` ([Trait mods](../../concepts/trait-mods/000-trait-mods-draft.md#trait-mods-draft)).
 Each project has one `horizon-mod.toml`, with exact build pins in `[native]`, and ships as one `.hmod`.
-For the rare case the API does not cover, internals injections use compiled raw slots when available;
-unlisted supported targets use a source rebuild. See [Injections](../../injections.md).
+For the rare case the API does not cover, internals injections use compiled raw slots only;
+unlisted targets are refused. Use [mixins](../../mixins.md) for supported native source edits. See [Injections](../../injections.md).
 An injection is an escape hatch; request a typed hook for the behavior it needs.
 
 Native mods are native code with the player's rights, not sandboxed. The first install shows a trust notice,

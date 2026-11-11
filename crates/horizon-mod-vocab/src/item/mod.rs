@@ -15,6 +15,7 @@ pub(crate) mod energy_capability;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod item_attributes;
+pub(crate) mod item_model_context;
 /// Owned item values and typed component patches.
 pub mod item_stack;
 // hidden: a module of game-side types; mods use their re-exports

@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s ເປັນເວລາ %2$s, ຈົນຮອດ %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "ບໍ່ກ່ຽວຂ້ອງກັບ Mojang ຫຼື Microsoft",
-  "key.emote": "ລໍ້ອາລົມ"
+  "key.emote": "ລໍ້ອາລົມ",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

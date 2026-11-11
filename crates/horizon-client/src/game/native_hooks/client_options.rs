@@ -24,18 +24,7 @@ impl Game<'_> {
     }
     /// A snapshot of the current GUI and accessibility preferences.
     pub(in crate::game) fn gui_options(&self) -> ClientGuiOptions {
-        let s = &self.settings;
-        ClientGuiOptions {
-            gui_scale: s.gui_scale,
-            attack_indicator: s.attack_indicator,
-            main_hand_left: s.main_hand_left,
-            reduced_debug_info: s.reduced_debug_info,
-            high_contrast: s.high_contrast,
-            show_subtitles: s.show_subtitles,
-            notification_display_time: s.notification_display_time,
-            text_background_opacity: s.text_background_opacity,
-            menu_blur: s.menu_blur,
-        }
+        gui_options_snapshot(&self.settings)
     }
     /// A snapshot of the current chat preferences.
     pub(in crate::game) fn chat_options(&self) -> ClientChatOptions {
@@ -57,6 +46,42 @@ impl Game<'_> {
     pub(in crate::game) fn audio_options(&self) -> ClientAudioOptions {
         ClientAudioOptions {
             master_volume: self.settings.master_volume,
+        }
+    }
+}
+
+/// Convert live client settings into the API-owned GUI snapshot.
+fn gui_options_snapshot(s: &horizon_client::settings::Settings) -> ClientGuiOptions {
+    ClientGuiOptions {
+        gui_scale: s.gui_scale,
+        attack_indicator: s.attack_indicator,
+        main_hand_left: s.main_hand_left,
+        reduced_debug_info: s.reduced_debug_info,
+        advanced_item_tooltips: s.file.bool("advancedItemTooltips"),
+        high_contrast: s.high_contrast,
+        show_subtitles: s.show_subtitles,
+        notification_display_time: s.notification_display_time,
+        text_background_opacity: s.text_background_opacity,
+        menu_blur: s.menu_blur,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gui_snapshot_tracks_advanced_tooltip_toggle() {
+        let mut settings = horizon_client::settings::Settings::default();
+        for enabled in [false, true, false] {
+            settings.file.set(
+                "advancedItemTooltips",
+                horizon_client::options_file::V::Bool(enabled),
+            );
+            assert_eq!(
+                gui_options_snapshot(&settings).advanced_item_tooltips,
+                enabled
+            );
         }
     }
 }

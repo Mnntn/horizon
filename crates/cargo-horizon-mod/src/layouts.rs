@@ -99,7 +99,9 @@ fn build_with(tool: Tool, root: &Path) -> Result<(), String> {
     if !root.join("Cargo.toml").is_file() {
         return Ok(());
     }
-    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    // `cargo metadata` prints plain Windows paths, without the verbatim prefix
+    // `canonicalize` adds, so member manifests are compared in that form.
+    let root = dunce::canonicalize(root).map_err(|e| e.to_string())?;
     let declaration = horizon_mod_package::Manifest::parse(
         &fs::read_to_string(root.join(horizon_mod_package::manifest::MANIFEST))
             .map_err(|e| e.to_string())?,

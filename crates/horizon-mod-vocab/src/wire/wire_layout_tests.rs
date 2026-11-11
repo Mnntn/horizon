@@ -190,6 +190,7 @@ fn handle_records_have_declared_field_bytes() {
     fields(UnspawnedMobRef::new(epoch, 61), (epoch, 61u64));
     fields(ModelRef::from_parts(31, 7).unwrap(), (31u64, 7u32));
     fields(InstanceGroupRef::from_parts(37, 9).unwrap(), (37u64, 9u32));
+    fields(RenderPipelineRef::from_parts(41, 5).unwrap(), (41u64, 5u32));
     fields(AttachmentHolder::Entity(entity), (0u32, entity));
     fields(AttachmentHolder::Player(player), (1u32, player));
     fields(
@@ -539,6 +540,7 @@ fn particle_record_has_declared_field_bytes() {
         to_color: [0.5, 0.6, 0.7],
         trail: Some(([1.0, 2.0, 3.0], 19)),
         item: Some(vec!["example:item".into()]),
+        item_stack: ItemStack::new(ItemKey::from_slot(0).unwrap(), 7),
         geyser: Some((11, 0.75)),
         vibration: Some((
             crate::client::particles::PositionSource::Entity {
@@ -551,7 +553,7 @@ fn particle_record_has_declared_field_bytes() {
         legacy_entity_effect: Some(true),
         legacy_trail_lifetime: true,
     };
-    // Nested tuples add no framing: two groups allow all eleven fields to be decoded
+    // Nested tuples add no framing: two groups allow all twelve fields to be decoded
     // with the same declared types despite Wire's six-element tuple limit.
     fields(
         particle,
@@ -566,6 +568,7 @@ fn particle_record_has_declared_field_bytes() {
             ),
             (
                 Some(vec!["example:item".to_owned()]),
+                ItemStack::new(ItemKey::from_slot(0).unwrap(), 7),
                 Some((11i32, 0.75f32)),
                 Some((
                     crate::client::particles::PositionSource::Entity {
@@ -594,7 +597,8 @@ fn particle_record_has_declared_field_bytes() {
 #[test]
 fn saved_attachment_batch_fields_keep_scoped_identity_and_nbt() {
     use horizon_mod_runtime::attachments::{
-        AttachmentBatch as Batch, AttachmentEntry, index::AttachmentOwner,
+        AttachmentBatch as Batch, AttachmentEntry,
+        index::{AttachmentOwner, AttachmentSnapshot},
     };
     let holder = AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(43), 29));
     let mut saved = Compound::new();
@@ -602,7 +606,9 @@ fn saved_attachment_batch_fields_keep_scoped_identity_and_nbt() {
     let row = AttachmentOwner::from_parts(holder, 71).into_row(std::sync::Arc::new(
         AttachmentEntry::from_saved(saved.clone()),
     ));
-    let batch = AttachmentBatch::from(Batch::new(std::sync::Arc::new(vec![row])));
+    let batch = AttachmentBatch::from(Batch::new(std::sync::Arc::new(
+        AttachmentSnapshot::from_rows(vec![row]),
+    )));
     let (rows,): (Vec<(AttachmentWriteToken, Vec<u8>)>,) = decode(batch);
     assert_eq!(rows.len(), 1);
     let (token, bytes) = rows.into_iter().next().unwrap();
@@ -846,7 +852,13 @@ fn every_game_mode_pose_animation_and_connection_case_has_declared_tag_type() {
         (ArmPose::Spear, 9),
         (ArmPose::Brush, 10),
     ] {
-        fields(value, (tag,));
+        let mut output = Writer::new();
+        output.put(&value);
+        assert_eq!(output.bytes(), tag.to_le_bytes());
+        assert_eq!(
+            Reader::new(output.bytes()).take::<ArmPose>().unwrap(),
+            value
+        );
     }
     for (value, tag) in [
         (UseAnimation::None, 0u32),

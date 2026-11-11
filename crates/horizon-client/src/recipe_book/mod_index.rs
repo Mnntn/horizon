@@ -1,9 +1,14 @@
 //! Frozen mod-book membership and recipe-display validation, built on table reload.
+#[path = "mod_panel.rs"]
+mod panel;
+#[path = "mod_placement.rs"]
+mod placement;
 #[cfg(test)]
 #[path = "mod_index_tests.rs"]
 mod tests;
 use super::RecipeBookCategory;
 use mod_api::{RecipeBookDisplay as Display, RecipeSlotDisplay as Slot};
+pub use panel::ModBookPanel;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Resource tables consulted at the load boundary, never while drawing tabs.
@@ -15,6 +20,10 @@ pub trait DisplayResources {
     fn component(&self, id: &str) -> bool;
     fn trim_pattern(&self, id: &str) -> bool;
     fn menu(&self, id: &str) -> bool;
+    fn menu_layout(&self, _id: &str) -> Option<super::menu_layout::MenuLayoutMetadata> {
+        None
+    }
+    fn recipe_type(&self, kind: &str) -> bool;
     fn recipe(&self, id: &str, kind: &str) -> bool;
 }
 
@@ -28,21 +37,42 @@ pub enum DisplayLoadError {
     DuplicateRecipe(String),
     ConflictingBook(String),
     InvalidLayout(String),
+    InvalidPlacement(String),
 }
 
 /// Immutable index. Search membership is derived from book ownership, not an
 /// unrestricted union of categories sharing a user-supplied search name.
 #[derive(Debug, Default)]
 pub struct ModBookIndex {
+    generation: u64,
     categories: BTreeMap<String, RecipeBookCategory>,
+    layouts: BTreeMap<String, super::slot_layout::CheckedSlotLayout>,
+    placements: BTreeMap<String, Option<crate::menu::place::custom_plan::MenuPlacement>>,
     books: BTreeMap<String, (String, String, Vec<String>)>,
 }
 impl ModBookIndex {
     pub fn build(
-        declarations: Vec<RecipeBookCategory>,
+        mut declarations: Vec<RecipeBookCategory>,
         resources: &dyn DisplayResources,
     ) -> Result<Self, DisplayLoadError> {
+        placement::validate_batch(&mut declarations, resources)?;
         let mut index = Self::default();
+        for menu in mod_api::RecipeBookLayout::registered_menus() {
+            let Some((_, recipe_type, layout)) = mod_api::RecipeBookLayout::registered(&menu)
+            else {
+                continue;
+            };
+            if !resources.recipe_type(&recipe_type) {
+                return Err(unknown("recipe type", &recipe_type));
+            }
+            let metadata = resources
+                .menu_layout(&menu)
+                .ok_or_else(|| unknown("menu layout", &menu))?;
+            let compiled = super::menu_layout::compile(layout, metadata).map_err(|error| {
+                DisplayLoadError::InvalidLayout(format!("menu {menu}: {error:?}"))
+            })?;
+            index.layouts.insert(menu, compiled);
+        }
         let mut search_owners = BTreeMap::new();
         let mut recipe_ids = BTreeSet::new();
         for category in declarations {
@@ -50,6 +80,9 @@ impl ModBookIndex {
                 if !super::custom_books::valid_book_id(id) || id.starts_with("minecraft:") {
                     return Err(DisplayLoadError::InvalidId(id.clone()));
                 }
+            }
+            if !resources.recipe_type(&category.recipe_type) {
+                return Err(unknown("recipe type", &category.recipe_type));
             }
             if !resources.book(&category.book) {
                 return Err(unknown("book", category.book.as_str()));
@@ -59,6 +92,12 @@ impl ModBookIndex {
             }
             if !resources.menu(&category.target_menu) {
                 return Err(unknown("menu", &category.target_menu));
+            }
+            if let Some((book, recipe_type, _)) =
+                mod_api::RecipeBookLayout::registered(&category.target_menu)
+                && (book != category.book || recipe_type != category.recipe_type)
+            {
+                return Err(DisplayLoadError::ConflictingBook(category.target_menu));
             }
             if !resources.item(&category.icon) || category.icon == "minecraft:air" {
                 return Err(unknown("item", &category.icon));
@@ -91,6 +130,25 @@ impl ModBookIndex {
                 ));
             }
             for recipe in &category.displays {
+                if u32::try_from(recipe.displays.len()).is_err() {
+                    return Err(DisplayLoadError::InvalidPlacement(format!(
+                        "recipe {} has more RecipeBookDisplay entries than Wire can index",
+                        recipe.recipe
+                    )));
+                }
+                if let Some(layout) = index.layouts.get(&category.target_menu) {
+                    let owner = mod_api::RecipeBookLayout::declaring_mod(&category.target_menu)
+                        .ok_or_else(|| {
+                            DisplayLoadError::InvalidPlacement(format!(
+                                "menu {} has no declaring mod",
+                                category.target_menu
+                            ))
+                        })?;
+                    index.placements.insert(
+                        recipe.recipe.clone(),
+                        placement::compile(owner, &category.target_menu, recipe, layout)?,
+                    );
+                }
                 if !resources.recipe(&recipe.recipe, &category.recipe_type) {
                     return Err(unknown("recipe", &recipe.recipe));
                 }
@@ -99,6 +157,14 @@ impl ModBookIndex {
                 }
                 for display in &recipe.displays {
                     validate_display(display, &recipe.recipe, resources)?;
+                    if let Some(layout) = index.layouts.get(&category.target_menu) {
+                        layout.map(display, true).map_err(|error| {
+                            DisplayLoadError::InvalidLayout(format!(
+                                "menu {} recipe {}: {error:?}",
+                                category.target_menu, recipe.recipe
+                            ))
+                        })?;
+                    }
                 }
             }
             book.2.push(category.id.clone());
@@ -113,7 +179,40 @@ impl ModBookIndex {
         for (_, _, categories) in index.books.values_mut() {
             categories.sort();
         }
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        index.generation = NEXT
+            .try_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |value| value.checked_add(1),
+            )
+            .map_err(|_| {
+                DisplayLoadError::InvalidPlacement("display generation exhausted".into())
+            })?;
         Ok(index)
+    }
+    /// Opaque successful declaration generation; zero is never a published generation.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+    /// Authoritative, validated plan; explicit NOT_PLACEABLE differs from an unknown recipe.
+    pub fn placement(
+        &self,
+        recipe: &str,
+    ) -> Result<
+        &crate::menu::place::custom_plan::MenuPlacement,
+        crate::menu::place::custom_plan::PlacementRefusal,
+    > {
+        use crate::menu::place::custom_plan::PlacementRefusal as Refused;
+        self.placements
+            .get(recipe)
+            .ok_or(Refused::Unavailable)?
+            .as_ref()
+            .ok_or(Refused::NotPlaceable)
+    }
+    /// Frozen, validated menu-order destination map, if explicitly declared.
+    pub fn layout(&self, menu: &str) -> Option<&super::slot_layout::CheckedSlotLayout> {
+        self.layouts.get(menu)
     }
     /// Search tab's exact membership. Unknown (including vanilla) books are empty.
     pub fn search_categories(&self, book: &str) -> &[String] {
@@ -123,6 +222,10 @@ impl ModBookIndex {
     }
     pub fn category(&self, id: &str) -> Option<&RecipeBookCategory> {
         self.categories.get(id)
+    }
+    /// Validated declarations in stable category-id order.
+    pub fn categories(&self) -> impl Iterator<Item = &RecipeBookCategory> {
+        self.categories.values()
     }
 }
 fn unknown(kind: &'static str, id: &str) -> DisplayLoadError {

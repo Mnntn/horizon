@@ -46,8 +46,6 @@ pub enum Action {
     None,
     /// The Open Mods Folder button.
     OpenFolder,
-    /// Horizon's own: open the registry's mod browser.
-    Browse,
     /// The Back button.
     Back,
     /// Config: the settings page of the native mod at this index of `ModList::installed`.
@@ -169,8 +167,8 @@ struct Geo {
     panel: [i32; 4],
     /// Homepage, Issues and Config.
     buttons: [[i32; 4]; 3],
-    /// Open Mods Folder, Browse Mods and Back.
-    footer: [[i32; 4]; 3],
+    /// Open Mods Folder and Back.
+    footer: [[i32; 4]; 2],
 }
 
 fn hit(r: [i32; 4], x: f64, y: f64) -> bool {
@@ -327,8 +325,8 @@ impl ModsScreen {
         let button_w = PANEL_W / 3 - 1;
         let gap = (PANEL_W + 2 * FRAME_PAD - 3 * button_w) / 4;
         let button_y = HEADER_H + view + (BUTTONS_H - CONTROL_H);
-        let footer_w = ((self.width - 8) / 3).clamp(1, 150);
-        let footer_x = (self.width - (3 * footer_w + 8)) / 2;
+        let footer_w = ((self.width - 4) / 2).clamp(1, 150);
+        let footer_x = (self.width - (2 * footer_w + 4)) / 2;
         let footer_y = self.height - FOOTER_H + 6 + 5;
         Geo {
             search: [left, top, SIDEBAR_W - SORT_W - 4, CONTROL_H],
@@ -348,7 +346,7 @@ impl ModsScreen {
                     CONTROL_H,
                 ]
             }),
-            footer: [0, 1, 2].map(|i| [footer_x + i * (footer_w + 4), footer_y, footer_w, 20]),
+            footer: [0, 1].map(|i| [footer_x + i * (footer_w + 4), footer_y, footer_w, 20]),
         }
     }
     /// Puts the search box where the layout has it.
@@ -630,10 +628,10 @@ impl ModsScreen {
         for (i, r) in g.footer.into_iter().enumerate() {
             if hit(r, x, y) {
                 self.search.focused = false;
-                let action = match i {
-                    0 => Action::OpenFolder,
-                    1 => Action::Browse,
-                    _ => Action::Back,
+                let action = if i == 0 {
+                    Action::OpenFolder
+                } else {
+                    Action::Back
                 };
                 return (action, true);
             }
@@ -770,20 +768,20 @@ impl ModsScreen {
         let g = self.geo();
         let mut out = Vec::new();
         let prefix = if self.in_world { "inworld_" } else { "" };
-        let separator = |out: &mut Vec<Draw>, name: &str, y: i32| {
+        let separator_at = |out: &mut Vec<Draw>, name: &str, x: i32, y: i32, w: i32| {
             d::blit(
                 out,
                 &format!("textures/gui/{prefix}{name}_separator.png"),
-                0,
+                x,
                 y,
                 (0.0, 0.0),
-                self.width,
+                w,
                 2,
                 [32, 2],
             );
         };
-        separator(&mut out, "header", HEADER_H - 2);
-        separator(&mut out, "footer", self.height - FOOTER_H);
+        separator_at(&mut out, "header", 0, HEADER_H - 2, self.width);
+        separator_at(&mut out, "footer", 0, self.height - FOOTER_H, self.width);
         let mut tooltip = None;
 
         // The sidebar: the search box and the sort button over the list.
@@ -808,18 +806,28 @@ impl ModsScreen {
         if sort_hover {
             tooltip = Some(tr(&format!("{name}.hover")));
         }
-        self.draw_list(&mut out, m, &g);
-
-        // The info panel.
+        // The info panel's frame, under the list so the list's scrollbar stays on top where
+        // the two overlap.
         let [px, py, _, view] = g.panel;
-        d::fill(
+        // `BackgroundWithPipingWidget`: the list's background and separators, with the frame's
+        // 2 px inset on every side for the separators and the scrolling contents between them.
+        let frame_w = PANEL_W + 2 * FRAME_PAD;
+        d::blit(
             &mut out,
+            &format!("textures/gui/{prefix}menu_list_background.png"),
             px - FRAME_PAD,
             py - FRAME_PAD,
-            px + PANEL_W + FRAME_PAD,
-            py + view + FRAME_PAD,
-            0x8000_0000u32 as i32,
+            (0.0, 0.0),
+            frame_w,
+            view + 2 * FRAME_PAD,
+            [32, 32],
         );
+        separator_at(&mut out, "header", px - FRAME_PAD, py - FRAME_PAD, frame_w);
+        separator_at(&mut out, "footer", px - FRAME_PAD, py + view, frame_w);
+
+        self.draw_list(&mut out, m, &g);
+
+        // The info panel's contents.
         let selected = self.current();
         if let Some(e) = selected {
             let (items, content, width) = self.panel_items(m, e);
@@ -922,15 +930,11 @@ impl ModsScreen {
         }
 
         // The footer.
-        let labels = [
-            tr("horizon.mods.open_folder"),
-            tr("horizon.mods.browse"),
-            tr("gui.back"),
-        ];
+        let labels = [tr("horizon.mods.open_folder"), tr("gui.back")];
         for (i, (r, label)) in g.footer.into_iter().zip(&labels).enumerate() {
             let hover = d::inside(mouse, r[0], r[1], r[2], r[3]);
             crate::widgets::widget_cursor(hover, true);
-            if i == 2 {
+            if i == 1 {
                 crate::widgets::declare_action(
                     crate::widgets::Action::Back,
                     [r[0] as f32, r[1] as f32, r[2] as f32, r[3] as f32],
@@ -1222,7 +1226,7 @@ mod tests {
     }
 
     #[test]
-    fn the_footer_asks_for_the_folder_the_browser_and_the_way_back() {
+    fn the_footer_asks_for_the_folder_and_the_way_back() {
         let atlas = atlas();
         let m = Measure(&atlas.font);
         let mut screen = ModsScreen::new(427, 240, false, &ModList::default());
@@ -1235,14 +1239,21 @@ mod tests {
                 screen.click(&m, x, y)
             })
             .collect();
-        assert_eq!(
-            actions,
-            [
-                (Action::OpenFolder, true),
-                (Action::Browse, true),
-                (Action::Back, true)
-            ]
-        );
+        assert_eq!(actions, [(Action::OpenFolder, true), (Action::Back, true)]);
+    }
+
+    /// Literal rectangles, not `geo()` read back: two 150 px buttons 4 px apart, centred, 11 px
+    /// below the footer separator's row (`height - 38`); narrow screens shrink both equally.
+    #[test]
+    fn the_footer_buttons_sit_at_fixed_rectangles() {
+        let footer = |w, h| {
+            ModsScreen::new(w, h, false, &ModList::default())
+                .geo()
+                .footer
+        };
+        assert_eq!(footer(427, 240), [[61, 213, 150, 20], [215, 213, 150, 20]]);
+        // Too narrow for 150 px: (240 - 4) / 2 = 118 each, flush to the edges.
+        assert_eq!(footer(240, 180), [[0, 153, 118, 20], [122, 153, 118, 20]]);
     }
 
     #[test]
@@ -1293,8 +1304,6 @@ mod tests {
 
     #[test]
     fn a_stopped_or_unlisted_mod_says_so_in_its_panel() {
-        let atlas = atlas();
-        let m = Measure(&atlas.font);
         let (mut broken, info) = installed("broken", "Broken", None);
         broken.problem = Some("Not loaded: boom".into());
         let screen = ModsScreen::new(427, 240, false, &mods(&[(broken, info)]));
@@ -1310,7 +1319,63 @@ mod tests {
         let screen = ModsScreen::new(427, 240, false, &mods(&[(idle, info)]));
         let idle = screen.entries.iter().find(|e| e.id == "idle").unwrap();
         assert!(idle.note.is_some());
+    }
+
+    /// `BackgroundWithPipingWidget`: the info panel is framed like the list, 2 px beyond its
+    /// 250 px contents on every side, with the list's background between two separators.
+    #[test]
+    fn the_info_panel_has_the_lists_background_and_separators() {
+        let atlas = atlas();
+        let m = Measure(&atlas.font);
+        let screen = ModsScreen::new(427, 240, false, &ModList::default());
+        let [px, py, _, view] = screen.geo().panel;
         let draws = screen.draw(&m, (0, 0), 0, 0);
-        assert!(draws.iter().any(|call| matches!(call, Draw::Fill { .. })));
+        let blit = |texture: &str, x: i32, y: i32, w: i32, h: i32| {
+            draws.iter().any(|call| {
+                matches!(call, Draw::Blit { texture: t, x: bx, y: by, w: bw, h: bh, .. }
+                    if t == texture && (*bx, *by, *bw, *bh) == (x, y, w, h))
+            })
+        };
+        assert!(blit(
+            "textures/gui/menu_list_background.png",
+            px - 2,
+            py - 2,
+            254,
+            view + 4
+        ));
+        assert!(blit(
+            "textures/gui/header_separator.png",
+            px - 2,
+            py - 2,
+            254,
+            2
+        ));
+        assert!(blit(
+            "textures/gui/footer_separator.png",
+            px - 2,
+            py + view,
+            254,
+            2
+        ));
+    }
+
+    /// The panel's frame reaches 5 px into the list's scrollbar at 427 px wide, so it is drawn
+    /// first and the list, scrollbar included, goes over it.
+    #[test]
+    fn the_panel_frame_is_drawn_under_the_list() {
+        let atlas = atlas();
+        let m = Measure(&atlas.font);
+        let screen = ModsScreen::new(427, 240, false, &ModList::default());
+        let [px, _, _, _] = screen.geo().panel;
+        let [lx, ..] = screen.geo().list;
+        let draws = screen.draw(&m, (0, 0), 0, 0);
+        let background_at = |x: i32| {
+            draws.iter().position(|call| {
+                matches!(call, Draw::Blit { texture, x: bx, .. }
+                    if texture == "textures/gui/menu_list_background.png" && *bx == x)
+            })
+        };
+        let (frame, list) = (background_at(px - 2).unwrap(), background_at(lx).unwrap());
+        assert!(frame < list, "frame at {frame}, list at {list}");
     }
 }

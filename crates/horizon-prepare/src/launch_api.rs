@@ -7,7 +7,7 @@ use crate::pyjson::{self, Value};
 
 /// The Launch API's version, the same line as `horizon-client --launch-api`'s
 /// (docs/api/stability.md): an addition makes the next patch.
-pub const VERSION: &str = "0.1.0";
+pub const VERSION: &str = "0.1.1";
 
 /// What a launcher may pass, with its value's placeholder (none for a flag). The asset commands
 /// (`sounds`, `fonts`...) stay out: `--complete` runs what a launcher needs of them.

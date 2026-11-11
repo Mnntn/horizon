@@ -12,6 +12,10 @@ To save from inside a hook, use `level.request_save(host)` so the save runs at t
 start-of-tick boundary. A synchronous `save-all` while an entity pass or held-out row is borrowed
 fails with vanilla's `commands.save.failed` feedback and a failed command result, without saving.
 
+To emit a vibration-producing game event, use `level.game_event(host, event, at, context)`.
+`GameEventContext` carries an optional source entity and affected block state; see
+[game events with context](../../how-to/game-events.md) for listener semantics and refusals.
+
 `#[listener]` on a hook method sets both, as NeoForge's `EventPriority` and `receiveCanceled` do. Two mods, each
 its own crate:
 

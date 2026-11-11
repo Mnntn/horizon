@@ -74,6 +74,7 @@ pub(crate) struct Resolved<'a> {
     pub fields: Vec<syn::Ident>,
     pub types: Vec<Type>,
     pub output: proc_macro2::TokenStream,
+    pub once: bool,
 }
 
 /// Identity facts, independent of whether the call can be lowered into a repeatable record.
@@ -193,7 +194,71 @@ pub(crate) fn callee<'a>(
     })
 }
 
-/// Resolve a selected call and refuse shapes that cannot have a repeatable raw continuation.
+// These structural shapes are Copy independently of any engine type's derives.
+fn copy_shape(shape: &Shape, structural: bool) -> bool {
+    match shape {
+        Shape::Scalar(
+            crate::crossing::Scalar::Bool
+            | crate::crossing::Scalar::Char
+            | crate::crossing::Scalar::Signed(_)
+            | crate::crossing::Scalar::Unsigned(_)
+            | crate::crossing::Scalar::Float(_)
+            | crate::crossing::Scalar::Wide(_),
+        )
+        | Shape::Unit => true,
+        Shape::Array(element, _) if structural => copy_shape(element, true),
+        Shape::Tuple(elements) if structural => {
+            elements.iter().all(|element| copy_shape(element, true))
+        }
+        _ => false,
+    }
+}
+
+/// Expand a non-generic source alias without naming its private lexical definition.
+/// Cyclic and generic aliases remain opaque and follow the existing record refusal.
+fn source_shape(
+    rule: &Rule,
+    entries: &[Internal],
+    module: &str,
+    this: Option<&str>,
+    ty: &Type,
+) -> Shape {
+    let mut shape = rule.shape(module, this, ty);
+    let mut current = ty.clone();
+    let mut module = module.to_owned();
+    let mut seen = std::collections::BTreeSet::new();
+    while matches!(shape, Shape::Opaque(_)) {
+        let Type::Path(path) = &current else { break };
+        let Some(path) = rule.resolve(&module, &path.path) else {
+            break;
+        };
+        if !seen.insert(path.clone()) {
+            break;
+        }
+        let Some(entry) = entries
+            .iter()
+            .find(|e| e.path == path && e.kind == "type" && e.cfg.is_empty())
+        else {
+            break;
+        };
+        let Ok(syn::Item::Type(alias)) = syn::parse_str::<syn::Item>(&entry.signature) else {
+            break;
+        };
+        if !alias.generics.params.is_empty() {
+            break;
+        }
+        module = path
+            .rsplit_once("::")
+            .expect("resolved alias module")
+            .0
+            .to_owned();
+        current = *alias.ty;
+        shape = rule.shape(&module, None, &current);
+    }
+    shape
+}
+
+/// Resolve a selected call and choose a repeatable or consuming source record.
 pub(crate) fn resolve<'a>(
     expr: &'a Expr,
     enclosing: &Internal,
@@ -231,31 +296,48 @@ pub(crate) fn resolve<'a>(
         .ok_or(Cause::Missing("unresolved callee scope"))?;
     let mut types = Vec::new();
     let mut fields = Vec::new();
+    let mut once = false;
     for arg in &sig.inputs {
         if let FnArg::Typed(arg) = arg {
             let syn::Pat::Ident(pat) = &*arg.pat else {
                 return Err(Cause::Record("destructured callee parameter").into());
             };
-            let shape = rule.shape(&callee_module, callee_this.as_deref(), &arg.ty);
-            // Moving an owned field out of &mut Args cannot implement a repeatable
-            // original. Borrowing fields need a separate alias analysis, not guesses.
-            if !matches!(
-                shape,
-                Shape::Scalar(
-                    crate::crossing::Scalar::Bool
-                        | crate::crossing::Scalar::Char
-                        | crate::crossing::Scalar::Signed(_)
-                        | crate::crossing::Scalar::Unsigned(_)
-                        | crate::crossing::Scalar::Float(_)
-                        | crate::crossing::Scalar::Wide(_)
-                ) | Shape::Unit
-            ) {
+            let shape = source_shape(
+                rule,
+                entries,
+                &callee_module,
+                callee_this.as_deref(),
+                &arg.ty,
+            );
+            // Owned non-Copy fields cannot implement a repeatable original. Shared
+            // references are Copy; native records bind their referents to the call.
+            let borrowed = matches!(shape, Shape::Ref { mutable: false, .. });
+            let owned = !shape.may_borrow()
+                && !matches!(
+                    shape,
+                    Shape::Slice(_) | Shape::DynError | Shape::Scalar(crate::crossing::Scalar::Str)
+                )
+                && !copy_shape(&shape, true);
+            once |= owned;
+            if !borrowed && !owned && !copy_shape(&shape, true) {
                 return Err(Cause::Record(
                     "argument record requires a borrowing or non-Copy field",
                 )
                 .into());
             }
-            types.push((*arg.ty).clone());
+            let ty = if borrowed || owned || matches!(&*arg.ty, Type::Path(_)) {
+                let spelling = crate::internals_table::spell(&shape).ok_or(Cause::Record(
+                    "argument record requires a borrowing or non-Copy field",
+                ))?;
+                let mut ty: Type = syn::parse_str(&spelling.to_string().replace("'static", "'g"))?;
+                if let Type::Reference(reference) = &mut ty {
+                    reference.lifetime = Some(syn::parse_quote!('a));
+                }
+                ty
+            } else {
+                (*arg.ty).clone()
+            };
+            types.push(ty);
             fields.push(pat.ident.clone());
         }
     }
@@ -306,6 +388,7 @@ pub(crate) fn resolve<'a>(
         fields,
         types,
         output,
+        once,
     })
 }
 

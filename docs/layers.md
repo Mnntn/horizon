@@ -12,6 +12,10 @@ complete vanilla-like game. The Horizon layer moves to its own repository, publi
 ships with every official launcher download (see [The Horizon layer in its own repository](#the-horizon-layer-in-its-own-repository)).
 The split comes first, inside this repository, one checked step at a time. The repositories separate after that.
 
+Both checks below run in CI's verify job and in `tools/pr_ready.py`, against the fork's baseline: the explicit
+rows and reasons in `tools/layers.json` and `tools/addresses.json`, which cover the split mod crates and the separate
+launcher, registry and telemetry-server workspaces. No engine/API refactor is implied by importing these tools.
+
 This page says:
 
 - what belongs to each layer and which layer may depend on which;
@@ -549,9 +553,10 @@ or `<name>_tests.rs` do not exempt a file; other `#[cfg(test)]` items count.
 
 ## The check
 
-`python3 tools/check_layers.py` reads the `cargo metadata` of the four workspaces `tools/layers.json` lists (the
-game, `launcher/`, `crates/horizon-mod-registry/` and `crates/horizon-telemetry-server/`; no build, about a second) and
-[`tools/layers.json`](../tools/layers.json), which gives every crate its layer. It fails when:
+`python3 tools/check_layers.py` runs in CI's verify job and in `tools/pr_ready.py`. It reads the `cargo metadata` of the
+four workspaces `tools/layers.json` lists (the game, `launcher/`, `crates/horizon-mod-registry/` and
+`crates/horizon-telemetry-server/`; no build, about a second) and [`tools/layers.json`](../tools/layers.json), which
+gives every crate its layer. It fails when:
 
 - a crate has no layer;
 - a dependency goes up a layer and neither `allowed` lists it nor `optional` lists it as an optional dependency;
@@ -584,8 +589,9 @@ endpoints. Every other built-in address belongs to the Horizon layer, in one lis
 `crates/horizon-addresses/src/lib.rs` (#12993). The game's Horizon crates and the launcher read it, and it moves
 with the Horizon layer. Platform code gets its addresses passed in.
 
-`tools/check_addresses.py` reads the string literals of shipped Rust and finds every host. It skips tests,
-placeholders (`example.com`, `*.test`) and local IPs. `tools/addresses.json` says where each host may be:
+`tools/check_addresses.py` runs in CI's verify job and in `tools/pr_ready.py`. It reads the string literals of shipped
+Rust and finds every host. It skips tests, placeholders (`example.com`, `*.test`) and local IPs.
+`tools/addresses.json` says where each host may be:
 
 - `homes`: the list file;
 - `vanilla`: vanilla's endpoints, allowed anywhere;

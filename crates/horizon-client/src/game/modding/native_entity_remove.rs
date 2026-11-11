@@ -2,9 +2,10 @@
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): `Entity.discard`
 //! and `Entity.remove` with a reason. Nothing dies and nothing drops loot.
 //! `Entity.spawnAtLocation` drops an item at one.
-//! Everything `Entity.setRemoved` tells the world happens at the call: the
-//! handle and selectors stop finding the entity, its passengers get off and
-//! mods hear it leave. A mob's list entry is marked at once too; the other
+//! Outside a mod block-entity tick, `Entity.setRemoved` tells the world at the call:
+//! the handle and selectors stop finding it, passengers get off and mods hear it leave.
+//! Dropped-item removal inside that tick is instead staged with its final snapshot;
+//! scoped reads hide it immediately, while the leave notification waits for publication. A mob's list entry is marked at once too; the other
 //! kinds stay in their lists until the level's next sweep of departed
 //! entities, a few times per tick, so a hook that removes one never shifts the
 //! lists the game is walking. A vehicle with a chest spills it at that sweep, as vanilla's `remove` does.
@@ -35,6 +36,9 @@ impl Game<'_> {
                 self.remove_mob_now(id, killed);
                 true
             }
+            Some(Target::Item(id)) if self.block_entity_tick_key.is_some() => {
+                self.stage_tick_item(id, None).unwrap_or(false)
+            }
             Some(t) => {
                 // Read before the entity counts as removed: its handle stops resolving.
                 let vehicle_y = match t {
@@ -62,13 +66,18 @@ impl Game<'_> {
                 // it removed; then the passengers get off and the level is told.
                 // Only players and mobs ride, so this kind has no vehicle to leave.
                 self.persist.removals.push(t);
+                self.retire_vehicle_registration(t);
+                if vehicle_y.is_some() {
+                    self.persist.notified_vehicle_removals.insert(entity.id());
+                }
                 for passenger in passengers {
                     self.entity_stop_riding(passenger);
                 }
                 if let Some(y) = vehicle_y {
-                    // Complete actual Mob edges here, including rejected objects.
-                    // The deferred physical removal then has no edge to notify twice.
+                    // Notify actual Mob edges here, including rejected objects.
+                    // A reentrant physical sweep must not notify them again.
                     self.dismount_destroyed_vehicle_mobs(entity.id(), y);
+                    self.score_destroyed_vehicle_once(entity.id());
                 }
                 self.native_entity_left(entity.id());
                 true
@@ -185,20 +194,43 @@ impl Game<'_> {
         if self.persist.removals.is_empty() {
             return;
         }
-        for t in std::mem::take(&mut self.persist.removals) {
+        // Keep every deferred vehicle logically removed while callbacks in
+        // this sweep can inspect the remaining physical owning slots.
+        let pending = std::mem::take(&mut self.persist.removals);
+        let mut already_marked = Vec::new();
+        for &target in &pending {
+            if matches!(target, Target::Boat(_) | Target::Cart(_))
+                && !self.persist.destroying_vehicles.insert(target)
+            {
+                already_marked.push(target);
+            }
+        }
+        for t in pending {
             match t {
                 Target::Crystal(id) => self.crystals.retain(|c| c.id != id),
                 Target::Dragon(id) => {
                     if self.dragon.as_ref().is_some_and(|d| d.id == id) {
-                        self.dragon.discard();
+                        self.discard_resident_dragon();
                     }
                 }
-                Target::Player | Target::Guest(_) | Target::Mob(_) => {}
-                // The kinds `/kill` already removes with no death.
-                t => {
+                Target::Boat(id) | Target::Cart(id) => {
+                    let marked = !already_marked.contains(&t);
                     self.spill_vehicle(t);
-                    self.kill_target_in_level(t);
+                    // Actual native removals already notified the edges. A
+                    // raw deferred entry still needs its own guarded pass.
+                    if marked && !self.persist.notified_vehicle_removals.contains(&id) {
+                        self.persist.destroying_vehicles.remove(&t);
+                    }
+                    self.kill_vehicle_object(t);
+                    self.score_destroyed_vehicle_once(id);
+                    if marked {
+                        self.persist.destroying_vehicles.remove(&t);
+                    }
+                    self.native_entity_left(id);
                 }
+                Target::Player | Target::Guest(_) | Target::Mob(_) => {}
+                // The remaining kinds `/kill` already removes with no death.
+                t => self.kill_target_in_level(t),
             }
         }
     }
@@ -416,8 +448,7 @@ mod tests {
             assert!(game.mobs[0].removed);
             assert!(!mob.discard(game));
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let player = game.entity(20).unwrap();
             assert!(!player.discard(game));
             assert!(game.player.is_some());

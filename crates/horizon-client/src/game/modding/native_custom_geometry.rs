@@ -6,8 +6,8 @@ use horizon_client::mesher::Vertex;
 use horizon_client::screen_effects::{CameraQuads, sampling};
 use horizon_client::world_geometry::{self, ModelBatch, WorldGeometry};
 use mod_api::{
-    DrawError, InstanceError, ModelInstance, ModelRef, RenderLevelStage, WorldDrawUsage, WorldLine,
-    WorldQuad,
+    DrawError, InstanceError, ModelInstance, ModelRef, PipelineDrawError, PipelineQuad,
+    RenderLevelStage, RenderPipelineRef, WorldDrawUsage, WorldLine, WorldQuad,
 };
 
 impl Game<'_> {
@@ -75,6 +75,8 @@ impl Game<'_> {
             return;
         }
         draw.set_model_cut(entities.len() as u32);
+        // Seconds of game time, wrapping every hour (72,000 ticks) so f32 keeps sub-tick steps.
+        draw.set_time(((self.world.game_time.rem_euclid(72_000) as f64 + alpha) / 20.0) as f32);
         let view = mod_api::WorldRenderView::new(camera, alpha as f32, self.world.game_time);
         // RenderLevelStageEvent's stages in frame order, so each one's output follows the
         // last's; custom geometry and the debug renderers draw with the last, AfterLevel.
@@ -108,6 +110,22 @@ impl Game<'_> {
         quads: &[WorldQuad],
     ) -> Result<(), DrawError> {
         draw.quads(quads)
+    }
+    /// Submit quads drawn by a mod pipeline atomically: the handle is checked against the
+    /// published pipelines once, then the batch is validated and queued or refused whole.
+    pub(super) fn native_world_draw_pipeline_quads(
+        &self,
+        draw: &mut WorldGeometry,
+        pipeline: RenderPipelineRef,
+        quads: &[PipelineQuad],
+    ) -> Result<(), PipelineDrawError> {
+        let slot = self
+            .pack
+            .render
+            .mod_pipelines
+            .slot(pipeline)
+            .map_err(PipelineDrawError::Pipeline)?;
+        draw.pipeline_quads(slot, quads)
     }
     /// Queued counts and fixed capacities, shared by both depth modes and all listeners.
     /// Capacity is allocated during setup, never grown during submission.

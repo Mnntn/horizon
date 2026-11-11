@@ -5,7 +5,7 @@ pub fn bump() -> usize {
     STATE.fetch_add(1, Ordering::SeqCst)
 }
 pub fn identity() -> [usize; 2] {
-    std::hint::black_box(horizon_client::entry::main as *const ());
+    std::hint::black_box(horizon_mod_host::main_with as *const ());
     [
         &STATE as *const _ as usize,
         &mod_points::__private::POINTS as *const _ as usize,

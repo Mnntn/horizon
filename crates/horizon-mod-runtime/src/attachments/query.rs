@@ -3,7 +3,7 @@ use std::{fmt, hash::Hash, slice, sync::Arc};
 
 use super::{
     AttachmentError, AttachmentType,
-    index::{AttachmentIndex, AttachmentOwner, AttachmentRow},
+    index::{AttachmentIndex, AttachmentOwner, AttachmentRow, AttachmentSnapshot},
 };
 
 // no wire: owned by the lower runtime crate, which cannot depend on mod_api's derive;
@@ -40,12 +40,12 @@ impl std::error::Error for AttachmentRowError {}
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct AttachmentBatch<H> {
-    rows: Option<Arc<Vec<AttachmentRow<H>>>>,
+    rows: Option<Arc<AttachmentSnapshot<H>>>,
 }
 
 impl<H> AttachmentBatch<H> {
     /// Wrap a captured index bucket without copying its contents.
-    pub fn new(rows: Arc<Vec<AttachmentRow<H>>>) -> Self {
+    pub fn new(rows: Arc<AttachmentSnapshot<H>>) -> Self {
         Self { rows: Some(rows) }
     }
 
@@ -88,6 +88,29 @@ impl<H: Copy, T: Send + Sync + 'static> AttachmentQuery<'_, H, T> {
             rows: self.batch.rows().iter(),
             key: self.key,
         }
+    }
+}
+
+impl<H: Copy + Eq + Hash, T: Clone + Send + Sync + 'static> AttachmentQuery<'_, H, T> {
+    /// Read an owned captured value with an expected O(1) holder probe before decode.
+    /// Absent or not yet synced holders return `Ok(None)`, without initializing
+    /// defaults. Decode/type errors are preserved as `AttachmentRowError::Value`.
+    /// `None` does not mean the holder is alive: absent and not-live holders
+    /// alike return `Ok(None)` when absent from captured membership, without a
+    /// host liveness check. Only scoped residency probes report `StaleHolder`.
+    /// Later replacements, removals and rebinds require a fresh snapshot.
+    pub fn get(&self, holder: H) -> Result<Option<T>, AttachmentRowError> {
+        let Some(rows) = self.batch.rows.as_deref() else {
+            return Ok(None);
+        };
+        let Some(slot) = rows.slot_for(holder) else {
+            return Ok(None);
+        };
+        rows[slot]
+            .entry
+            .read_validated(self.key)
+            .map(|value| Some(value.clone()))
+            .map_err(AttachmentRowError::Value)
     }
 }
 
@@ -205,10 +228,10 @@ mod tests {
         copy_on_death: false,
         sync: false,
     };
-    fn key() -> super::super::index::AttachmentKey {
+    pub(super) fn key() -> super::super::index::AttachmentKey {
         ("query".into(), "value".into())
     }
-    fn entry(value: impl Send + Sync + 'static) -> Arc<AttachmentEntry> {
+    pub(super) fn entry(value: impl Send + Sync + 'static) -> Arc<AttachmentEntry> {
         Arc::new(AttachmentEntry {
             state: super::super::Entry::Decoded(Decoded {
                 value: Arc::new(value),
@@ -220,7 +243,7 @@ mod tests {
             }),
         })
     }
-    fn query(index: &AttachmentIndex<u32>) -> AttachmentQuery<'static, u32, u32> {
+    pub(super) fn query(index: &AttachmentIndex<u32>) -> AttachmentQuery<'static, u32, u32> {
         AttachmentBatch::new(index.snapshot(&key()))
             .query(&KEY)
             .unwrap()
@@ -426,5 +449,51 @@ mod tests {
         retired.into_result();
         assert_eq!(batch.iter().count(), 1);
         drop(batch);
+    }
+}
+
+#[cfg(test)]
+mod existing_tests {
+    use super::tests::{entry, key, query};
+    use super::*;
+    #[test]
+    fn keyed_absent_and_unloaded_holders_return_none() {
+        let mut index = AttachmentIndex::default();
+        index.register(7, [(key(), entry(7u32))]).into_result();
+        let retained = query(&index);
+        let token = retained.iter().next().unwrap().unwrap().write_token();
+        index.unload(7).into_result();
+        let fresh = query(&index);
+        assert_eq!(fresh.get(7), Ok(None)); // no longer live
+        assert_eq!(fresh.get(11), Ok(None)); // never resident
+        assert_eq!(
+            index.validate_owner(&token),
+            Err(AttachmentRowError::StaleHolder)
+        );
+        assert_eq!(retained.get(7), Ok(Some(7))); // captured, not live
+    }
+
+    #[test]
+    fn keyed_existing_values_retain_snapshots_and_validate_rebound_tokens() {
+        let mut index = AttachmentIndex::default();
+        let a = index.register(7, [(key(), entry(7u32))]).into_result();
+        index.register(9, [(key(), entry(9u32))]).into_result();
+        let old = query(&index);
+        assert_eq!(old.get(7), Ok(Some(7)));
+        assert_eq!(old.get(9), Ok(Some(9)));
+        assert_eq!(old.get(11), Ok(None));
+        index.set(&a, &key(), entry(8u32)).into_result();
+        assert_eq!(query(&index).get(7), Ok(Some(8)));
+        assert_eq!(old.get(7), Ok(Some(7)));
+        index.remove(&a, &key()).into_result();
+        assert_eq!(query(&index).get(7), Ok(None));
+        index.register(7, [(key(), entry(10u32))]).into_result();
+        assert_eq!(
+            index.validate_owner(&a),
+            Err(AttachmentRowError::StaleHolder)
+        );
+        assert_eq!(index.snapshot(&key()).slot_of(&a), None);
+        assert_eq!(query(&index).get(7), Ok(Some(10)));
+        assert_eq!(query(&AttachmentIndex::default()).get(7), Ok(None));
     }
 }

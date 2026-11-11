@@ -13,6 +13,7 @@ name = "point_shape"
 proc-macro2 = "1"
 quote = "1"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 syn = { version = "2", features = ["full", "visit", "visit-mut"] }
 
 [lints]

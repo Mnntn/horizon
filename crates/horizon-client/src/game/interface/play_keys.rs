@@ -63,6 +63,11 @@ impl Game<'_> {
                     self.capture(true);
                 }
                 Screen::Paused | Screen::Inventory => {
+                    // RecipeBookComponent.keyPressed: a narrow window's open
+                    // book takes Escape to close itself, not the screen.
+                    if self.screen == Screen::Inventory && self.recipe_book_escape() {
+                        return Ok(());
+                    }
                     self.close_container();
                     self.pause_focus = None;
                     self.set_screen(Screen::Playing);
@@ -136,6 +141,7 @@ impl Game<'_> {
             {
                 if let Some(tab) = self.creative_screen.search_tab() {
                     select_creative_tab(&mut self.creative_screen, &mut self.inv_clicks, tab);
+                    self.build_screen();
                     self.creative_ignore_text = true;
                 }
             }

@@ -20,6 +20,8 @@ pub struct ParticleOptions {
     /// `ItemParticleOption`: the particle sprite of each layer of the item's
     /// model as resolved for the ground.
     pub item: Option<Vec<String>>,
+    /// Unresolved stack for server particle delivery.
+    pub item_stack: Option<horizon_items::items::ItemStack>,
     /// `GeyserParticleOptions.waterBlocks` and `GeyserBaseParticleOptions`'
     /// `waterBlocks` and `burstImpulseBase` (0 where the type has none).
     pub geyser: Option<(i32, f32)>,
@@ -51,6 +53,7 @@ impl ParticleOptions {
             to_color: [1.0, 0.0, 0.0],
             trail: None,
             item: None,
+            item_stack: None,
             geyser: None,
             vibration: None,
             mod_particle: None,

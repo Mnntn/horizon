@@ -21,8 +21,9 @@ mod foreign;
 mod mod_properties;
 mod special;
 pub use mod_properties::{
-    is_range_property, is_select_property, is_tint_source, keep_mod_ids, register_range_properties,
-    register_select_properties, register_tint_sources,
+    is_item_model_type, is_mod_id, is_range_property, is_select_property, is_tint_source,
+    keep_mod_ids, register_item_models, register_range_properties, register_select_properties,
+    register_tint_sources,
 };
 pub use special::{SpecialKind, SpecialModel};
 
@@ -425,6 +426,16 @@ pub enum ItemModelNode {
         model: SpecialModel,
     },
     BundleSelectedItem,
+    /// A node of a type a native mod registered (`register_item_models`): per stack, its mod
+    /// answers which of `models`, by name, draw (`item_model_update`).
+    Registered {
+        kind: String,
+        transformation: Option<Mat4>,
+        /// The node's JSON object, converted once at load.
+        config: Arc<horizon_core::nbt::Tag>,
+        /// The node's `models` object: named nodes decoded and baked as any other.
+        models: Vec<(String, ItemModelNode)>,
+    },
 }
 #[derive(Clone, Debug)]
 pub struct SwitchCase {
@@ -565,8 +576,22 @@ impl ItemModelNode {
                 model: SpecialModel::decode(required(m, "model")?)?,
             },
             "minecraft:bundle/selected_item" => Self::BundleSelectedItem,
-            other if foreign::is_foreign(other) => foreign::decode_node(other, m),
-            _ => return Err(err("unknown item model type")),
+            kind if is_item_model_type(kind) => Self::Registered {
+                kind: kind.to_owned(),
+                transformation: optional_transformation(m)?,
+                config: Arc::new(
+                    horizon_core::json_nbt::json_to_tag(v)
+                        .map_err(|_| err("invalid item model data"))?,
+                ),
+                models: match m.get("models") {
+                    None => Vec::new(),
+                    Some(models) => object(models)?
+                        .iter()
+                        .map(|(name, node)| Ok((name.clone(), Self::decode(node)?)))
+                        .collect::<Result<_>>()?,
+                },
+            },
+            other => return Err(err(&format!("unknown item model type {other}"))),
         })
     }
     /// Every model resource id the tree can ask for.
@@ -594,6 +619,9 @@ impl ItemModelNode {
                 fallback.iter().for_each(|f| f.dependencies(out));
             }
             Self::Special { base, .. } => out.push(base.clone()),
+            Self::Registered { models, .. } => {
+                models.iter().for_each(|(_, m)| m.dependencies(out));
+            }
         }
     }
 }
@@ -1100,6 +1128,18 @@ pub trait ItemEnv {
     ) -> i32 {
         -1
     }
+    /// A mod's registered node type for `stack`, with the node's object and the surroundings
+    /// `ItemModel.update` reads (`ctx`): push the names of the node's `models` to draw, in order.
+    /// None draw when no mod answers.
+    fn item_model_update(
+        &self,
+        _kind: &str,
+        _config: &horizon_core::nbt::Tag,
+        _stack: &StackView,
+        _ctx: &Context,
+        _models: &mut Vec<String>,
+    ) {
+    }
     /// `PotionContents.getColorOr` for the potion/effects part: the mixed
     /// effect colour, or `None` when the contents have no visible effects.
     fn potion_effect_color(&self, _potion_contents: &Value) -> Option<i32> {
@@ -1434,6 +1474,22 @@ impl Resolve<'_> {
                 if let Some(selected) = self.bundle_selected() {
                     self.models
                         .append_layers(out, &selected, self.ctx, self.env);
+                }
+            }
+            ItemModelNode::Registered {
+                kind,
+                transformation,
+                config,
+                models,
+            } => {
+                let mut drawn = Vec::new();
+                self.env
+                    .item_model_update(kind, config, self.stack, self.ctx, &mut drawn);
+                let child = compose(parent, transformation);
+                for name in &drawn {
+                    if let Some((_, model)) = models.iter().find(|(key, _)| key == name) {
+                        self.node(out, model, &child);
+                    }
                 }
             }
         }

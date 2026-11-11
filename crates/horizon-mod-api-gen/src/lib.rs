@@ -3,9 +3,14 @@ mod catalog;
 mod dispatch_fixtures;
 mod exports;
 mod game_modules;
+mod interface_cache;
+#[cfg(test)]
+mod interface_cache_tests;
+pub mod sdk_catalog;
 #[doc(hidden)]
 pub use dispatch_fixtures::layout as dispatch_fixture_layout;
 pub use game_modules::materialize_game_modules;
+mod hook_targets;
 mod host;
 mod layout;
 mod named_hooks;
@@ -615,6 +620,23 @@ mod host_param;
 mod index;
 mod wire;
 pub use wire::generate as generate_wire;
+pub use wire::generate_coverage as generate_wire_coverage;
+
+static GENERATED_ON_STDOUT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// For a tool that prints generated text on stdout (`xtask mod-api coverage`): the generator's
+/// `cargo:rerun-if-changed` lines, meant for a build script's Cargo, are left out of it.
+pub fn generated_on_stdout() {
+    GENERATED_ON_STDOUT.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Tells the build script's Cargo to rerun it when `path` changes.
+pub(crate) fn rerun_if_changed(path: &impl std::fmt::Display) {
+    if !GENERATED_ON_STDOUT.load(std::sync::atomic::Ordering::Relaxed) {
+        println!("cargo:rerun-if-changed={path}");
+    }
+}
 pub use wire::generate_host as generate_wire_host;
 pub mod internals;
 pub mod internals_table;
@@ -623,7 +645,7 @@ pub mod notes;
 pub mod points;
 pub mod sites;
 pub mod staging;
-pub use build::{generate, generate_points, generate_render};
+pub use build::{generate, generate_points, generate_render, write_if_changed};
 pub use notes::generate as generate_hook_notes;
 mod staged;
 pub use staged::{MODS_STAGE, staged_mods};
@@ -870,7 +892,7 @@ mod tests {
         );
     }
 
-    /// `item_damaged` taken back to how a new hook arrives (its body the
+    /// `item_picked_up` taken back to how a new hook arrives (its body the
     /// placeholder) in a copy of the sources: the check reports it, any other
     /// body is left alone, a hook without its attribute fails by name, and the
     /// generator brings back the shipped file byte for byte with the generated
@@ -951,27 +973,27 @@ mod tests {
         std::fs::write(&first, original).unwrap();
         let hooks = root.join("crates/horizon-client/src/game/native_hooks/base.rs");
         let shipped = std::fs::read_to_string(&hooks).unwrap();
-        let call = "self.fire_item_damaged(player, name, item, amount, cancel);";
+        let call = "self.fire_item_picked_up(player, item, count, canceled);";
         assert_eq!(shipped.matches(call).count(), 1);
-        let unfinished = shipped.replace(call, "let _ = (player, name, item, amount);");
+        let unfinished = shipped.replace(call, "let _ = (player, item, count);");
         std::fs::write(&hooks, &unfinished).unwrap();
         assert!(
             super::fill_hooks(&root)
                 .unwrap_err()
-                .starts_with("missing dispatch_item_damaged call in native_item_damaged: ")
+                .starts_with("missing dispatch_item_picked_up call in native_item_picked_up: ")
         );
         assert_eq!(std::fs::read_to_string(&hooks).unwrap(), unfinished);
-        let placeholder = shipped.replace(call, "let _ = (player, name, item, amount, cancel);");
+        let placeholder = shipped.replace(call, "let _ = (player, item, count, canceled);");
         std::fs::write(&hooks, &placeholder).unwrap();
         assert_eq!(
             super::sources(&root, super::FillMode::Require).unwrap_err(),
-            "native_item_damaged: the let _ = (…); placeholder needs its dispatch call; run cargo run -p xtask -- mod-api"
+            "native_item_picked_up: the let _ = (…); placeholder needs its dispatch call; run cargo run -p xtask -- mod-api"
         );
         assert_eq!(std::fs::read_to_string(&hooks).unwrap(), placeholder);
         // A hook without its attribute fails by name.
-        let declared = declaring("item_damaged");
+        let declared = declaring("item_picked_up");
         let shipped_declarations = std::fs::read_to_string(&declared).unwrap();
-        let declaration = shipped_declarations.find("fn item_damaged();").unwrap();
+        let declaration = shipped_declarations.find("fn item_picked_up();").unwrap();
         let attribute = shipped_declarations[..declaration]
             .rfind("#[hook(")
             .unwrap();
@@ -987,7 +1009,7 @@ mod tests {
         assert!(
             super::fill_hooks(&root)
                 .unwrap_err()
-                .contains("item_damaged: needs a #[hook(...)] attribute")
+                .contains("item_picked_up: needs a #[hook(...)] attribute")
         );
         std::fs::write(&declared, shipped_declarations).unwrap();
         let second = root.join("crates/horizon-client/src/game/native_hooks/client_tick_pre.rs");
@@ -998,7 +1020,7 @@ mod tests {
         )
         .unwrap();
         let decoy = hooks.with_file_name("decoy.rs");
-        let decoy_source = "impl Game<'_> { /// mentions fn native_item_damaged(\n fn unrelated(&self) { let _ = self; } }\n";
+        let decoy_source = "impl Game<'_> { /// mentions fn native_item_picked_up(\n fn unrelated(&self) { let _ = self; } }\n";
         std::fs::write(&decoy, decoy_source).unwrap();
         super::fill_hooks(&root).unwrap();
         // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
@@ -1119,6 +1141,3 @@ mod tests {
         );
     }
 }
-
-/// Native source-only transient fields.
-pub mod fields;

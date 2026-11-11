@@ -91,7 +91,6 @@
     "launcher/src/github_mods.rs github.com",
     "launcher/src/github_mods.rs www.github.com",
     "launcher/src/github_mods_page.rs github.com",
-    "launcher/src/installer.rs playhorizon.dev",
     "launcher/src/internet.rs login.tailscale.com",
     "launcher/src/loaders.rs meta.fabricmc.net",
     "launcher/src/loaders.rs meta.quiltmc.org",

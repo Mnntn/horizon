@@ -109,6 +109,7 @@ pub mod tests {
         impl Host for NoGame {}
         mod_api::impl_host_areas!(NoGame);
         assert!(std::panic::catch_unwind(|| keys[0].id(&NoGame)).is_err());
+        assert_eq!(keys[0].category(&NoGame), None);
     }
 }
 

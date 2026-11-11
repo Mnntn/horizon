@@ -5,6 +5,7 @@
 #[cfg(test)]
 mod lifetime_tests;
 mod placement;
+pub(super) use placement::OutlineFluidRay;
 
 use super::{Game, InteractTarget, entity::Entity, entity_culling::at, view_vector};
 use horizon_client::actions::Action;
@@ -1510,12 +1511,11 @@ impl Game<'_> {
     }
     /// Where the boat at `i` lets a player facing `yaw` off.
     pub(super) fn boat_player_dismount_target(&self, i: usize, yaw: f32) -> Vec3 {
-        self.boat_dismount_target(i, 0.6, yaw)
+        self.boat_dismount_target(&self.boats[i], 0.6, yaw)
     }
     /// `getDismountLocationForPassenger` for a passenger `width` wide
     /// facing `yaw`.
-    pub(super) fn boat_dismount_target(&self, i: usize, width: f64, yaw: f32) -> Vec3 {
-        let b = &self.boats[i];
+    pub(super) fn boat_dismount_target(&self, b: &Boat, width: f64, yaw: f32) -> Vec3 {
         let r = yaw.to_radians();
         let distance = (WIDTH * std::f64::consts::SQRT_2 + width + 1.0e-5) / 2.0;
         let (s, c) = (-(r.sin()) as f64, r.cos() as f64);
@@ -1825,6 +1825,13 @@ impl Game<'_> {
         creative: bool,
     ) -> Option<bool> {
         let id = self.boats[i].id;
+        if self
+            .persist
+            .destroying_vehicles
+            .contains(&super::commands::Target::Boat(id))
+        {
+            return Some(true);
+        }
         let mut cancel = false;
         self.native_vehicle_damage("boat", &mut damage, &mut cancel);
         if cancel {
@@ -1850,6 +1857,26 @@ impl Game<'_> {
         });
         if destroyed {
             self.native_vehicle_destroy("boat", at);
+            if !self.boats.iter().any(|b| {
+                b.id == id
+                    && !self
+                        .persist
+                        .removals
+                        .contains(&crate::game::commands::Target::Boat(id))
+            }) {
+                return Some(true);
+            }
+            if self
+                .with_destroying_vehicle(super::commands::Target::Boat(id), |game| {
+                    game.dismount_destroyed_vehicle_players(id);
+                    if let Some(i) = game.boats.iter().position(|boat| boat.id == id) {
+                        game.eject_boat_mobs(i, true);
+                    }
+                })
+                .is_none()
+            {
+                return Some(true);
+            }
             let Some(i) = self.boats.iter().position(|b| {
                 b.id == id
                     && !self
@@ -1859,17 +1886,6 @@ impl Game<'_> {
             }) else {
                 return Some(true);
             };
-            self.eject_boat_mobs(i, true);
-            let Some(i) = self.boats.iter().position(|b| {
-                b.id == id
-                    && !self
-                        .persist
-                        .removals
-                        .contains(&crate::game::commands::Target::Boat(id))
-            }) else {
-                return Some(true);
-            };
-            self.finish_destroyed_vehicle_riders(id, self.boats[i].position.y);
             self.release_vehicle_container(id);
             let b = self.boats.remove(i);
             // `AbstractChestBoat.remove` spills the chest through
@@ -1912,6 +1928,7 @@ impl Game<'_> {
                     self.drop_vehicle_contents(at, &empty);
                 }
             }
+            self.retain_removed_vehicle(id, super::persist::RemovedVehicle::Boat(b));
         }
         Some(destroyed)
     }

@@ -397,26 +397,50 @@ parameter, or a method reference or lambda that takes one event
 `neoforge` names, generated at build time from the Rust hook declarations (see the
 [hook notes](https://arismoko.github.io/horizon/reference/hook-notes.html)). An optional JSON
 file with `hooks` entries containing `name` and `neoforge` can replace those labels for a report.
-Over a folder of jars it ranks the names by how many mods use them. Each name gets one of six answers:
+Over a folder of jars it ranks the names by how many mods use them. Each name gets one of eight answers:
 
 - a hook;
 - another phase's hook (`player_tick_post` for `PlayerTickEvent.Pre` when only Post is listed);
 - a hook whose label says why it isn't quite the counterpart;
 - data: the event is gone because vanilla made what it built into data, and the answer names the
-  registries a port writes instead;
+  registries or the item component a port writes instead;
+- mod API: no hook, but another part of the mod API, and the answer names the `Registrar` method a
+  mod calls from `Hooks::register` or the capability key it asks and answers by;
 - load phases: a mod-loading event Horizon has no hook for by design, and the answer says where a
   port does that work instead;
+- no hook: nothing in the game would fire one, and the answer says why;
 - none.
 
 The load-phase events follow the modding book's
 [load phases](https://arismoko.github.io/horizon/concepts/trait-mods.html#load-phases-and-access).
 `FMLCommonSetupEvent`'s work goes in `Hooks::register`, then the first server reload.
 `FMLLoadCompleteEvent`'s goes after the initial config and before `server_about_to_start`.
+`FMLDedicatedServerSetupEvent`'s goes in `server_about_to_start`, when its `dedicated` flag is set.
+`FMLConstructModEvent`'s goes in `Hooks::register`: the book doesn't name the event, and
+Registration is the first phase it gives a mod declarations in.
 `InterModEnqueueEvent` and `InterModProcessEvent` carried `InterModComms` messages. A Horizon
 dependent calls the library directly instead, after it in dependency order.
 
-Names NeoForge changed after 1.21.1 (`Capabilities.ItemHandler`, `Capabilities.EnergyStorage`,
-`AddReloadListenerEvent`) are looked up under their new ones. `VillagerTradesEvent` and
+Names NeoForge changed after 1.21.1 (`Capabilities.ItemHandler`, `Capabilities.FluidHandler`,
+`Capabilities.EnergyStorage`, `AddReloadListenerEvent`, `BlockEvent.BreakEvent`,
+`ContainerScreenEvent.Render`, `RegisterColorHandlersEvent.Block` and `.Item`, …) are looked up
+under their new ones, and the answer shows the new name. A rename is where a port starts, not a
+promise that the event carries the same things: `RENAMED` in `events.rs` says which ones changed
+what they carry. `RegisterEvent.RegisterHelper` is the helper `RegisterEvent` hands a mod, so it
+gets `RegisterEvent`'s hooks.
+
+The mod API answers are the registration events a `Registrar` method replaces
+(`RegisterKeyMappingsEvent`, `EntityAttributeCreationEvent` and `…ModificationEvent`,
+`RegisterSpawnPlacementsEvent`, `RegisterTicketControllersEvent`) and the capabilities with no hook
+label of their own, which get their key (`mod_api::FLUIDS` for `Capabilities.Fluid.BLOCK`).
+
+`GatherDataEvent` has no hook because data generation runs in the mod developer's build, not in the
+game; what it wrote is already in the jar. `IdMappingEvent`, `RegisterNamedRenderTypesEvent` and
+`RenderLevelStageEvent.RegisterStageEvent` have none because NeoForge 26.3 no longer has them.
+
+`RegisterBrewingRecipesEvent` is data (`minecraft:brewing` recipe files), and so are
+`RegisterDimensionSpecialEffectsEvent` (the `minecraft:visual/*` attributes of a `dimension_type`)
+and `FurnaceFuelBurnTimeEvent` (the item's `minecraft:cooking_fuel` component). `VillagerTradesEvent` and
 `WandererTradesEvent` are data: 26.1 made villager trades the `trade_set` and `villager_trade`
 registries (NeoForge's 26.1 primer), and 26.3's NeoForge has neither event. A port writes each
 trade as a `villager_trade` file and adds it to the tag a set reads (`armorer/level_1`'s set takes

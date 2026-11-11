@@ -24,7 +24,8 @@ pub enum TooltipElement {
 pub struct TooltipImage {
     /// The stack.
     pub stack: ItemStack,
-    /// The size.
+    /// This component's measurement in GUI pixels. The draw callback receives
+    /// the whole tooltip content box size, not this measurement.
     pub size: [f32; 2],
 }
 

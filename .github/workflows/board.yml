@@ -27,7 +27,7 @@ jobs:
         env:
           PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
         run: '[ -n "$PROJECT_TOKEN" ] && echo set=1 >> "$GITHUB_OUTPUT" || echo "::notice::PROJECT_TOKEN is not set; board sync skipped."'
-      # A /claim comment assigns through claim.yml at the same moment; give it a head start.
+      # A /claim comment assigns through claim-command.yml at the same moment; give it a head start.
       - if: steps.token.outputs.set && github.event_name == 'issue_comment'
         run: sleep 20
       - if: steps.token.outputs.set

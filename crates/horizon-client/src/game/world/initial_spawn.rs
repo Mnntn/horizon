@@ -137,7 +137,7 @@ impl Game<'_> {
         while let Some((dx, dz)) = self.spawn_spiral.current() {
             if self.spawn_spiral.tested() {
                 let (cx, cz) = (ox + dx, oz + dz);
-                if self.standalone_server() {
+                if self.is_dedicated_server() {
                     // getChunk(FULL) of the tested chunk alone: its 3x3 is decorated.
                     if !self.world.chunks.contains_key(&(cx, cz)) {
                         let area = [((cx, cz), -1)];

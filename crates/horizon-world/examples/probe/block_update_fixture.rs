@@ -42,6 +42,7 @@ struct Cells {
     /// `preRemoveSideEffects` of each state's block entity.
     removals: std::rc::Rc<Vec<PreRemove>>,
 }
+impl horizon_world::level::BlockEntityNeighbors for Cells {}
 impl LevelAccess for Cells {
     fn within_world_border(&self, pos: BlockPos) -> bool {
         self.border.is_none_or(|border| border.contains_block(pos))

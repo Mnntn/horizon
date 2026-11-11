@@ -9,6 +9,7 @@ name = "shm_scene_runner"
 path = "main.rs"
 [dependencies]
 horizon-client = { path = "/box/work/arismoko/horizon/crates/horizon-client", default-features = false }
+horizon-mod-host = { path = "../../crates/horizon-mod-host", default-features = false }
 horizon-mod-api = { path = "/box/work/arismoko/horizon/crates/horizon-mod-api" }
 horizon-mod-points = { path = "/box/work/arismoko/horizon/crates/horizon-mod-points" }
 horizon-mod-package = { path = "/box/work/arismoko/horizon/crates/horizon-mod-package" }

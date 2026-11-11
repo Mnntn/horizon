@@ -1,1 +1,3 @@
-pub fn count(_: &mut internals::game::Game<'_>, _: &mut internals::raw::__TickMobsRaw<'_>) {}
+fn count(game: &mut crate::game::Game<'_>) {
+    let _ = game;
+}

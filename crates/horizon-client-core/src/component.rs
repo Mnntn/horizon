@@ -1072,6 +1072,9 @@ mod tests {
 
     #[test]
     fn a_text_received_whole_has_the_spans_its_parts_would() {
+        let _guard = crate::key_display::TEST_BINDINGS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         use serde_json::json;
         for v in [
             json!(""),
@@ -1090,6 +1093,38 @@ mod tests {
             assert_eq!(whole.rendered.spans, parts.rendered.spans, "{v}");
             assert_eq!(whole.component(), v, "{v}");
         }
+    }
+
+    #[test]
+    fn keybind_components_decode_assigned_key_and_reflect_rebinding() {
+        let _guard = crate::key_display::TEST_BINDINGS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        crate::key_display::replace_action_bindings([("key.jump", "key.keyboard.space")]);
+        let ((), _) = crate::lang::scoped(
+            crate::lang::Language::of(
+                "en_us",
+                [
+                    ("key.jump".into(), "Jump".into()),
+                    ("key.keyboard.space".into(), "Space".into()),
+                    ("key.keyboard.up".into(), "Up Arrow".into()),
+                    ("key.keyboard.unknown".into(), "None".into()),
+                ],
+            ),
+            || {
+                let v = serde_json::json!({"keybind": "key.jump"});
+                assert_eq!(to_text(&v, &mut |_| Text::empty()).plain(), "Space");
+
+                crate::key_display::set_action_binding("key.jump", "key.keyboard.up");
+                assert_eq!(to_text(&v, &mut |_| Text::empty()).plain(), "Up Arrow");
+
+                crate::key_display::set_action_binding("key.jump", "key.keyboard.unknown");
+                assert_eq!(to_text(&v, &mut |_| Text::empty()).plain(), "None");
+
+                crate::key_display::reset_action_bindings();
+                assert_eq!(to_text(&v, &mut |_| Text::empty()).plain(), "Jump");
+            },
+        );
     }
 
     #[test]

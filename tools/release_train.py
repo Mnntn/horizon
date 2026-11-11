@@ -235,18 +235,42 @@ def changed_paths(commit):
     return run("git", "diff", "--name-only", f"{commit}^1", commit).split()
 
 
-def pull_request(number):
-    data = gh_json("pr", "view", str(number), "--repo", REPO, "--json",
-                   "number,title,url,labels,closingIssuesReferences,author,mergedAt")
-    return {
-        "number": data["number"],
-        "title": data["title"].strip(),
-        "url": data["url"],
-        "labels": sorted(label["name"] for label in data["labels"]),
-        "issues": sorted(issue["number"] for issue in data.get("closingIssuesReferences") or []),
-        "author": (data.get("author") or {}).get("login", ""),
-        "merged_at": dt.datetime.fromisoformat(data["mergedAt"].replace("Z", "+00:00")) if data.get("mergedAt") else None,
+def merged_pull_request_metadata():
+    """Repository-owned merge identities and note fields, without one network call per PR."""
+    owner, name = REPO.split("/")
+    query = """
+    query($owner: String!, $name: String!, $endCursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequests(first: 100, states: MERGED, after: $endCursor) {
+          nodes {
+            number title url mergedAt mergeCommit { oid } author { login }
+            labels(first: 100) { nodes { name } }
+            closingIssuesReferences(first: 100) { nodes { number } }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
     }
+    """
+    pages = gh_json("api", "graphql", "--paginate", "--slurp",
+                    "-F", f"owner={owner}", "-F", f"name={name}", "-f", f"query={query}")
+    owned = {}
+    for page in pages:
+        for data in page["data"]["repository"]["pullRequests"]["nodes"]:
+            # A historical merge commit can have been removed by a force-push. It cannot
+            # match a reachable candidate; GraphQL explicitly permits a null commit.
+            if data["mergeCommit"] is None:
+                continue
+            owned[(data["number"], data["mergeCommit"]["oid"])] = {
+                "number": data["number"],
+                "title": data["title"].strip(),
+                "url": data["url"],
+                "labels": sorted(label["name"] for label in data["labels"]["nodes"]),
+                "issues": sorted(issue["number"] for issue in data["closingIssuesReferences"]["nodes"]),
+                "author": (data["author"] or {}).get("login", ""),
+                "merged_at": dt.datetime.fromisoformat(data["mergedAt"].replace("Z", "+00:00")),
+            }
+    return owned
 
 
 def published_releases():
@@ -392,7 +416,7 @@ def line_intro(kind, version, previous):
             f"`horizon-server update --version {version}`.")
 
 
-def notes(kind, version, prs, issues, previous=None):
+def notes(kind, version, prs, issues, previous=None, repository="horizon-rust/horizon"):
     """(title, body) of a release. previous: the release before it, for a line's first release."""
     shown = [pr for pr in prs if pr["paths"] and "skip-release" not in pr["labels"]]
     new = [pr for pr in shown if "feature" in pr["labels"]]
@@ -401,8 +425,12 @@ def notes(kind, version, prs, issues, previous=None):
         title = f"Horizon {version.removeprefix(GAME_PREFIX)}" + (f": {summary(new, fixed)}" if shown else "")
     else:
         title = f"Horizon launcher {version.removeprefix(OLD_LAUNCHER_PREFIX).removeprefix(LAUNCHER_PREFIX)}"
-    intro = line_intro(kind, version, previous)
+    fork_launcher = kind == "launcher" and repository == "arismoko/horizon"
+    intro = None if fork_launcher else line_intro(kind, version, previous)
     parts = [PLAYERS] if kind == "game" else []
+    if fork_launcher:
+        title = f"Horizon Fork Launcher (arismoko) {version}"
+        parts.append((ROOT / "packaging/fork-launcher-release-notes.md").read_text().replace("{tag}", version).strip())
     if intro:
         parts.append(intro)
     if not shown:
@@ -416,7 +444,7 @@ def notes(kind, version, prs, issues, previous=None):
     contributors = sorted({pr["author"] for pr in shown if pr["author"] and pr["author"] != MAINTAINER})
     if contributors:
         parts.append("### Contributors\nThanks to " + ", ".join(f"@{name}" for name in contributors) + ".")
-    if kind == "launcher":
+    if kind == "launcher" and not fork_launcher:
         parts.append(LAUNCHER_FOOTER)
     if kind == "game":
         parts.append(PLAYERS_FOOTER)
@@ -475,9 +503,17 @@ def gather(kind, head, releases=None):
 def merged_between(kind, base, head):
     """The pull requests merged into main between base and head, with their player-facing paths ("paths")."""
     exporter_paths = exporters()
+    candidates = merged_pull_requests(base, head)
+    if not candidates:
+        return []
+    # Merge subjects survive imports and PR numbers are repository-local. Fetch this
+    # repository's merge identities AND note fields in one fully paginated query.
+    owned = merged_pull_request_metadata()
     prs = []
-    for number, commit in merged_pull_requests(base, head):
-        pr = pull_request(number)
+    for number, commit in candidates:
+        if (number, commit) not in owned:
+            continue
+        pr = owned[(number, commit)].copy()
         pr["paths"] = [path for path in changed_paths(commit) if player_facing(path, kind, exporter_paths)]
         prs.append(pr)
     return prs
@@ -491,11 +527,44 @@ def passed_on(workflow, sha):
     return bool(done) and done[0]["conclusion"] == "success"
 
 
-def green_main_head(parity=False):
+def gate_jobs_passed(run_id, required):
+    """Require every named gate on the latest attempt, regardless of non-gate failures."""
+    pages = gh_json("api", "--paginate", "--slurp",
+                    f"repos/{REPO}/actions/runs/{run_id}/jobs?filter=latest&per_page=100")
+    jobs = [job for page in pages for job in page["jobs"] if job["name"] in required]
+    return (required == {job["name"] for job in jobs}
+            and all(job["status"] == "completed" and job["conclusion"] == "success" for job in jobs))
+
+
+def green_main_head(parity=False, eligible=None):
     """The newest commit on main whose checks passed: what an automatic release builds. With parity (game
     releases), the newest commit parity-main passed on whose checks passed too: parity-main runs on batches of
     merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing. A
     later batch that failed holds only the merges after that commit, which the green one doesn't contain."""
+    if REPO == "arismoko/horizon":
+        # Runs are ordered by creation, not completion: a late old run must not
+        # displace a newer push. Paginate beyond bursts of cancelled main runs.
+        pages = gh_json("api", "--paginate", "--slurp",
+                        f"repos/{REPO}/actions/workflows/dyna-ci.yml/runs?branch=main&event=push&per_page=100")
+        seen = set()
+        for page in pages:
+            for entry in page["workflow_runs"]:
+                sha = entry["head_sha"]
+                if entry["head_branch"] != "main" or entry["event"] != "push" or sha in seen:
+                    continue
+                seen.add(sha)
+                if eligible is not None and not eligible(sha):
+                    continue
+                if not gate_jobs_passed(entry["id"], {"lint", "verify", "launcher", "pool-watch"}):
+                    continue
+                fixtures = gh_json("api", "--paginate", "--slurp",
+                                   f"repos/{REPO}/actions/workflows/wasm-mods.yml/runs"
+                                   f"?branch=main&event=push&head_sha={sha}&per_page=100")
+                runs = [run for page in fixtures for run in page["workflow_runs"]
+                        if run["head_sha"] == sha and run["head_branch"] == "main" and run["event"] == "push"]
+                if runs and gate_jobs_passed(runs[0]["id"], {"fixture"}):
+                    return sha
+        return None
     if parity:
         # Only the successful runs: while merges land, one run at a time finishes (the pending one is replaced at
         # every push), and a later failed or timed-out batch must not starve the Nightly of the commit an earlier
@@ -566,7 +635,7 @@ def main():
     if args.command == "notes":
         version = args.tag or "unreleased"
         previous = last["tag_name"] if last and last["tag_name"] != version else None
-        title, body = notes(args.kind, version, prs, known_issues(), previous=previous)
+        title, body = notes(args.kind, version, prs, known_issues(), previous=previous, repository=REPO)
         if args.out:
             args.out.mkdir(parents=True, exist_ok=True)
             (args.out / "title.txt").write_text(title + "\n")

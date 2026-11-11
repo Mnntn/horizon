@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s %2$s várás, gitta %3$s rádjái",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "Ii leat čadnon Mojang dahje Microsoft",
-  "key.emote": "Emošuvdnarullahjul"
+  "key.emote": "Emošuvdnarullahjul",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

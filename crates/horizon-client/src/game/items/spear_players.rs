@@ -248,9 +248,17 @@ impl Game<'_> {
                 // whether or not the hurt went through.
                 let (strength, xd, zd) = s.knockback;
                 if s.deals_knockback {
-                    g.knock_back_player(0.4, xd, zd, SPEAR_SOURCE, &attack);
+                    g.knock_back_player_full(0.4, xd, zd, SPEAR_SOURCE, &attack, s.amount, false);
                     if strength > 0.0 {
-                        g.knock_back_player(f64::from(strength), xd, zd, SPEAR_SOURCE, &attack);
+                        g.knock_back_player_full(
+                            f64::from(strength),
+                            xd,
+                            zd,
+                            SPEAR_SOURCE,
+                            &attack,
+                            s.amount,
+                            true,
+                        );
                     }
                 }
                 if hurt

@@ -28,6 +28,19 @@ pub fn stage(
     points_json: &Path,
     internals_json: &Path,
     mode: Mode,
+    api_version: &str,
+) -> Result<Staged, String> {
+    stage_with_catalog(root, points_json, internals_json, mode, || {
+        crate::sdk_catalog::sdk_catalog(root, api_version)
+    })
+}
+
+fn stage_with_catalog(
+    root: &Path,
+    points_json: &Path,
+    internals_json: &Path,
+    mode: Mode,
+    catalog: impl FnOnce() -> Result<String, String>,
 ) -> Result<Staged, String> {
     let stamp = root.join(".horizon-source-staged");
     if stamp.exists() {
@@ -38,6 +51,12 @@ pub fn stage(
         "Source staging started. Use a fresh copy to stage again.\n",
     )
     .map_err(|error| format!("{}: {error}", stamp.display()))?;
+    if matches!(mode, Mode::Build) {
+        let catalog = catalog()?;
+        let destination = points_json.with_file_name(point_shape::SDK_CATALOG_FILE);
+        std::fs::write(&destination, catalog)
+            .map_err(|e| format!("{}: {e}", destination.display()))?;
+    }
     let mut internals = match mode {
         Mode::Build => internals::widen(root)?,
         Mode::Discovery => internals::discover(root)?,
@@ -77,14 +96,17 @@ fn write(path: &Path, value: &impl serde::Serialize) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    // Point staging fixtures isolate source rewriting from full hook resolution.
+    fn stage(root: &Path, points: &Path, internals: &Path, mode: Mode) -> Result<Staged, String> {
+        stage_with_catalog(root, points, internals, mode, || Ok("{}\n".into()))
+    }
+
     #[test]
     fn staging_preserves_return_authority_and_refuses_reuse() {
         // Each iteration starts from fresh source, not the preceding staged fixture.
         for copy in 0..3 {
-            let root = std::env::temp_dir().join(format!(
-                "horizon-staging-return-{}-{copy}",
-                std::process::id()
-            ));
+            let temporary = tempfile::tempdir().unwrap();
+            let root = temporary.path().to_path_buf();
             let source = root.join("crates/horizon-client/src/game.rs");
             std::fs::create_dir_all(source.parent().unwrap()).unwrap();
             std::fs::write(
@@ -126,6 +148,10 @@ mod tests {
                 assert!(stage(&root, &output, &root.join("internals.json"), Mode::Build).is_err());
             } else {
                 stage(&root, &output, &root.join("internals.json"), Mode::Build).unwrap();
+                assert_eq!(
+                    std::fs::read_to_string(root.join(point_shape::SDK_CATALOG_FILE)).unwrap(),
+                    "{}\n"
+                );
                 let bytes = std::fs::read(&output).unwrap();
                 assert_eq!(bytes.last(), Some(&b'\n'));
                 let manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();

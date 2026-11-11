@@ -8,6 +8,13 @@ use std::{rc::Rc, sync::Arc};
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+#[path = "wire_loopback/loot_tags.rs"]
+mod loot_tags_wire;
+#[path = "wire_loopback/use_item_hand.rs"]
+mod use_item_hand;
+thread_local! {
+    static EXPECTED_LOOT_HAND: std::cell::RefCell<Option<mod_api::ItemStack>> = const { std::cell::RefCell::new(None) };
+}
 #[derive(Clone)]
 struct WasmMod {
     group: u8,
@@ -159,17 +166,40 @@ impl LoopContext for Context {
     fn mods(&self) -> mod_api::LoadedMods {
         unreachable!("not used by this fixture")
     }
+    fn mod_recipe_property_contains(&self, _: &str, _: mod_api::ItemKey) -> bool {
+        false
+    }
 }
 #[unsafe(no_mangle)]
 fn __horizon_mod_hooks() -> Box<dyn Hooks> {
     struct Mod;
     impl Hooks for Mod {
+        fn loot_function(&self, event: &mut mod_api::LootFunctionEvent<'_>) {
+            let tag = event
+                .tags
+                .key(&mod_api::Identifier::parse("test:ingredients").unwrap())
+                .unwrap();
+            let members = event.tags.items(tag).unwrap();
+            assert_eq!(members, vec![event.stack.item]);
+            assert_eq!(event.tags.is_in_tag(event.stack.item, tag), Some(true));
+            event.stack.count = 29;
+        }
+        fn loot_condition(&self, event: &mut mod_api::LootConditionEvent<'_>) {
+            let tag = event
+                .tags
+                .key(&mod_api::Identifier::parse("test:ingredients").unwrap())
+                .unwrap();
+            let item = event.tags.items(tag).unwrap()[0];
+            event.holds = event.tags.is_in_tag(item, tag).unwrap();
+        }
         fn register(
             &self,
             registrar: &mut dyn mod_api::Registrar,
             _: &mod_api::RegistrationContext,
         ) {
+            arm_pose_registration::check(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
+            use_item_hand::register(registrar);
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
             let kind = registrar.block_entity_type("counter").blocks(&[]).build();
@@ -185,6 +215,24 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
                 priority: -37,
                 receive_cancelled: true,
             }]
+        }
+        fn register_json_animation_types(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterJsonAnimationTypesEvent<'_>,
+        ) {
+            assert!(
+                event.types.is_empty(),
+                "the guest starts from its own batch"
+            );
+            for (target, id) in [(true, "wire_test:pulse"), (false, "wire_test:step")] {
+                let id = mod_api::Identifier::parse(id).unwrap();
+                event.types.push(if target {
+                    mod_api::JsonAnimationType::Target(id)
+                } else {
+                    mod_api::JsonAnimationType::Interpolation(id)
+                });
+            }
         }
         fn render_gui_pre(
             &self,
@@ -219,6 +267,16 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             event.add_exhaustion(0.5);
             event.keep = false;
         }
+        fn mob_submit(
+            &self,
+            _: &dyn mod_api::ClientHost,
+            event: &mut mod_api::MobSubmitEvent<'_>,
+        ) -> mod_api::Flow {
+            assert!(event.hidden.contains_named("nose"));
+            event.hidden.hide_named("hat_rim").unwrap();
+            event.hidden.hide(mod_api::HumanoidPart::Head);
+            mod_api::Flow::Continue
+        }
         fn mob_layer(&self, _: &dyn mod_api::ClientHost, event: &mut mod_api::MobLayerEvent<'_>) {
             assert_eq!(event.mob.kind, "test:mob");
             assert_eq!(event.mob.custom_name, Some("custom"));
@@ -247,11 +305,32 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         }
         fn loot_drops(
             &self,
-            _: &mut dyn mod_api::ServerHost,
+            host: &mut dyn mod_api::ServerHost,
             event: &mut mod_api::LootDropsEvent<'_>,
         ) {
             assert_eq!(event.context.entity, Some((12, "test:mob")));
             assert_eq!(event.context.table.len(), 300);
+            let source = event.context.damage_source.unwrap();
+            assert_eq!(
+                (source.damage_type, source.causing, source.direct),
+                ("minecraft:arrow", 41, 73)
+            );
+            assert_eq!(source.position, Some([1.0, 2.0, 3.0]));
+            assert!(event.context.tool.is_none());
+            EXPECTED_LOOT_HAND.with(|expected| {
+                assert_eq!(
+                    event.context.weapon_item(host),
+                    expected.borrow().clone(),
+                    "the recorded weapon crosses the generated hook boundary"
+                );
+                assert_eq!(
+                    host.entity(source.causing as u32)
+                        .and_then(|e| host.living(e))
+                        .and_then(|living| living.hand_item(host, mod_api::Hand::Main)),
+                    expected.borrow().clone(),
+                    "the complete live hand crosses the generated Host boundary"
+                )
+            });
             event.drops.clear();
         }
         fn item_stacked_on_other(
@@ -647,6 +726,69 @@ fn wire_loopback_readonly_private_projection() {
         assert_eq!(lines[1].1, expected);
     }
 }
+/// An answered collect crosses the generated wire proxies as the guest's own plain batch, run by the
+/// real guest dispatcher (natively; the wasm-mods workflow runs a wasm guest in `real_member`): the
+/// guest starts empty although a native mod pushed before it, and the host names the guest mod on
+/// each entry it pushed, after the native one's.
+#[test]
+fn wire_loopback_answered_collect_names_the_guest_mod() {
+    use mod_api::__private::game::RegistrationContextNew;
+    let id = |id: &str| mod_api::Identifier::parse(id).unwrap();
+    struct First;
+    #[mod_api::__subscriptions]
+    impl Hooks for First {
+        fn register_json_animation_types(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterJsonAnimationTypesEvent<'_>,
+        ) {
+            event.types.push(mod_api::JsonAnimationType::Target(
+                mod_api::Identifier::parse("first:glow").unwrap(),
+            ));
+        }
+    }
+    let mods = [
+        mod_api::ModEntry::new("first", Box::new(First)),
+        mod_api::ModEntry::new(
+            "wire_test",
+            Box::new(WasmMod {
+                group: 0,
+                subscribed: &[Some(mod_api::HookId::RegisterJsonAnimationTypes)],
+                listeners: &[],
+                corrupt: false,
+            }),
+        ),
+    ];
+    mod_api::testing::with_mods(Arc::from(mods), || {
+        let mut types = Vec::new();
+        mod_api::dispatch_register_json_animation_types(
+            &mod_api::RegistrationContext::new(),
+            &mut types,
+        );
+        let named: Vec<_> = types
+            .iter()
+            .map(|entry| (entry.answer.clone(), entry.mod_id))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                (
+                    mod_api::JsonAnimationType::Target(id("first:glow")),
+                    "first"
+                ),
+                (
+                    mod_api::JsonAnimationType::Target(id("wire_test:pulse")),
+                    "wire_test"
+                ),
+                (
+                    mod_api::JsonAnimationType::Interpolation(id("wire_test:step")),
+                    "wire_test"
+                ),
+            ]
+        );
+    });
+}
+
 #[test]
 fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
     use mod_api::EffectTickChange;
@@ -843,9 +985,60 @@ fn wire_loopback_array_of_optional_borrowed_records() {
 }
 #[test]
 fn wire_loopback_borrowed_tuple_inside_optional_context() {
+    use mod_api::__private::game::BackendRefOf;
+    struct World;
+    impl mod_api::Host for World {
+        fn backend(&self) -> Option<mod_api::BackendRef<'_>> {
+            Some(mod_api::BackendRef::of(self))
+        }
+    }
+    mod_api::impl_host_areas!(World, except(entities, living));
+    impl mod_api::prelude::EntitiesHost for World {
+        fn entity(&self, id: u32) -> Option<mod_api::EntityRef> {
+            Some(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), id))
+        }
+    }
+    impl mod_api::prelude::LivingHost for World {
+        fn living(&self, entity: mod_api::EntityRef) -> Option<mod_api::LivingRef> {
+            Some(mod_api::LivingRef::new(entity))
+        }
+    }
+    impl mod_api::Backend for World {}
+    mod_api::impl_backend_areas!(World, except(living));
+    impl mod_api::prelude::LivingClientBackend for World {}
+    impl mod_api::prelude::LivingBackend for World {
+        fn living_hand_item(
+            &self,
+            _: mod_api::LivingRef,
+            _: mod_api::Hand,
+        ) -> Option<mod_api::ItemStack> {
+            EXPECTED_LOOT_HAND.with(|expected| expected.borrow().clone())
+        }
+    }
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+
     install_counter();
     let table = "t".repeat(300);
+    let mut hand = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 7).unwrap();
+    hand.set_damage(19);
+    hand.set_components(
+        [(
+            "minecraft:custom_data".into(),
+            mod_api::Tag::Compound([("marker".into(), mod_api::Tag::Int(73))].into()),
+        )]
+        .into(),
+    )
+    .unwrap();
+    EXPECTED_LOOT_HAND.with(|expected| *expected.borrow_mut() = Some(hand.clone()));
     let context: mod_api::LootDrops = mod_api::__private::built::LootDrops {
+        weapon: Some(&hand),
+        damage_source: Some(mod_api::HurtSource {
+            damage_type: "minecraft:arrow",
+            causing: 41,
+            direct: 73,
+            position: Some([1.0, 2.0, 3.0]),
+        }),
         table: &table,
         dimension: "minecraft:overworld",
         origin: [0.; 3],
@@ -865,7 +1058,7 @@ fn wire_loopback_borrowed_tuple_inside_optional_context() {
         corrupt: false,
     }
     .loot_drops(
-        &mut guest::Guest,
+        &mut World,
         &mut mod_api::LootDropsEvent {
             context: &context,
             drops: &mut drops,
@@ -1644,4 +1837,60 @@ fn listener_metadata_and_cancellation_cross_the_real_guest() {
         .unwrap();
     assert_eq!(flow, mod_api::Flow::Continue);
     assert!(!event.cancelled);
+}
+
+#[path = "wire_loopback/arm_pose_registration.rs"]
+mod arm_pose_registration;
+
+#[test]
+fn wire_loopback_mob_submit_hidden_parts_write_back() {
+    struct Client;
+    impl mod_api::Host for Client {}
+    mod_api::impl_host_areas!(Client);
+    impl mod_api::ClientHost for Client {}
+    mod_api::impl_client_host_areas!(Client);
+    struct Draw(u32);
+    impl mod_api::BlockEntityDrawContext for Draw {
+        fn set_light(&mut self, value: u32) {
+            self.0 = value;
+        }
+    }
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        listeners: &[],
+        corrupt: false,
+    };
+    let mob = mod_api::MobRender {
+        id: 1,
+        kind: "test:mob",
+        custom_name: Some("custom"),
+        baby: false,
+        partial: 0.5,
+        age: 1.,
+        body_yaw: 0.,
+        head_yaw: 0.,
+        pitch: 0.,
+        walk_position: 0.,
+        walk_speed: 0.,
+        hurt_time: 0,
+        death_time: 0,
+        on_ground: true,
+    };
+    let mut hidden = mod_api::HiddenParts::default();
+    hidden.hide_named("nose").unwrap();
+    let mut draw = Draw(0);
+    module.mob_submit(
+        &Client,
+        &mut mod_api::MobSubmitEvent {
+            mob: &mob,
+            draw: &mut draw,
+            hidden: &mut hidden,
+            cancelled: false,
+        },
+    );
+    assert!(hidden.contains_named("nose"));
+    assert!(hidden.contains_named("hat_rim"));
+    assert!(hidden.contains(mod_api::HumanoidPart::Head));
 }

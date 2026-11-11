@@ -8,6 +8,7 @@ pub use mod_render::render::Vertex;
 mod fluid;
 mod leaf_culling;
 mod lighting;
+mod mod_geometry;
 mod mod_tint;
 pub mod packed;
 mod sides;
@@ -33,6 +34,7 @@ use horizon_world::{
     fluid::{FluidKind, FluidState},
     registry::BlockStateId,
 };
+pub use mod_geometry::{has_section_geometry, register_section_geometry};
 use mod_tint::ModLayer;
 pub use mod_tint::{
     ModTintValues, has_custom_block_tint_sources, register_block_tint_sources,
@@ -637,6 +639,8 @@ fn visibility_rows(open: &[u16; 256]) -> u64 {
     result
 }
 #[cfg(test)]
+mod mod_geometry_tests;
+#[cfg(test)]
 mod mod_tint_tests;
 #[cfg(test)]
 mod particle_tests;
@@ -745,6 +749,8 @@ pub struct MeshTables {
     animated_layers: Vec<bool>,
     /// The layers of the states mods colour (`register_block_tint_sources`).
     mod_tints: mod_tint::ModTints,
+    /// The mods' section geometry renderers (`add_section_geometry`), in registration order.
+    section_geometry: Arc<[mod_geometry::Renderer]>,
     /// Resource packs' Polytone block and fluid colormaps (#11486), and the water's.
     colormaps: Vec<Arc<crate::environment::Colormap>>,
     water_colormap: Option<u16>,
@@ -1058,9 +1064,13 @@ impl MeshTables {
             colormaps: Vec::new(),
             water_colormap: None,
             mod_tints: mod_tint::ModTints::default(),
+            section_geometry: mod_geometry::registered(),
         };
         if let Some(registered) = mod_tint::registered() {
             tables.apply_tint_layers(assets.registry, registered, mod_tint_values)?;
+        } else if !tables.section_geometry.is_empty() {
+            tables.mod_tints.values =
+                Some(mod_tint_values.ok_or("section geometry needs game-prepared metadata")?);
         }
         Ok(tables)
     }
@@ -2099,7 +2109,19 @@ impl Mesher<'_> {
         out.clear();
         let center = region[1][1].expect("centre chunk");
         let section = &center.sections[sy as usize];
+        let base_y = center.min_y() + sy * 16;
         if section.is_uniform(0) {
+            if !self.tables.section_geometry.is_empty() {
+                let mut tints = Tints::new(
+                    region,
+                    self.biomes,
+                    self.zoom,
+                    self.blend_radius,
+                    [center.x, center.z, base_y],
+                );
+                mod_geometry::add(self, &mut tints, &mut out);
+                out.finish_sprite_layers();
+            }
             return out;
         }
         let own = scratch.own.get_or_insert_with(|| Box::new([0; 4096]));
@@ -2116,7 +2138,6 @@ impl Mesher<'_> {
         let opaque = &scratch.solid_rows;
         let (open, hidden) = row_masks(opaque);
         out.visibility = visibility_rows(&open);
-        let base_y = center.min_y() + sy * 16;
         if self.leaf_culling.is_interior() {
             scratch
                 .leaf
@@ -2297,6 +2318,9 @@ impl Mesher<'_> {
                     }
                 }
             }
+        }
+        if !self.tables.section_geometry.is_empty() {
+            mod_geometry::add(self, &mut tints, &mut out);
         }
         out.finish_sprite_layers();
         out

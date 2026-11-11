@@ -4,6 +4,7 @@ mod admin;
 pub(super) mod compute;
 mod data;
 mod difficulty;
+mod display_names;
 pub(super) use data::place_summoned;
 mod effects;
 pub(super) mod execute;
@@ -430,7 +431,7 @@ impl Game<'_> {
             .ui
             .rules
             .bool_at(horizon_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK);
-        let console = self.options.dedicated.is_some()
+        let console = self.is_dedicated_server()
             && self
                 .ui
                 .rules
@@ -465,7 +466,7 @@ impl Game<'_> {
         // MinecraftServer.sendSystemMessage, unless the server is the source.
         let console = self.console_broadcast.is_none()
             && self.lan_acting.is_some()
-            && self.options.dedicated.is_some()
+            && self.is_dedicated_server()
             && self
                 .ui
                 .rules
@@ -816,13 +817,7 @@ impl Game<'_> {
                 let block = Text::translate(&format!("block.{block}"), &[]);
                 Text::translate("entity.minecraft.falling_block_type", &[block])
             }
-            Target::Mob(id) => self.mobs.iter().find(|m| m.id == id).map_or_else(
-                || Text::translate("entity.", &[]),
-                |m| match self.mob_team_of(m) {
-                    Some(team) => team.formatted_name(m.command_name()),
-                    None => m.command_name(),
-                },
-            ),
+            Target::Mob(id) => self.mob_command_name(id),
             other => {
                 // Entity.getDisplayName: the CustomName component, else the type.
                 let custom = super::native_entities::target_id(other)
@@ -1098,8 +1093,10 @@ impl Game<'_> {
         );
         candidates.extend(self.natural_knot_ids().into_iter().map(Target::Knot));
         // `isRemoved` from a mod's call on, though the sweep has not taken it out.
-        if !self.persist.removals.is_empty() {
-            candidates.retain(|t| !self.persist.removals.contains(t));
+        if !self.persist.removals.is_empty() || !self.persist.destroying_vehicles.is_empty() {
+            candidates.retain(|t| {
+                !self.persist.removals.contains(t) && !self.persist.destroying_vehicles.contains(t)
+            });
         }
         candidates
     }
@@ -2632,25 +2629,9 @@ impl Game<'_> {
                 self.item_frames.retain(|f| f.id != id);
             }
             Target::Painting(id) => self.paintings.retain(|p| p.id != id),
-            Target::Boat(id) => {
-                // AbstractBoat.remove: a killed boat drops its lead.
-                self.dismount_killed_boat(id);
-                if let Some(i) = self.boats.iter().position(|b| b.id == id) {
-                    self.release_vehicle_container(id);
-                    let b = self.boats.remove(i);
-                    // AbstractChestBoat.remove, after the live menu writes
-                    // back its slots.
-                    self.drop_vehicle_contents(b.position.components(), &b.items);
-                    self.boat_removed(&b);
-                }
-            }
-            Target::Cart(id) => {
-                self.dismount_killed_cart(id);
-                self.release_vehicle_container(id);
-                if let Some(i) = self.carts.iter().position(|c| c.id == id) {
-                    let c = self.carts.remove(i);
-                    // AbstractMinecartContainer.remove.
-                    self.drop_vehicle_contents(c.position.components(), &c.items);
+            Target::Boat(_) | Target::Cart(_) => {
+                if !self.kill_vehicle_object(t) {
+                    return;
                 }
             }
             Target::Other(id) => {
@@ -2749,15 +2730,16 @@ impl Game<'_> {
         }
         let name;
         if kind == "minecraft:ender_dragon" || self.res.mob_types().contains_key(&kind) {
-            self.spawn_mob_spawned(
-                &short,
-                pos,
-                super::creatures::SpawnSite::Finalizing(
-                    horizon_client::mobs::spawn_rules::Reason::Command,
-                ),
-            )
-            .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
-            name = Text::translate(&entity_name_key(&kind), &[]);
+            let id = self
+                .spawn_mob_spawned(
+                    &short,
+                    pos,
+                    super::creatures::SpawnSite::Finalizing(
+                        horizon_client::mobs::spawn_rules::Reason::Command,
+                    ),
+                )
+                .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
+            name = self.target_name(Target::Mob(id));
         } else {
             match short.as_str() {
                 "item" => {
@@ -3826,7 +3808,7 @@ impl Game<'_> {
             self.game_rule_changed(&rule.name, value, actor);
         }
         self.sync_rules();
-        if self.options.dedicated.is_some() {
+        if self.is_dedicated_server() {
             let (value_type, json) = match value {
                 Value::Bool(b) => ("boolean", serde_json::json!(b)),
                 Value::Int(i) => ("integer", serde_json::json!(i)),
@@ -4266,9 +4248,9 @@ impl Game<'_> {
         };
         let from = self.source_position().map(|v| v.floor() as i32);
         const RANGE: i32 = 256;
-        let mut cache: std::collections::HashMap<u32, Option<&'static str>> =
+        let mut cache: std::collections::HashMap<u32, Option<&str>> =
             std::collections::HashMap::new();
-        let mut best: Option<(i64, [i32; 3], &'static str)> = None;
+        let mut best: Option<(i64, [i32; 3], &str)> = None;
         let (cx0, cz0) = ((from[0] - RANGE) >> 4, (from[2] - RANGE) >> 4);
         let (cx1, cz1) = ((from[0] + RANGE) >> 4, (from[2] + RANGE) >> 4);
         for cx in cx0..=cx1 {
@@ -4589,7 +4571,7 @@ impl Game<'_> {
             }
         };
         if id == "say" {
-            if self.lan.is_some() && self.options.dedicated.is_some() {
+            if self.lan.is_some() && self.is_dedicated_server() {
                 self.lan_log_event(horizon_client::lan::hub::HostEvent::Chat {
                     line: line.plain(),
                     secure: false,
@@ -6383,3 +6365,6 @@ mod global_selector_order_tests {
 #[cfg(test)]
 #[path = "incoming_tests/knot_identity.rs"]
 mod knot_identity_tests;
+
+#[cfg(test)]
+mod mob_display_name_tests;

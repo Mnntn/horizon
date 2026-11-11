@@ -2,7 +2,7 @@
 use std::sync::atomic::Ordering;
 fn main() {
     // Ensure the actual game (including its global allocator) is a linked dependency.
-    std::hint::black_box(horizon_client::entry::main as *const ());
+    std::hint::black_box(horizon_mod_host::main_with as *const ());
     let libraries: Vec<_> = std::env::args_os()
         .skip(1)
         .map(|path| {

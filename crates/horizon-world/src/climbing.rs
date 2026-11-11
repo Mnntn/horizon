@@ -88,6 +88,11 @@ pub trait ClimbingWorld {
     fn is_fall_flying(&mut self) -> Result<bool, Self::Error>;
     fn block_state(&mut self, position: BlockPos) -> Result<BlockStateId, Self::Error>;
     fn set_last_climbable_position(&mut self, position: BlockPos);
+    /// `IBlockExtension.isLadder` for the block `state` at `position` the entity stands in, once
+    /// the `#minecraft:climbable` tag answered `tagged`: the answer to use. The default keeps it.
+    fn adjust_ladder(&mut self, _position: BlockPos, _state: BlockStateId, tagged: bool) -> bool {
+        tagged
+    }
 }
 #[derive(Debug)]
 pub enum ClimbingError<E> {
@@ -114,13 +119,12 @@ pub fn on_climbable<W: ClimbingWorld>(
         return Ok(false);
     }
     let position = world.block_position().map_err(World)?;
-    let state = registry
-        .state(world.in_block_state().map_err(World)?)
-        .map_err(Data)?;
+    let in_state = world.in_block_state().map_err(World)?;
+    let state = registry.state(in_state).map_err(Data)?;
     if world.is_fall_flying().map_err(World)? && state.glide_through {
         return Ok(false);
     }
-    let climbable = if state.climbable {
+    let climbable = if world.adjust_ladder(position, in_state, state.climbable) {
         true
     } else if let Some(facing) = state.open_trapdoor {
         let below = BlockPos::new(position.x, position.y.wrapping_sub(1), position.z);
@@ -179,6 +183,9 @@ mod tests {
         inside: BlockStateId,
         below: BlockStateId,
         last: Option<BlockPos>,
+        /// A part's `is_ladder` answer for one state, with the tag's answer it was asked after.
+        ladder: Option<(BlockStateId, bool)>,
+        asked: Vec<(BlockStateId, bool)>,
     }
     impl ClimbingWorld for World {
         type Error = Infallible;
@@ -200,13 +207,31 @@ mod tests {
         fn set_last_climbable_position(&mut self, position: BlockPos) {
             self.last = Some(position);
         }
+        fn adjust_ladder(&mut self, _: BlockPos, state: BlockStateId, tagged: bool) -> bool {
+            self.asked.push((state, tagged));
+            match self.ladder {
+                Some((answered, ladder)) if answered == state => ladder,
+                _ => tagged,
+            }
+        }
     }
 
     fn climbs(registry: &ClimbingRegistry<'_>, inside: BlockStateId, below: BlockStateId) -> bool {
+        climbs_with(registry, inside, below, None)
+    }
+
+    fn climbs_with(
+        registry: &ClimbingRegistry<'_>,
+        inside: BlockStateId,
+        below: BlockStateId,
+        ladder: Option<(BlockStateId, bool)>,
+    ) -> bool {
         let mut world = World {
             inside,
             below,
             last: None,
+            ladder,
+            asked: Vec::new(),
         };
         let result = on_climbable(&mut world, registry).unwrap();
         assert_eq!(result, world.last.is_some());
@@ -246,5 +271,80 @@ mod tests {
             let tagged = names(&[name]);
             assert!(ClimbingRegistry::new(&registry, &tagged, &empty, &empty).is_ok());
         }
+    }
+
+    #[test]
+    fn a_blocks_ladder_answer_replaces_the_tag() {
+        let registry = registry();
+        // Only the mod's pier is tagged `climbable` here; the ladder and the air are not.
+        let climbable = names(&["mod:pier"]);
+        let empty = BTreeSet::new();
+        let climbing = ClimbingRegistry::new(&registry, &empty, &climbable, &empty).unwrap();
+
+        // Default: the tag decides, as before (the block asked is the one the entity stands in).
+        assert!(climbs(&climbing, PIER_NO_PROPERTIES, AIR));
+        assert!(!climbs(&climbing, LADDER_NORTH, AIR));
+        assert!(!climbs(&climbing, AIR, AIR));
+        let mut world = World {
+            inside: PIER_NO_PROPERTIES,
+            below: AIR,
+            last: None,
+            ladder: None,
+            asked: Vec::new(),
+        };
+        on_climbable(&mut world, &climbing).unwrap();
+        assert_eq!(world.asked, [(PIER_NO_PROPERTIES, true)]);
+
+        // Allow: an untagged block climbs, and the block is remembered.
+        assert!(climbs_with(&climbing, AIR, AIR, Some((AIR, true))));
+        assert!(climbs_with(
+            &climbing,
+            LADDER_NORTH,
+            AIR,
+            Some((LADDER_NORTH, true))
+        ));
+        // Deny: a tagged block does not climb, and nothing is remembered.
+        assert!(!climbs_with(
+            &climbing,
+            PIER_NO_PROPERTIES,
+            AIR,
+            Some((PIER_NO_PROPERTIES, false))
+        ));
+        // An answer for another state changes nothing.
+        assert!(climbs_with(
+            &climbing,
+            PIER_NO_PROPERTIES,
+            AIR,
+            Some((AIR, false))
+        ));
+        assert!(!climbs_with(
+            &climbing,
+            AIR,
+            AIR,
+            Some((LADDER_NORTH, true))
+        ));
+    }
+
+    #[test]
+    fn a_denied_ladder_answer_leaves_the_trapdoor_over_a_ladder() {
+        let registry = registry();
+        let trapdoors = names(&["minecraft:oak_trapdoor"]);
+        let climbable = names(&["minecraft:oak_trapdoor"]);
+        let empty = BTreeSet::new();
+        let climbing = ClimbingRegistry::new(&registry, &trapdoors, &climbable, &empty).unwrap();
+        // Vanilla's `else if` falls to the trapdoor rule when the block is not a ladder: an open
+        // trapdoor over a matching ladder still climbs when its own answer is no.
+        assert!(climbs_with(
+            &climbing,
+            OPEN_TRAPDOOR_NORTH,
+            LADDER_NORTH,
+            Some((OPEN_TRAPDOOR_NORTH, false))
+        ));
+        assert!(!climbs_with(
+            &climbing,
+            OPEN_TRAPDOOR_NORTH,
+            AIR,
+            Some((OPEN_TRAPDOOR_NORTH, false))
+        ));
     }
 }

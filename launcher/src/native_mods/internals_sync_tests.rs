@@ -173,8 +173,18 @@ fn module_edit_regenerates_hash_and_apply_failure_names_the_mod() {
 
 #[test]
 fn discovery_error_text_is_unchanged() {
-    assert_eq!(Error::SourceInjection.to_string(), "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, raw listeners and the mod's own modules, not source listeners or helpers. Use cargo horizon-mod internals add for this mod.");
-    assert_eq!(Error::SourceUnavailable { revision: "pinned".into(), reason: "offline".into() }.to_string(), "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for pinned. It is not cached and could not be downloaded: offline");
+    assert_eq!(
+        Error::SourceInjection.to_string(),
+        "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, slot listeners and supporting modules, not mixin helpers. Use cargo horizon-mod internals add for this mod."
+    );
+    assert_eq!(
+        Error::SourceUnavailable {
+            revision: "pinned".into(),
+            reason: "offline".into()
+        }
+        .to_string(),
+        "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for pinned. It is not cached and could not be downloaded: offline"
+    );
     assert_eq!(
         Error::Check("compiler failure".into()).to_string(),
         "compiler failure"

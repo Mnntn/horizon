@@ -256,6 +256,97 @@ pub mod tests {
         mark_game_thread();
     }
 
+    /// Install parts that decide what a living entity climbs: glass is a ladder to entities with
+    /// an even id, and a vine (tagged climbable) is a ladder to none.
+    pub fn ladder_game_thread() {
+        struct Glass;
+        #[mod_api::horizon_part]
+        impl BlockPart for Glass {
+            fn is_ladder(&self, _: &dyn LoopContext, event: &mut IsLadderEvent) {
+                event.ladder = event.entity.is_multiple_of(2);
+            }
+        }
+        struct Vine;
+        #[mod_api::horizon_part]
+        impl BlockPart for Vine {
+            fn is_ladder(&self, _: &dyn LoopContext, event: &mut IsLadderEvent) {
+                event.ladder = false;
+            }
+        }
+        struct LadderMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for LadderMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                let glass = r.block_key("minecraft:glass");
+                r.block_part(glass, Glass);
+                let vine = r.block_key("minecraft:vine");
+                r.block_part(vine, Vine);
+            }
+        }
+        let mods: crate::Mods = vec![ModEntry::new("ladder_test", Box::new(LadderMod))].into();
+        crate::install(mods.clone());
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+        mark_game_thread();
+    }
+
+    /// Install parts that decide whether a tool harvests: stone is harvested by any tool, bare
+    /// hand included, and dirt by none.
+    pub fn harvest_game_thread() {
+        struct Answer(bool);
+        #[mod_api::horizon_part]
+        impl BlockPart for Answer {
+            fn can_harvest_block(&self, _: HostSide<'_>, event: &mut CanHarvestBlockEvent) {
+                event.can_harvest = self.0;
+            }
+        }
+        struct HarvestMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for HarvestMod {
+            fn player_harvest_check(&self, _: HostSide<'_>, event: &mut PlayerHarvestCheckEvent) {
+                event.can_harvest = !event.can_harvest;
+            }
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                let stone = r.block_key("minecraft:stone");
+                r.block_part(stone, Answer(true));
+                let dirt = r.block_key("minecraft:dirt");
+                r.block_part(dirt, Answer(false));
+            }
+        }
+        let mods: crate::Mods = vec![ModEntry::new("harvest_test", Box::new(HarvestMod))].into();
+        crate::install(mods.clone());
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+        mark_game_thread();
+    }
+
+    /// Install soil parts: glass sustains any plant, and grass sustains none.
+    pub fn sustain_plant_game_thread() {
+        struct Soil(bool);
+        #[mod_api::horizon_part]
+        impl BlockPart for Soil {
+            fn can_sustain_plant(
+                &self,
+                _: &dyn LevelHost,
+                _: &mut CanSustainPlantEvent,
+            ) -> Option<bool> {
+                Some(self.0)
+            }
+        }
+        struct SoilMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for SoilMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                let glass = r.block_key("minecraft:glass");
+                r.block_part(glass, Soil(true));
+                let grass = r.block_key("minecraft:grass_block");
+                r.block_part(grass, Soil(false));
+            }
+        }
+        let mods: crate::Mods = vec![ModEntry::new("soil_test", Box::new(SoilMod))].into();
+        crate::install(mods.clone());
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+        mark_game_thread();
+    }
+
     /// Install a part on glass that asks, when a glass block is removed, for every neighbour to
     /// be told, as an override of `affectNeighborsAfterRemoval` calling `updateNeighborsAt`.
     pub fn removal_game_thread() {

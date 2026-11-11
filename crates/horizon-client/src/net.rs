@@ -415,12 +415,19 @@ impl Session {
         {
             eprintln!("[net] -> {packet:?}");
         }
+        let body = match packet.try_encode() {
+            Ok(body) => body,
+            Err(error) => {
+                eprintln!("[net] send refused: {error}");
+                return;
+            }
+        };
         let mut writer = self.writer.lock().unwrap();
         if self.configuring.load(Ordering::Relaxed) {
             return;
         }
         if let Some(w) = writer.as_mut()
-            && w.send(&packet.encode()).is_err()
+            && w.send(&body).is_err()
         {
             w.shutdown();
         }
@@ -919,7 +926,8 @@ fn run(
             channel: "minecraft:brand".into(),
             data: brand(),
         })
-        .encode(),
+        .try_encode()
+        .map_err(e)?,
     )
     .map_err(e)?;
     c.send(&cfg::Serverbound::ClientInformation(info).encode())
@@ -1071,10 +1079,12 @@ fn configure(
 ) -> Result<Dynamic, Reason> {
     let mut registries = Dynamic::default();
     let mut content_verified = false;
+    crate::datapack_net::clear_received();
     let reply = |p: cfg::Serverbound| -> Result<(), Reason> {
         match writer.lock().unwrap().as_mut() {
-            Some(w) => w
-                .send(&p.encode())
+            Some(w) => p
+                .try_encode()
+                .and_then(|body| w.send(&body))
                 .map_err(|e| Reason::plain(connection_lost(e, lang))),
             None => Err(Reason::plain("Disconnected")),
         }
@@ -1093,11 +1103,16 @@ fn configure(
                         .map_err(|_| {
                             Reason::plain(crate::content_identity::MISMATCH.to_string())
                         })?;
-                content_verified = p.data == hash;
+                content_verified = crate::content_identity::decode_payload(&p.data)
+                    .map_err(|error| Reason::plain(error.to_string()))?
+                    == Some(hash);
                 reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                     channel: crate::content_identity::CHANNEL.into(),
                     data: hash.to_vec(),
                 }))?;
+            }
+            cfg::Clientbound::CustomPayload(p) if p.channel == crate::datapack_net::CHANNEL => {
+                crate::datapack_net::accept_chunk(&p.data).map_err(Reason::plain)?;
             }
             cfg::Clientbound::CustomPayload(p) => {
                 // Horizon servers use the client brand to negotiate their extensions.
@@ -1123,6 +1138,13 @@ fn configure(
                             &horizon_protocol::mod_list::local(),
                         ),
                     }))?;
+                    // And the mods' datapack registries it has (#811).
+                    if let Some(data) = crate::datapack_net::offer() {
+                        reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                            channel: crate::datapack_net::OFFER_CHANNEL.into(),
+                            data,
+                        }))?;
+                    }
                 }
                 receive_brand(&p, send);
             }
@@ -1179,6 +1201,7 @@ fn configure(
             }
             cfg::Clientbound::Disconnect(d) => return Err(Reason::tag(&d.reason, lang)),
             cfg::Clientbound::FinishConfiguration(_) => {
+                crate::datapack_net::finish_transfer().map_err(Reason::plain)?;
                 registries.custom_components = content_verified;
                 let mut w = writer.lock().unwrap_or_else(|e| e.into_inner());
                 let w = w.as_mut().ok_or_else(|| Reason::plain("Disconnected"))?;
@@ -1731,6 +1754,14 @@ mod tests {
                     .encode(),
                 )
                 .unwrap();
+            if server_brand == b"\xff" {
+                // A registered brand uses its own string codec: malformed
+                // bytes fail the session rather than continuing negotiation.
+                assert!(server.recv().unwrap_err().is_end_of_stream());
+                drop(server);
+                drop(session);
+                continue;
+            }
             server
                 .send(
                     &cfg::Clientbound::SelectKnownPacks(cfg::SelectKnownPacks { packs: vec![] })
@@ -2048,6 +2079,47 @@ mod tests {
         writer.lock().unwrap().take().unwrap().shutdown();
         assert!(thread.join().unwrap().is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn local_send_rejects_unknown_oversize_payload_before_writing() {
+        let (client, server) = horizon_protocol::connection::Pipe::pair();
+        let (_, writer) = Connection::local(client).split();
+        let (_, events) = channel();
+        let session = Session {
+            events,
+            writer: Arc::new(Mutex::new(Some(writer))),
+            configuring: Arc::new(AtomicBool::new(false)),
+            thread: None,
+            address: "local".into(),
+            name: "Player".into(),
+            counters: Arc::new(Mutex::new(None)),
+            cookies: Cookies::default(),
+            debug: false,
+            far: Arc::default(),
+            recorder: Arc::new(Mutex::new(None)),
+            serial: next_serial(),
+        };
+        let mut server = Connection::local(server);
+        let payload = |size| {
+            play::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: "test:opaque".into(),
+                data: vec![0x83; size],
+            })
+        };
+        session.send(payload(32_767));
+        let (id, bytes) = server.recv().unwrap();
+        assert_eq!(
+            play::Serverbound::decode(id, &bytes).unwrap(),
+            payload(32_767)
+        );
+        session.send(payload(32_768));
+        session.send(play::Serverbound::ClientTickEnd(Empty));
+        let (id, bytes) = server.recv().unwrap();
+        assert_eq!(
+            play::Serverbound::decode(id, &bytes).unwrap(),
+            play::Serverbound::ClientTickEnd(Empty)
+        );
     }
 
     #[test]

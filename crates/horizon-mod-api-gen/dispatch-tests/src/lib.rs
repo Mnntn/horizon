@@ -1,4 +1,7 @@
 #[cfg(test)]
+include!(concat!(env!("OUT_DIR"), "/dispatch_fixtures_crate_root.rs"));
+
+#[cfg(test)]
 mod tests {
     #[allow(dead_code)]
     mod stubs {

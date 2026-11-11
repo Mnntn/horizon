@@ -119,9 +119,15 @@ impl Game<'_> {
         };
         let now = self.world.game_time;
         let items = world_items!(self);
-        let meeting = villager::meet(&mut self.mobs, ia, ib, now, |item| {
-            items.get(item).map_or(64, |i| i.max_stack)
-        });
+        let professions = self.stations().professions.clone();
+        let meeting = villager::meet(
+            &mut self.mobs,
+            ia,
+            ib,
+            now,
+            |item| items.get(item).map_or(64, |i| i.max_stack),
+            &professions,
+        );
         for stack in meeting.thrown {
             self.villager_throw(meeting.from, meeting.eye, meeting.to, stack);
         }
@@ -328,7 +334,8 @@ impl Game<'_> {
         for i in due {
             let m = &self.mobs[i];
             let area = m.bounds().inflate(Vec3::new(32.0, 16.0, 32.0));
-            let requested = villager::requested_items(m);
+            let professions = self.stations().professions.clone();
+            let requested = villager::requested_items(m, &professions);
             let eye = Vec3::new(m.position.x, m.eye_y(), m.position.z);
             let mut best: Option<(f64, Vec3)> = None;
             for e in &self.dropped {
@@ -342,7 +349,7 @@ impl Game<'_> {
                 let item = &e.stack.item;
                 let wants = villager::food_points(item) > 0
                     || picks_up.as_ref().is_some_and(|t| t.contains(&**item))
-                    || requested.contains(&&**item);
+                    || requested.iter().any(|key| key == &**item);
                 let fits =
                     villager::ext(m).is_none_or(|x| x.can_add(&e.stack, self.item_max_stack(item)));
                 // ItemEntity's eye height is 0.2125.
@@ -397,7 +404,8 @@ impl Game<'_> {
             if scan.is_empty() {
                 continue;
             }
-            let requested = villager::requested_items(m);
+            let professions = self.stations().professions.clone();
+            let requested = villager::requested_items(m, &professions);
             let mut j = 0;
             loop {
                 j = scan.next_from(j, self.dropped.len());
@@ -415,7 +423,7 @@ impl Game<'_> {
                 let item = e.stack.item.clone();
                 let wants = villager::food_points(&item) > 0
                     || picks_up.as_ref().is_some_and(|t| t.contains(&*item))
-                    || requested.contains(&&*item);
+                    || requested.iter().any(|key| key == &*item);
                 if !wants {
                     j += 1;
                     continue;

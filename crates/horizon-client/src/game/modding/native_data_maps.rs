@@ -10,6 +10,8 @@
 //! merged each time the server's tables are built: a world's first open and
 //! every `/reload`.
 use super::Game;
+use super::data_map_json::to_tag;
+use horizon_core::nbt::Tag;
 pub use mod_api::game::DataMapType;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -27,11 +29,11 @@ pub(crate) fn registries_of(types: &[DataMapType]) -> Vec<&'static str> {
         .collect()
 }
 
-/// The merged values of every registered type: `(registry, type id)` to the
+/// The merged values of every registered type: registry, then type id, to the
 /// value of each entry that has one.
 #[derive(Default)]
 pub(crate) struct DataMaps {
-    maps: HashMap<(String, String), BTreeMap<String, Value>>,
+    maps: HashMap<&'static str, HashMap<String, BTreeMap<String, Value>>>,
 }
 
 /// `minecraft:` for an id written without a namespace.
@@ -120,9 +122,10 @@ impl DataMaps {
         item_tags: &HashMap<String, HashSet<String>>,
         block_tags: &HashMap<String, HashSet<String>>,
     ) -> Self {
-        let mut maps: HashMap<(String, String), BTreeMap<String, Value>> = HashMap::new();
+        let mut maps: HashMap<&'static str, HashMap<String, BTreeMap<String, Value>>> =
+            HashMap::new();
         for ty in types {
-            let Some((_, dir)) = REGISTRIES.iter().find(|(r, _)| *r == ty.registry) else {
+            let Some((registry, dir)) = REGISTRIES.iter().find(|(r, _)| *r == ty.registry) else {
                 log::warn!(
                     "Horizon: data map {} is for {}, which has no data maps yet: left out",
                     ty.id,
@@ -146,8 +149,8 @@ impl DataMaps {
                 );
                 continue;
             }
-            let key = (ty.registry.clone(), ty.id.clone());
-            if maps.contains_key(&key) {
+            let registered = maps.entry(registry).or_default();
+            if registered.contains_key(&ty.id) {
                 log::warn!(
                     "Horizon: data map {} registered twice: the first is kept",
                     ty.id
@@ -180,9 +183,25 @@ impl DataMaps {
                     }
                 }
             }
-            maps.insert(key, map);
+            registered.insert(ty.id.clone(), map);
         }
         Self { maps }
+    }
+
+    /// `entry`'s value in map `type_id` of `registry`, as NBT: none where the
+    /// map gives it none, refused where no mod registered the map there.
+    fn value(
+        &self,
+        registry: &str,
+        type_id: &str,
+        entry: &str,
+    ) -> Result<Option<Tag>, mod_api::DataMapError> {
+        let map = self
+            .maps
+            .get(registry)
+            .and_then(|maps| maps.get(type_id))
+            .ok_or(mod_api::DataMapError::UnknownType)?;
+        map.get(entry).map(to_tag).transpose()
     }
 }
 
@@ -199,47 +218,39 @@ impl Game<'_> {
     }
 }
 
-// Native mods use these; nothing in Horizon does.
-#[allow(dead_code, reason = "native mod API (docs/native-mods.md)")]
 impl Game<'_> {
-    /// The merged data map of `type_id` for `registry`, none unless this is a
-    /// server whose tables were built from packs or mods' files.
-    fn native_data_map_of(
-        &self,
-        registry: &str,
-        type_id: &str,
-    ) -> Option<&BTreeMap<String, Value>> {
+    /// The server's merged data maps, none unless this is a server whose
+    /// tables were built from packs and mods' files.
+    fn loaded_data_maps(&self) -> Result<&DataMaps, mod_api::DataMapError> {
         if self.serving.is_none() && self.options.dedicated.is_none() {
-            return None;
+            return Err(mod_api::DataMapError::Unavailable);
         }
-        let key = (registry.to_owned(), type_id.to_owned());
-        self.world_tables.as_ref()?.data_maps.maps.get(&key)
+        self.world_tables
+            .as_ref()
+            .map(|tables| &tables.data_maps)
+            .ok_or(mod_api::DataMapError::Unavailable)
     }
-    /// `Holder.getData(type)`: the value the data pack and mod files gave
-    /// `entry` (`minecraft:coal`) in data map `type_id` for `registry`
-    /// (`minecraft:item`, `minecraft:block`), as the JSON the file held. None
-    /// when the entry has none, the type isn't registered for that registry
-    /// (`native_data_map_types`), or this isn't a server whose tables hold
-    /// files.
-    pub(in crate::game) fn native_data_map(
+    /// Item `item`'s value in data map `map`, before the map decodes it: the merged JSON the
+    /// server's data packs and mods' files gave it, as NBT. `Ok(None)` where it has none.
+    pub(in crate::game) fn item_data_map_value(
         &self,
-        registry: &str,
-        type_id: &str,
-        entry: &str,
-    ) -> Option<&Value> {
-        self.native_data_map_of(registry, type_id)?
-            .get(&full_id(entry))
+        item: mod_api::ItemKey,
+        map: &str,
+    ) -> Result<Option<Tag>, mod_api::DataMapError> {
+        let maps = self.loaded_data_maps()?;
+        let id = mod_api::__private::item_key_id(item).ok_or(mod_api::DataMapError::Unavailable)?;
+        maps.value("minecraft:item", map, id)
     }
-    /// Every entry that has a value in data map `type_id` for `registry`, in
-    /// id order. Empty where `native_data_map` is none for all.
-    pub(in crate::game) fn native_data_map_entries(
+    /// Block `block`'s value in data map `map`, as `item_data_map_value` answers for an item.
+    pub(in crate::game) fn block_data_map_value(
         &self,
-        registry: &str,
-        type_id: &str,
-    ) -> Vec<(&str, &Value)> {
-        self.native_data_map_of(registry, type_id)
-            .map(|map| map.iter().map(|(k, v)| (k.as_str(), v)).collect())
-            .unwrap_or_default()
+        block: mod_api::BlockKey,
+        map: &str,
+    ) -> Result<Option<Tag>, mod_api::DataMapError> {
+        let maps = self.loaded_data_maps()?;
+        let id =
+            mod_api::__private::block_key_id(block).ok_or(mod_api::DataMapError::Unavailable)?;
+        maps.value("minecraft:block", map, id)
     }
 }
 
@@ -247,6 +258,33 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn data_map_read_refuses_lossy_payloads_instead_of_successful_substitutes() {
+        for value in [
+            json!({"nested": [null]}),
+            json!(9223372036854775809_u64),
+            json!(u64::MAX),
+        ] {
+            let maps = DataMaps {
+                maps: HashMap::from([(
+                    "minecraft:item",
+                    HashMap::from([(
+                        "test:map".to_owned(),
+                        BTreeMap::from([("minecraft:stone".to_owned(), value)]),
+                    )]),
+                )]),
+            };
+            assert_eq!(
+                maps.value("minecraft:item", "test:map", "minecraft:stone"),
+                Err(mod_api::DataMapError::Undecodable)
+            );
+            assert_eq!(
+                maps.value("minecraft:item", "test:map", "minecraft:air"),
+                Ok(None)
+            );
+        }
+    }
 
     fn tags(list: &[(&str, &[&str])]) -> HashMap<String, HashSet<String>> {
         list.iter()
@@ -297,7 +335,45 @@ mod tests {
     }
 
     fn get<'a>(maps: &'a DataMaps, entry: &str) -> Option<&'a Value> {
-        maps.maps[&("minecraft:item".to_owned(), "mymod:fuel".to_owned())].get(entry)
+        maps.maps["minecraft:item"]["mymod:fuel"].get(entry)
+    }
+
+    #[test]
+    fn a_value_reads_as_nbt_and_a_map_no_mod_registered_is_refused() {
+        let f = files(&[(
+            "data_maps/mymod:item/fuel",
+            &[json!({"values": {
+                "minecraft:coal": 1600,
+                "minecraft:stick": {"burn": 3_000_000_000_i64}
+            }})],
+        )]);
+        let maps = load(&f);
+        let value =
+            |registry: &str, type_id: &str, entry: &str| maps.value(registry, type_id, entry);
+        assert_eq!(
+            value("minecraft:item", "mymod:fuel", "minecraft:coal"),
+            Ok(Some(Tag::Int(1600)))
+        );
+        assert_eq!(
+            value("minecraft:item", "mymod:fuel", "minecraft:stick"),
+            Ok(Some(Tag::Compound(
+                [("burn".into(), Tag::Long(3_000_000_000))]
+                    .into_iter()
+                    .collect()
+            )))
+        );
+        assert_eq!(
+            value("minecraft:item", "mymod:fuel", "minecraft:stone"),
+            Ok(None)
+        );
+        assert_eq!(
+            value("minecraft:block", "mymod:fuel", "minecraft:coal"),
+            Err(mod_api::DataMapError::UnknownType)
+        );
+        assert_eq!(
+            value("minecraft:item", "mymod:other", "minecraft:coal"),
+            Err(mod_api::DataMapError::UnknownType)
+        );
     }
 
     #[test]
@@ -417,10 +493,9 @@ mod tests {
         );
         // Only the one good type, registered once, empty.
         assert_eq!(maps.maps.len(), 1);
-        assert!(
-            maps.maps
-                .contains_key(&("minecraft:block".to_owned(), "mymod:a".to_owned()))
-        );
+        let blocks = &maps.maps["minecraft:block"];
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks["mymod:a"].is_empty());
     }
 
     #[test]
@@ -466,7 +541,7 @@ mod tests {
             &HashMap::new(),
             &blocks,
         );
-        let map = &maps.maps[&("minecraft:block".to_owned(), "mymod:hardness".to_owned())];
+        let map = &maps.maps["minecraft:block"]["mymod:hardness"];
         assert_eq!(map.get("minecraft:oak_log"), Some(&json!(2)));
     }
 }

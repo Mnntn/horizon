@@ -14,7 +14,6 @@ listener-fixture = []
 [dependencies]
 horizon-game-discovery = { path = "../horizon-game-discovery" }
 horizon-mod-point-shape = { path = "../horizon-mod-point-shape" }
-horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
 heck = "0.5"
 syn = { version = "2", features = ["full", "visit", "visit-mut"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
@@ -29,6 +28,9 @@ wit-parser = "0.261"
 [[bin]]
 name = "horizon-stage"
 path = "src/bin/horizon-stage.rs"
+
+[dev-dependencies]
+tempfile = "3.27.0"
 
 [lints]
 workspace = true

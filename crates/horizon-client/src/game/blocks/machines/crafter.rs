@@ -234,7 +234,7 @@ impl Game<'_> {
         let c = self.crafter_at(key)?;
         self.recipes().craft(&self.loop_context, &c.items, 3)
     }
-    fn crafter_open(&self) -> bool {
+    pub(in crate::game) fn crafter_open(&self) -> bool {
         matches!(self.container_kind(), Some(BlockEntity::Crafter(_)))
     }
     /// `CrafterMenu` slot layout: the grid at (26, 17), the result at (134, 35).

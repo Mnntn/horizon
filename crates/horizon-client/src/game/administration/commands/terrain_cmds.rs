@@ -915,7 +915,9 @@ impl Game<'_> {
                     };
                     let Some(slot) = slot else { continue };
                     let item = drops.get(i).filter(|drop| drop.count > 0).cloned();
-                    if self.slot_set_by_command(&slot, item.clone()) {
+                    if self.slot_accepts(&slot, item.as_ref())
+                        && self.slot_set_by_command(&slot, item.clone())
+                    {
                         used.push(item.unwrap_or(ItemStack {
                             item: "minecraft:air".into(),
                             count: 0,
@@ -1750,3 +1752,7 @@ mod loot_location_shape_tests {
         assert_eq!(chunks.len(), count, "no chunk is loaded as a side effect");
     }
 }
+
+#[cfg(test)]
+#[path = "loot_slot_tests.rs"]
+mod loot_slot_tests;

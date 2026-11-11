@@ -1,4 +1,7 @@
 //! Sandboxed core-wasm transport. One lock, memory and poison flag per dependency group.
+//! Refusals leave the group running; only faults and native unwinds poison it.
+//! The preallocated call path adds an Arc increment/decrement per call, without
+//! allocating on success. Diagnostic keys are built and checked only on refusal.
 #[cfg(test)]
 #[path = "runtime_tests.rs"]
 mod runtime_tests;
@@ -40,6 +43,8 @@ pub(crate) struct State {
     outputs: Vec<Vec<u8>>,
     imports: Vec<Vec<u8>>,
     depth: usize,
+    path: Vec<(Arc<str>, u32)>,
+    refusals: std::collections::HashSet<String>,
     epoch_budget: u64,
     group: usize,
     lending: Arc<AtomicUsize>,
@@ -64,6 +69,8 @@ impl Default for State {
             outputs: Vec::new(),
             imports: Vec::new(),
             depth: 0,
+            path: Vec::with_capacity(64),
+            refusals: Default::default(),
             epoch_budget: 0,
             group: 0,
             lending: Arc::default(),
@@ -71,9 +78,12 @@ impl Default for State {
     }
 }
 
+/// Explicit engine settings; the remaining defaults are covered by Wasmtime compatibility.
+pub(crate) const ENGINE_CONFIG: (&str, bool) = ("epoch_interruption", true);
+
 pub(crate) fn engine() -> wasmtime::Result<Engine> {
     let mut config = wasmtime::Config::new();
-    config.epoch_interruption(true);
+    config.epoch_interruption(ENGINE_CONFIG.1);
     let engine = Engine::new(&config)?;
     let weak = engine.weak();
     std::thread::Builder::new()
@@ -114,6 +124,24 @@ struct Running {
     poisoned: AtomicBool,
     lending: Arc<AtomicUsize>,
 }
+/// Only faults may leave guest state half-updated. Refusals returned normally.
+#[derive(Debug)]
+enum CallError {
+    Refused(wasmtime::Error),
+    Fault(wasmtime::Error),
+}
+impl std::fmt::Display for CallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Refused(error) | Self::Fault(error) => write!(f, "{error:#}"),
+        }
+    }
+}
+impl From<WireError> for CallError {
+    fn from(error: WireError) -> Self {
+        Self::Refused(error.into())
+    }
+}
 struct PoisonOnPanic<'a>(&'a AtomicBool);
 impl Drop for PoisonOnPanic<'_> {
     fn drop(&mut self) {
@@ -133,6 +161,7 @@ impl Drop for FrameScope {
         // boxed state remains in place until this synchronous call scope ends.
         let state = unsafe { &mut *self.state };
         state.cx.frames.pop();
+        state.path.pop();
         state.cx.module = self.previous_module;
         state.depth -= 1;
         if std::thread::panicking() {
@@ -174,6 +203,7 @@ impl WeakWasmMod {
             .upgrade()
             .is_some_and(|running| running.poisoned.load(Ordering::Relaxed))
     }
+    /// Refusals answer unavailable without stopping the group; faults stop all members.
     pub(crate) fn call<R>(
         &self,
         class: CallClass,
@@ -438,13 +468,15 @@ impl WasmMod {
     }
     pub(crate) fn instantiate(
         engine: &Engine,
+        manifests: &[(&str, &horizon_mod_package::Manifest)],
         members: &[Member<'_>],
+        cache: Option<&crate::module_cache::ModuleCache>,
     ) -> Result<Vec<Self>, Refusal> {
         let mut store = Store::new(engine, State::default());
         store.limiter(|state| &mut state.limits);
         store.set_epoch_deadline(30_000);
         let mut armed = false;
-        let mut group = Group::link_with(store, members, |store, module, name| {
+        let mut group = Group::link_cached_with(store, members, cache, |store, module, name| {
             // Compilation is not guest execution and must not consume its load deadline.
             if !armed {
                 store.set_epoch_deadline(30_000);
@@ -506,6 +538,88 @@ impl WasmMod {
                 .map_err(load)?;
             exports.push((name, input, hook));
         }
+        // Register through the library's exported bridge, then seal every member's private
+        // registry. No hook or mod initialization runs until the entire group is ready.
+        for (name, instance) in group.members.clone() {
+            if instance
+                .get_func(&mut group.store, "horizon_mod_points_register")
+                .is_some()
+            {
+                let refused = instance
+                    .get_typed_func::<(), u32>(&mut group.store, "horizon_mod_points_register")
+                    .and_then(|function| function.call(&mut group.store, ()))
+                    .map_err(|e| Refusal::Runtime(format!("mod point registration: {e:#}")))?;
+                if refused != 0 {
+                    let injection = manifests
+                        .iter()
+                        .find(|(member, _)| *member == name)
+                        .and_then(|(_, manifest)| {
+                            manifest
+                                .inject
+                                .iter()
+                                .filter(|injection| {
+                                    manifest.mod_point_dependency(&injection.at).is_some()
+                                })
+                                .nth((refused - 1) as usize)
+                                .map(|injection| format!("{}:{}", manifest.id, injection.id))
+                        })
+                        .ok_or_else(|| {
+                            Refusal::Runtime(format!(
+                                "{name}: invalid mod point registration refusal index {refused}"
+                            ))
+                        })?;
+                    return Err(Refusal::Runtime(format!(
+                        "{injection}: refused by library registry"
+                    )));
+                }
+            }
+        }
+        // A member whose manifest listens at a library's points was built with the bridge that
+        // registers them, and the library with the seal: a module missing either is refused, not
+        // left silently unregistered.
+        for (name, manifest) in manifests {
+            for injection in &manifest.inject {
+                let Some(library) = manifest.mod_point_dependency(&injection.at) else {
+                    continue;
+                };
+                let mut exports = |member: &str, export: &str| {
+                    let instance = group.members.iter().find(|(m, _)| m == member);
+                    instance
+                        .map(|(_, instance)| *instance)
+                        .is_some_and(|instance| {
+                            instance.get_func(&mut group.store, export).is_some()
+                        })
+                };
+                let id = format!("{}:{}", manifest.id, injection.id);
+                if !exports(name, "horizon_mod_points_register") {
+                    return Err(Refusal::Runtime(format!(
+                        "{id}: {name} has no mod point registration; rebuild it with `cargo \
+                         horizon-mod build --wasm`"
+                    )));
+                }
+                let sealed = manifests
+                    .iter()
+                    .find(|(_, other)| other.id == library)
+                    .is_some_and(|(member, _)| exports(member, "horizon_mod_points_seal"));
+                if !sealed {
+                    return Err(Refusal::Runtime(format!(
+                        "{id}: library {library} has no mod point seal in this group; rebuild it \
+                         with `cargo horizon-mod build --wasm`"
+                    )));
+                }
+            }
+        }
+        for (_, instance) in group.members.clone() {
+            if instance
+                .get_func(&mut group.store, "horizon_mod_points_seal")
+                .is_some()
+            {
+                instance
+                    .get_typed_func::<(), ()>(&mut group.store, "horizon_mod_points_seal")
+                    .and_then(|function| function.call(&mut group.store, ()))
+                    .map_err(|e| Refusal::Runtime(format!("mod point seal: {e:#}")))?;
+            }
+        }
         let lending = group.store.data().lending.clone();
         let running = Arc::new(Running {
             lending,
@@ -533,6 +647,7 @@ impl WasmMod {
             })
             .collect())
     }
+    /// Refusals answer unavailable without stopping the group; faults stop all members.
     pub(crate) fn call<R>(
         &self,
         class: CallClass,
@@ -557,7 +672,8 @@ impl WasmMod {
         let mut resumed = Resumed::take(key);
         let mut locked = None;
         if resumed.is_none() {
-            let start = Instant::now();
+            // Start the busy timeout on contention, not on the uncontended hot path.
+            let mut start = None;
             loop {
                 match self.running.group.try_lock() {
                     Ok(group) => {
@@ -571,7 +687,8 @@ impl WasmMod {
                     Err(_)
                         if class != CallClass::Worker
                             && (self.running.lending.load(Ordering::Relaxed) != 0
-                                || start.elapsed() >= Duration::from_secs(5)) =>
+                                || start.get_or_insert_with(Instant::now).elapsed()
+                                    >= Duration::from_secs(5)) =>
                     {
                         log::warn!("wasm mod {}: {}", self.id, Refusal::Busy);
                         return None;
@@ -603,11 +720,9 @@ impl WasmMod {
         let budget = store.data().epoch_budget;
         let depth = store.data().depth + 1;
         if depth > 64 {
-            if !self.running.poisoned.swap(true, Ordering::Relaxed) {
-                log::error!(
-                    "wasm mod {} stopped its group: {class:?} depth {depth} exceeds budget 64 (active epoch budget {budget})",
-                    self.id
-                );
+            let path = format!("{:?} -> ({}, {id}), limit 64", store.data().path, self.id);
+            if store.data_mut().refusals.insert(path.clone()) {
+                log::warn!("wasm depth refusal: {path}");
             }
             return None;
         }
@@ -619,6 +734,7 @@ impl WasmMod {
             store.data_mut().imports.resize_with(depth + 1, Vec::new);
         }
         store.data_mut().cx.frames.push(frame);
+        store.data_mut().path.push((self.id.clone(), id));
         // self remains borrowed until this call returns. FrameScope restores the
         // enclosing module before this borrow ends, including on error or unwind.
         let previous_module =
@@ -636,7 +752,7 @@ impl WasmMod {
         // This guard unwinds before the resource scope, whose native destructors
         // must already see the group stopped.
         let panic_stop = PoisonOnPanic(&self.running.poisoned);
-        let result = (|| -> wasmtime::Result<R> {
+        let result = (|| -> Result<R, CallError> {
             let released = self.released.take();
             if !released.is_empty() {
                 w.clear();
@@ -661,13 +777,28 @@ impl WasmMod {
         })();
         store.data_mut().inputs[depth] = w;
         store.data_mut().outputs[depth] = output;
-        let first_failure = result.is_err() && !self.running.poisoned.swap(true, Ordering::Relaxed);
+        if result.is_err() {
+            horizon_mod_runtime::dispatch_failures::record_dispatch_failure();
+        }
+        let first_failure = matches!(result, Err(CallError::Fault(_)))
+            && !self.running.poisoned.swap(true, Ordering::Relaxed);
+        if let Err(CallError::Refused(error)) = &result {
+            let reason = format!("{} hook {id}: {error:#}", self.id);
+            if store
+                .data_mut()
+                .refusals
+                .insert(format!("{} hook {id}", self.id))
+            {
+                log::warn!("wasm refusal: {reason}");
+            }
+        }
         drop(panic_stop);
         drop(resources);
         drop(scope);
         match result {
             Ok(value) => Some(value),
-            Err(e) => {
+            Err(CallError::Refused(_)) => None,
+            Err(CallError::Fault(e)) => {
                 if first_failure {
                     log::error!(
                         "wasm mod {} stopped its group: {class:?}, depth {depth}, active epoch budget {budget}: {e:#}",
@@ -684,37 +815,41 @@ impl WasmMod {
         id: u32,
         input: &Writer,
         output: &mut Vec<u8>,
-    ) -> wasmtime::Result<()> {
+    ) -> Result<(), CallError> {
         if let Some(error) = input.error() {
             return Err(error.into());
         }
-        let len = u32::try_from(input.bytes().len())?;
-        let ptr = self.input.call(&mut *store, len)?;
+        let len = u32::try_from(input.bytes().len()).map_err(|e| CallError::Refused(e.into()))?;
+        let ptr = self
+            .input
+            .call(&mut *store, len)
+            .map_err(CallError::Fault)?;
         let memory = store
             .data()
             .memory
-            .ok_or_else(|| wasmtime::Error::msg("no memory"))?;
-        memory.write(&mut *store, ptr as usize, input.bytes())?;
-        let result = self.hook.call(&mut *store, id)?;
+            .ok_or_else(|| CallError::Fault(wasmtime::Error::msg("no memory")))?;
+        memory
+            .write(&mut *store, ptr as usize, input.bytes())
+            .map_err(|e| CallError::Fault(e.into()))?;
+        let result = self.hook.call(&mut *store, id).map_err(CallError::Fault)?;
         let ptr = (result >> 32) as usize;
         let len = result as u32;
         if len == u32::MAX {
-            let bytes = memory
-                .data(&*store)
-                .get(ptr..)
-                .ok_or_else(|| wasmtime::Error::msg("error reply outside memory"))?;
+            let bytes = memory.data(&*store).get(ptr..).ok_or_else(|| {
+                CallError::Refused(wasmtime::Error::msg("error reply outside memory"))
+            })?;
             let message: String = Reader::new(bytes).take()?;
-            return Err(wasmtime::Error::msg(message));
+            return Err(CallError::Refused(wasmtime::Error::msg(message)));
         }
         let end = ptr
             .checked_add(len as usize)
-            .ok_or_else(|| wasmtime::Error::msg("reply overflow"))?;
+            .ok_or_else(|| CallError::Refused(wasmtime::Error::msg("reply overflow")))?;
         output.clear();
         output.extend_from_slice(
             memory
                 .data(&*store)
                 .get(ptr..end)
-                .ok_or_else(|| wasmtime::Error::msg("reply outside memory"))?,
+                .ok_or_else(|| CallError::Refused(wasmtime::Error::msg("reply outside memory")))?,
         );
         Ok(())
     }

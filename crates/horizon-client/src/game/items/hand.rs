@@ -215,8 +215,23 @@ impl Game<'_> {
         self.request_remote_mining_stop();
         self.mining = None;
     }
-    /// `LivingEntity.swing` with `getModifiedSwingDuration`.
+    /// `LivingEntity.swing` with `getModifiedSwingDuration`: the item's
+    /// `on_entity_swing` Part first, which may keep the swing from starting.
     pub(super) fn swing_hand(&mut self, hand: Hand, animation: SwingAnimation) {
+        self.try_swing_hand(hand, animation);
+    }
+    /// Returns false when the interaction policy or item vetoes the swing and its packet.
+    pub(super) fn try_swing_hand(&mut self, hand: Hand, animation: SwingAnimation) -> bool {
+        if self
+            .remote
+            .as_ref()
+            .is_some_and(|r| !r.interaction_swing[usize::from(hand == Hand::Off)])
+        {
+            return false;
+        }
+        if self.native_entity_swing_event(hand) {
+            return false;
+        }
         let effects = &self.potions.effects;
         let dig_speed = effects
             .amplifier("haste")
@@ -239,6 +254,7 @@ impl Game<'_> {
                 r.session.record_clientbound(&pkt);
             }
         }
+        true
     }
     /// `swing(hand)` for the hand that acts, with the default animation.
     pub(super) fn swing_arm(&mut self) {
@@ -263,7 +279,7 @@ impl Game<'_> {
     /// spear's 4.5 blocks), with the item the keys select (attribute
     /// swapping a spear's reach onto a mace).
     pub(super) fn pick_tick_targets(&mut self) {
-        self.tick_hit = Some(self.pick());
+        self.tick_hit.set(Some(self.pick()));
         self.tick_mob = None;
         let mob = match self.active_attack_range() {
             Some(range) => self.attack_range_pick(&range),
@@ -280,7 +296,7 @@ impl Game<'_> {
     }
     /// The tick's clicks are done: later picks follow the crosshair again.
     pub(super) fn release_tick_targets(&mut self) {
-        self.tick_hit = None;
+        self.tick_hit.set(None);
         self.tick_mob = None;
     }
     /// `Minecraft.startAttack` on an entity: a main-hand item with an
@@ -437,6 +453,22 @@ impl Game<'_> {
         }
         Ok(())
     }
+    /// Whether the player's tool harvests the block `state` at `pos`, once vanilla's rule
+    /// answered `harvest`: the block's parts (`can_harvest_block`, NeoForge's
+    /// `IBlockExtension.canHarvestBlock`) answer first, then the global `player_harvest_check`
+    /// (`PlayerEvent.HarvestCheck`) hears the result.
+    pub(in crate::game) fn mod_harvest_check(
+        &mut self,
+        pos: [i32; 3],
+        state: horizon_world::registry::BlockStateId,
+        harvest: &mut bool,
+    ) {
+        let player = self.own_entity_id() as u32;
+        self.native_can_harvest_block(player, pos, state, harvest);
+        if mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck) {
+            self.native_player_harvest_check(player, pos, state.0, harvest);
+        }
+    }
     /// `BlockBehaviour.getDestroyProgress` with `Player.getDestroySpeed`, whose
     /// end asks the mods' `native_player_break_speed`. Every dig's progress comes from
     /// here: single player's, a host's for each guest, a remote client's own.
@@ -449,14 +481,7 @@ impl Game<'_> {
         let mut harvest =
             !facts.requires_tool || self.items().correct_for_drops(self.held(), &facts.name);
         let hardness = facts.hardness;
-        if mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck) {
-            self.native_player_harvest_check(
-                self.own_entity_id() as u32,
-                pos,
-                state.0,
-                &mut harvest,
-            );
-        }
+        self.mod_harvest_check(pos, state, &mut harvest);
         let block_break_speed = self.block_break_speed();
         let facts = self.res.facts().get(state);
         let mut speed = self.items().mining_speed(self.held(), &facts.name);
@@ -517,6 +542,9 @@ impl Game<'_> {
     /// Whether an attack would hit an entity rather than the block behind
     /// it: the crosshair's `EntityHitResult`.
     pub(super) fn entity_targeted(&self) -> bool {
+        if let Some(entity) = self.targeting().entity {
+            return self.targeting_entity_hit(entity).is_some();
+        }
         let before = |d: Option<f64>| d.is_some_and(|d| self.before_block(d));
         before(self.painting_hit().map(|h| h.1))
             || before(self.frame_hit().map(|h| h.1))

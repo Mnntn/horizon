@@ -19,7 +19,7 @@ impl dyn Registrar + '_ {
     /// Register command argument type `name` (`machine` or `mymod:machine`), once, from
     /// `Hooks::register`: a usage then names it as an argument's kind,
     /// `Command::new("machine use <machine:mymod:machine>")`, and the game parses and
-    /// completes that argument with it. A name in another mod's namespace, an empty name, and an
+    /// completes that argument with it. A name in an unowned namespace, an empty name, and an
     /// id registered twice refuse the mods at startup, naming the mod.
     pub fn register_command_argument<T: crate::CommandArgumentType>(
         &mut self,
@@ -39,19 +39,14 @@ pub trait CommandArgumentsRegistrar {
 
 impl CommandArgumentsRegistrar for PartRegistrar {
     fn add_command_argument(&mut self, name: &str, argument: Arc<dyn crate::CommandArgumentType>) {
-        let (namespace, path) = name.split_once(':').unwrap_or((self.mod_id, name));
-        let id = format!("{}:{}", self.mod_id, path);
-        let refusal = if namespace != self.mod_id {
-            Some(format!(
-                "{} registered command argument type {name:?} in the namespace {namespace:?}, which is not its own",
-                self.mod_id
-            ))
-        } else if path.is_empty() {
-            Some(format!(
-                "{} registered a command argument type with no name",
-                self.mod_id
-            ))
-        } else {
+        let id = match self.owned_declaration_id(name) {
+            Ok(id) => id,
+            Err(reason) => {
+                self.refused.push(reason);
+                return;
+            }
+        };
+        let refusal = {
             self.parts
                 .command_arguments
                 .iter()
@@ -148,6 +143,6 @@ pub mod tests {
         assert_eq!(errors.len(), 3);
         assert!(errors[0].contains("test registered command argument type test:mode twice"));
         assert!(errors[1].contains("namespace"));
-        assert!(errors[2].contains("no name"));
+        assert!(errors[2].contains("invalid identifier \"test:\""));
     }
 }

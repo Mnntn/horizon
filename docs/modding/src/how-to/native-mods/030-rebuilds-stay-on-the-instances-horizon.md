@@ -3,6 +3,9 @@
 
 ## Rebuilds stay on the instance's Horizon
 
+Game source edits below come from mixins and their support tables, not injects.
+An `[[inject]]` fills a compiled slot or is refused; it never compiles game code.
+
 A build starts from the version the instance plays (`native_mods::base_for`). When that is a native build, the
 next one compiles the same commit (its `native-mods.json`'s `horizon`) from the same game files, unless a mod pins
 another, so a rebuild after a mod changes or is switched off compiles only what changed. A newer Horizon is taken

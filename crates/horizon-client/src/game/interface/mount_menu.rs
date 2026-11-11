@@ -339,6 +339,13 @@ impl Game<'_> {
             .filter(|_| self.mount_active())?;
         Some(36 + usize::from(open.show_saddle) + usize::from(open.show_armor) + open.columns * 3)
     }
+    pub(super) fn mount_layout_inputs(&self) -> Option<(usize, bool, bool)> {
+        self.mount_menu
+            .open
+            .as_ref()
+            .filter(|_| self.mount_active())
+            .map(|s| (s.columns, s.show_saddle, s.show_armor))
+    }
     pub(super) fn mount_slot_position(&self, i: usize) -> Option<(f32, f32)> {
         let open = self
             .mount_menu

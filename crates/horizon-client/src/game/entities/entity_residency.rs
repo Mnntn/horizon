@@ -167,7 +167,7 @@ macro_rules! define_resident_access {
         pub(super) fn bind_resident_owners(&mut $this, journal: &Journal, dimension: DimensionKey) {
             $($crate::game::entity_residency::bind_resident_list!($kind, $this$(.$field)+, journal, Owner { dimension, kind: Kind::$kind });)*
             $this$(.$projectiles)+.bind_residency(journal, Owner { dimension, kind: Kind::Projectile }, |entity| (entity.id, entity.join_seq()));
-            $this.dragon.bind_residency_specialized(journal, Owner { dimension, kind: Kind::Dragon }, |entity| (entity.id, entity.join_seq()), horizon_client::join_seq::residency::Source::Ordinary, Some((Kind::DragonPart, 8, |dragon, offset| dragon.residency.part_uuids.get(usize::from(offset)).copied())), None);
+            $this.dragon.bind_residency_specialized(journal, Owner { dimension, kind: Kind::Dragon }, |entity| (entity.id, entity.join_seq()), horizon_client::join_seq::residency::Source::Ordinary, Some((Kind::DragonPart, 8, |dragon, offset| dragon.parts.get(usize::from(offset)).map(|part| part.3))), None);
         }
         pub(super) fn with_resident_owner_slot<R>(
             &mut $this,
@@ -184,7 +184,15 @@ macro_rules! define_resident_access {
                         SlotAccess::Done(visit($this.dragon.as_mut().unwrap().attachment_lifetime()))
                     })
                 },
-                Kind::Player | Kind::Hook | Kind::DragonPart => SlotAccess::UnsupportedKind(at.owner.kind),
+                Kind::DragonPart => {
+                    use horizon_client::join_seq::residency::Source;
+                    use horizon_mod_runtime::attachments::HasAttachmentLifetime;
+                    let Source::DragonPart(offset) = at.source else { return SlotAccess::Missing; };
+                    if $this.dragon.locate(at.join).is_none() { return SlotAccess::Missing; }
+                    let Some(part) = $this.dragon.as_mut().and_then(|dragon| dragon.parts.get_mut(usize::from(offset))) else { return SlotAccess::Missing; };
+                    SlotAccess::Done(visit(part.attachment_lifetime()))
+                },
+                Kind::Player | Kind::Hook => SlotAccess::UnsupportedKind(at.owner.kind),
             }
         }
         pub(super) fn locate_resident_owner(&$this, at: Location) -> Option<SourceEntity<(Target, bool)>> {
@@ -222,6 +230,7 @@ macro_rules! define_resident_access {
             // incorrectly evict reversible conversion rows or report Taken.
             source.map(|mut source| {
                 source.value.1 &= !$this.persist.removals.contains(&source.value.0);
+                source.value.1 &= !$this.persist.destroying_vehicles.contains(&source.value.0);
                 source
             })
         }

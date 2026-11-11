@@ -249,3 +249,204 @@ class BoatHealthTests(unittest.TestCase):
         for enabled, author, actor in [("off", "alice", "alice"), ("on", "bob", "alice"), ("on", "alice", "bob")]:
             self.assertEqual(boat.select_label(enabled, ["alice"], author, actor, [], NOW)[0], "ubuntu-latest")
         self.assertEqual(boat.select_label("on", ["alice"], "alice", "alice", [], NOW)[0], "boat-large")
+
+
+REPO = "arismoko/horizon"
+
+
+def routing_run(**changes):
+    run = dict(id=77, path=".github/workflows/boat-recovery.yml", head_branch="main", event="schedule",
+               repository=dict(full_name=REPO), head_repository=dict(full_name=REPO))
+    run.update(changes)
+    return run
+
+
+def routing_artifact(**changes):
+    artifact = dict(id=5, name="boat-routing", expired=False, size_in_bytes=300, created_at="2026-11-10T11:50:00Z",
+                    workflow_run=dict(id=77, repository_id=1, head_repository_id=1))
+    artifact.update(changes)
+    return artifact
+
+
+def routing_zip(document=None, members=None):
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as zipped:
+        for name, data in (members or [("boat-routing.json", json.dumps(document))]):
+            zipped.writestr(name, data)
+    return archive.getvalue()
+
+
+VALID = dict(schema=1, enabled="on", users=["alice"], run_id="77")
+
+
+class BoatRoutingTests(unittest.TestCase):
+    def read(self, runs=None, artifacts=None, archive=None):
+        responses = {"default": dict(default_branch="main"),
+                     "runs": dict(workflow_runs=[routing_run()] if runs is None else runs),
+                     "artifacts": dict(artifacts=[routing_artifact()] if artifacts is None else artifacts)}
+
+        def api(path):
+            if path == f"repos/{REPO}":
+                return responses["default"]
+            return responses["runs" if "/workflows/" in path else "artifacts"]
+        with patch.object(boat, "api", side_effect=api), patch.object(boat, "download", return_value=routing_zip(VALID) if archive is None else archive) as download:
+            return boat.published_routing(REPO, NOW), download
+
+    def test_fresh_trusted_artifact_is_read(self):
+        (result, reason), _ = self.read()
+        self.assertEqual(result, ("on", ["alice"]))
+        self.assertEqual(reason, "")
+
+    def test_untrusted_runs_are_never_read(self):
+        for run in (routing_run(path=".github/workflows/dyna-ci.yml"), routing_run(head_branch="feature"),
+                    routing_run(event="pull_request"), routing_run(head_repository=dict(full_name="fork/horizon")),
+                    routing_run(repository=dict(full_name="fork/horizon"))):
+            (result, reason), download = self.read(runs=[run])
+            self.assertIsNone(result)
+            self.assertIn("no recent", reason)
+            download.assert_not_called()
+
+    def test_bad_artifacts_fail_closed(self):
+        cases = [
+            [routing_artifact(), routing_artifact(id=6)],
+            [routing_artifact(created_at="2026-11-10T11:39:59Z")],
+            [routing_artifact(size_in_bytes=16385)],
+            [routing_artifact(expired=True)],
+            [routing_artifact(workflow_run=dict(id=78, repository_id=1, head_repository_id=1))],
+            [routing_artifact(workflow_run=dict(id=77, repository_id=1, head_repository_id=2))],
+        ]
+        for artifacts in cases:
+            (result, reason), download = self.read(artifacts=artifacts)
+            self.assertIsNone(result, artifacts)
+            self.assertTrue(reason)
+            download.assert_not_called()
+
+    def test_bad_documents_fail_closed(self):
+        archives = [routing_zip(members=[("boat-routing.json", "{")]),
+                    routing_zip(members=[("boat-routing.json", json.dumps(VALID)), ("other", "x")]),
+                    routing_zip(members=[("../boat-routing.json", json.dumps(VALID))]),
+                    routing_zip(members=[("boat-routing.json", " " * 8193 + json.dumps(VALID))]),
+                    b"not a zip"]
+        for change in (dict(schema=2), dict(enabled="yes"), dict(users=["bad login"]), dict(users=["-alice"]),
+                       dict(users=["a"] * 101), dict(users="alice"), dict(run_id="78"), dict(extra=1)):
+            archives.append(routing_zip({**VALID, **change}))
+        for archive in archives:
+            (result, reason), _ = self.read(archive=archive)
+            self.assertIsNone(result)
+            self.assertTrue(reason)
+
+    def test_publisher_round_trips_and_refuses_bad_lists(self):
+        text = boat.publish("on", " alice,bob ,", 77)
+        self.assertEqual(boat.routing(json.loads(text), 77), ("on", ["alice", "bob"]))
+        self.assertEqual(json.loads(boat.publish("", "", 77))["enabled"], "off")
+        for users in ("not a login", ",".join(["a"] * 101)):
+            with self.assertRaises(SystemExit):
+                boat.publish("on", users, 77)
+
+    def run_main(self, published=None, failure=None, **env):
+        values = dict(GITHUB_REPOSITORY=REPO, GITHUB_RUN_ID="9", AUTHOR="alice", ACTOR="alice", BOAT_CI="",
+                      BOAT_USERS="", BOAT_FALLBACK="false")
+        values.update(env)
+        with tempfile.TemporaryDirectory() as directory:
+            output, summary = Path(directory) / "output", Path(directory) / "summary"
+            values.update(GITHUB_OUTPUT=str(output), GITHUB_STEP_SUMMARY=str(summary))
+            reader = patch.object(boat, "published_routing", side_effect=failure, return_value=published)
+            with patch.dict(os.environ, values, clear=True), reader as read, patch.object(boat, "api", return_value=dict(workflow_runs=[])), patch("builtins.print"):
+                boat.main()
+            return output.read_text(), read
+
+    def test_fork_run_uses_published_routing(self):
+        output, read = self.run_main(published=(("on", ["alice"]), ""))
+        self.assertIn("label=boat-large", output)
+        read.assert_called_once()
+
+    def test_unlisted_author_or_actor_stays_on_github(self):
+        for env in (dict(AUTHOR="mallory"), dict(ACTOR="mallory")):
+            output, _ = self.run_main(published=(("on", ["alice"]), ""), **env)
+            self.assertIn("label=ubuntu-latest", output)
+
+    def test_unavailable_routing_stays_on_github(self):
+        for published, failure in (((None, "no recent boat routing artifact"), None), (None, subprocess.CalledProcessError(1, "gh")), (None, KeyError("artifacts"))):
+            output, _ = self.run_main(published=published, failure=failure)
+            self.assertIn("label=ubuntu-latest", output)
+
+    def test_fallback_wins_and_never_reads(self):
+        output, read = self.run_main(published=(("on", ["alice"]), ""), BOAT_FALLBACK="true")
+        self.assertIn("label=ubuntu-latest", output)
+        read.assert_not_called()
+        output, read = self.run_main(published=(("on", ["alice"]), ""), BOAT_FALLBACK="true", BOAT_CI="on", BOAT_USERS="alice")
+        self.assertIn("label=ubuntu-latest", output)
+        read.assert_not_called()
+
+    def test_present_variables_are_never_overridden(self):
+        output, read = self.run_main(published=(("on", ["alice"]), ""), BOAT_CI="off", BOAT_USERS="alice")
+        self.assertIn("label=ubuntu-latest", output)
+        read.assert_not_called()
+        output, read = self.run_main(BOAT_CI="on", BOAT_USERS="bob, alice")
+        self.assertIn("label=boat-large", output)
+        read.assert_not_called()
+
+
+class RustupRetryTests(unittest.TestCase):
+    def run_script(self, failures):
+        script = Path(__file__).parents[1] / "tools/ci/rustup_install.sh"
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory)
+            count = bin_dir / "count"
+            (bin_dir / "rustup").write_text(f'#!/bin/sh\necho "$@" >> {count}\n[ $(wc -l < {count}) -gt {failures} ]\n')
+            (bin_dir / "sleep").write_text("#!/bin/sh\n")
+            for name in ("rustup", "sleep"):
+                (bin_dir / name).chmod(0o755)
+            result = subprocess.run(["bash", str(script), "stable", "--profile", "minimal"], capture_output=True, text=True,
+                                    env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"})
+            return result.returncode, count.read_text().splitlines()
+
+    @unittest.skipIf(os.name == "nt", "a bash script for Linux runners")
+    def test_transient_failures_are_retried_then_bounded(self):
+        status, calls = self.run_script(failures=2)
+        self.assertEqual((status, len(calls)), (0, 3))
+        self.assertEqual(calls[0], "toolchain install stable --profile minimal")
+        status, calls = self.run_script(failures=10)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(len(calls), 4)
+
+
+class RunnerPackagesTests(unittest.TestCase):
+    def test_hosted_steps_install_the_image_list_and_the_fallback_stays_within_it(self):
+        root = Path(__file__).parents[1]
+        listed = [line for line in (root / "tools/ci/runner-packages.txt").read_text().splitlines() if not line.startswith("#")]
+        self.assertEqual(len(listed), len(set(listed)))
+        workflow = (root / ".github/workflows/dyna-ci.yml").read_text()
+        self.assertEqual(workflow.count("$(grep -v '^#' tools/ci/runner-packages.txt)"), 2)
+        deps = (root / "tools/ci/dyna_ci_deps.sh").read_text()
+        fallback = deps.split("packages=(", 1)[1].split(")", 1)[0].split()
+        self.assertTrue(fallback)
+        self.assertLessEqual(set(fallback), set(listed))
+
+    def test_the_image_check_fails_on_any_difference(self):
+        spec = importlib.util.spec_from_file_location("check_runner_packages", Path(__file__).parents[1] / "tools/ci/check_runner_packages.py")
+        check = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(check)
+        image = ("FROM ${DYNA_CI_BASE}\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n"
+                 "    xvfb xauth x11-xkb-utils xkb-data pkg-config libasound2-dev libudev-dev libxkbcommon-x11-dev \\\n"
+                 "    libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libxcursor1 libxi6 libxrandr2 \\\n"
+                 "    && rm -rf /var/lib/apt/lists/*\n")
+        listed = check.LIST.read_text()
+        with tempfile.TemporaryDirectory() as directory:
+            containerfile, listing = Path(directory) / "Containerfile", Path(directory) / "packages.txt"
+
+            def outcome(image_text, list_text):
+                containerfile.write_text(image_text)
+                listing.write_text(list_text)
+                with patch.object(sys, "argv", ["check", str(containerfile)]), patch("builtins.print"):
+                    try:
+                        check.main(listing)
+                    except SystemExit as failure:
+                        return str(failure)
+                return None
+            self.assertIsNone(outcome(image, listed))
+            for dropped in ("xauth", "x11-xkb-utils", "xkb-data"):
+                self.assertIn(f"lacks: {dropped}", outcome(image, listed.replace(f"\n{dropped}\n", "\n")))
+            self.assertIn("lacks: extra-package", outcome(image.replace("libxrandr2", "libxrandr2 extra-package"), listed))
+            self.assertIn("beyond the image: mesa-vulkan-drivers", outcome(image, listed + "mesa-vulkan-drivers\n"))
+            self.assertIn("no apt-get install", outcome("FROM base\n", listed))

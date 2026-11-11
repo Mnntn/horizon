@@ -177,7 +177,7 @@ pub trait EntityAttributesRegistrar {
     /// map and the attribute sync, so the reads of #1469 and #1493 answer the
     /// same defaults with no second copy.
     ///
-    /// Resolved once, at load: an id outside the mod's namespace, a duplicate
+    /// Resolved once, at load: an id outside the mod's manifest-owned namespaces, a duplicate
     /// attribute, a non-finite base or a second declaration of the same type
     /// refuses the mods, naming the mod; an attribute the game does not know,
     /// or a template without attribute defaults, refuses the resource load,
@@ -223,17 +223,19 @@ impl EntityAttributesRegistrar for PartRegistrar {
         template: &str,
         attributes: Vec<(String, f64)>,
     ) -> Result<(), crate::EntityAttributeError> {
-        let result = (|| {
-            let (namespace, name) = path.split_once(':').unwrap_or((self.mod_id, path));
-            if namespace.is_empty() || name.is_empty() || namespace != self.mod_id {
+        let id = match self.owned_declaration_id(path) {
+            Ok(id) => id,
+            Err(reason) => {
+                self.refused.push(reason);
                 return Err(crate::EntityAttributeError::InvalidId);
             }
+        };
+        let result = (|| {
             let (template_ns, template_name) =
                 template.split_once(':').unwrap_or(("minecraft", template));
             if template_ns.is_empty() || template_name.is_empty() {
                 return Err(crate::EntityAttributeError::InvalidId);
             }
-            let id = format!("{namespace}:{name}");
             if self.entity_attributes.iter().any(|d| d.id == id) {
                 return Err(crate::EntityAttributeError::Duplicate);
             }

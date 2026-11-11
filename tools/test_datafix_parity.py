@@ -2,7 +2,7 @@
 """DataFixer differential test: worlds saved by older game versions, upgraded by
 vanilla 26.3 and by Horizon, must give the same data.
 
-For every sample world in datafix/worlds beside the shared vanilla data (made by
+For every sample world in the private datafix/worlds directory (made by
 tools/datafix_worlds.py with the official server jars of 1.18.2 to 26.2, and
 generated automatically when missing), two upgrades run on a copy:
 
@@ -36,8 +36,10 @@ import anvil_dump  # noqa: E402
 import parity_shard  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-LOCAL = ROOT / '.local' / 'datafix'
-WORLDS = (ROOT / '.local' / 'minecraft').resolve().parent / 'datafix' / 'worlds'
+from datafix_paths import writable_root
+
+LOCAL = writable_root()
+WORLDS = LOCAL / 'worlds'
 RUN = LOCAL / 'run'
 
 PARITY_SHARDS = 6
@@ -215,7 +217,7 @@ def main():
     import file_lock
     WORLDS.parent.mkdir(parents=True, exist_ok=True)
     with open(WORLDS.parent / 'generate.lock', 'w') as handle:
-        file_lock.lock(handle)  # another worktree may be generating them
+        file_lock.lock(handle)  # another process may be generating them
         missing = [v for v in [*datafix_worlds.VERSIONS, *datafix_worlds.VARIANTS] if not (datafix_worlds.worlds_dir(v) / v / 'level.dat').exists()]
         if missing:
             print('generating sample worlds:', ' '.join(missing), flush=True)

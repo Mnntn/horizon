@@ -9,12 +9,11 @@ use std::{
     path::PathBuf,
     sync::OnceLock,
 };
-struct Fixture {
-    registry: BlockRegistry,
-    behaviours: Behaviours,
+pub(super) struct Fixture {
+    pub(super) registry: BlockRegistry,
+    pub(super) behaviours: Behaviours,
 }
-
-fn fixture() -> Option<&'static Fixture> {
+pub(super) fn fixture() -> Option<&'static Fixture> {
     static FIXTURE: OnceLock<Option<Fixture>> = OnceLock::new();
     FIXTURE
         .get_or_init(|| {
@@ -38,7 +37,6 @@ fn fixture() -> Option<&'static Fixture> {
         })
         .as_ref()
 }
-
 pub(crate) struct TestLevel {
     blocks: HashMap<BlockPos, BlockStateId>,
     air: BlockStateId,
@@ -49,6 +47,8 @@ pub(crate) struct TestLevel {
     pub block_light: HashMap<BlockPos, i32>,
     /// `Level.isClientSide`.
     pub client_side: bool,
+    pub cake_answer: Option<bool>,
+    pub cake_asks: std::cell::Cell<u32>,
     pub tick_ready: bool,
     pub block_events_ready: bool,
     /// Positions that refuse fluids, fire and piston moves, as a land claim would.
@@ -94,7 +94,7 @@ pub(crate) struct TestLevel {
     pub opened: HashSet<BlockPos>,
 }
 impl TestLevel {
-    fn new(b: &Behaviours) -> Self {
+    pub(super) fn new(b: &Behaviours) -> Self {
         Self {
             blocks: HashMap::new(),
             air: b.air(),
@@ -107,6 +107,8 @@ impl TestLevel {
             analog_states: HashSet::new(),
             wire_connect: HashMap::new(),
             connect: HashMap::new(),
+            cake_answer: None,
+            cake_asks: Default::default(),
             time: 0,
             day_time: 0,
             events: Vec::new(),
@@ -127,7 +129,12 @@ impl TestLevel {
         }
     }
 }
+impl crate::level::BlockEntityNeighbors for TestLevel {}
 impl LevelAccess for TestLevel {
+    fn cake_can_eat(&self, vanilla: bool) -> bool {
+        self.cake_asks.set(self.cake_asks.get() + 1);
+        self.cake_answer.unwrap_or(vanilla)
+    }
     fn should_tick_blocks_at(&self, _chunk: ChunkPos) -> bool {
         self.block_events_ready
     }
@@ -303,7 +310,6 @@ impl LevelAccess for TestLevel {
         !self.refuse_portals
     }
 }
-
 struct World<'f> {
     f: &'f Fixture,
     level: TestLevel,
@@ -403,7 +409,6 @@ impl<'f> World<'f> {
         }
     }
 }
-
 macro_rules! world {
     () => {{
         let Some(f) = fixture() else {
@@ -412,11 +417,9 @@ macro_rules! world {
         World::new(f)
     }};
 }
-
 #[test]
 fn block_observation_follows_successful_commits_only() {
     use std::cell::RefCell;
-
     #[derive(Debug, PartialEq)]
     enum Observation {
         Block(BlockPos, BlockStateId, BlockStateId),
@@ -427,6 +430,7 @@ fn block_observation_follows_successful_commits_only() {
         loaded: bool,
         seen: RefCell<Vec<Observation>>,
     }
+    impl crate::level::BlockEntityNeighbors for Observer {}
     impl LevelAccess for Observer {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -494,15 +498,14 @@ fn block_observation_follows_successful_commits_only() {
         Observation::Block(pos, stone, b.air())
     );
 }
-
 #[test]
 fn neighbor_observation_follows_dispatch_order() {
     use std::cell::RefCell;
-
     struct Observer {
         inner: TestLevel,
         seen: RefCell<Vec<(BlockPos, BlockStateId, BlockId, bool)>>,
     }
+    impl crate::level::BlockEntityNeighbors for Observer {}
     impl LevelAccess for Observer {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -561,7 +564,6 @@ fn neighbor_observation_follows_dispatch_order() {
         Some(&(BlockPos::new(3, 4, 5), b.air(), changed, true))
     );
 }
-
 /// A level that hears every `neighborChanged`, and answers `affectNeighborsAfterRemoval` for a
 /// mod's part with three requests when `asks`.
 struct Asker {
@@ -569,6 +571,7 @@ struct Asker {
     seen: std::cell::RefCell<Vec<BlockPos>>,
     asks: bool,
 }
+impl crate::level::BlockEntityNeighbors for Asker {}
 impl LevelAccess for Asker {
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
         self.inner.block_state(pos)
@@ -611,7 +614,6 @@ impl LevelAccess for Asker {
         }
     }
 }
-
 /// The positions told of a neighbour change when `state` is removed from the origin.
 fn removal_notices(f: &Fixture, state: BlockStateId, asks: bool) -> Vec<BlockPos> {
     let b = &f.behaviours;
@@ -686,6 +688,7 @@ fn block_update_notifications_follow_client_and_invisible_flags() {
         client: bool,
         notifications: usize,
     }
+    impl crate::level::BlockEntityNeighbors for Level {}
     impl LevelAccess for Level {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -772,6 +775,7 @@ fn random_tick_hook_can_change_the_block_and_skip_its_own_tick() {
         /// Moves on with every write, as `World::revision` does.
         revision: u64,
     }
+    impl crate::level::BlockEntityNeighbors for Grower {}
     impl LevelAccess for Grower {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -902,6 +906,7 @@ fn tick_block_hook_can_change_the_block_and_skip_its_own_tick() {
         /// Moves on with every write, as `World::revision` does.
         revision: u64,
     }
+    impl crate::level::BlockEntityNeighbors for Ticked {}
     impl LevelAccess for Ticked {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -3646,35 +3651,8 @@ fn diodes_on_downward_pistons_survive_retraction() {
     }
 }
 
-#[test]
-fn a_candle_on_an_uneaten_cake_makes_a_candle_cake() {
-    // CakeBlock.useItemOn: any candle on a cake with no bites turns it into the
-    // matching unlit candle cake; a bitten cake does not.
-    let mut w = world!();
-    let pos = BlockPos::new(0, 1, 0);
-    let cake = w.id("cake", &[("bites", "0")]);
-    for (item, block) in [
-        ("minecraft:candle", "candle_cake"),
-        ("minecraft:red_candle", "red_candle_cake"),
-    ] {
-        w.put(pos, cake);
-        assert_eq!(w.use_item(pos, item), InteractionResult::Success);
-        assert_eq!(w.get(pos), w.id(block, &[("lit", "false")]));
-    }
-    let bitten = w.id("cake", &[("bites", "1")]);
-    w.put(pos, bitten);
-    w.use_item(pos, "minecraft:candle");
-    assert_ne!(w.get(pos), w.id("candle_cake", &[("lit", "false")]));
-    w.put(pos, cake);
-    // Anything else answers TRY_WITH_EMPTY_HAND, and ServerPlayerGameMode
-    // then calls useWithoutItem with whatever the main hand holds, so a stone
-    // eats a slice of the cake instead of adding a candle to it.
-    assert_eq!(
-        w.use_item(pos, "minecraft:stone"),
-        InteractionResult::Success
-    );
-    assert_eq!(w.get(pos), bitten);
-}
+#[path = "cake_tests.rs"]
+mod cake_tests;
 
 #[test]
 fn water_douses_a_lit_campfire_with_the_extinguish_sound() {
@@ -3857,6 +3835,7 @@ fn update_shape_hook_can_answer_for_the_block() {
         /// The `state` each call was given.
         states: RefCell<Vec<BlockStateId>>,
     }
+    impl crate::level::BlockEntityNeighbors for Shaper {}
     impl LevelAccess for Shaper {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -4016,6 +3995,7 @@ fn the_level_chooses_the_state_a_block_is_placed_in() {
         answer: Option<Option<BlockStateId>>,
         asked: RefCell<Vec<Asked>>,
     }
+    impl crate::level::BlockEntityNeighbors for Placer {}
     impl LevelAccess for Placer {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -4232,6 +4212,7 @@ fn survive_hooks_answer_for_the_block() {
         survive: Option<(BlockId, bool)>,
         asked: Cell<usize>,
     }
+    impl crate::level::BlockEntityNeighbors for Rules {}
     impl LevelAccess for Rules {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -4824,4 +4805,8 @@ fn fresh_chunk_sculk_charge_does_not_wait_for_ticking_readiness() {
 }
 
 mod barrel;
+#[cfg(test)]
+mod removal {
+    include!("tests/removal.rs");
+}
 mod fluid_tick;

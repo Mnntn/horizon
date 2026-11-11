@@ -6,11 +6,15 @@ use super::Game;
 use horizon_client::{Result, cauldron, items::ItemStack, mobs::Who};
 use horizon_core::{position::BlockPos, random::RandomSource};
 
+/// The two ordered float draws of `Entity.playEntityOnFireExtinguishedSound`.
+pub(super) fn extinguish_pitch(random: &mut impl RandomSource) -> f32 {
+    1.6 + (random.next_float() - random.next_float()) * 0.4
+}
+
 impl Game<'_> {
     /// Entity.playEntityOnFireExtinguishedSound
     pub(super) fn extinguish_sound(&mut self, at: [f64; 3]) {
-        let r = self.particles.random();
-        let pitch = 1.6 + (r.next_float() - r.next_float()) * 0.4;
+        let pitch = extinguish_pitch(self.particles.random());
         self.audio.play(
             "minecraft:entity.generic.extinguish_fire",
             Some(at),

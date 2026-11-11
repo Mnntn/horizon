@@ -11,56 +11,6 @@ fn model_id(n: &ItemModelNode) -> &str {
 }
 
 #[test]
-fn node_with_a_model_id_draws_that_model() {
-    let n = node(r#"{"type":"mod:thing","model":"mod:item/thing","tints":[{"type":"mod:tint"}]}"#)
-        .unwrap();
-    assert_eq!(model_id(&n), "mod:item/thing");
-    let ItemModelNode::Model(leaf) = n else {
-        unreachable!()
-    };
-    assert_eq!(leaf.tints, vec![TintSource::Constant(-1)]);
-    let n = node(r#"{"type":"mod:thing","base_model":"mod:item/base"}"#).unwrap();
-    assert_eq!(model_id(&n), "mod:item/base");
-    let n = node(r#"{"type":"mod:thing","on_model":"mod:item/a"}"#).unwrap();
-    assert_eq!(model_id(&n), "mod:item/a");
-}
-
-#[test]
-fn node_with_a_nested_node_decodes_it() {
-    let n = node(
-        r#"{"type":"neoforge:trimmed_armor","base_model":{"type":"minecraft:model","model":"mod:item/boots"}}"#,
-    )
-    .unwrap();
-    assert_eq!(model_id(&n), "mod:item/boots");
-    let n = node(
-        r#"{"type":"mod:x","model":{"type":"mod:y","model":"mod:item/inner"},"transformation":[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]}"#,
-    )
-    .unwrap();
-    let ItemModelNode::Composite {
-        models,
-        transformation,
-    } = n
-    else {
-        panic!("a transformation wraps the nested node")
-    };
-    assert!(transformation.is_some());
-    assert_eq!(model_id(&models[0]), "mod:item/inner");
-}
-
-#[test]
-fn node_with_nothing_usable_is_empty() {
-    assert!(matches!(
-        node(r#"{"type":"mod:facade"}"#).unwrap(),
-        ItemModelNode::Empty
-    ));
-    assert!(matches!(
-        node(r#"{"type":"mod:x","model":7}"#).unwrap(),
-        ItemModelNode::Empty
-    ));
-    assert!(ClientItem::from_json(r#"{"model":{"type":"ae2:facade"}}"#).is_ok());
-}
-
-#[test]
 fn unknown_vanilla_names_still_fail() {
     assert!(node(r#"{"type":"minecraft:nope"}"#).is_err());
     assert!(node(r#"{"type":"nope","model":"a:b"}"#).is_err());
@@ -172,25 +122,26 @@ fn special_type_keeps_its_base_model() {
     assert!(matches!(n, ItemModelNode::Special { .. }));
 }
 
+/// A node type no mod registered is an error naming it, so the item definition holding it isn't
+/// loaded and the item draws the missing model, whatever keys the node has (a NeoForge type
+/// such as `neoforge:fluid_container` included: #2606 makes it a built-in node).
 #[test]
-fn fluid_container_draws_its_base_without_the_fluid() {
-    let n = node(
-        r#"{"type":"neoforge:fluid_container","fluid":"mod:gas","cover_is_mask":false,"flip_gas":true,
-            "textures":{"base":"minecraft:item/bucket","fluid":"neoforge:item/mask/bucket_fluid"}}"#,
-    )
-    .unwrap();
-    assert_eq!(model_id(&n), "minecraft:item/bucket");
-    let n = node(
-        r#"{"type":"neoforge:fluid_container","cover_is_mask":false,
-            "textures":{"base":"a:item/flask","cover":"a:item/flask_cover"}}"#,
-    )
-    .unwrap();
-    let ItemModelNode::Composite { models, .. } = n else {
-        panic!("base and cover")
-    };
-    assert_eq!(models.len(), 2);
-    assert!(matches!(
-        node(r#"{"type":"neoforge:fluid_container"}"#).unwrap(),
-        ItemModelNode::Empty
-    ));
+fn an_unregistered_node_type_fails_by_name() {
+    for json in [
+        r#"{"type":"mod:thing","model":"mod:item/thing"}"#,
+        r#"{"type":"neoforge:trimmed_armor","base_model":{"type":"minecraft:model","model":"mod:item/boots"}}"#,
+        r#"{"type":"mod:facade"}"#,
+        r#"{"type":"neoforge:fluid_container","textures":{"base":"minecraft:item/bucket"}}"#,
+    ] {
+        let kind = serde_json::from_str::<Value>(json).unwrap()["type"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let error = node(json).unwrap_err().to_string();
+        assert!(
+            error.contains(&format!("unknown item model type {kind}")),
+            "{error}"
+        );
+    }
+    assert!(ClientItem::from_json(r#"{"model":{"type":"ae2:facade"}}"#).is_err());
 }

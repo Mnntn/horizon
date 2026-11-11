@@ -46,6 +46,7 @@
 //! use horizon_world::level::{self, Behaviours, LevelAccess, LevelEvent, PlaceContext, Ticks, flags};
 //!
 //! struct GameLevel { chunks: Chunks, random: LegacyRandom, time: i64, events: Vec<LevelEvent> }
+//! impl level::BlockEntityNeighbors for GameLevel {}
 //! impl LevelAccess for GameLevel {
 //!     fn block_state(&self, pos: BlockPos) -> BlockStateId { self.chunks.get(pos) }
 //!     fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
@@ -140,6 +141,8 @@ mod weather;
 
 #[cfg(test)]
 mod growth_tests;
+#[cfg(test)]
+mod survive_tests;
 #[cfg(test)]
 mod tests;
 
@@ -397,8 +400,17 @@ pub enum Spread {
     Fire,
 }
 
+mod block_entity_neighbors;
+pub use block_entity_neighbors::BlockEntityNeighbors;
+
 /// The world as seen by block behaviour. Implemented by the game and tests.
-pub trait LevelAccess {
+pub trait LevelAccess: BlockEntityNeighbors {
+    /// `Player.canEat(false)` at the cake bite, after item-specific interactions
+    /// have passed. Defaults to the interacting player's vanilla hunger answer.
+    fn cake_can_eat(&self, vanilla: bool) -> bool {
+        vanilla
+    }
+
     /// `WorldBorder.isWithinBounds(BlockPos)` for block movement.
     fn within_world_border(&self, _pos: BlockPos) -> bool {
         true
@@ -700,6 +712,17 @@ pub trait LevelAccess {
         _survives: &mut Option<bool>,
     ) {
     }
+    /// `IBlockExtension.canSustainPlant` for the soil `ground` at `ground_pos`
+    /// and the plant `state` above it, before the plant answers `mayPlaceOn`.
+    /// An answer put in `sustains` is the result. The default does nothing.
+    fn before_can_sustain_plant(
+        &self,
+        _state: BlockStateId,
+        _ground: BlockStateId,
+        _ground_pos: BlockPos,
+        _sustains: &mut Option<bool>,
+    ) {
+    }
     /// `VegetationBlock.mayPlaceOn(ground, level, groundPos)` for the plant
     /// `state`, before the plant answers it: the blocks a plant can stand on,
     /// which its `canSurvive` asks. An answer put in `may` is the result. The
@@ -893,6 +916,16 @@ pub trait LevelAccess {
         _direction: Option<Direction>,
         vanilla: bool,
     ) -> bool {
+        vanilla
+    }
+    /// Replacement for `Level.removeBlock`; the default keeps the fluid block.
+    fn adjust_remove_block(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _moved_by_piston: bool,
+        vanilla: BlockStateId,
+    ) -> BlockStateId {
         vanilla
     }
     /// Whether connection queries (fences, walls, bars and panes) need the level hook.
@@ -1763,3 +1796,6 @@ mod dimension_key_tests {
         assert_eq!(vanilla_sea_level(custom), 63);
     }
 }
+
+#[cfg(test)]
+mod block_entity_neighbor_tests;

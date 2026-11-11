@@ -205,6 +205,7 @@ impl Game<'_> {
         match result {
             Ok(done) => {
                 self.take_arrival_records(uuid, &done);
+                self.sync_replaced_book_settings(uuid);
                 let handover = arrivals::handover_text(done.handover);
                 let placed = if done.place {
                     self.place_arrival(uuid, done.handover)

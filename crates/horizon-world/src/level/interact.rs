@@ -269,7 +269,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     Success
                 }
                 Class::Cake => {
-                    if !player.can_eat {
+                    if !self.level.cake_can_eat(player.can_eat) {
                         return Pass;
                     }
                     self.player_effect(pos, state, PlayerEffect::EatCake);
@@ -284,7 +284,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     Success
                 }
                 Class::CandleCake => {
-                    if !player.can_eat {
+                    if !self.level.cake_can_eat(player.can_eat) {
                         return Pass;
                     }
                     self.player_effect(pos, state, PlayerEffect::EatCake);

@@ -45,6 +45,7 @@ fn collect(
         let (scope, items) = if let Item::Mod(module) = &item {
             let scope = match module.ident.to_string().as_str() {
                 "stubs" => Some("stubs"),
+                "crate_root" => Some("crate_root"),
                 "api" => Some("api"),
                 _ if shared => None,
                 _ => return Err("unsupported fixture envelope".into()),
@@ -83,7 +84,7 @@ fn collect(
 
 pub(crate) fn generate(root: &Path, out: &Path) -> Result<(), String> {
     let dir = root.join(DIRECTORY);
-    println!("cargo:rerun-if-changed={}", dir.display());
+    crate::rerun_if_changed(&dir.display());
     let mut areas = Catalog::modules(&root.join(DECLARATIONS))?;
     // A fixture can support an engine entry-point module as well as a declaration.
     // Their boundaries need not match when declarations are split per hook.
@@ -98,7 +99,7 @@ pub(crate) fn generate(root: &Path, out: &Path) -> Result<(), String> {
             return Err(format!("fixture area {area} has no catalog declaration"));
         }
         let path = dir.join(format!("{area}.rs"));
-        println!("cargo:rerun-if-changed={}", path.display());
+        crate::rerun_if_changed(&path.display());
         collect(
             &fs::read_to_string(&path).map_err(|e| e.to_string())?,
             area == "shared",
@@ -107,7 +108,7 @@ pub(crate) fn generate(root: &Path, out: &Path) -> Result<(), String> {
         )
         .map_err(|e| format!("{}: {e}", path.display()))?;
     }
-    for scope in ["root", "stubs", "api"] {
+    for scope in ["root", "stubs", "api", "crate_root"] {
         fs::write(
             out.join(format!("dispatch_fixtures_{scope}.rs")),
             output.get(scope).cloned().unwrap_or_default(),
@@ -162,7 +163,7 @@ mod tests {
         generate(&root, &root).unwrap();
         fs::write(
             dir.join("alpha.rs"),
-            "fn check() {} mod stubs { struct Stub; } mod api { pub struct Api; }",
+            "fn check() {} mod stubs { struct Stub; } mod api { pub struct Api; } mod crate_root { mod item {} }", 
         )
         .unwrap();
         fs::write(root.join(DECLARATIONS).join("zeta.rs"), "").unwrap();
@@ -170,7 +171,12 @@ mod tests {
         generate(&root, &root).unwrap();
         let ordered = fs::read_to_string(root.join("dispatch_fixtures_root.rs")).unwrap();
         assert!(ordered.find("check").unwrap() < ordered.find("last").unwrap());
-        for (scope, name) in [("root", "check"), ("stubs", "Stub"), ("api", "Api")] {
+        for (scope, name) in [
+            ("root", "check"),
+            ("stubs", "Stub"),
+            ("api", "Api"),
+            ("crate_root", "item"),
+        ] {
             let source =
                 fs::read_to_string(root.join(format!("dispatch_fixtures_{scope}.rs"))).unwrap();
             assert!(
@@ -211,7 +217,7 @@ mod tests {
         let source = fs::read_to_string(root.join("lib.rs")).unwrap();
         assert_eq!(
             source.trim().replace("\r\n", "\n"),
-            "#[cfg(test)]\nmod tests {\n    #[allow(dead_code)]\n    mod stubs {\n        include!(concat!(env!(\"OUT_DIR\"), \"/dispatch_fixtures_stubs.rs\"));\n    }\n    use generated as mod_api;\n    include!(concat!(env!(\"OUT_DIR\"), \"/dispatch_fixtures_root.rs\"));\n}"
+            "#[cfg(test)]\ninclude!(concat!(env!(\"OUT_DIR\"), \"/dispatch_fixtures_crate_root.rs\"));\n\n#[cfg(test)]\nmod tests {\n    #[allow(dead_code)]\n    mod stubs {\n        include!(concat!(env!(\"OUT_DIR\"), \"/dispatch_fixtures_stubs.rs\"));\n    }\n    use generated as mod_api;\n    include!(concat!(env!(\"OUT_DIR\"), \"/dispatch_fixtures_root.rs\"));\n}"
         );
         for name in ["shared", "base"] {
             assert!(

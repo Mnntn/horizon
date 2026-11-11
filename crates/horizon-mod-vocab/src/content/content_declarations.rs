@@ -1,7 +1,7 @@
 //! Load-time content declarations. These are drafts: the game admits a namespace atomically
 //! using the same checks as content JSON files. Registry-dependent validity is not promised
 //! by these records; no engine state is written by constructing or editing them.
-use horizon_core::arm_pose::ArmPose;
+use crate::ArmPose;
 use std::collections::BTreeMap;
 
 /// BlockProperties in a load-time content declaration.

@@ -62,6 +62,13 @@ fires no `block_drops` event; `destroy_block` with `collect` does all of that. T
 from the table's random sequence or the level random, as vanilla's does, so it takes a
 `ServerHost` and moves later draws.
 
+`LevelRef::roll_loot(host, table, origin, tool, entity)` is `LootTable.getRandomItems`: one roll
+of any loot table, the world's data packs merged, handed back instead of dropped, for a sieve or a
+machine that turns an input into a table's roll. The context is the one `/loot … fish <table>
+<pos> <tool>` gives: `origin`, `tool` for `match_tool` and enchantment bonuses, and `entity` as
+`this`. The stacks come split to their stack sizes. It draws as `block_drops` does and fires no
+`loot_drops` event. None for a table that isn't there.
+
 `fluid_shape(host, pos)` is `FluidState.getShape`: no box for no fluid, else one block-local box
 up to the fluid's height, a full block under the same fluid. `has_collisions(host, aabb)` asks
 whether any block collision shape is in a box, with `collision_boxes`'s walk and limits and

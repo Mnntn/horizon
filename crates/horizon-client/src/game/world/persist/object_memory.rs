@@ -43,6 +43,27 @@ impl Game<'_> {
             .and_then(OffLevel::as_mob_mut)
     }
 
+    /// A boat object, resident or retained as the root of a passenger graph.
+    /// Selectors, tracking and ticking keep iterating `boats` instead.
+    pub(in crate::game) fn boat_object(&self, id: u32) -> Option<&crate::game::boats::Boat> {
+        self.boats
+            .iter()
+            .find(|boat| boat.id == id)
+            .or_else(|| self.persist.off_level.get(&id).and_then(OffLevel::as_boat))
+    }
+
+    /// A minecart object, resident or retained as the root of a passenger graph.
+    /// Selectors, tracking and ticking keep iterating `carts` instead.
+    pub(in crate::game) fn cart_object(
+        &self,
+        id: u32,
+    ) -> Option<&crate::game::minecarts::Minecart> {
+        self.carts
+            .iter()
+            .find(|cart| cart.id == id)
+            .or_else(|| self.persist.off_level.get(&id).and_then(OffLevel::as_cart))
+    }
+
     /// Internal topology only: resident objects followed by retained passengers.
     /// Callers needing level membership must continue to iterate `mobs` instead.
     pub(in crate::game) fn mob_objects(&self) -> impl Iterator<Item = &Mob> {
@@ -346,9 +367,13 @@ impl Game<'_> {
         k: &str,
         transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) -> Option<u32> {
-        if uuid.is_some_and(|u| self.target_with_uuid(u).is_some()) {
+        // A runtime transfer owns a distinct live object: like a Mob, the copy
+        // refused residency stays below the passengers admitted before it.
+        // A disk copy with a taken UUID is still not constructed.
+        if transferred.is_none() && uuid.is_some_and(|u| self.target_with_uuid(u).is_some()) {
             return None;
         }
+        let refused = transferred.is_some() && self.uuid_admission_refused(uuid);
         if let Some((position, velocity, yaw)) = entity_nbt::boat_from_nbt(&tag) {
             let mut tag = tag;
             let riders = self.take_mob_passengers(&mut tag);
@@ -377,8 +402,12 @@ impl Game<'_> {
                 self.adopt_transferred_entity_state(id, state);
             }
             self.remember(id, uuid, tag);
-            self.bind_saved_entity_attachments(id, &mut b.attachment_lifetime);
-            self.boats.push(b);
+            if refused {
+                self.persist.off_level.insert(id, OffLevel::Boat(b));
+            } else {
+                self.bind_saved_entity_attachments(id, &mut b.attachment_lifetime);
+                self.boats.push(b);
+            }
             for rider in riders {
                 self.load_mob(rider, Some(id));
             }
@@ -394,9 +423,11 @@ impl Game<'_> {
         k: &str,
         transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) -> Option<u32> {
-        if uuid.is_some_and(|u| self.target_with_uuid(u).is_some()) {
+        // As `load_boat_transferred`: only a runtime transfer retains a refused copy.
+        if transferred.is_none() && uuid.is_some_and(|u| self.target_with_uuid(u).is_some()) {
             return None;
         }
+        let refused = transferred.is_some() && self.uuid_admission_refused(uuid);
         let kind = crate::game::minecarts::CartKind::from_id(k).unwrap();
         let mut tag = tag;
         let riders = self.take_mob_passengers(&mut tag);
@@ -411,8 +442,12 @@ impl Game<'_> {
                 self.adopt_transferred_entity_state(id, state);
             }
             self.remember(id, uuid, tag);
-            self.bind_saved_entity_attachments(id, &mut c.attachment_lifetime);
-            self.carts.push(c);
+            if refused {
+                self.persist.off_level.insert(id, OffLevel::Cart(c));
+            } else {
+                self.bind_saved_entity_attachments(id, &mut c.attachment_lifetime);
+                self.carts.push(c);
+            }
             for rider in riders {
                 self.load_mob(rider, Some(id));
             }
@@ -421,7 +456,9 @@ impl Game<'_> {
         None
     }
 
-    pub(in crate::game) fn mob_uuid_admission_refused(&self, uuid: Option<[i32; 4]>) -> bool {
+    /// `PersistentEntitySectionManager.addEntityUuid`: another resident object
+    /// already holds `uuid`, so this one is refused level residency.
+    pub(in crate::game) fn uuid_admission_refused(&self, uuid: Option<[i32; 4]>) -> bool {
         uuid.is_some_and(|uuid| {
             self.target_with_uuid(uuid)
                 .is_some_and(|target| target != crate::game::commands::Target::Player)
@@ -461,7 +498,7 @@ impl Game<'_> {
             Some(self.pack.assets.registry),
             own,
         )?;
-        self.warn_missing_profession(&m);
+        self.resolve_loaded_profession(&mut m);
         if horizon_client::mobs::camel::is_camel(m.species()) {
             horizon_client::mobs::camel::finish_load(&mut m, self.world.game_time);
         }
@@ -513,7 +550,7 @@ impl Game<'_> {
         // PersistentEntitySectionManager.addEntityUuid refuses residency, not
         // the already-constructed object or its passenger links. Descendants
         // are still considered individually in preorder.
-        let refused = self.mob_uuid_admission_refused(uuid);
+        let refused = self.uuid_admission_refused(uuid);
 
         if let Some(state) = transferred {
             self.adopt_transferred_entity_state(id, state);
@@ -620,10 +657,10 @@ impl Game<'_> {
                 VehicleTreeKind::Mob,
                 horizon_client_core::identifier::normalize_id(&mob.kind.id)?,
             )
-        } else if let Some(boat) = self.boats.iter().find(|boat| boat.id == root) {
+        } else if let Some(boat) = self.boat_object(root) {
             (VehicleTreeKind::Boat, boat.entity_type())
         } else {
-            let cart = self.carts.iter().find(|cart| cart.id == root)?;
+            let cart = self.cart_object(root)?;
             (VehicleTreeKind::Cart, cart.kind.id().to_owned())
         };
         let children: Vec<_> = self
@@ -678,24 +715,22 @@ impl Game<'_> {
     }
 
     /// Reconstruct using actual object IDs, even when the copied root is refused
-    /// residency. Mob roots follow passenger-first vanilla dimension admission;
-    /// boat/cart roots retain their existing admission until the #2419 repair.
+    /// residency. `Entity.teleportCrossDimension` admits every passenger before
+    /// its copied vehicle, whether that root is a mob, boat or minecart.
     pub(in crate::game) fn restore_vehicle_tree_state(
         &mut self,
         tag: Tag,
         tree: TransferredVehicleTree,
     ) -> Option<RestoredVehicleTree> {
-        let passenger_first = matches!(tree.kind, VehicleTreeKind::Mob);
         let prepared = self.prepare_vehicle_transfer(tag, tree)?;
         let mut by_source = HashMap::new();
-        let root = self.restore_vehicle_transfer(prepared, passenger_first, &mut by_source)?;
+        let root = self.restore_vehicle_transfer(prepared, &mut by_source)?;
         Some(RestoredVehicleTree { root, by_source })
     }
 
     pub(super) fn restore_vehicle_transfer(
         &mut self,
         tree: PreparedVehicleTransfer,
-        passenger_first: bool,
         by_source: &mut HashMap<u32, u32>,
     ) -> Option<u32> {
         let PreparedVehicleTransfer {
@@ -706,23 +741,11 @@ impl Game<'_> {
             state,
             passengers,
         } = tree;
-        let (root, riders) = if passenger_first {
-            let riders = passengers
-                .into_iter()
-                .map(|child| self.restore_vehicle_transfer(child, true, by_source))
-                .collect::<Option<Vec<_>>>()?;
-            (
-                self.restore_vehicle_object(tag, kind, &name, state)?,
-                riders,
-            )
-        } else {
-            let root = self.restore_vehicle_object(tag, kind, &name, state)?;
-            let riders = passengers
-                .into_iter()
-                .map(|child| self.restore_vehicle_transfer(child, false, by_source))
-                .collect::<Option<Vec<_>>>()?;
-            (root, riders)
-        };
+        let riders = passengers
+            .into_iter()
+            .map(|child| self.restore_vehicle_transfer(child, by_source))
+            .collect::<Option<Vec<_>>>()?;
+        let root = self.restore_vehicle_object(tag, kind, &name, state)?;
         for (order, &id) in riders.iter().enumerate() {
             if let Some(mob) = self.mob_object_mut(id) {
                 mob.extra.mount = Some(root);
@@ -881,7 +904,8 @@ impl Game<'_> {
         for mob in self.mob_objects() {
             if let Some(vehicle) = mob.extra.mount
                 && (self.persist.off_level.contains_key(&mob.id)
-                    || self.persist.off_level.contains_key(&vehicle))
+                    || self.persist.off_level.contains_key(&vehicle)
+                    || self.persist.removed_vehicles.contains_key(&vehicle))
             {
                 links.entry(mob.id).or_default().push(vehicle);
                 links.entry(vehicle).or_default().push(mob.id);
@@ -892,7 +916,9 @@ impl Game<'_> {
                 .iter()
                 .flat_map(|host| host.hub.guests.iter().filter_map(|guest| guest.vehicle)),
         ) {
-            if self.persist.off_level.contains_key(&vehicle) {
+            if self.persist.off_level.contains_key(&vehicle)
+                || self.persist.removed_vehicles.contains_key(&vehicle)
+            {
                 retained.insert(vehicle);
             }
         }
@@ -903,7 +929,10 @@ impl Game<'_> {
             .collect();
         while let Some(id) = pending.pop() {
             for &neighbor in links.get(&id).into_iter().flatten() {
-                if self.persist.off_level.contains_key(&neighbor) && retained.insert(neighbor) {
+                if (self.persist.off_level.contains_key(&neighbor)
+                    || self.persist.removed_vehicles.contains_key(&neighbor))
+                    && retained.insert(neighbor)
+                {
                     pending.push(neighbor);
                 }
             }
@@ -917,6 +946,17 @@ impl Game<'_> {
             .collect();
         for id in gone {
             self.persist.off_level.remove(&id);
+            self.forget_entity(id);
+        }
+        let gone: Vec<_> = self
+            .persist
+            .removed_vehicles
+            .keys()
+            .copied()
+            .filter(|id| !retained.contains(id))
+            .collect();
+        for id in gone {
+            self.persist.removed_vehicles.remove(&id);
             self.forget_entity(id);
         }
     }

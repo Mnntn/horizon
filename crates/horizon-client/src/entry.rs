@@ -145,11 +145,11 @@ pub fn start<G>(
                 let context = reader.context();
                 mod_api::dispatch_modify_default_components(&context, item, components);
             },
-            loot_function: |kind, data, ctx, stack| {
-                crate::game::api_values::dispatch_loot_function(kind, data, ctx, stack);
+            loot_function: |kind, data, ctx, stack, tags| {
+                crate::game::api_values::dispatch_loot_function(kind, data, ctx, stack, tags);
             },
-            loot_condition: |kind, data, ctx, holds| {
-                crate::game::api_values::dispatch_loot_condition(kind, data, ctx, holds);
+            loot_condition: |kind, data, ctx, holds, tags| {
+                crate::game::api_values::dispatch_loot_condition(kind, data, ctx, holds, tags);
             },
         },
     )
@@ -317,6 +317,9 @@ pub(crate) fn install_client_hooks() {
         },
         block_speed_factor: |context, state, factor| {
             crate::game::block_speed_factor(context, state, factor);
+        },
+        is_ladder: |context, entity, pos, state, ladder| {
+            crate::game::is_ladder(context, entity, pos, state, ladder);
         },
         player_stays_on_ground_surface: |context, entity, staying| {
             if !mod_api::__private::listened(mod_api::HookId::PlayerStaysOnGroundSurface) {

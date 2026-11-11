@@ -18,6 +18,43 @@ its fields. Lengths and numbers are little-endian; collections are length-prefix
 Decoding returns `WireError` for invalid data rather than accepting an unknown tag,
 invalid UTF-8 or an unsupported length.
 
+## Nesting and stacks
+
+Structural decoding and encoding allow **32** nested records, payload-carrying
+variants and `Box`/`Arc` values (`MAX_DEPTH`). Collection iteration, `Option`
+and tuples do not consume a level. The reader returns `WireError::Depth` before
+entering level 33; the writer records the same error. Always check `Writer::error`
+before sending its bytes. This is a transport budget for unbounded mod-defined
+trees, including ingredients, item places, loot vehicles and recipe slot displays.
+
+Vanilla trees are not restricted by that structural budget: NBT `Tag` uses an
+explicit work stack with **512** nested containers; `Text` crosses as the existing
+validated flat `TextForm` table, preserving its **512** component-depth contract.
+These encodings are identical on native and wasm. Text's layout identity is the
+flat table's identity; mods must rebuild.
+
+JSON-backed `serde_json::Value`, JSON maps and `ModelPart` also refuse beyond
+32 JSON containers. Their encoders preflight the in-memory tree iteratively
+before serde recursion; their decoders scan the JSON's nesting outside quoted
+strings before parsing. A model part's JSON includes object, children-list and
+named-child-tuple containers, so one part can consume several JSON levels.
+
+The smallest configured guest shadow stack is **256 KiB** (`horizon-mod-wasm`'s
+shared linker). Wasmtime also has its default **512 KiB** native call-stack budget.
+Native decoding runs synchronously on the calling thread: world workers use Rust's
+normal spawned-thread stack (normally **2 MiB**), while integrated server threads
+reserve at least **8 MiB**. The depth regression tests use **128 KiB**, leaving half
+the guest shadow stack for callers. An embedding that supplies smaller stacks or
+arbitrarily recursive handwritten `Wire` implementations must enforce its own
+stack contract; the reader cannot police code outside its codec.
+
+Wire does not own a borrowed value's destructor. Constructing an arbitrarily deep
+Rust tree and then dropping it can still overflow a thread independently of Wire.
+Use explicit work stacks when disposing of hostile trees (`discard_tag` for NBT),
+and do not transfer arbitrarily deep owned Rust trees to an encoder. The source
+scanner `tools/scan_recursive_wire.py` and its classification test require review
+of every new recursive public vocabulary type.
+
 ## Checked representations
 
 Use `#[wire(via = String)]` (or another `Wire` type) when a checked constructor owns

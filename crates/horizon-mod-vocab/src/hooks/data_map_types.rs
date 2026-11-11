@@ -12,9 +12,9 @@ pub trait Hooks {
     /// you push through `native_data_pack_files` under the key
     /// `data_maps/<mod_id>:<registry path>/<name>`: `replace`, `values`
     /// (entry ids and `#tags` to JSON values) and `remove`, a newer value
-    /// overriding an older. Read them with `native_data_map` and
-    /// `native_data_map_entries`, in `native_data_maps.rs`. Server-side, not
-    /// synced to clients.
+    /// overriding an older. Push a typed map's `DataMap::ty`
+    /// and read its values with `ItemKey::data` and `BlockKey::data`. Server-side,
+    /// not synced to clients.
     #[hook(
         side = "server",
         contract = "collect",

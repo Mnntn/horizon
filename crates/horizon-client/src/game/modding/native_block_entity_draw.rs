@@ -446,11 +446,14 @@ impl BlockEntityDraw {
         );
     }
     /// The vertices drawn, with those it was made with first.
-    pub(super) fn into_vertices(self) -> Vec<Vertex> {
+    pub(super) fn into_vertices(mut self) -> Vec<Vertex> {
+        super::draw_boundary::truncate(&mut self.vertices, super::draw_boundary::MAX_DRAW_VERTICES);
         self.vertices
     }
     /// The vertices drawn and where its turning parts start in them (`spin`).
-    pub(super) fn into_turning(self) -> (Vec<Vertex>, Vec<(usize, Option<Spin>)>) {
+    pub(super) fn into_turning(mut self) -> (Vec<Vertex>, Vec<(usize, Option<Spin>)>) {
+        super::draw_boundary::truncate(&mut self.vertices, super::draw_boundary::MAX_DRAW_VERTICES);
+        self.spins.retain(|(at, _)| *at <= self.vertices.len());
         (self.vertices, self.spins)
     }
     /// `PoseStack.pushPose`: `pop` comes back to the pose as it is now.
@@ -551,6 +554,14 @@ impl BlockEntityDraw {
     fn quad(&mut self, corners: [[f32; 3]; 4], uv: [[f32; 2]; 4], sprite: Rect, tint: u32) {
         let pose = self.pose();
         let at = corners.map(|c| pose.transform_point3(Vec3::from_array(c)));
+        if !super::draw_boundary::quad_allowed(
+            at.map(|p| p.to_array()),
+            uv,
+            self.vertices.len(),
+            super::draw_boundary::MAX_DRAW_VERTICES,
+        ) {
+            return;
+        }
         let normal = (at[1] - at[0]).cross(at[2] - at[0]).normalize_or_zero();
         let normal = if normal == Vec3::ZERO {
             (at[2] - at[1]).cross(at[3] - at[1]).normalize_or(Vec3::Y)
@@ -1331,6 +1342,29 @@ mod tests {
             w: 16,
             h: 16,
         }
+    }
+
+    #[test]
+    fn non_finite_quad_submission_leaves_geometry_unchanged() {
+        let mut surface = draw();
+        let corners = [
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ];
+        let uv = [[0.0; 2]; 4];
+        surface.quad(corners, uv, sprite(), 0xFFFFFF);
+        assert_eq!(surface.vertices.len(), 4);
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut bad_corners = corners;
+            bad_corners[1][2] = bad;
+            surface.quad(bad_corners, uv, sprite(), 0xFFFFFF);
+            let mut bad_uv = uv;
+            bad_uv[2][1] = bad;
+            surface.quad(corners, bad_uv, sprite(), 0xFFFFFF);
+        }
+        assert_eq!(surface.into_vertices().len(), 4);
     }
 
     #[test]

@@ -13,7 +13,7 @@
   release of it with a `.hmod` asset is a version once the bundle passes the registry's checks, with no further
   review (nothing is built or run by the registry; the player's launcher builds it behind its warning).
   The `.hmod` contains the flat Rust project and may contain `assets/`, `data/` and an optional `icon.png`.
-  The launcher checks the bundle without running anything. Native code is trusted.
+  The launcher checks the bundle without running anything. Native code is trusted. Mixins are code compiled into the game, with the same trust as internals.
   The file is pinned by SHA-256 like every registry file; its identity and exact build pins come from
   `horizon-mod.toml`. `revoked.toml` takes a bad release down.
   A project's kind never changes.

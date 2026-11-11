@@ -22,6 +22,9 @@ impl DisplayResources for Resources {
     fn menu(&self, id: &str) -> bool {
         matches!(id, "demo:pot" | "demo:oven")
     }
+    fn recipe_type(&self, kind: &str) -> bool {
+        kind == "demo:cooking"
+    }
     fn recipe(&self, id: &str, kind: &str) -> bool {
         id == "demo:soup" && kind == "demo:cooking"
     }
@@ -79,6 +82,76 @@ fn each_search_contains_exactly_its_books_categories() {
     );
 }
 #[test]
+fn invalid_declarations_refuse_the_whole_generation() {
+    let valid = category("demo:pot", "demo:soups");
+    for id in [
+        "bare",
+        "demo:",
+        ":soups",
+        "demo:Bad",
+        "demo:bad:id",
+        "minecraft:crafting_misc",
+    ] {
+        let mut invalid = valid.clone();
+        invalid.id = id.into();
+        assert!(matches!(
+            ModBookIndex::build(vec![valid.clone(), invalid], &Resources),
+            Err(DisplayLoadError::InvalidId(_))
+        ));
+    }
+    for icon in ["", "minecraft:air", "demo:absent"] {
+        let mut invalid = valid.clone();
+        invalid.id = "demo:stews".into();
+        invalid.icon = icon.into();
+        assert!(matches!(
+            ModBookIndex::build(vec![valid.clone(), invalid], &Resources),
+            Err(DisplayLoadError::UnknownResource { kind: "item", .. })
+        ));
+    }
+    let mut second = valid.clone();
+    second.id = "demo:stews".into();
+    let index = ModBookIndex::build(vec![valid.clone(), second], &Resources).unwrap();
+    assert_eq!(
+        index
+            .panel("demo:pot", &valid.book)
+            .unwrap()
+            .categories()
+            .count(),
+        2
+    );
+}
+#[test]
+fn panels_reject_wrong_menu_and_stale_tabs() {
+    let pot = category("demo:pot", "demo:soups");
+    let oven = category("demo:oven", "demo:breads");
+    let index = ModBookIndex::build(vec![pot.clone(), oven.clone()], &Resources).unwrap();
+    let panel = index.panel("demo:pot", &pot.book).unwrap();
+    assert_eq!(panel.search_group(), "demo:pot_search");
+    assert_eq!(
+        panel
+            .categories()
+            .map(|c| c.id.as_str())
+            .collect::<Vec<_>>(),
+        ["demo:soups"]
+    );
+    assert!(panel.category("demo:breads").is_none());
+    assert_eq!(
+        panel.category("demo:soups").unwrap().icon,
+        "minecraft:stone"
+    );
+    assert!(index.panel("demo:oven", &pot.book).is_none());
+    assert!(index.panel("demo:pot", &oven.book).is_none());
+    let mut invalid = pot;
+    invalid.recipe_type = "demo:absent".into();
+    assert!(matches!(
+        ModBookIndex::build(vec![invalid], &Resources),
+        Err(DisplayLoadError::UnknownResource {
+            kind: "recipe type",
+            ..
+        })
+    ));
+}
+#[test]
 fn shared_search_or_mismatched_menu_cannot_merge_books() {
     let a = category("demo:pot", "demo:soups");
     let mut b = category("demo:oven", "demo:breads");
@@ -132,6 +205,7 @@ fn all_five_display_kinds_validate_and_unknown_nested_items_are_typed_errors() {
     a.displays.push(mod_api::RecipeBookDisplayEntry {
         recipe: "demo:soup".into(),
         displays,
+        placement: None,
     });
     assert!(ModBookIndex::build(vec![a.clone()], &Resources).is_ok());
     a.displays[0]
@@ -162,6 +236,7 @@ fn malformed_layouts_and_wrong_recipe_ownership_are_refused() {
     a.displays.push(mod_api::RecipeBookDisplayEntry {
         recipe: "demo:wrong_type".into(),
         displays: vec![shaped(vec![item()])],
+        placement: None,
     });
     assert!(matches!(
         ModBookIndex::build(vec![a], &Resources),

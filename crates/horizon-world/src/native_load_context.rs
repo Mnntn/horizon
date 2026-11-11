@@ -48,6 +48,7 @@ impl LoadInputs {
 }
 
 /// A load's registry snapshot with the settings captured for its mods.
+#[derive(Clone)]
 struct Snapshot {
     inputs: Arc<LoadInputs>,
     settings: BTreeMap<String, BTreeMap<String, String>>,
@@ -146,6 +147,7 @@ impl LoadContext {
         LoopContext {
             side,
             snapshot: Snapshot::capture(self.snapshot.inputs.clone(), mod_ids),
+            recipe_properties: Default::default(),
         }
     }
 
@@ -187,10 +189,15 @@ pub enum LoopSide {
 /// Registries, settings and the side for hooks fired inside a menu, recipe or
 /// player-list loop, where no game is at hand. It holds no game, world handle
 /// or mutable registry access, and is built once per resource generation.
+#[derive(Clone)]
 pub struct LoopContext {
     side: LoopSide,
     snapshot: Snapshot,
+    recipe_properties: Arc<HashMap<String, std::collections::HashSet<String>>>,
 }
+
+#[path = "native_load_context/recipe_properties.rs"]
+mod recipe_properties;
 
 impl LoopContext {
     pub fn side(&self) -> LoopSide {

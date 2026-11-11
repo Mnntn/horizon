@@ -8,6 +8,8 @@ pub trait Hooks {
     /// `data/<id>/horizon/item/<path>.json` (a vanilla `template`,
     /// `max_stack_size`, `rarity`, `components`, `crafting_remainder`). A
     /// block's item comes with its block (`item: true`), not from here.
+    /// Each mod receives its own batch; IDs must use a namespace owned by its
+    /// manifest (bare paths use its mod ID). Unowned namespaces refuse registration.
     /// Asked once at start, on every side.
     #[hook(
         side = "both",

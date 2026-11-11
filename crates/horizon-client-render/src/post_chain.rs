@@ -1962,8 +1962,30 @@ mod tests {
     }
 
     fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
+        device_where(|_| true)
+    }
+
+    /// A device for a chain that reads the frame's depth. On GL the depth is copied into an
+    /// `R32Float` target first, which an adapter without `EXT_color_buffer_float` (Mesa's llvmpipe)
+    /// cannot render to: skip there, as the other GPU tests skip a missing capability.
+    fn depth_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+        device_where(|adapter| {
+            crate::gfx::test_gpu::supports_texture_usage(
+                adapter,
+                wgpu::TextureFormat::R32Float,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            )
+        })
+    }
+
+    fn device_where(
+        supported: impl Fn(&wgpu::Adapter) -> bool,
+    ) -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = crate::gfx::test_gpu::instance();
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+        if !supported(&adapter) {
+            return None;
+        }
         let pair = pollster::block_on(adapter.request_device(&Default::default())).ok()?;
         eprintln!("post-effect GPU: {:?}", adapter.get_info());
         Some(pair)
@@ -2221,7 +2243,7 @@ mod tests {
     /// `textures/effect` image: nothing here is one of vanilla's shaders.
     #[test]
     fn a_chain_runs_its_own_glsl() {
-        let Some((device, queue)) = device() else {
+        let Some((device, queue)) = depth_device() else {
             return;
         };
         let root = scratch(
@@ -2263,7 +2285,7 @@ mod tests {
     /// close to 1), not as GL's window depth.
     #[test]
     fn a_pass_reads_the_frame_depth_as_it_is() {
-        let Some((device, queue)) = device() else {
+        let Some((device, queue)) = depth_device() else {
             return;
         };
         let root = scratch(
@@ -2390,7 +2412,7 @@ mod tests {
     /// thread, and runs as one loaded in its frame does.
     #[test]
     fn a_preloaded_archive_chain_arrives_compiled() {
-        let Some((device, queue)) = device() else {
+        let Some((device, queue)) = depth_device() else {
             return;
         };
         let root = scratch(

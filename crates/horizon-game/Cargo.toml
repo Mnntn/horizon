@@ -37,6 +37,7 @@ windows-segment-heap = ["horizon-client/windows-segment-heap"]
 winresource = "0.1"
 
 [dev-dependencies]
+horizon-protocol = { path = "../horizon-protocol" }
 tempfile = "3"
 horizon-core = { path = "../horizon-core" }
 serde_json = "1"

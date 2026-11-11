@@ -254,6 +254,7 @@ mod tests {
             goal_host: None,
             live_mobs: None,
             teams: Default::default(),
+            professions: crate::mobs::villager::profession_table(),
             loop_context: crate::test_resources::server_loop_context(),
             world: &world,
             registry,

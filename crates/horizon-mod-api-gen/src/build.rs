@@ -3,6 +3,19 @@ use super::{Catalog, Target, free_function_source, host, native_hook_files, sour
 use quote::ToTokens;
 use std::{fs, path::Path};
 
+/// Preserve output timestamps when generation produces identical bytes.
+pub fn write_if_changed(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> std::io::Result<()> {
+    let path = path.as_ref();
+    let bytes = bytes.as_ref();
+    match fs::read(path) {
+        Ok(previous) if previous == bytes => return Ok(()),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    fs::write(path, bytes)
+}
+
 /// Generate only this crate's files, tracking every source read by the generator.
 /// `root` is supplied at run time by the consuming crate's build script.
 pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), String> {
@@ -25,13 +38,13 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         ],
         Target::Api | Target::Vocab => {
             if matches!(target, Target::Vocab) {
-                fs::write(
+                write_if_changed(
                     out_dir.join(super::parts::OUTPUT),
                     super::parts::source(root)?,
                 )
                 .map_err(|e| e.to_string())?;
                 for (name, code) in super::exports::sources(root)? {
-                    fs::write(out_dir.join(name), code).map_err(|e| e.to_string())?;
+                    write_if_changed(out_dir.join(name), code).map_err(|e| e.to_string())?;
                 }
             }
             let hooks = generated.hooks;
@@ -51,7 +64,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                     .map_err(|_| "generating the wire impls panicked".to_string())?
             })?;
             for path in sources.iter().chain(&generated_wire.sources) {
-                println!("cargo:rerun-if-changed={}", path.display());
+                crate::rerun_if_changed(&path.display());
             }
             let outputs = vec![
                 (host::AREAS_OUTPUT, generated.areas),
@@ -72,7 +85,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         }
     };
     for (name, code) in outputs {
-        fs::write(out_dir.join(name), &code).map_err(|e| e.to_string())?;
+        write_if_changed(out_dir.join(name), &code).map_err(|e| e.to_string())?;
         syn::parse_file(&code).map_err(|e| format!("generated Rust: {name}: {e}"))?;
     }
     Ok(())
@@ -113,19 +126,16 @@ pub(crate) fn game_host_modules(root: &Path) -> Result<String, String> {
 /// Generate the native-only raw render records, without trait dispatch or subscriptions.
 pub fn generate_render(root: &Path, out_dir: &Path) -> Result<(), String> {
     let declarations = root.join(super::catalog::DECLARATIONS);
-    println!("cargo:rerun-if-changed={}", declarations.display());
+    crate::rerun_if_changed(&declarations.display());
     for module in Catalog::modules(&declarations)? {
-        println!(
-            "cargo:rerun-if-changed={}",
-            declarations.join(format!("{module}.rs")).display()
-        );
+        crate::rerun_if_changed(&declarations.join(format!("{module}.rs")).display());
     }
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join("crates/horizon-mod-render/src/render.rs")
-            .display()
+    crate::rerun_if_changed(
+        &root
+            .join("crates/horizon-mod-render/src/render.rs")
+            .display(),
     );
-    let source = super::dispatch::render(root, &Catalog::load(root)?)?.render_dispatch;
+    let source = super::dispatch::render(root, &Catalog::load_declarations(root)?)?.render_dispatch;
     use syn::spanned::Spanned;
     let file = syn::parse_file(&source).map_err(|error| error.to_string())?;
     let lines: Vec<_> = std::iter::once(0)
@@ -146,7 +156,7 @@ pub fn generate_render(root: &Path, out_dir: &Path) -> Result<(), String> {
         records.push('\n');
     }
     syn::parse_file(&records).map_err(|error| error.to_string())?;
-    fs::write(out_dir.join("native_render_generated.rs"), records)
+    write_if_changed(out_dir.join("native_render_generated.rs"), records)
         .map_err(|error| error.to_string())
 }
 
@@ -174,7 +184,7 @@ fn render_records_need_no_game_sources() {
             .iter()
             .filter(|item| matches!(item, syn::Item::Struct(_)))
             .count(),
-        3
+        5
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -211,16 +221,19 @@ pub(crate) fn wire_types(root: &Path) -> Result<std::collections::BTreeSet<Strin
 /// `horizon-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
 /// from the game's source, tracking the game module's files.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
+    crate::interface_cache::with_cache(out_dir, || generate_points_inner(root, out_dir))
+}
+
+pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), String> {
     let src = root.join("crates/horizon-client/src");
-    println!("cargo:rerun-if-changed={}", src.join("game.rs").display());
-    println!("cargo:rerun-if-changed={}", src.join("game").display());
+    crate::rerun_if_changed(&src.join("game.rs").display());
+    crate::rerun_if_changed(&src.join("game").display());
     for path in super::points::tracked(root)?
         .into_iter()
         .chain(super::sites::tracked(root).map_err(|e| e.to_string())?)
     {
-        println!("cargo:rerun-if-changed={}", path.display());
+        crate::rerun_if_changed(&path.display());
     }
-    let private = super::points::source::build_input(root)?;
     println!("cargo:rerun-if-env-changed=HORIZON_POINT_NAMES");
     let selected = std::env::var("HORIZON_POINT_NAMES")
         .ok()
@@ -229,11 +242,9 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
                 .map_err(|error| format!("HORIZON_POINT_NAMES: {error}"))
         })
         .transpose()?;
-    let code = super::points::records_selected(
-        &super::points::game_points(root)?,
-        &private,
-        selected.as_ref(),
-    ) + &super::sites::ids(root).map_err(|e| e.to_string())?;
+    let code =
+        super::points::records_selected(&super::points::game_points(root)?, selected.as_ref())
+            + &super::sites::ids(root).map_err(|e| e.to_string())?;
     let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
     // A single multi-megabyte line makes Clippy's source lookups prohibitively slow.
     let mut code = String::new();
@@ -241,33 +252,30 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
         code.push_str(&item.to_token_stream().to_string());
         code.push('\n');
     }
-    fs::write(out_dir.join("points_generated.rs"), code).map_err(|e| e.to_string())
+    write_if_changed(out_dir.join("points_generated.rs"), code).map_err(|e| e.to_string())
 }
 
 pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
     fn directory(path: &Path, extension: &str, recursive: bool) -> Result<(), String> {
         // Track the directory as well: adding a helper source or fragment changes the inputs.
-        println!("cargo:rerun-if-changed={}", path.display());
+        crate::rerun_if_changed(&path.display());
         for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
             let path = entry.map_err(|e| e.to_string())?.path();
             if path.is_dir() && recursive {
                 directory(&path, extension, recursive)?;
             } else if path.extension().is_some_and(|ext| ext == extension) {
-                println!("cargo:rerun-if-changed={}", path.display());
+                crate::rerun_if_changed(&path.display());
             }
         }
         Ok(())
     }
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join("crates/horizon-mod-vocab/src/lib.rs").display()
-    );
+    crate::rerun_if_changed(&root.join("crates/horizon-mod-vocab/src/lib.rs").display());
     for retired in super::catalog::RETIRED {
         // Only while present: Cargo reruns a build script on every build for a path that doesn't
         // exist. One that appears fails the next generation, and every fresh build, such as CI's.
         let path = root.join(retired);
         if path.exists() {
-            println!("cargo:rerun-if-changed={}", path.display());
+            crate::rerun_if_changed(&path.display());
         }
     }
     directory(&root.join(super::catalog::DECLARATIONS), "rs", false)?;
@@ -279,10 +287,7 @@ pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
     )?;
     if all_game {
         directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
-        println!(
-            "cargo:rerun-if-changed={}",
-            root.join("crates/horizon-client/src/game.rs").display()
-        );
+        crate::rerun_if_changed(&root.join("crates/horizon-client/src/game.rs").display());
     } else {
         directory(
             &root.join("crates/horizon-client/src/game/native_hooks"),
@@ -298,7 +303,7 @@ pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
                 .join(krate)
                 .join("src")
                 .join(format!("{}.rs", module.replace("::", "/")));
-            println!("cargo:rerun-if-changed={}", path.display());
+            crate::rerun_if_changed(&path.display());
         }
     }
     Ok(())

@@ -16,6 +16,10 @@ pub trait Hooks {
     /// players; a mob your server half spawned (`native_spawn_mob`) is told
     /// apart by its id, sent with mod messages, or by its custom name.
     /// A mob is drawn afresh each frame: `draw.keep()` does nothing here.
+    /// `hidden.hide_named(name)` leaves only the part of that name out of the
+    /// vanilla model this frame (a villager's `nose`), drawn on the CPU or the
+    /// GPU: a hidden part takes its children with it, while its armour, held
+    /// items and other layers keep every part.
     #[hook(
         side = "client",
         contract = "cancel",

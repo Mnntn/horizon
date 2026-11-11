@@ -13,6 +13,18 @@ use std::{
 };
 
 pub const CHANNEL: &str = "horizon:block_registry";
+/// Decode the optional identity challenge; an empty body requests our digest.
+/// Fixed-size validation happens before any owned decoding allocation.
+pub fn decode_payload(data: &[u8]) -> horizon_protocol::Result<Option<[u8; 32]>> {
+    if data.is_empty() {
+        return Ok(None);
+    }
+    let digest = data
+        .try_into()
+        .map_err(|_| horizon_protocol::Error::new("block registry identity must be 32 bytes"))?;
+    Ok(Some(digest))
+}
+
 pub const MARKER: &str = "horizon-content-blocks";
 pub const MISMATCH: &str =
     "Content registry mismatch: install the same content mods as the server.";

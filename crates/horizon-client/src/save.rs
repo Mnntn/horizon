@@ -14,6 +14,7 @@
 //! Worlds saved by older Horizon builds (`region/`, `DIM-1/`, `Player` in
 //! `level.dat`) are migrated on open.
 use crate::mod_chunk_tickets::{ModTicket, ModTickets, TicketOwner};
+pub mod level_mods;
 mod respawn;
 
 use crate::{
@@ -1234,47 +1235,8 @@ pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::contain
     Some((pos, entity))
 }
 
-/// The chunk's points of interest as `PoiManager` saves them: each section
-/// with POI blocks, valid, with a record per block at its max tickets (a
-/// freshly made world). None when the chunk has none.
-pub fn encode_poi(chunk: &Chunk, tables: &SaveTables) -> Option<NamedTag> {
-    let kind = |v: u32| tables.poi.get(v as usize).copied().flatten();
-    let mut sections = Compound::new();
-    let mut states = [0u32; 4096];
-    for (si, section) in chunk.sections.iter().enumerate() {
-        if !section.blocks.maybe_has(|v| kind(v).is_some()) {
-            continue;
-        }
-        section.unpack(&mut states);
-        let y = (chunk.min_y() >> 4) + si as i32;
-        let records: Vec<Tag> = states
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &v)| {
-                let (id, tickets) = kind(v)?;
-                let i = i as i32;
-                let pos = [
-                    chunk.x * 16 + (i & 15),
-                    y * 16 + (i >> 8),
-                    chunk.z * 16 + ((i >> 4) & 15),
-                ];
-                let mut record = vec![("pos", Tag::IntArray(pos.to_vec())), ("type", string(id))];
-                // PoiRecord.CODEC: free_tickets defaults to 0 and is then left out.
-                if tickets != 0 {
-                    record.push(("free_tickets", Tag::Int(tickets)));
-                }
-                Some(Tag::compound(record))
-            })
-            .collect();
-        if !records.is_empty() {
-            sections.insert(
-                y.to_string().as_str().into(),
-                Tag::compound([("Valid", Tag::Byte(1)), ("Records", Tag::List(records))]),
-            );
-        }
-    }
-    (!sections.is_empty()).then(|| poi_root(sections))
-}
+mod villager_poi;
+pub use villager_poi::encode_poi;
 /// A record's `free_tickets` from the POI file the chunk had, while the same
 /// POI is still there: a bed or job site a villager claimed stays claimed.
 fn keep_claims(saved: &mut NamedTag, old: &NamedTag) {
@@ -2396,7 +2358,11 @@ enum Record {
     Proto(Arc<SavedProto>, Arc<Encoding>),
     /// A chunk's points of interest, made on the writer thread against the
     /// saved ones (`resolve_poi`).
-    Poi(Arc<Chunk>, Arc<SaveTables>),
+    Poi(
+        Arc<Chunk>,
+        Arc<SaveTables>,
+        Option<Arc<crate::mobs::villager::ResolvedProfessions>>,
+    ),
     Delete,
 }
 /// What encoding a chunk needs, captured when it is queued.
@@ -2425,7 +2391,9 @@ impl Record {
                 e.tables.as_deref(),
                 e.shape,
             ))),
-            Record::Poi(c, t) => encode_poi(c, t).map(Arc::new),
+            Record::Poi(c, t, professions) => {
+                encode_poi(c, t, professions.as_deref()).map(Arc::new)
+            }
             Record::Delete => None,
         }
     }
@@ -2439,7 +2407,7 @@ fn resolve_poi(
     (x, z): (i32, i32),
     record: &Record,
 ) -> Option<Record> {
-    let Record::Poi(chunk, tables) = record else {
+    let Record::Poi(chunk, tables, professions) = record else {
         return Some(record.clone());
     };
     let old = read_region_record(root, cache, "poi", x, z)
@@ -2454,7 +2422,7 @@ fn resolve_poi(
             log::warn!("Horizon: could not read the poi record of chunk {x} {z}: {e}");
             None
         });
-    let tag = match (encode_poi(chunk, tables), old) {
+    let tag = match (encode_poi(chunk, tables, professions.as_deref()), old) {
         (Some(mut tag), Some(old)) => {
             keep_claims(&mut tag, &old);
             tag
@@ -2609,6 +2577,7 @@ pub struct SaveDir {
     outstanding: Arc<Outstanding>,
     /// Set by `Persistent` before the first load.
     pub tables: OnceLock<Arc<SaveTables>>,
+    professions: std::sync::RwLock<Option<Arc<crate::mobs::villager::ResolvedProfessions>>>,
     loot: crate::structure_blocks::LootSnapshot,
     trusted_fluid_load: bool,
     /// The dimension's skylight and height, from its folder name.
@@ -2778,6 +2747,7 @@ impl SaveDir {
             writer: Mutex::new(None),
             outstanding: Default::default(),
             tables: OnceLock::new(),
+            professions: Default::default(),
             loot: Default::default(),
             trusted_fluid_load: false,
             shape,
@@ -3421,9 +3391,19 @@ impl SaveDir {
         let Some(tables) = self.tables.get() else {
             return Ok(());
         };
+        let professions = self
+            .professions
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let records = chunks
             .iter()
-            .map(|c| ((c.x, c.z), Record::Poi(c.clone(), tables.clone())))
+            .map(|c| {
+                (
+                    (c.x, c.z),
+                    Record::Poi(c.clone(), tables.clone(), professions.clone()),
+                )
+            })
             .collect();
         self.queue(Folder::Poi, records, wait)
     }
@@ -4036,6 +4016,8 @@ pub struct Level {
     /// the world enables, `minecraft:vanilla` included. Empty is vanilla's
     /// default, which the level.dat omits.
     pub enabled_features: std::sync::Arc<[String]>,
+    /// `fml.LoadingModList` at the root beside `Data`, the code mods the world was saved with; `None` without one.
+    pub saved_mods: Option<Vec<level_mods::ModRecord>>,
     /// Game rule values by name without namespace (`keep_inventory`, ...).
     pub game_rules: BTreeMap<String, i32>,
     /// Definitions used by this world session.
@@ -4188,14 +4170,9 @@ impl Level {
         // WorldDataConfiguration.MAP_CODEC's `enabled_features`, flat in the
         // Data compound and omitted when the flags are vanilla's default.
         if let Some(Tag::List(flags)) = data.get("enabled_features") {
-            level.enabled_features = flags
-                .iter()
-                .filter_map(|f| match f {
-                    Tag::String(s) => Some(s.to_string_lossy()),
-                    _ => None,
-                })
-                .collect();
+            level.enabled_features = flags.iter().filter_map(|f| text(Some(f))).collect();
         }
+        level.saved_mods = level_mods::saved(&root);
         if let Some(packs) = data.get("DataPacks") {
             let ids = |key| match packs.get(key) {
                 Some(Tag::List(ids)) => ids.iter().filter_map(|id| text(Some(id))).collect(),
@@ -4740,11 +4717,11 @@ impl Level {
     fn write_internal(&mut self, dir: &Path, write_player: bool, upload: bool) -> Result<()> {
         fs::create_dir_all(dir)?;
         restore_level_dat(dir);
-        let existing = read_dat(&dir.join("level.dat")).and_then(|r| r.get("Data").cloned());
-        let legacy = existing
-            .as_ref()
+        let mut root = compound_or_empty(read_dat(&dir.join("level.dat")));
+        let legacy = root
+            .get("Data")
             .is_some_and(|d| d.get("Player").is_some() || d.get("WorldGenSettings").is_some());
-        let mut data = compound_or_empty(existing);
+        let mut data = compound_or_empty(root.get("Data").cloned());
         if let Tag::Compound(map) = &mut data {
             // Pre-26.3 keys now stored elsewhere (a legacy Horizon level.dat).
             for key in [
@@ -4867,6 +4844,7 @@ impl Level {
         ] {
             put(&mut data, key, value);
         }
+        level_mods::write(&mut root);
         if let Some(uuid) = uuid {
             put(&mut data, "singleplayer_uuid", uuid_tag(uuid));
         }
@@ -4992,7 +4970,8 @@ impl Level {
         if write_player {
             self.write_player(dir)?;
         }
-        write_dat(&dir.join("level.dat"), Tag::compound([("Data", data)]))?;
+        put(&mut root, "Data", data);
+        write_dat(&dir.join("level.dat"), root)?;
         Ok(())
     }
 }
@@ -5859,8 +5838,8 @@ mod tests {
         chunk.set(5, 71, 5, state("minecraft:bell", &[]));
         chunk.set(6, 71, 5, state("minecraft:stone", &[]));
         chunk.set(9, 70, 9, state("minecraft:straw_bed", &[("part", "head")]));
-        assert!(encode_poi(&Chunk::empty(0, 0), &tables).is_none());
-        let saved = encode_poi(&chunk, &tables).expect("records");
+        assert!(encode_poi(&Chunk::empty(0, 0), &tables, None).is_none());
+        let saved = encode_poi(&chunk, &tables, None).expect("records");
         let Some(Tag::Compound(sections)) = saved.tag.get("Sections") else {
             panic!("no sections");
         };
@@ -5894,6 +5873,55 @@ mod tests {
                     Some(32)
                 ),
             ]
+        );
+    }
+
+    /// A block a mod added to `minecraft:home` (`extend_poi_types`) saves as a
+    /// home record, as a bed head does.
+    #[test]
+    fn states_a_mod_added_to_a_poi_type_save_as_its_records() {
+        let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
+            return;
+        };
+        let assets = crate::assets::Assets::load(&PathBuf::from(root)).expect("assets");
+        let hay_states: Vec<_> = (0..assets.registry.len())
+            .filter_map(|i| assets.registry.state(BlockStateId(i as u32)))
+            .filter(|state| state.name == "minecraft:hay_block")
+            .map(|state| horizon_world::poi::PoiExtension {
+                state: state.clone(),
+                poi: "minecraft:home".into(),
+            })
+            .collect();
+        assert_eq!(hay_states.len(), 3);
+        // The tables are built once per registry, so they keep the addition.
+        let tables = horizon_world::poi::with_extensions(hay_states, |refusals| {
+            assert_eq!(refusals, Vec::<String>::new());
+            SaveTables::new(&assets)
+        });
+        let hay = assets
+            .registry
+            .default_state("minecraft:hay_block")
+            .unwrap();
+        assert_eq!(tables.poi[hay.0 as usize], Some(("minecraft:home", 1)));
+        let stone = assets.registry.default_state("minecraft:stone").unwrap();
+        assert_eq!(tables.poi[stone.0 as usize], None);
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.set(3, 70, 3, hay.0);
+        chunk.set(4, 70, 3, stone.0);
+        let saved = encode_poi(&chunk, &tables, None).expect("records");
+        let Some(Tag::Compound(sections)) = saved.tag.get("Sections") else {
+            panic!("no sections");
+        };
+        let Some(Tag::List(records)) = sections[&"4".into()].get("Records") else {
+            panic!("no records");
+        };
+        let records: Vec<_> = records
+            .iter()
+            .map(|r| (text(r.get("type")).unwrap(), r.get("pos").cloned()))
+            .collect();
+        assert_eq!(
+            records,
+            [("minecraft:home".into(), Some(Tag::IntArray(vec![3, 70, 3])))]
         );
     }
 
@@ -9854,7 +9882,8 @@ mod far_census {
         let limit: usize = std::env::var("HORIZON_FAR_TILES")
             .ok()
             .and_then(|n| n.parse().ok())
-            .unwrap_or(48);
+            .unwrap_or(48)
+            .max(1);
         for level in 1..=6u8 {
             let size = 16 << level;
             let width = size / 16;

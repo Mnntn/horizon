@@ -1,5 +1,14 @@
 // Compiled against the actual generated crossing by the generator's focused test.
+extern crate self as log;
+#[macro_export]
+macro_rules! warn {
+    ($($args:tt)*) => {{
+        crate::REFUSALS.fetch_add(1, crate::Ordering::Relaxed);
+        eprintln!($($args)*);
+    }};
+}
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+static REFUSALS: AtomicUsize = AtomicUsize::new(0);
 static SUBSCRIBED: AtomicBool = AtomicBool::new(false);
 static CONVERSIONS: AtomicUsize = AtomicUsize::new(0);
 static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
@@ -96,6 +105,11 @@ fn main() {
         game.fire(&mut state, &mut sibling);
         assert_eq!((state.0, sibling), (2, invalid));
     }
+    assert_eq!(
+        REFUSALS.load(Ordering::Relaxed),
+        2,
+        "invalid states must report a refusal"
+    );
     let mut results = [(0u128, 0usize); 2];
     for (i, generated) in [false, true].into_iter().enumerate() {
         let allocations = ALLOCATIONS.load(Ordering::Relaxed);

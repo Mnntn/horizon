@@ -159,7 +159,7 @@ fn a_broadcast_target_replaces_only_a_farther_one() {
     let (near, far) = (mob_id(&mut game, PIG), mob_id(&mut game, NEAR_PIG));
     let place = |game: &Game<'_>, id: u32| game.mobs.iter().find(|m| m.id == id).unwrap().position;
     let (near_at, far_at) = (place(&game, near), place(&game, far));
-    let position = |who: Who| match who {
+    let position = |who: Who, _current| match who {
         Who::Mob(id) if id == near => Some(near_at),
         Who::Mob(id) if id == far => Some(far_at),
         _ => None::<Vec3>,
@@ -167,26 +167,42 @@ fn a_broadcast_target_replaces_only_a_farther_one() {
     let m = game.mobs.iter_mut().find(|m| m.id == receiver).unwrap();
     // No current target: the broadcast's is taken.
     m.ai.target = None;
-    receive_attack_target(m, Who::Mob(far), position);
-    assert_eq!(m.ai.target, Some(Who::Mob(far)), "no current target");
+    let proposal = receive_attack_target(m, Who::Mob(far), position);
+    assert_eq!(proposal, Some(Who::Mob(far)), "no current target");
+    assert_eq!(
+        m.ai.target, None,
+        "selection leaves committing to the event hook"
+    );
     // Pacified: nothing changes.
     m.ai.target = None;
     m.extra.ints[0] = 200;
-    receive_attack_target(m, Who::Mob(near), position);
-    assert_eq!(m.ai.target, None, "pacified");
+    assert_eq!(
+        receive_attack_target(m, Who::Mob(near), position),
+        None,
+        "pacified"
+    );
     m.extra.ints[0] = 0;
     // A nearer current target stays.
     m.ai.target = Some(Who::Mob(near));
-    receive_attack_target(m, Who::Mob(far), position);
-    assert_eq!(m.ai.target, Some(Who::Mob(near)), "nearer current");
+    assert_eq!(
+        receive_attack_target(m, Who::Mob(far), position),
+        None,
+        "nearer current"
+    );
     // A nearer incoming target replaces a farther current one.
     m.ai.target = Some(Who::Mob(far));
-    receive_attack_target(m, Who::Mob(near), position);
-    assert_eq!(m.ai.target, Some(Who::Mob(near)), "nearer incoming");
+    assert_eq!(
+        receive_attack_target(m, Who::Mob(near), position),
+        Some(Who::Mob(near)),
+        "nearer incoming"
+    );
     // A tie takes the incoming one (`getTargetNearestMe`: current only if strictly nearer).
     m.ai.target = Some(Who::Mob(far));
-    receive_attack_target(m, Who::Mob(near), |_| Some(near_at));
-    assert_eq!(m.ai.target, Some(Who::Mob(near)), "tie");
+    assert_eq!(
+        receive_attack_target(m, Who::Mob(near), |_, _| Some(near_at)),
+        Some(Who::Mob(near)),
+        "tie"
+    );
 }
 
 /// The broadcast's receivers are the sensed visible adult hoglins
@@ -229,4 +245,169 @@ fn the_sensed_receivers_are_visible_adult_hoglins() {
         !adults.contains(&walled),
         "not one behind stone: {adults:?}"
     );
+}
+
+#[derive(Default)]
+struct BroadcastTargetListener {
+    state: Arc<
+        std::sync::Mutex<(
+            usize,
+            Option<mod_api::LivingRef>,
+            Option<mod_api::LivingRef>,
+        )>,
+    >,
+}
+
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for BroadcastTargetListener {
+    fn living_change_target(
+        &self,
+        _host: &dyn mod_api::Host,
+        event: &mut mod_api::LivingChangeTargetEvent<'_>,
+    ) -> mod_api::Flow {
+        assert!(event.is_brain, "hoglin targets use the brain event");
+        let mut state = self.state.lock().unwrap();
+        state.0 += 1;
+        state.2 = event.original_target;
+        if let Some(redirect) = state.1 {
+            *event.new_target = Some(redirect);
+            mod_api::Flow::Continue
+        } else {
+            mod_api::Flow::Cancel
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn hoglin_broadcast_obeys_target_cancellation_and_redirection() {
+    use crate::game::native_entity_refs::tests::with_game;
+    use horizon_client::mobs::{Mob, MobEvent, Who};
+    use horizon_core::geometry::Vec3;
+
+    let state = Arc::new(std::sync::Mutex::new((0, None, None)));
+    let mods = vec![mod_api::ModEntry::new(
+        "hoglin_target_listener",
+        Box::new(BroadcastTargetListener {
+            state: state.clone(),
+        }),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:hoglin")
+                .unwrap()
+                .clone();
+            for (id, x) in [(9001, 0.0), (9002, 4.0), (9003, 2.0)] {
+                game.mobs
+                    .push(Mob::new(id, kind.clone(), Vec3::new(x, 64.0, 0.0), 0.0));
+            }
+            let broadcast = || {
+                vec![MobEvent::HoglinAttackTarget {
+                    mob: 9001,
+                    target: Who::Mob(9002),
+                    player: None,
+                }]
+            };
+            game.handle_mob_events(broadcast()).unwrap();
+            assert_eq!(state.lock().unwrap().0, 1);
+            assert_eq!(
+                game.mobs[0].ai.target, None,
+                "cancellation preserves target"
+            );
+
+            let epoch = game.native_lifecycle.epoch().unwrap();
+            state.lock().unwrap().1 = Some(mod_api::LivingRef::new(mod_api::EntityRef::new(
+                epoch, 9003,
+            )));
+            game.handle_mob_events(broadcast()).unwrap();
+            assert_eq!(state.lock().unwrap().0, 2);
+            assert_eq!(
+                game.mobs[0].ai.target,
+                Some(Who::Mob(9003)),
+                "listener redirect is committed"
+            );
+
+            // A nearer current target and a pacified receiver reject the proposal
+            // before listener dispatch, preserving vanilla's broadcast selection.
+            game.handle_mob_events(broadcast()).unwrap();
+            assert_eq!(state.lock().unwrap().0, 2);
+            game.mobs[0].ai.target = None;
+            game.mobs[0].extra.ints[0] = 200;
+            game.handle_mob_events(broadcast()).unwrap();
+            assert_eq!(state.lock().unwrap().0, 2);
+            assert_eq!(game.mobs[0].ai.target, None);
+
+            use crate::game::native_item_places::tests::{guest, open_to_lan};
+            open_to_lan(game);
+            for conn in [12, 13] {
+                let mut placed = guest(conn);
+                placed.loaded = true;
+                placed.position = [if conn == 12 { 4.0 } else { 2.0 }, 64.0, 0.0];
+                game.lan.as_mut().unwrap().hub.guests.push(placed);
+            }
+            let attacker_id = game.guest_identity(12).unwrap().1;
+            let attacker = mod_api::LivingRef::new(mod_api::EntityRef::new(epoch, attacker_id));
+            game.mobs[0].extra.ints[0] = 0;
+            game.lan.as_mut().unwrap().mob_players.insert(9001, 13);
+            let broadcast_player = || {
+                vec![MobEvent::HoglinAttackTarget {
+                    mob: 9001,
+                    target: Who::Player,
+                    player: Some(12),
+                }]
+            };
+            state.lock().unwrap().1 = None;
+            game.handle_mob_events(broadcast_player()).unwrap();
+            assert_eq!(state.lock().unwrap().2, Some(attacker));
+            assert_eq!(game.mobs[0].ai.target, None);
+            assert_eq!(game.lan.as_ref().unwrap().mob_players[&9001], 13);
+            state.lock().unwrap().1 = Some(attacker);
+            game.handle_mob_events(broadcast_player()).unwrap();
+            assert_eq!(state.lock().unwrap().2, Some(attacker));
+            assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
+            assert_eq!(game.lan.as_ref().unwrap().mob_players[&9001], 12);
+            // Concrete players must be compared, not the shared Who::Player tag.
+            let nearer_mob = mod_api::LivingRef::new(mod_api::EntityRef::new(epoch, 9003));
+            state.lock().unwrap().1 = Some(nearer_mob);
+            let before = state.lock().unwrap().0;
+            game.handle_mob_events(vec![MobEvent::HoglinAttackTarget {
+                mob: 9001,
+                target: Who::Mob(9003),
+                player: None,
+            }])
+            .unwrap();
+            assert_eq!(state.lock().unwrap().0, before + 1);
+            assert_eq!(
+                game.mobs[0].ai.target,
+                Some(Who::Mob(9003)),
+                "player at four loses to mob at two"
+            );
+            game.mobs[0].ai.target = Some(Who::Mob(9002));
+            let nearer_player = mod_api::LivingRef::new(mod_api::EntityRef::new(
+                epoch,
+                game.guest_identity(13).unwrap().1,
+            ));
+            state.lock().unwrap().1 = Some(nearer_player);
+            let broadcast_nearer_player = || {
+                vec![MobEvent::HoglinAttackTarget {
+                    mob: 9001,
+                    target: Who::Player,
+                    player: Some(13),
+                }]
+            };
+            game.handle_mob_events(broadcast_nearer_player()).unwrap();
+            assert_eq!(state.lock().unwrap().0, before + 2);
+            assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
+            assert_eq!(game.lan.as_ref().unwrap().mob_players[&9001], 13);
+            game.lan.as_mut().unwrap().mob_players.insert(9001, 12);
+            game.handle_mob_events(broadcast_nearer_player()).unwrap();
+            assert_eq!(state.lock().unwrap().0, before + 3);
+            assert_eq!(game.lan.as_ref().unwrap().mob_players[&9001], 13);
+        });
+    });
 }

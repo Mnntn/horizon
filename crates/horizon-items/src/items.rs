@@ -353,6 +353,14 @@ impl BlocksAttacks {
             .as_ref()
             .map(std::borrow::Cow::Borrowed)
     }
+    /// `blocks_attacks={}`: the codec's defaults, what a stack that only a mod's item
+    /// ability makes block attacks (`minecraft:shield_block`) blocks with.
+    pub fn bare() -> &'static Self {
+        static DEFAULT: std::sync::LazyLock<BlocksAttacks> = std::sync::LazyLock::new(|| {
+            BlocksAttacks::parse(&Value::Object(Default::default())).expect("an object parses")
+        });
+        &DEFAULT
+    }
     fn parse(v: &Value) -> Option<Self> {
         if !v.is_object() {
             return None;
@@ -1686,9 +1694,48 @@ impl Items {
         random: &mut R,
         keep_empty: bool,
     ) -> Vec<ItemStack> {
-        let Some(table) = self.loot.get(id) else {
-            return vec![];
-        };
+        self.table_raw(id, killed_by_player, held, false, random, keep_empty)
+            .unwrap_or_default()
+    }
+    /// `LootTable.getRandomItems(LootParams)` of table `id` with an ORIGIN,
+    /// `held` as the TOOL and, when `this_entity`, a THIS_ENTITY: the context
+    /// `/loot … fish` gives (`LootContextParamSets.FISHING`). The stacks come
+    /// after the stack splitter, each at most its item's stack size, empties
+    /// left out. None when there is no such table.
+    pub fn roll_loot_table<R: RandomSource>(
+        &self,
+        id: &str,
+        held: Option<&ItemStack>,
+        this_entity: bool,
+        random: &mut R,
+    ) -> Option<Vec<ItemStack>> {
+        let raw = self.table_raw(id, false, held, this_entity, random, false)?;
+        // LootTable.createStackSplitter.
+        let mut out = Vec::with_capacity(raw.len());
+        for stack in raw {
+            let max = crate::bundle::max_stack(self, &stack);
+            let mut count = stack.count;
+            while count > max {
+                let mut part = stack.clone();
+                part.count = max;
+                out.push(part);
+                count -= max;
+            }
+            out.push(ItemStack { count, ..stack });
+        }
+        Some(out)
+    }
+    /// `LootTable.getRandomItemsRaw` of table `id` with no block.
+    fn table_raw<R: RandomSource>(
+        &self,
+        id: &str,
+        killed_by_player: bool,
+        held: Option<&ItemStack>,
+        this_entity: bool,
+        random: &mut R,
+        keep_empty: bool,
+    ) -> Option<Vec<ItemStack>> {
+        let table = self.loot.get(id)?;
         let empty = horizon_world::chunk::BlockProperties::new();
         let ctx = LootContext {
             items: self,
@@ -1697,7 +1744,7 @@ impl Items {
             held,
             killed_by_player,
             explosion_radius: None,
-            this_entity: false,
+            this_entity,
             entity_levels: None,
             block_levels: None,
             target: None,
@@ -1708,7 +1755,7 @@ impl Items {
         NESTED_ROLLS.with(|v| v.borrow_mut().push(id.to_owned()));
         let out = ctx.evaluate(table, random);
         NESTED_ROLLS.with(|v| v.borrow_mut().pop());
-        out
+        Some(out)
     }
     /// The server random sequence a loot table draws from (`random_sequence`):
     /// vanilla's `LootContext.Builder.create` uses it instead of the level random.
@@ -2231,7 +2278,9 @@ impl<R: RandomSource> LootContext<'_, R> {
             k if !c.is_null() && k.contains(':') && !k.starts_with("minecraft:") => {
                 let ctx = self.native_loot_context(random);
                 let mut holds = false;
-                horizon_world::loot::native_loot_condition(k, c, &ctx, &mut holds);
+                horizon_world::loot::native_invoke_loot_condition(
+                    k, c, &ctx, &mut holds, self.items,
+                );
                 holds
             }
             _ => false,
@@ -2624,7 +2673,11 @@ impl<R: RandomSource> LootContext<'_, R> {
                 // does in the main loot engine.
                 k if k.contains(':') && !k.starts_with("minecraft:") => {
                     let ctx = self.native_loot_context(random);
-                    mod_function(k, f, &ctx, stack, horizon_world::loot::native_loot_function);
+                    mod_function(k, f, &ctx, stack, |kind, data, ctx, stack| {
+                        horizon_world::loot::native_invoke_loot_function(
+                            kind, data, ctx, stack, self.items,
+                        );
+                    });
                 }
                 _ => {}
             }
@@ -2789,9 +2842,9 @@ fn apply_loot(
     stack.tidy();
 }
 
-/// `native_loot_function` with the items engine's stack: the stack as the
+/// `native_invoke_loot_function` with the items engine's stack: the stack as the
 /// loot engine's, the hook, and back what it changed. `hook` is the hook
-/// point (`horizon_world::loot::native_loot_function`); a test passes its own.
+/// point (`horizon_world::loot::native_invoke_loot_function`); a test passes its own.
 fn mod_function(
     kind: &str,
     data: &Value,

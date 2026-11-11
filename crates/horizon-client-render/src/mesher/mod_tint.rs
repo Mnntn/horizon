@@ -179,11 +179,15 @@ impl MeshTables {
         values: Option<ModTintValues>,
     ) -> crate::Result<()> {
         let sources = has_custom_sources(by_block);
-        let values = if sources {
-            Some(values.ok_or("a block tint source needs game-prepared metadata")?)
-        } else {
-            None
-        };
+        // Section geometry reads the same values through its `level`.
+        let values =
+            if sources || !self.section_geometry.is_empty() {
+                Some(values.ok_or(
+                    "a block tint source or section geometry needs game-prepared metadata",
+                )?)
+            } else {
+                None
+            };
         let mut mod_tints = ModTints {
             values,
             ..Default::default()

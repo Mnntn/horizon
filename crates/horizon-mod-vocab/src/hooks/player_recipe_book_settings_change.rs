@@ -2,8 +2,9 @@
 // catalog-order: 0305
 
 pub trait Hooks {
-    /// A server player's recipe book open or filter setting changed. `book`
-    /// is the book type's protocol id. The guest's state is not swapped in.
+    /// A server player's authoritative recipe book pair changed. `book` is a
+    /// typed RecipeBookIdentity, never a custom vanilla ordinal. Rejected and
+    /// unchanged custom requests do not notify. The guest is not swapped in.
     #[hook(
         side = "server",
         contract = "listen",

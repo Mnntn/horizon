@@ -6,7 +6,6 @@
 //! level, a stale handle or a client returns false. Reaching a parked level, as `play_sound` and the
 //! reads do through `native_level_world`, is a follow-up.
 use super::{Game, GameLevel, native_explosions::NativeBlast};
-use horizon_client::sculk::Context;
 use horizon_world::level::{BlockEventData, LevelEvent};
 use mod_api::{BlockKey, ExplosionInteraction, LevelRef};
 
@@ -70,18 +69,21 @@ impl Game<'_> {
         true
     }
     /// Sends game event `event` (`minecraft:block_change`...) from `at`, as
-    /// `Level.gameEvent(null, event, at)` does: sculk sensors, shriekers,
-    /// wardens and allays in range hear it. False for an event vanilla
-    /// doesn't have.
-    pub(super) fn level_game_event(&mut self, level: LevelRef, event: &str, at: [f64; 3]) -> bool {
+    /// `Level.gameEvent(event, at, context)`, with validated source and state.
+    pub(super) fn level_game_event(
+        &mut self,
+        level: LevelRef,
+        event: &str,
+        at: [f64; 3],
+        context: mod_api::GameEventContext,
+    ) -> bool {
         let Some(event) = horizon_client::sculk::intern(event) else {
             return false;
         };
         if !self.level_in_place(level) || !in_bounds(at) {
             return false;
         }
-        self.post_game_event(event, at, Context::default());
-        true
+        self.post_contextual_game_event(event, at, context)
     }
     /// Queues block event `a`, `b` for `block` at `pos` in the level in place
     /// (`ServerLevel.blockEvent`): `run_block_events` hands it to the block's

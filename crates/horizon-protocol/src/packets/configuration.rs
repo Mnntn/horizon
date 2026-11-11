@@ -3,7 +3,7 @@
 use crate::{
     Result,
     buf::{
-        Bool, Byte, Codec, Ident, Int, List, Long, Nbt, Opt, Reader, Rest, Str, StrN, UByte, Uuid,
+        Bool, Byte, Codec, Ident, Int, List, Long, Nbt, Opt, Reader, Str, StrN, UByte, Uuid,
         VarInt, Writer,
     },
     packet, packet_enum,
@@ -12,7 +12,7 @@ use crate::{
 use horizon_core::nbt::Tag;
 
 packet!(CookieRequest { key: String => Ident });
-packet!(CustomPayload { channel: String => Ident, data: Vec<u8> => Rest });
+pub use super::custom_payload::CustomPayload;
 packet!(
     /// Common disconnect: a chat component (NBT).
     Disconnect { reason: Tag => Nbt }
@@ -122,7 +122,7 @@ impl Codec<Option<Tag>> for ClickPayload {
 
 packet_enum!(Clientbound, crate::ids::configuration::clientbound {
     CookieRequest(CookieRequest) = COOKIE_REQUEST,
-    CustomPayload(CustomPayload) = CUSTOM_PAYLOAD,
+    CustomPayload(CustomPayload) = CUSTOM_PAYLOAD => super::custom_payload::ClientboundPayload,
     Disconnect(Disconnect) = DISCONNECT,
     FinishConfiguration(Empty) = FINISH_CONFIGURATION,
     KeepAlive(KeepAlive) = KEEP_ALIVE,
@@ -211,7 +211,7 @@ packet!(
 packet_enum!(Serverbound, crate::ids::configuration::serverbound {
     ClientInformation(ClientInformation) = CLIENT_INFORMATION,
     CookieResponse(CookieResponse) = COOKIE_RESPONSE,
-    CustomPayload(CustomPayload) = CUSTOM_PAYLOAD,
+    CustomPayload(CustomPayload) = CUSTOM_PAYLOAD => super::custom_payload::ServerboundPayload,
     FinishConfiguration(Empty) = FINISH_CONFIGURATION,
     KeepAlive(KeepAlive) = KEEP_ALIVE,
     Pong(Ping) = PONG,

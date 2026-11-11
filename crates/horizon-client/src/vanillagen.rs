@@ -752,13 +752,22 @@ impl VanillaTerrain {
 }
 /// `overrides` with the content mods' biome modifiers over the packs' biomes
 /// (`mod_content::biome_modifiers_over_packs`), for the worldgen bundle
-/// `dir` of a content root; `None` when its biomes stand as they are.
+/// `dir` of a content root, and those mods declared in code; `None` when its biomes stand as
+/// they are.
 pub fn biome_modifiers_over_packs(
     dir: &Path,
     overrides: &WorldgenOverrides,
 ) -> Option<WorldgenOverrides> {
     let root = dir.parent()?;
-    crate::mod_content::biome_modifiers_over_packs(root, overrides).unwrap_or_else(|e| {
+    // The modifiers code mods declared: they register after the content root is built.
+    let declared: Vec<[String; 3]> = mod_api::__private::biome_modifier_declarations()
+        .iter()
+        .filter_map(|d| {
+            let (mod_id, _) = d.id.split_once(':')?;
+            Some([mod_id.to_owned(), d.file(), d.modifier.json()])
+        })
+        .collect();
+    crate::mod_content::biome_modifiers_over_packs(root, overrides, &declared).unwrap_or_else(|e| {
         log::warn!("Horizon: biome modifiers over data packs: {e}");
         None
     })

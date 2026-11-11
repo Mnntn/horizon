@@ -40,10 +40,11 @@ const KINDS: [(&str, &str); 16] = [
     ("worldgen/template_pool", "template_pools"),
 ];
 /// Tag folders the chunk generator reads, and the tag bundle each joins.
-const TAG_KINDS: [(&str, &str); 3] = [
+const TAG_KINDS: [(&str, &str); 4] = [
     ("tags/block", "block_tags"),
     ("tags/fluid", "fluid_tags"),
     ("tags/worldgen/biome", "biome_tags"),
+    ("tags/worldgen/carver", "carver_tags"),
 ];
 /// The pack folders the worldgen resolver reads, in walk order.
 pub const PACK_KINDS: [&str; 5] = [

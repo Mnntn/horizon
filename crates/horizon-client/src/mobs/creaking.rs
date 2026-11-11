@@ -281,18 +281,31 @@ fn entity_action(m: &Mob, events: &mut Vec<MobEvent>) {
     });
 }
 /// `Creaking.activate`.
-fn activate(m: &mut Mob, events: &mut Vec<MobEvent>) {
-    monster_brain::set_attack_target(m, Some(Who::Player));
-    entity_action(m, events);
-    m.voice("entity.creaking.activate", events);
-    m.extra.flag = true;
+fn activate(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+    if let super::TargetChange::Set(target) = w.change_target(m, true, Some(Who::Player)) {
+        monster_brain::set_attack_target(m, target);
+    }
+    activation_effects(m, true, events);
 }
 /// `Creaking.deactivate`.
-fn deactivate(m: &mut Mob, events: &mut Vec<MobEvent>) {
-    monster_brain::set_attack_target(m, None);
+fn deactivate(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+    if let super::TargetChange::Set(target) = w.change_target(m, true, None) {
+        monster_brain::set_attack_target(m, target);
+    }
+    activation_effects(m, false, events);
+}
+/// The independent game event, sound and active flag of either transition.
+fn activation_effects(m: &mut Mob, active: bool, events: &mut Vec<MobEvent>) {
     entity_action(m, events);
-    m.voice("entity.creaking.deactivate", events);
-    m.extra.flag = false;
+    m.voice(
+        if active {
+            "entity.creaking.activate"
+        } else {
+            "entity.creaking.deactivate"
+        },
+        events,
+    );
+    m.extra.flag = active;
 }
 /// `LivingEntity.isLookingAtMe(player, 0.5, false, true, eyeY, y + 0.5,
 /// (eyeY + y) / 2)`: within the player's view cone and seen through
@@ -336,7 +349,7 @@ fn check_can_move(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) -> bool
     let active = is_active(m);
     if players.is_empty() {
         if active {
-            deactivate(m, events);
+            deactivate(m, w, events);
         }
         return true;
     }
@@ -355,14 +368,14 @@ fn check_can_move(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) -> bool
                     return false;
                 }
                 if m.distance_sqr(p.position) < ACTIVATION_RANGE_SQ {
-                    activate(m, events);
+                    activate(m, w, events);
                     return false;
                 }
             }
         }
     }
     if !potential && active {
-        deactivate(m, events);
+        deactivate(m, w, events);
     }
     true
 }
@@ -461,8 +474,26 @@ mod tests {
     use crate::mobs::sensor_scan_tests::kind;
     use std::sync::Arc;
 
+    fn with_world(
+        others: &[super::super::Seen],
+        f: impl FnOnce(&MobWorld<'_>, &super::super::MobTypes),
+    ) -> bool {
+        if let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") {
+            crate::mobs::world::with_resource_test_world(
+                std::path::Path::new(&root),
+                others,
+                true,
+                true,
+                |_, _| {},
+                f,
+            )
+        } else {
+            crate::mobs::world::with_test_world(others, f)
+        }
+    }
+
     /// Creaking.activate and deactivate post ENTITY_ACTION, for the sculk sensors and
-    /// wardens nearby.
+    /// wardens nearby, independently of whether their target change is accepted.
     #[test]
     fn activating_and_deactivating_post_entity_action() {
         let mut m = creaking();
@@ -474,11 +505,110 @@ mod tests {
             })
         };
         let mut events = Vec::new();
-        activate(&mut m, &mut events);
+        activation_effects(&mut m, true, &mut events);
         assert!(action(&events), "activating posts entity_action");
         let mut events = Vec::new();
-        deactivate(&mut m, &mut events);
+        activation_effects(&mut m, false, &mut events);
         assert!(action(&events), "deactivating posts entity_action");
+    }
+
+    struct TargetHook {
+        outcome: super::super::TargetChange,
+        calls: std::sync::Mutex<Vec<(bool, Option<Who>)>>,
+    }
+    impl super::super::MobHooks for TargetHook {
+        fn enderman_anger_suppressed(&self, _: u32, _: &super::super::PlayerView) -> bool {
+            false
+        }
+        fn can_grief(&self, _: u32, rule: bool) -> bool {
+            rule
+        }
+        fn grief_hooked(&self) -> bool {
+            false
+        }
+        fn living_visibility(&self, _: &super::super::PlayerView, _: u32, visibility: f64) -> f64 {
+            visibility
+        }
+        fn living_change_target(
+            &self,
+            _: &mut Mob,
+            _: &MobWorld<'_>,
+            brain: bool,
+            proposed: Option<Who>,
+        ) -> super::super::TargetChange {
+            self.calls.lock().unwrap().push((brain, proposed));
+            self.outcome
+        }
+    }
+
+    #[test]
+    #[ignore = "requires prepared entity resources in .local/horizon-client"]
+    fn activation_target_hook_cancels_and_redirects_without_suppressing_side_effects() {
+        use super::super::TargetChange;
+        let others = [creaking().seen(None)];
+        assert!(with_world(&others, |world, _| {
+            for outcome in [
+                TargetChange::Keep,
+                TargetChange::Set(Some(Who::Mob(1))),
+                TargetChange::Set(Some(Who::Mob(999))),
+                TargetChange::Set(None),
+            ] {
+                for activating in [true, false] {
+                    let hook = TargetHook {
+                        outcome,
+                        calls: Default::default(),
+                    };
+                    let mut world = world.clone();
+                    world.mob_hooks = Some(&hook);
+                    let mut m = creaking();
+                    m.id = 2;
+                    let previous = (!activating).then_some(Who::Player);
+                    monster_brain::set_attack_target(&mut m, previous);
+                    let expected = match outcome {
+                        TargetChange::Keep | TargetChange::Set(Some(Who::Mob(999))) => previous,
+                        TargetChange::Set(target) => target,
+                    };
+                    let mut events = Vec::new();
+                    if activating {
+                        activate(&mut m, &world, &mut events);
+                    } else {
+                        deactivate(&mut m, &world, &mut events);
+                    }
+                    assert_eq!(monster_brain::attack_target(&m), expected);
+                    assert_eq!(m.ai.target, expected);
+                    assert_eq!(is_active(&m), activating);
+                    assert!(events.iter().any(|event| matches!(
+                        event,
+                        MobEvent::GameEvent {
+                            event: "minecraft:entity_action",
+                            source: 2,
+                            ..
+                        }
+                    )));
+                    let sound = if activating {
+                        "entity.creaking.activate"
+                    } else {
+                        "entity.creaking.deactivate"
+                    };
+                    assert!(
+                        events.iter().any(
+                            |event| matches!(event, MobEvent::Sound(name, ..) if *name == sound)
+                        )
+                    );
+                    assert_eq!(
+                        *hook.calls.lock().unwrap(),
+                        [(true, activating.then_some(Who::Player))]
+                    );
+                    hook.calls.lock().unwrap().clear();
+                    m.extra.flag = false;
+                    assert!(check_can_move(&mut m, &world, &mut events));
+                    assert!(
+                        hook.calls.lock().unwrap().is_empty(),
+                        "an inactive creaking with no players changes no target"
+                    );
+                }
+            }
+        }));
     }
 
     /// A creaking with no heart bound to it, at the origin.

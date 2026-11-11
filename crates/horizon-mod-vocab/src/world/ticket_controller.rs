@@ -79,17 +79,14 @@ pub(crate) fn register(
     name: &str,
     validates: bool,
 ) -> TicketController {
-    let (namespace, path) = name.split_once(':').unwrap_or((mod_id, name));
-    let id = format!("{mod_id}:{path}");
-    let refusal = if namespace != mod_id {
-        Some(format!(
-            "{mod_id} registered ticket controller {name:?} in the namespace {namespace:?}, which is not its own"
-        ))
-    } else if path.is_empty() {
-        Some(format!(
-            "{mod_id} registered a ticket controller with no name"
-        ))
-    } else {
+    let id = match crate::parts::owned_declaration_id(mod_id, name) {
+        Ok(id) => id,
+        Err(reason) => {
+            refused.push(reason);
+            return TicketController { slot: REFUSED };
+        }
+    };
+    let refusal = {
         table
             .iter()
             .any(|info| *info.id == *id)

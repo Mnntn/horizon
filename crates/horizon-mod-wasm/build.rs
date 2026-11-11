@@ -4,7 +4,6 @@ fn main() {
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     println!("cargo:rerun-if-changed=../horizon-mod-api/src");
     println!("cargo:rerun-if-changed=../horizon-mod-api-gen/src");
-    println!("cargo:rerun-if-changed=../../mod-api");
     let code = std::thread::Builder::new()
         .stack_size(64 << 20)
         .spawn(move || horizon_mod_api_gen::generate_wire_host(&root))
@@ -12,5 +11,6 @@ fn main() {
         .join()
         .expect("host generator panicked")
         .expect("generating host boundary");
-    std::fs::write(out.join("wire_host_generated.rs"), code).expect("writing host boundary");
+    horizon_mod_api_gen::write_if_changed(out.join("wire_host_generated.rs"), code)
+        .expect("writing host boundary");
 }

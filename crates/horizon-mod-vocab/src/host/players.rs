@@ -41,6 +41,16 @@ pub trait PlayersClientHost {
 #[horizon_mod_api_macros::host_area]
 pub trait PlayersBackend {
     /// Side: server.
+    /// Read one registered custom book's authoritative flags. A fresh book
+    /// returns the default pair; an unavailable player or unregistered key
+    /// returns None. This never reads a vanilla ordinal or pending client intent.
+    #[access(WorldOnly)]
+    fn player_recipe_book_settings(
+        &self,
+        player: PlayerRef,
+        book: &RecipeBookTypeKey,
+    ) -> Option<RecipeBookSettings>;
+    /// Side: server.
     /// The IP address the player connects from, without the port (behind a
     /// Velocity proxy, the address the proxy forwards). Displaced connected
     /// players keep their address; an acting player with no known connection
@@ -52,6 +62,18 @@ pub trait PlayersBackend {
     /// unavailable player; displaced online players retain their identity.
     #[access(WorldOnly)]
     fn player_name(&self, player: PlayerRef) -> Option<String>;
+    /// Side: both.
+    /// The level the online player is in (`ServerPlayer.level`): on an integrated
+    /// server or dedicated server, the player's current dimension; on a client,
+    /// the client's level. None for a stale or unavailable player.
+    #[access(WorldOnly)]
+    fn player_level(&self, player: PlayerRef) -> Option<LevelRef>;
+    /// Side: both.
+    /// The dimension the online player is in (`ServerPlayer.level().dimension()`):
+    /// `minecraft:overworld`, `minecraft:the_nether`, ... None for a stale
+    /// or unavailable player.
+    #[access(WorldOnly)]
+    fn player_dimension(&self, player: PlayerRef) -> Option<Identifier>;
     /// Side: both.
     /// `Inventory.getSelectedSlot`: the hotbar slot the player holds, 0..9.
     #[access(WorldOnly)]
@@ -273,6 +295,15 @@ pub trait PlayersBackend {
 #[horizon_mod_api_macros::host_area]
 pub trait PlayersClientBackend {
     /// Side: client.
+    /// The local player's last authoritative custom-book pair. None before
+    /// negotiation, while resynchronizing, or for a nonlocal/stale handle.
+    #[access(WorldOnly)]
+    fn player_synced_recipe_book_settings(
+        &self,
+        player: PlayerRef,
+        book: &RecipeBookTypeKey,
+    ) -> Option<RecipeBookSettings>;
+    /// Side: client.
     /// The local player's predicted breaking state, including Idle. None for
     /// stale, nonlocal or fake handles and outside a logged-in client world.
     #[access(WorldOnly)]
@@ -283,11 +314,38 @@ pub trait PlayersClientBackend {
     #[access(WorldOnly)]
     fn player_ambient_mood(&self, player: PlayerRef) -> Option<f32>;
 }
+/// Client-only custom book intent, reached through player handles.
+// hidden: mods call PlayerRef methods, never the generated backend trait
+#[doc(hidden)]
+#[horizon_mod_api_macros::host_area]
+pub trait PlayersClientBackendMut {
+    /// Side: client.
+    /// Request a new pair for the local player's negotiated book. True means
+    /// queued, not accepted; only an authoritative reply changes saved state.
+    #[access(WorldOnly)]
+    fn player_request_recipe_book_settings(
+        &mut self,
+        player: PlayerRef,
+        book: &RecipeBookTypeKey,
+        settings: RecipeBookSettings,
+    ) -> bool;
+}
 /// The handles' writes of the `players` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait PlayersBackendMut {
+    /// Side: server.
+    /// Set a registered custom book's authoritative pair and synchronize an
+    /// accepted change. Returns false for an unavailable player, unknown key
+    /// or exhausted storage. An unchanged pair succeeds without notification.
+    #[access(WorldOnly)]
+    fn player_set_recipe_book_settings(
+        &mut self,
+        player: PlayerRef,
+        book: &RecipeBookTypeKey,
+        settings: RecipeBookSettings,
+    ) -> bool;
     /// Side: server.
     /// A system line in that player's chat, also inside a player's hook for
     /// the acting player; false when they aren't on.
@@ -470,6 +528,36 @@ pub trait PlayersBackendMut {
         player: PlayerRef,
         trigger: &Identifier,
         test: Arc<dyn CriterionTest>,
+    ) -> Result<(), TriggerCriterionError>;
+    /// Side: server. Fires only `default_block_use`, without a tool.
+    /// The engine fires `any_block_use` once when the enclosing block use consumes.
+    /// It sees the hand after the use; a replacement stack is visible, unlike vanilla's original object.
+    /// Evaluates vanilla predicates and rewards in the player's own level; never reads inventory.
+    /// `Ok(())` means reached, even if no criterion matched. Refuses remote clients
+    /// (`NotServer`), stale/offline/displaced players (`PlayerUnavailable`), and
+    /// unloaded positions (`UnloadedChunk`).
+    #[access(WorldOnly)]
+    fn player_trigger_block_use(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+    ) -> Result<(), TriggerCriterionError>;
+    /// Side: server. Fires only `item_used_on_block` with `original`.
+    /// `original` is copied after a before-block PASS and before block/item effects.
+    /// The stack is not read from inventory. The engine fires `any_block_use`
+    /// once when the enclosing block use consumes, including a consuming cancel.
+    /// Call this helper only when the mod also intends the inner criterion.
+    /// An invalid stack returns `Stack(StackWriteError)` before the trigger fires.
+    /// Evaluates vanilla predicates and rewards in the player's own level.
+    /// `Ok(())` means reached, even if nothing matched. Refuses remote clients
+    /// (`NotServer`), stale/offline/displaced players (`PlayerUnavailable`), and
+    /// unloaded positions (`UnloadedChunk`).
+    #[access(WorldOnly)]
+    fn player_trigger_item_used_on_block(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+        original: &ItemStack,
     ) -> Result<(), TriggerCriterionError>;
     /// Side: server.
     /// `Player.setLastDeathLocation`: stores where the player died, or

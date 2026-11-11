@@ -12,6 +12,9 @@
 pub(in crate::game) mod dragon_parts_table;
 #[path = "native_entity_refs/dragon_query.rs"]
 mod dragon_query;
+#[cfg(test)]
+#[path = "native_entity_refs/roll_loot_tests.rs"]
+mod roll_loot_tests;
 #[path = "native_entity_refs/save_lending.rs"]
 mod save_lending;
 use super::{
@@ -89,22 +92,10 @@ impl Game<'_> {
 
     /// What a handle names now, or None for a stale or foreign one.
     pub(super) fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
-        if self.held_out.contains(&entity.id())
-            || !self.is_logical_server()
-            || self.native_lifecycle.epoch() != Some(entity.epoch())
-        {
-            return None;
+        if self.block_entity_tick_items.is_some() {
+            return self.scoped_native_entity_target(entity);
         }
-        let horizon_client::join_seq::residency::table::EntityLookup::Found { location, value } =
-            self.server_resident_entity(entity.id())
-        else {
-            return None;
-        };
-        // Players are server-wide records. Ordinary body operations retain
-        // their existing current-level domain; source membership is global.
-        (matches!(value, Target::Player | Target::Guest(_))
-            || location.owner.dimension == self.dim.key())
-        .then_some(value)
+        self.unscoped_native_entity_target(entity)
     }
     /// What a handle names on a client: the local player, or an entity the
     /// server told this client of (`ClientLevel.getEntity`, whose entities are
@@ -208,6 +199,14 @@ impl Game<'_> {
             .into_iter()
             .filter_map(|dim| self.level(dim.id()))
             .collect()
+    }
+    /// All lookup members of the active server level, without spatial filtering.
+    /// Parts are not lookup members. Refuses remote, stale and parked levels.
+    pub(super) fn level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>> {
+        if self.block_entity_tick_items.is_some() {
+            return self.scoped_level_all_entities(level);
+        }
+        self.unscoped_level_all_entities(level)
     }
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
@@ -333,6 +332,47 @@ impl Game<'_> {
         let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
         Some(self.with_level(|_, level, _| level.block_drops_of(at, state, tool, entity)))
     }
+    /// One roll of the world's loot table `table` (`LootTable.getRandomItems`) with `origin` as
+    /// ORIGIN, `tool` as TOOL and `entity` as THIS_ENTITY when given: the context
+    /// `/loot … fish <table> <pos> <tool>` gives. It draws from the table's random sequence,
+    /// else the level random, and the stacks come split to their stack sizes. None for a
+    /// missing table, a stale handle or one of a parked level, a client, and an `entity` that
+    /// names nothing.
+    pub(super) fn level_roll_loot(
+        &mut self,
+        level: LevelRef,
+        table: &str,
+        origin: [f64; 3],
+        tool: Option<&ItemStack>,
+        entity: Option<EntityRef>,
+    ) -> Option<Vec<ItemStack>> {
+        if !self.is_logical_server()
+            || self.native_lifecycle.epoch() != Some(level.epoch())
+            || self.dim.key() != level.dimension()
+            || !world_items!(self).has_loot_table(table)
+        {
+            return None;
+        }
+        if let Some(entity) = entity {
+            self.native_entity_target(entity)?;
+        }
+        let place = self.loot_place_at(origin, None);
+        horizon_world::loot::with_native_loot_place(place, || {
+            let this_entity = entity.is_some();
+            match world_items!(self).loot_sequence(table) {
+                Some(sequence) => {
+                    let random = self.rand_sequences.get(&sequence, self.level.seed);
+                    world_items!(self).roll_loot_table(table, tool, this_entity, random)
+                }
+                None => world_items!(self).roll_loot_table(
+                    table,
+                    tool,
+                    this_entity,
+                    &mut self.world.random,
+                ),
+            }
+        })
+    }
     /// Set a block through Level.setBlock. Typed errors distinguish stale/unavailable
     /// levels; Ok(false) preserves vanilla's position/no-change refusal.
     pub(super) fn level_set_block(
@@ -358,7 +398,7 @@ impl Game<'_> {
             return false;
         }
         let changed =
-            self.with_level(|_, level, ticks| level.native_remove_block(ticks, pos, moved));
+            self.with_level(|_, level, ticks| level.remove_block_write(ticks, pos, moved));
         let _ = self.process_level_events();
         changed
     }
@@ -449,6 +489,45 @@ impl Game<'_> {
         self.server_destroy_block_progress(breaker, pos, progress);
         true
     }
+    /// `Level.sendBlockUpdated`: queue the block at `pos` to be sent to the clients again.
+    pub(super) fn level_send_block_updated(&mut self, level: LevelRef, pos: [i32; 3]) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
+            return false;
+        }
+        self.after_commit(super::transactions::After::NotifyClients((
+            pos[0], pos[1], pos[2],
+        )));
+        true
+    }
+    /// `LevelRenderer.destroyBlockProgress` for this client's own view only.
+    pub(super) fn level_set_client_break_progress(
+        &mut self,
+        level: LevelRef,
+        breaker: i32,
+        pos: [i32; 3],
+        progress: i32,
+    ) -> bool {
+        if self.is_logical_server() || self.native_level_read_world(level).is_none() {
+            return false;
+        }
+        self.destroy_block_progress(breaker, pos, progress);
+        true
+    }
+    /// `ItemStack.getDestroySpeed` of `tool` on the block at `pos`.
+    pub(super) fn level_block_break_speed(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        tool: Option<&ItemStack>,
+    ) -> Option<f32> {
+        let world = self.native_level_read_world(level)?;
+        if !world.loaded(pos[0], pos[2]) || !world.shape.contains_y(pos[1]) {
+            return None;
+        }
+        let state = world.block(pos[0], pos[1], pos[2]);
+        let name = &self.res.facts().get(state).name;
+        Some(self.items().mining_speed(tool, name))
+    }
     /// Apply bone meal to the block at `pos` as a dispenser does (`BoneMealItem.growCrop`, then
     /// `growWaterPlant`): the mods' `bonemeal` hook first, level event 1505 when something grew.
     /// False for a refused write, a stale or parked handle, a client, and a block that did not
@@ -503,13 +582,14 @@ impl Game<'_> {
             && self.world.loaded(pos[0], pos[2])
             && self.world.shape.contains_y(pos[1])
     }
-    /// Block-local outline or collision boxes with an empty context. Interaction,
-    /// visual, occlusion and support shapes are not exposed. Returns None on a
-    /// client, for a stale handle, or for a closed level. Unloaded blocks read
-    /// as air; collision errors return no boxes, like `block_collision`.
+    /// The supplied state's block-local outline or collision boxes at a level
+    /// position with an empty context. The world is never modified. Returns None
+    /// on a client, for a stale handle or for a closed level. Unloaded neighbors
+    /// read as air; collision errors return no boxes, like `block_collision`.
     pub(super) fn level_block_shape(
         &self,
         level: LevelRef,
+        state: BlockStateId,
         pos: [i32; 3],
         kind: BlockShapeKind,
     ) -> Option<Vec<[f64; 6]>> {
@@ -529,15 +609,7 @@ impl Game<'_> {
                 self.levels.parked_anims(dim)?,
             )
         };
-        Some(match kind {
-            BlockShapeKind::Outline => self
-                .outline_boxes_in_context(world, anims, pos, false)
-                .into_iter()
-                .map(|b| std::array::from_fn(|i| b[i] - f64::from(pos[i % 3])))
-                .collect(),
-            BlockShapeKind::Collision => self.native_block_collision_in(world, pos),
-            _ => unreachable!("BlockShapeKind: unhandled variant"),
-        })
+        Some(self.state_shape_boxes(world, anims, state, pos, kind))
     }
 
     /// Gameplay's face support in the current or a parked server level, including
@@ -741,6 +813,9 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
         .fold(0, |uuid, w| (uuid << 32) | u128::from(*w as u32))
 }
 
+include!("native_entity_refs/tick_item_read.rs");
+include!("native_entity_refs/tick_item_selector.rs");
+
 #[cfg(test)]
 mod ray_tests {
     use super::*;
@@ -815,8 +890,8 @@ pub(super) mod tests {
             std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap())
                 .canonicalize()
                 .unwrap();
-        let target = std::env::current_dir().unwrap().join("target");
-        std::fs::create_dir_all(&target).unwrap();
+        let scratch_owner = tempfile::tempdir().unwrap();
+        let target = scratch_owner.path();
         for case in cases {
             let scratch = target.join(format!(
                 "be-types-fixture-{}-{}",
@@ -934,6 +1009,16 @@ pub(super) mod tests {
                 }
             }
         }
+    }
+
+    /// Bind the fixture body's canonical identity before configuring its acting context.
+    pub(in crate::game) fn bind_local_player(game: &mut super::Game<'_>, id: u32, uuid: u128) {
+        game.player.as_mut().expect("fixture player body").entity_id =
+            i32::try_from(id).expect("fixture entity ID fits the protocol");
+        game.level.player_uuid = Some(horizon_client::lan::playerdata::uuid_ints(uuid));
+        game.bind_local_player_residency();
+        game.lan_acting_entity = Some(id);
+        game.lan_acting_uuid = Some(uuid);
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
@@ -1078,6 +1163,116 @@ pub(super) mod tests {
                 b.best_neighbor_signal(level, ticks, BlockPos::new(pos.x - 1, pos.y, pos.z))
             });
             assert_eq!(signal, 15);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_soil_part_answers_for_the_plants_above_it_in_a_real_game_level() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::position::BlockPos;
+        use std::sync::Arc;
+
+        // The fixture's parts: glass sustains any plant, grass sustains none.
+        mod_api::__private::part_tests::sustain_plant_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let state = |name: &str| registry.default_state(name).unwrap();
+            let dandelion = state("minecraft:dandelion");
+            let survives = |game: &mut super::super::Game<'_>, soil: &str| {
+                game.world.set(5, 64, 5, state(soil)).unwrap();
+                game.with_level(|b, level, ticks| {
+                    b.can_survive(level, ticks, BlockPos::new(5, 65, 5), dandelion)
+                })
+            };
+            // Allow: vanilla refuses a dandelion on glass; the soil's part lets it stand.
+            assert!(survives(game, "minecraft:glass"));
+            // Deny: vanilla lets a dandelion stand on grass; the soil's part refuses it.
+            assert!(!survives(game, "minecraft:grass_block"));
+            // Default: soils with no part answer as vanilla's plant rule does.
+            assert!(survives(game, "minecraft:dirt"));
+            assert!(!survives(game, "minecraft:stone"));
+            // A client's copy of the level does not ask the part.
+            game.options.dedicated = None;
+            assert!(!survives(game, "minecraft:glass"));
+            assert!(survives(game, "minecraft:grass_block"));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_block_part_decides_whether_the_tool_harvests() {
+        use horizon_client::{chunk::Chunk, motion::PlayerMotion};
+        use horizon_core::{geometry::Vec3, position::ChunkPos};
+        use std::sync::Arc;
+
+        // The fixture's parts: stone is harvested by any tool, dirt by none.
+        mod_api::__private::part_tests::harvest_game_thread();
+        with_game(|game| {
+            let scratch = std::env::temp_dir().join(format!(
+                "horizon-harvest-part-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            std::fs::create_dir_all(&scratch).unwrap();
+            game.world_root = scratch.clone();
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(4.5, 62.0, 4.5)).unwrap());
+            game.player.as_mut().unwrap().ground.on_ground = true;
+            game.creative = false;
+            game.build_registries();
+            game.set_allow_commands(true);
+            assert!(game.run_command("gamemode survival"));
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            let registry = game.pack.assets.registry;
+            let pos = [5, 63, 4];
+            // The dig's progress and the drops of a break by bare hand: (block, its hardness, what
+            // vanilla drops by hand, and what the drop is). Vanilla's own rule: a block that
+            // requires a tool drops nothing by hand, and the dig is 3.33 times slower for it.
+            for (block, hardness, part, by_hand, drop) in [
+                // Stone needs a pickaxe; the part harvests it anyway.
+                (
+                    "minecraft:stone",
+                    1.5_f32,
+                    Some(true),
+                    false,
+                    "minecraft:cobblestone",
+                ),
+                // Dirt needs none; the part refuses it.
+                ("minecraft:dirt", 0.5, Some(false), true, "minecraft:dirt"),
+                // No part: vanilla's rule alone, both ways.
+                (
+                    "minecraft:cobblestone",
+                    2.0,
+                    None,
+                    false,
+                    "minecraft:cobblestone",
+                ),
+                ("minecraft:grass_block", 0.6, None, true, "minecraft:dirt"),
+            ] {
+                let state = registry.default_state(block).unwrap();
+                let harvest = !part.unwrap_or(by_hand);
+                game.world.set(pos[0], pos[1], pos[2], state).unwrap();
+                let divisor = if harvest { 30.0 } else { 100.0 };
+                assert_eq!(
+                    game.destroy_progress(pos),
+                    1.0 / hardness / divisor,
+                    "{block}"
+                );
+                game.dropped.clear();
+                game.break_block(pos).unwrap();
+                let dropped = game.dropped.iter().any(|item| &*item.stack.item == drop);
+                assert_eq!(dropped, harvest, "{block}: drops {drop}");
+            }
+            std::fs::remove_dir_all(scratch).unwrap();
         });
     }
 
@@ -3417,17 +3612,18 @@ pub(super) mod tests {
         assert_eq!(host.levels().list_levels(), vec![level, nether]);
         let cube = vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]];
         assert_eq!(
-            game.level_block_shape(nether, [0, 64, 0], BlockShapeKind::Outline),
+            game.level_block_shape(nether, stone, [0, 64, 0], BlockShapeKind::Outline),
             Some(cube.clone())
         );
         assert_eq!(
-            game.level_block_shape(nether, [0, 64, 0], BlockShapeKind::Collision),
+            game.level_block_shape(nether, stone, [0, 64, 0], BlockShapeKind::Collision),
             Some(cube)
         );
         let shape = |game: &mut Game<'_>, name: &str, kind| {
             let state = game.pack.assets.registry.default_state(name).unwrap();
             game.world.set(0, 64, 0, state).unwrap();
-            game.level_block_shape(level, [0, 64, 0], kind).unwrap()
+            game.level_block_shape(level, state, [0, 64, 0], kind)
+                .unwrap()
         };
         game.inventory[game.selected] = Some(horizon_client::items::ItemStack {
             item: "minecraft:light".into(),
@@ -3493,8 +3689,8 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn level_block_writes_validate_and_change_world() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
-        use horizon_client::chunk::Chunk;
-        use mod_api::{Authority, BlockUpdateFlags};
+        use horizon_client::{chunk::Chunk, items::ItemStack};
+        use mod_api::{Authority, BlockUpdateFlags, HostTransaction};
         use std::{sync::Arc, time::Instant};
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -3617,6 +3813,62 @@ pub(super) mod tests {
             game.world.block_log.as_ref().unwrap(),
             &vec![(3, 64, 0), (4, 64, 0)]
         );
+        // `sendBlockUpdated` queues the block again without writing; out of height it queues nothing.
+        game.world.modified.clear();
+        let dirty_before = game.world.modified.clone();
+        let block_before = game.world.block(5, 64, 0);
+        assert!(game.level_send_block_updated(level, [5, 64, 0]));
+        assert!(game.level_send_block_updated(level, [5, 64, 0]));
+        assert_eq!(game.world.modified.clone(), dirty_before);
+        assert_eq!(game.world.block(5, 64, 0), block_before);
+        let host: &mut dyn mod_api::ServerHost = &mut game;
+        let aborted: Result<(), ()> = host.transaction(|host, _| {
+            assert!(level.send_block_updated(host, [6, 64, 0]));
+            Err(())
+        });
+        assert!(aborted.is_err());
+        assert!(!game.world.block_log.as_ref().unwrap().contains(&(6, 64, 0)));
+        assert!(!game.level_send_block_updated(level, [5, 10_000, 0]));
+        assert_eq!(
+            game.world.block_log.as_ref().unwrap(),
+            &vec![(3, 64, 0), (4, 64, 0), (5, 64, 0)]
+        );
+        // A bare hand mines at the base speed; an unloaded position has none.
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], None),
+            Some(1.0)
+        );
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 10_000, 0], None),
+            None
+        );
+        let mut pickaxe = ItemStack::new("minecraft:iron_pickaxe", 1);
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], Some(&pickaxe)),
+            Some(6.0)
+        );
+        pickaxe.enchant("minecraft:efficiency", 5);
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], Some(&pickaxe)),
+            Some(6.0)
+        );
+        let mut custom_tool = ItemStack::new("minecraft:stick", 1);
+        let components = horizon_client::item_data::command_components(
+            r#"[tool={rules:[{blocks:"stone",speed:7.0f}],default_mining_speed:2.0f}]"#,
+        )
+        .unwrap();
+        (custom_tool.damage, custom_tool.extra) =
+            horizon_client::item_data::decode_components(Some(&components));
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], Some(&custom_tool)),
+            Some(7.0)
+        );
+        assert_eq!(
+            game.level_block_break_speed(level, [5, 64, 0], Some(&custom_tool)),
+            Some(2.0)
+        );
+        // Server-side game: the client-only crack is refused.
+        assert!(!game.level_set_client_break_progress(level, 1, [3, 64, 0], 4));
         game.world.block_log = None;
         let waterlogged = game
             .pack

@@ -2,7 +2,7 @@
 
 > Horizon is Minecraft: Java Edition 26.3 in Rust. A mod is one `.hmod`: content (assets/ and data/), plus an optional Rust crate built native or to mod.wasm against the `mod_api` crate (`horizon-mod-api`).
 
-Prefer a hook or Part method; otherwise a unified `[[inject]]` with `access = "api"` and a `with` function. Use `access = "internals"` with top-level fingerprinted declarations only when the API shape cannot express it; native source routing rebuilds the game when no compiled slot exists. API injections never rebuild the game: missing slots are refused, and source rebuilds and call-site injections require internals access or a hook request. Every injection is a hook request. NeoForge 26.3 names, no `on_` prefix, `&mut` events, writes take `host`.
+Prefer a hook or Part method; otherwise a compiled-slot `[[inject]]` with `access = "api"` and a `with` function. Use `access = "internals"` with top-level fingerprinted declarations only when the API shape cannot express it; injects never compile game code. Missing slots are refused on native too. Use [[native.mixin]] for supported native source edits, or request the slot. Mixins are trusted code compiled into the game. Every injection is a hook request. NeoForge 26.3 names, no `on_` prefix, `&mut` events, writes take `host`.
 
 ## Rules
 

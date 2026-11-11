@@ -9,6 +9,7 @@
 
 use super::end::GatewayJob;
 use super::nether_portal::{PLAYER_DELAY, Plan};
+use super::persist::OffLevel;
 use super::respawn_anchor::RespawnConfig;
 use super::respawn_position::Respawn;
 use super::{Dim, Game, Mob, boats, lan::LanHost, minecarts};
@@ -1194,11 +1195,6 @@ impl Game<'_> {
         let Some(id) = self.parked_vehicle_root(source, id) else {
             return;
         };
-        enum ArrivingVehicle {
-            Boat(boats::Boat),
-            Cart(minecarts::Minecart),
-            Mob(Mob),
-        }
         let motion = self
             .portals
             .carried_motion
@@ -1230,14 +1226,14 @@ impl Game<'_> {
         let Some((from, rotation)) = before else {
             return;
         };
-        // Keep the root out of destination residency until its passengers have
-        // been admitted: teleportCrossDimension copies passengers before the root.
+        // Keep the root out of both levels until its passengers have been
+        // admitted: teleportCrossDimension copies passengers before the root.
         let vehicle = if let Some(body) = take_vehicle(&mut parked.boats, id, at, yaw, motion) {
-            ArrivingVehicle::Boat(body)
+            OffLevel::Boat(body)
         } else if let Some(body) = take_vehicle(&mut parked.carts, id, at, yaw, motion) {
-            ArrivingVehicle::Cart(body)
+            OffLevel::Cart(body)
         } else if let Some(body) = take_vehicle(&mut parked.mobs, id, at, yaw, motion) {
-            ArrivingVehicle::Mob(body)
+            OffLevel::Mob(body)
         } else {
             return;
         };
@@ -1261,19 +1257,9 @@ impl Game<'_> {
             mob.head_yaw = turned_yaw;
             mob.head_pitch = pitch;
             mob.previous_head_pitch = pitch;
-            self.admit_transferred_mob(mob);
+            self.admit_transferred_object(OffLevel::Mob(mob));
         }
-        match vehicle {
-            ArrivingVehicle::Boat(mut body) => {
-                self.rebind_transferred_entity(id, &mut body);
-                self.boats.push(body);
-            }
-            ArrivingVehicle::Cart(mut body) => {
-                self.rebind_transferred_entity(id, &mut body);
-                self.carts.push(body);
-            }
-            ArrivingVehicle::Mob(body) => self.admit_transferred_mob(body),
-        }
+        self.admit_transferred_object(vehicle);
         // The source may have ticked while the player's destination was loading.
         self.portals.entities.entry(id).or_default().cooldown = carried.unwrap_or(left);
     }
@@ -1682,6 +1668,55 @@ mod tests {
                     game.native_joins_flush(false, 0);
                     assert_eq!(*calls.lock().unwrap(), before);
                 })
+            });
+        }
+    }
+
+    /// `Entity.teleportCrossDimension` admits the passengers before the copied
+    /// vehicle, so a pig that shares its boat's or minecart's UUID takes it in
+    /// the destination and the vehicle is retained off-level below it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn natural_carrier_retains_a_vehicle_root_refused_by_its_passenger() {
+        for (kind, uuid) in [("minecraft:oak_boat", 705), ("minecraft:minecart", 706)] {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                let tag = horizon_core::nbt::parse_snbt(&format!(
+                    r#"{{id:"{kind}",UUID:[I;{uuid},0,0,1],Pos:[1.0d,80.0d,2.0d],
+                    Passengers:[{{id:"minecraft:pig",UUID:[I;{uuid},0,0,1],Pos:[1.0d,80.0d,2.0d],NoAI:1b,
+                     Passengers:[{{id:"minecraft:chicken",UUID:[I;{uuid},0,0,2],Pos:[1.0d,80.0d,2.0d],NoAI:1b}}]}}]}}"#
+                ))
+                .unwrap()
+                .0;
+                let root = if kind.ends_with("boat") {
+                    game.load_boat_transferred(tag, Some([uuid, 0, 0, 1]), kind, None)
+                } else {
+                    game.load_cart_transferred(tag, Some([uuid, 0, 0, 1]), kind, None)
+                }
+                .unwrap();
+                let pig = game.mob_passenger_ids(root)[0];
+                let chicken = game.mob_passenger_ids(pig)[0];
+                assert!(game.persist.off_level.contains_key(&pig));
+                let source = game.dim;
+                game.enter_level(Dim::Nether).unwrap();
+                game.arrive_vehicle(source, chicken, Vec3::new(32.0, 90.0, 48.0), 0.0);
+                assert!(game.entity(pig).is_some());
+                assert!(game.entity(chicken).is_some());
+                assert!(game.entity(root).is_none());
+                assert!(game.boats.iter().all(|b| b.id != root));
+                assert!(game.carts.iter().all(|c| c.id != root));
+                assert!(game.boat_object(root).is_some() || game.cart_object(root).is_some());
+                assert_eq!(game.mob_object(pig).unwrap().extra.mount, Some(root));
+                assert_eq!(game.mob_object(chicken).unwrap().extra.mount, Some(pig));
+                assert!(game.mobs_below_off_level().contains(&pig));
+                assert!(game.mobs_below_off_level().contains(&chicken));
+                game.enter_level(source).unwrap();
+                for id in [root, pig, chicken] {
+                    assert!(!game.persist.off_level.contains_key(&id));
+                    assert!(game.mob_object(id).is_none());
+                }
+                assert!(game.boats.iter().all(|b| b.id != root));
+                assert!(game.carts.iter().all(|c| c.id != root));
             });
         }
     }

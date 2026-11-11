@@ -10,7 +10,6 @@ use horizon_protocol::{
         configuration::CustomPayload,
         play::{Clientbound as C, Serverbound as S},
     },
-    quiet,
 };
 use mod_api::{SendPacketError, ServerboundPlayPacket};
 use std::collections::HashMap;
@@ -22,6 +21,13 @@ pub(super) const PER_TICK: u32 = 32;
 /// The messages waiting, and what each player used of this tick's allowance.
 #[derive(Default)]
 pub(super) struct NativeNet {
+    pub(super) placement: super::native_book_placement::State,
+    pub(super) book_connections:
+        HashMap<u32, horizon_client::recipe_book::settings_connection::Connection>,
+    pub(super) book_view: horizon_client::recipe_book::settings_sync::ClientView,
+    pub(super) book_request: u64,
+    pub(super) book_ready: bool,
+    pub(super) book_retry_at: Option<std::time::Instant>,
     from_players: Vec<(u128, Message)>,
     from_counts: HashMap<u128, u32>,
     to_players: Vec<(u128, Vec<u8>)>,
@@ -211,9 +217,9 @@ impl Game<'_> {
     /// or any other play packet. Nothing counts it, and the game doesn't apply
     /// it on its side: a packet that needs a sequence number, a signature or
     /// the client's own state is the mod's to get right. An error when the
-    /// player isn't in a server's play state, and for a custom payload past
-    /// `ServerboundCustomPayloadPacket.MAX_PAYLOAD_SIZE`, which a server
-    /// disconnects for. API 409.
+    /// player isn't in a server's play state, and for an unknown custom payload
+    /// past the serverbound discard limit. Registered engine channels retain
+    /// their own codec constraints. API 409.
     pub(super) fn send_packet(
         &mut self,
         packet: ServerboundPlayPacket,
@@ -229,16 +235,15 @@ impl Game<'_> {
             _ => None,
         }
         .ok_or(SendPacketError::UnknownPacket { id: packet.id })?;
-        let packet =
-            S::decode(id as i32, &packet.body).map_err(|_| SendPacketError::InvalidBody)?;
-        if let S::CustomPayload(payload) = &packet
-            && payload.data.len() > quiet::MAX_PAYLOAD
-        {
-            return Err(SendPacketError::PayloadTooLarge {
-                size: payload.data.len() as u64,
-                limit: quiet::MAX_PAYLOAD as u64,
-            });
-        }
+        let packet = S::decode(id as i32, &packet.body).map_err(|error| {
+            if let Some(detail) = error.payload_limit() {
+                return SendPacketError::PayloadTooLarge {
+                    size: detail.size as u64,
+                    limit: detail.limit as u64,
+                };
+            }
+            SendPacketError::InvalidBody
+        })?;
         self.send(packet);
         Ok(())
     }
@@ -249,7 +254,8 @@ mod tests {
     use super::super::{
         Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
     };
-    use super::{SendPacketError, ServerboundPlayPacket, quiet};
+    use super::{SendPacketError, ServerboundPlayPacket};
+    use horizon_protocol::quiet;
     use horizon_protocol::{buf::Writer, connection::Pipe};
     use mod_api::Identifier;
 

@@ -223,22 +223,6 @@ mod mod_points {
 }
 
 impl Counter {
-    #[point(side = "server", name = "add", raw_only)]
-    fn add_raw_only(&mut self, step: usize) -> usize {
-        self.total += step;
-        self.total
-    }
-
-    #[point(side = "server", name = "reset", raw_only)]
-    fn reset_raw_only(&mut self) {
-        self.total = 0;
-    }
-
-    #[point(side = "server", name = "slot", raw_only)]
-    fn slot_raw_only(&mut self) -> &mut usize {
-        &mut self.total
-    }
-
     #[point(side = "server", raw)]
     fn add(&mut self, step: usize) -> usize {
         self.total += step;
@@ -305,11 +289,6 @@ pub type __PenLabelReturnListener = for<'r> fn(&'r Pen, &'r mut Vec<String>);
 
 #[point(name = "double", raw, free)]
 fn double(x: i64) -> i64 {
-    x * 2
-}
-
-#[point(name = "double", raw_only, free)]
-fn double_raw_only(x: i64) -> i64 {
     x * 2
 }
 
@@ -526,47 +505,6 @@ fn slots_change_arguments_stop_the_function_and_change_its_value() {
             "double",
         ]
     );
-    // Private source points use these same raw paths, without API projection or dispatch.
-    RAW.lock().unwrap().clear();
-    HEARD.lock().unwrap().clear();
-    RAW.lock().unwrap().extend([
-        (PointId::Add, RawKind::Typed(add as *const ())),
-        (PointId::AddReturn, RawKind::Typed(add_return as *const ())),
-        (PointId::SlotReturn, RawKind::Typed(slot as *const ())),
-    ]);
-    counter.total = 2;
-    assert_eq!(counter.add_raw_only(3), 17);
-    assert_eq!(counter.total, 7);
-    let stop: __AddListener = |_, raw| *raw.result = Some(42);
-    RAW.lock().unwrap()[0].1 = RawKind::Typed(stop as *const ());
-    assert_eq!(counter.add_raw_only(100), 42);
-    assert_eq!(counter.total, 7);
-    let cancel: __ResetListener = |_, raw| *raw.cancel = true;
-    RAW.lock()
-        .unwrap()
-        .push((PointId::Reset, RawKind::Typed(cancel as *const ())));
-    counter.reset_raw_only();
-    assert_eq!(counter.total, 7);
-    *counter.slot_raw_only() += 1;
-    assert_eq!(counter.total, 58);
-    RAW.lock()
-        .unwrap()
-        .push((PointId::Double, RawKind::Typed(head as *const ())));
-    assert_eq!(double_raw_only(-5), 0);
-    assert_eq!(double_raw_only(3), 6);
-    assert_eq!(
-        *HEARD.lock().unwrap(),
-        [
-            "add",
-            "add_return",
-            "add",
-            "reset",
-            "slot_return",
-            "double",
-            "double"
-        ]
-    );
-
     // A `replace` listener (the registry's last API one) owns the outcome: internals listeners
     // run after it, but neither clearing its value nor uncancelling brings the body back.
     use mod_points::__private::REPLACED;

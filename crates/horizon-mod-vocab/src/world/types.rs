@@ -1145,6 +1145,12 @@ impl TriState {
 /// }
 /// ```
 pub trait LevelHost {
+    /// Read a block entity's saved data without identity metadata from this level.
+    /// Stale generations and handles from another level or world return None.
+    fn block_entity_data(&self, _entity: crate::BlockEntityRef) -> Option<crate::Compound> {
+        None
+    }
+
     /// Read an owned block state through the level's engine read.
     /// Out-of-height or unloaded engine reads retain vanilla's air as `Some(air)`.
     /// Returns `None` when the owning state index is unavailable or refuses the state;
@@ -1332,6 +1338,7 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
         unimplemented!("LevelWriteHost::play_sound")
     }
     /// `ServerLevel.sendParticles` through `native_send_particles`.
+    /// Item particles require `options.item_stack`; invalid stacks return false.
     fn send_particles(
         &mut self,
         _options: &ParticleOptions,

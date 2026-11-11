@@ -162,7 +162,7 @@ fn discarded_mob_leaves_selectors_and_saves_while_frozen() {
     game.mobs[3].extra.mount = Some(44);
     saved.clear();
     game.save_every_entity(&keys, &mut saved);
-    let root = &saved[&(0, 0)][0];
+    let root = &saved[&(0, 0)][0].2;
     assert!(matches!(root.get("Passengers"), Some(Tag::List(list)) if list.len() == 1));
     assert!(game.entity_discard(mod_api::EntityRef::new(
         game.native_lifecycle.epoch().unwrap(),
@@ -171,5 +171,5 @@ fn discarded_mob_leaves_selectors_and_saves_while_frozen() {
     saved.clear();
     game.save_every_entity(&keys, &mut saved);
     assert_eq!(saved[&(0, 0)].len(), 1);
-    assert!(saved[&(0, 0)][0].get("Passengers").is_none());
+    assert!(saved[&(0, 0)][0].2.get("Passengers").is_none());
 }

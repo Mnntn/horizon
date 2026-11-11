@@ -832,6 +832,9 @@ impl Game<'_> {
             Position([f64; 3]),
             Rider([f64; 3]),
         }
+        let released_vehicle = host.hub.guests[i]
+            .vehicle
+            .filter(|id| Some(*id) != guest_vehicle);
         let (stat_events, name, teleport) = host.hub.guests.update(i, |g| {
             let mut teleport = None;
             g.attachments = std::mem::replace(&mut self.player_attachments, attachments);
@@ -1019,6 +1022,9 @@ impl Game<'_> {
             None => self.resident_entities.local_player.put_back(),
         }
         self.hook.finish_loan();
+        if let Some(vehicle) = released_vehicle {
+            self.release_removed_vehicle(vehicle);
+        }
         self.bind_current_hook_residency();
         for event in turn_events {
             match event {

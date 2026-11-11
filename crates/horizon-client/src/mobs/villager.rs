@@ -19,101 +19,20 @@ use std::f32::consts::PI;
 pub const NONE: u8 = 0;
 pub const NITWIT: u8 = 11;
 
-/// Vanilla profession metadata in the frozen table.
-#[derive(Debug)]
-pub struct Profession {
-    pub id: &'static str,
-    pub trade_set: Option<&'static str>,
-    pub render_index: u8,
-    held: Option<horizon_world::poi::PoiType>,
-    acquirable: Option<horizon_world::poi::PoiType>,
-}
+#[path = "villager_professions.rs"]
+pub mod professions;
 
-/// Immutable vanilla-only generation. A load-owned table replaces this before mod registration.
-pub struct ProfessionTable {
-    entries: Vec<Profession>,
-    by_poi: [Option<u8>; 13],
-}
-impl ProfessionTable {
-    fn vanilla() -> Self {
-        use horizon_world::poi::PoiType as P;
-        let entries = [
-            ("none", None, None),
-            ("armorer", Some("armorer"), Some(P::Armorer)),
-            ("butcher", Some("butcher"), Some(P::Butcher)),
-            ("cartographer", Some("cartographer"), Some(P::Cartographer)),
-            ("cleric", Some("cleric"), Some(P::Cleric)),
-            ("farmer", Some("farmer"), Some(P::Farmer)),
-            ("fisherman", Some("fisherman"), Some(P::Fisherman)),
-            ("fletcher", Some("fletcher"), Some(P::Fletcher)),
-            (
-                "leatherworker",
-                Some("leatherworker"),
-                Some(P::Leatherworker),
-            ),
-            ("librarian", Some("librarian"), Some(P::Librarian)),
-            ("mason", Some("mason"), Some(P::Mason)),
-            ("nitwit", None, None),
-            ("shepherd", Some("shepherd"), Some(P::Shepherd)),
-            ("toolsmith", Some("toolsmith"), Some(P::Toolsmith)),
-            ("weaponsmith", Some("weaponsmith"), Some(P::Weaponsmith)),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(i, (id, trade_set, poi))| Profession {
-            id,
-            trade_set,
-            render_index: i as u8,
-            held: poi,
-            acquirable: poi,
-        })
-        .collect::<Vec<_>>();
-        let mut by_poi = [None; 13];
-        for p in &entries {
-            if let Some(i) = p.acquirable.and_then(P::job_index) {
-                assert!(
-                    by_poi[i].replace(p.render_index).is_none(),
-                    "duplicate vanilla POI"
-                );
-            }
-        }
-        Self { entries, by_poi }
-    }
-    pub fn entries(&self) -> &[Profession] {
-        &self.entries
-    }
-    pub fn get(&self, index: u8) -> &Profession {
-        &self.entries[index as usize % self.entries.len()]
-    }
-    pub fn find(&self, name: &str) -> Option<u8> {
-        self.entries
-            .iter()
-            .find(|p| p.id == name)
-            .map(|p| p.render_index)
-    }
-    pub(super) fn by_poi(&self, poi: horizon_world::poi::PoiType) -> Option<u8> {
-        self.by_poi[poi.job_index()?]
-    }
-    pub(super) fn held(&self, index: u8, poi: horizon_world::poi::PoiType) -> bool {
-        self.entries
-            .get(usize::from(index))
-            .is_some_and(|p| p.held == Some(poi))
-    }
-    pub(super) fn acquirable(&self, index: u8, poi: horizon_world::poi::PoiType) -> bool {
-        if index == NONE {
-            poi.is_job()
-        } else {
-            self.entries
-                .get(usize::from(index))
-                .is_some_and(|p| p.acquirable == Some(poi))
-        }
-    }
-}
+pub use professions::{Profession, ResolvedProfessions};
+#[path = "villager_identity.rs"]
+mod identity;
+pub use identity::profession_id;
+pub use identity::reported_profession;
+pub(crate) use identity::{command_name, seen_profession_name};
 
 /// The frozen vanilla-only generation shared by the existing context-free consumers.
-pub fn profession_table() -> &'static ProfessionTable {
-    static TABLE: std::sync::OnceLock<ProfessionTable> = std::sync::OnceLock::new();
-    TABLE.get_or_init(ProfessionTable::vanilla)
+pub fn profession_table() -> &'static ResolvedProfessions {
+    static TABLE: std::sync::OnceLock<ResolvedProfessions> = std::sync::OnceLock::new();
+    TABLE.get_or_init(ResolvedProfessions::vanilla)
 }
 
 /// Existing u8 adapter; invalid values retain the historic wrapping behavior.
@@ -128,6 +47,10 @@ pub enum ProfessionState {
     None,
     Vanilla(u8),
     Unresolved(String),
+    Registered {
+        id: std::sync::Arc<str>,
+        slot: u16,
+    },
 }
 
 impl ProfessionState {
@@ -152,15 +75,16 @@ impl ProfessionState {
         match self {
             Self::None => Some(NONE),
             Self::Vanilla(index) => Some(*index),
-            Self::Unresolved(_) => None,
+            Self::Unresolved(_) | Self::Registered { .. } => None,
         }
     }
 
     pub fn id(&self) -> String {
         match self {
             Self::None => "minecraft:none".into(),
-            Self::Vanilla(index) => format!("minecraft:{}", profession(*index).id),
+            Self::Vanilla(index) => format!("minecraft:{}", profession(*index).id.as_str()),
             Self::Unresolved(id) => id.clone(),
+            Self::Registered { id, .. } => id.to_string(),
         }
     }
 }
@@ -468,18 +392,24 @@ pub fn xp(m: &Mob) -> i32 {
 /// `Villager.setVillagerData(withProfession)`: a new profession forgets the
 /// offers (`offers = null`), so the next `getOffers` rolls the new
 /// profession's trades.
-pub fn set_profession(m: &mut Mob, profession: u8) {
-    if m.extra.profession.index() != Some(profession) {
-        m.extra.profession = ProfessionState::from_index(profession);
-        if let Some(t) = m.extra.trade.as_mut() {
-            t.offers.clear();
-            t.unset = true;
+/// An index outside the owning load is refused.
+pub fn set_profession(m: &mut Mob, table: &ResolvedProfessions, index: usize) -> bool {
+    let Some(state) = table.state(index) else {
+        return false;
+    };
+    if m.extra.profession != state {
+        m.extra.profession = state;
+        if let Some(trade) = m.extra.trade.as_mut() {
+            trade.offers.clear();
+            trade.unset = true;
         }
     }
+    true
 }
+
 /// `VillagerProfession.workSound`.
 pub fn work_sound(index: u8) -> Option<&'static str> {
-    Some(match profession(index).id {
+    Some(match profession(index).id.as_str() {
         "armorer" => "entity.villager.work_armorer",
         "butcher" => "entity.villager.work_butcher",
         "cartographer" => "entity.villager.work_cartographer",
@@ -527,7 +457,9 @@ pub fn gift_table(m: &Mob) -> String {
     if m.is_baby() {
         return "minecraft:gameplay/hero_of_the_village/baby_gift".into();
     }
-    let profession = profession(m.extra.profession.index().unwrap_or(0)).id;
+    let profession = profession(m.extra.profession.index().unwrap_or(0))
+        .id
+        .as_str();
     let name = match profession {
         "none" | "nitwit" => "unemployed",
         other => other,
@@ -559,15 +491,17 @@ pub fn farmer_items() -> &'static [&'static str] {
     ]
 }
 /// A villager's `requestedItems` by profession.
-pub fn requested_items(m: &Mob) -> &'static [&'static str] {
-    if profession(m.extra.profession.index().unwrap_or(0)).id == "farmer" {
-        farmer_items()
-    } else {
-        &[]
-    }
+pub fn requested_items<'a>(m: &Mob, table: &'a ResolvedProfessions) -> &'a [String] {
+    table
+        .state_index(&m.extra.profession)
+        .and_then(|i| table.entry(i))
+        .map_or(&[], |p| p.requested.as_slice())
 }
 pub fn is_farmer(m: &Mob) -> bool {
-    profession(m.extra.profession.index().unwrap_or(0)).id == "farmer"
+    profession(m.extra.profession.index().unwrap_or(0))
+        .id
+        .as_str()
+        == "farmer"
 }
 /// `SimpleContainer(8)`: stacks the villager carries.
 const INVENTORY_SLOTS: usize = 8;
@@ -798,6 +732,7 @@ pub fn meet(
     b: usize,
     now: i64,
     max_stack: impl Fn(&str) -> u32,
+    table: &ResolvedProfessions,
 ) -> Meeting {
     let ready = ext(&mobs[a]).is_none_or(|e| e.can_gossip(now))
         && ext(&mobs[b]).is_none_or(|e| e.can_gossip(now));
@@ -832,12 +767,12 @@ pub fn meet(
         thrown.push(s);
     }
     // Wares the neighbour's profession asks for and ours does not.
-    let theirs = requested_items(&mobs[b]);
-    let mine = requested_items(&mobs[a]);
+    let theirs = requested_items(&mobs[b], table);
+    let mine = requested_items(&mobs[a], table);
     let wanted: Vec<&str> = theirs
         .iter()
-        .copied()
-        .filter(|i| !mine.contains(i))
+        .map(String::as_str)
+        .filter(|i| !mine.iter().any(|item| item == *i))
         .collect();
     if !wanted.is_empty()
         && let Some(s) =
@@ -1200,7 +1135,7 @@ mod tests {
         ];
         for (index, (name, sites)) in cases.iter().enumerate() {
             let index = index as u8;
-            assert_eq!(profession(index).id, *name);
+            assert_eq!(profession(index).id.as_str(), *name);
             assert_eq!(profession_index(name), Some(index));
             assert_eq!(profession(index).render_index, index);
             for site in *sites {
@@ -1216,17 +1151,18 @@ mod tests {
             }
             for level in 1..=5 {
                 assert_eq!(
-                    crate::merchant::Trades::set_for(name, level),
-                    format!("minecraft:{name}/level_{level}")
+                    profession_table().trade_key(name, level).unwrap_or(""),
+                    if matches!(*name, "none" | "nitwit") {
+                        String::new()
+                    } else {
+                        format!("minecraft:{name}/level_{level}")
+                    }
                 );
             }
         }
-        assert_eq!(profession(255).id, "none");
+        assert_eq!(profession(255).id.as_str(), "none");
         assert_eq!(profession_index("other:farmer"), None);
-        assert_eq!(
-            crate::merchant::Trades::set_for("other:farmer", 2),
-            "minecraft:other:farmer/level_2"
-        );
+        assert_eq!(profession_table().trade_key("other:farmer", 2), None);
     }
 
     /// Added after the H138 baseline: `add_item` delegates to
@@ -1441,7 +1377,7 @@ mod tests {
             brain: Brain::Passive,
             anim: Anim::Villager,
             sounds: [""; 3],
-            step_sound: None,
+            sound_overrides: Default::default(),
             food: Arc::default(),
             tempt: Arc::default(),
             passenger_attachments: Vec::new(),
@@ -1535,15 +1471,15 @@ mod tests {
     #[test]
     fn a_new_profession_rolls_new_offers() {
         let mut m = villager();
-        set_profession(&mut m, 1);
+        set_profession(&mut m, profession_table(), 1);
         // Offers made for the first profession.
         m.extra.trade.get_or_insert_default().unset = false;
         // The same profession keeps them.
-        set_profession(&mut m, 1);
+        set_profession(&mut m, profession_table(), 1);
         assert!(!m.extra.trade.as_ref().unwrap().unset);
         // A new one forgets them (offers = null), so the next getOffers
         // (ensure_offers) rolls the new profession's trades.
-        set_profession(&mut m, 2);
+        set_profession(&mut m, profession_table(), 2);
         let t = m.extra.trade.as_ref().unwrap();
         assert!(t.offers.is_empty());
         assert!(t.unset);
@@ -1563,7 +1499,7 @@ mod tests {
     fn a_villager_that_loses_its_job_site_offers_its_new_profession_trades() {
         let mut m = villager();
         // The composter's job: the villager is a farmer.
-        set_profession(&mut m, 5);
+        set_profession(&mut m, profession_table(), 5);
         assert_eq!(m.extra.profession.index().unwrap_or(0), 5);
         // Its trades were made, so the offers are there.
         let trade = m.extra.trade.get_or_insert_default();
@@ -1584,13 +1520,13 @@ mod tests {
         }];
         // The work bench is destroyed: the job site is gone, so the villager
         // is unemployed and its offers are dropped (`offers = null`).
-        set_profession(&mut m, NONE);
+        set_profession(&mut m, profession_table(), usize::from(NONE));
         let t = m.extra.trade.as_ref().unwrap();
         assert!(t.offers.is_empty());
         assert!(t.unset);
         // It takes the smithing table's job. The new profession's trades are
         // rolled by the next `getOffers` (ensure_offers).
-        set_profession(&mut m, 13);
+        set_profession(&mut m, profession_table(), 13);
         let t = m.extra.trade.as_ref().unwrap();
         assert!(t.offers.is_empty());
         assert!(t.unset);

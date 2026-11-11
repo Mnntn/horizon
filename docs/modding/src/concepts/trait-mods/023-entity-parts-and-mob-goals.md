@@ -39,6 +39,11 @@ mob itself through the engine's own paths: `move_to(pos, speed)` and `stop_navig
 with its setter's side effects, and a brain-backed species refuses, since its target is a brain
 memory that `MobRef::set_brain_target` writes from a server host). Writes to other entities
 are not part of a goal; the write handles a `ServerHost` takes do not exist in a goal tick.
+Clearing a fox's target ends defending without changing its trusted entities. An enderman's
+target controls its creepy flag and attacking speed modifier; clearing it also clears its stared-at
+flag. A zombified piglin schedules its first anger sound and next alert when it acquires a target
+from none, not when switching between targets. Targeting a player does not count as player damage.
+
 
 #### Brain behaviors
 

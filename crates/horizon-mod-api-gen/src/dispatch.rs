@@ -217,6 +217,7 @@ pub(super) fn emit<'a>(
         let receives = fresh_name("receives_cancelled", &mut used);
         let mod_entry = fresh_name("mod_entry", &mut used);
         let entered = fresh_name("_entered", &mut used);
+        let batch = fresh_name("batch", &mut used);
         let contract = hook.contract;
         let out = hook.out.as_deref();
         let answered = hook.answered_by_mod;
@@ -246,6 +247,9 @@ pub(super) fn emit<'a>(
                     format!(" -> Option<{}>", answer.to_token_stream())
                 }
                 Contract::Replace => format!(" -> {}", reference.elem.to_token_stream()),
+                Contract::Collect if answered && answered_batch(&reference.elem).is_none() => {
+                    return Err(format!("{name}: output must be Vec<Answered<T>>"));
+                }
                 Contract::Collect => String::new(),
                 _ => return Err(format!("unexpected output type for {name}")),
             }
@@ -391,8 +395,19 @@ pub(super) fn emit<'a>(
             let ty = &owned_ty;
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
             let mutable_entity = ty.to_token_stream().to_string() == "& mut ModBlockEntity";
+            // An answered collect hook's mods each push plain entries into their own batch;
+            // dispatch, not the mod, names the mod on each.
+            let batch_entry =
+                (answered && contract == Contract::Collect && Some(name.as_str()) == out)
+                    .then(|| match ty {
+                        Type::Reference(reference) => answered_batch(&reference.elem),
+                        _ => None,
+                    })
+                    .flatten();
             let field_ty = if mutable_entity {
                 syn::parse_quote!(ModBlockEntityView<'_>)
+            } else if let Some(entry) = batch_entry {
+                syn::parse_quote!(&mut Vec<#entry>)
             } else {
                 ty.clone()
             };
@@ -411,6 +426,8 @@ pub(super) fn emit<'a>(
                 write_back.push_str(&format!("*{name} = {event}.{name};"));
             } else if mutable_entity {
                 inits.push(format!("{name}: ModBlockEntityView::new({name})"));
+            } else if batch_entry.is_some() {
+                inits.push(format!("{name}: &mut {batch}"));
             } else {
                 inits.push(name.clone());
             }
@@ -542,8 +559,9 @@ pub(super) fn emit<'a>(
                     .collect();
                 let refs: Vec<_> = engine.iter().map(|(name, ty)| (name.clone(), ty)).collect();
                 let (fields, generics) = carrier_fields(&refs);
+                let visibility = method.vis.to_token_stream();
                 fire.push_str(&format!(
-                    "pub(in crate::game) struct {carrier}{generics} {{ {fields} }}\n"
+                    "{visibility} struct {carrier}{generics} {{ {fields} }}\n"
                 ));
                 for arg in &mut signature.inputs {
                     if let FnArg::Typed(arg) = arg
@@ -672,6 +690,12 @@ pub(super) fn emit<'a>(
             (Contract::Replace, Some(out)) => method_source.push_str(&format!(
                 "///\n/// Return `Some` to set `{out}`; the first {callee} returning `Some` wins.\n"
             )),
+            (Contract::Collect, Some(out)) if matches!(name, "blocks" | "items") => method_source.push_str(&format!(
+                "///\n/// Each mod receives its own empty `{event}.{out}` batch. Declared identifiers must\n/// belong to that mod's manifest-owned namespaces; unowned identifiers refuse registration.\n"
+            )),
+            (Contract::Collect, Some(out)) if answered => method_source.push_str(&format!(
+                "///\n/// Each mod receives its own empty `{event}.{out}` batch; every entry it adds is recorded\n/// as that mod's.\n"
+            )),
             (Contract::Collect, Some(out)) => method_source.push_str(&format!(
                 "///\n/// Every {callee} gets `{event}.{out}` in order and may add, change or remove {out}.\n"
             )),
@@ -693,11 +717,24 @@ pub(super) fn emit<'a>(
         dispatch.push_str(&format!(
             "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
-        let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
+        let build = format!(
+            "{}let {}{event} = {event_type} {{ {} }};",
+            if answered && contract == Contract::Collect {
+                format!("let mut {batch} = Vec::new(); ")
+            } else {
+                String::new()
+            },
+            if matches!(name, "blocks" | "items") {
+                ""
+            } else {
+                "mut "
+            },
+            inits.join(", "),
+        );
         // A trait mod's call is marked with the mod for a panic to name.
         let each = match &hook.owner {
             Some(owner) => format!("super::entered_owned(HookId::{hook_id}, \"{name}\", {owner})"),
-            None if answered => {
+            None if answered || hook.collect_validator.is_some() => {
                 format!("super::entered_with_id(HookId::{hook_id}, \"{name}\")")
             }
             None => format!("super::entered(HookId::{hook_id}, \"{name}\")"),
@@ -716,14 +753,31 @@ pub(super) fn emit<'a>(
                 "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some({replacement}); {exit}; }}",
                 o = out.unwrap()
             ),
+            Contract::Collect if answered => format!(
+                "{callee}.{name}({invoke}); {o}.extend({event}.{o}.drain(..).map(|answer| Answered {{ answer, mod_id }}));",
+                o = out.unwrap()
+            ),
+            Contract::Collect if hook.collect_validator.is_some() => {
+                let validator = hook.collect_validator.as_ref().unwrap();
+                let output = out.unwrap();
+                format!(
+                    "let previous = {event}.{output}.clone(); {callee}.{name}({invoke}); {validator}(mod_id, &previous, {event}.{output});"
+                )
+            }
             _ => format!("{callee}.{name}({invoke});"),
         };
-        let binding = if answered {
+        let binding = if answered || hook.collect_validator.is_some() {
             format!("(mod_id, {mod_item})")
         } else {
             mod_item.clone()
         };
         let (lookup, calls) = match &scoped {
+            None if matches!(name, "blocks" | "items") => (
+                String::new(),
+                format!(
+                    "for (mod_id, {mod_item}) in super::entered_with_id(HookId::{hook_id}, \"{name}\") {{ let mut local = Vec::new(); {{ let mut {event} = {event_type} {{ {name}: &mut local }}; {mod_item}.{name}(context, &mut {event}); }} for declaration in &mut local {{ match super::parts::owned_declaration_id(mod_id, &declaration.id) {{ Ok(id) => declaration.id = id, Err(reason) => context.refuse_declaration(reason), }} }} {event}.{name}.extend(local); }}"
+                ),
+            ),
             None if name == "setting_changed" => (
                 String::new(),
                 format!(
@@ -947,7 +1001,7 @@ fn stack_crossing_routed(
                 )
             } else if block {
                 format!(
-                    "match {local}.try_into_engine(&*self) {{ Ok(value) => value, Err(_) => return }}"
+                    "match {local}.try_into_engine(&*self) {{ Ok(value) => value, Err(error) => {{ log::warn!(\"mod block state write refused: {{error:?}}\"); return; }} }}"
                 )
             } else if stack {
                 let result = format!("__checked_{name}");
@@ -1316,6 +1370,11 @@ fn main() {
         let unguarded = body.replace(guard, "");
         assert_ne!(early, body);
         assert_ne!(unguarded, body);
+        let silent = body.replace(
+            "log::warn!(\"mod block state write refused: {error:?}\");",
+            "",
+        );
+        assert_ne!(silent, body);
         let fixture = include_str!("../../../tools/refactors/api-pr3b/hook_crossing.rs");
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/hook-crossing-proof");
@@ -1324,6 +1383,7 @@ fn main() {
             ("baseline", body, true),
             ("early_commit", early, false),
             ("no_guard", unguarded, false),
+            ("silent_refusal", silent, false),
         ] {
             let source = directory.join(format!("{name}.rs"));
             let binary = directory.join(name);
@@ -1736,6 +1796,11 @@ fn answered_type(ty: &Type) -> Option<&Type> {
     generic_of(generic_of(ty, "Option")?, "Answered")
 }
 
+/// `T` of a `Vec<Answered<T>>` output, if that is its type.
+fn answered_batch(ty: &Type) -> Option<&Type> {
+    generic_of(generic_of(ty, "Vec")?, "Answered")
+}
+
 /// `T` of a `name<T>` type.
 fn generic_of<'a>(ty: &'a Type, name: &str) -> Option<&'a Type> {
     let Type::Path(path) = ty else { return None };
@@ -1973,6 +2038,102 @@ fn main() {{ game::run(std::env::args_os().nth(1).unwrap().into()); }}
                 .status()
                 .unwrap()
                 .success()
+        );
+    }
+
+    #[test]
+    fn an_answered_collect_names_the_mod_of_each_entry() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let hook = Hook {
+            name: "gather".into(),
+            contract: Contract::Collect,
+            out: Some("entries".into()),
+            answered_by_mod: true,
+            ..Hook::sample(
+                "horizon_client::game::native_hooks::gather::Game<'_>::native_gather",
+                Side::Server,
+            )
+        };
+        let method: syn::ItemFn = syn::parse_quote! {
+            fn native_gather(&mut self, entries: &mut Vec<Answered<u32>>) {
+                let _ = (entries,);
+            }
+        };
+        let sources = emit(&root, std::iter::once(&hook), &[method], &[]).unwrap();
+        let (traits, dispatch) = (sources.traits, sources.dispatch);
+        let program = format!(
+            r#"
+#![allow(dead_code, unused_variables)]
+struct Gatherer {{ pushes: &'static [u32] }}
+static MODS: [(&str, Gatherer); 3] = [("a", Gatherer {{ pushes: &[1, 2] }}), ("quiet", Gatherer {{ pushes: &[] }}), ("b", Gatherer {{ pushes: &[3] }})];
+fn listened(_: generated::HookId) -> bool {{ true }}
+fn entered_with_id(_: generated::HookId, _: &str) -> impl Iterator<Item = (&'static str, &'static Gatherer)> {{ MODS.iter().map(|(id, m)| (*id, m)) }}
+impl Gatherer {{ fn gather(&self, _: &mut dyn generated::ServerHost, event: &mut generated::GatherEvent<'_>) {{ assert!(event.entries.is_empty()); event.entries.extend(self.pushes); }} }}
+mod generated {{
+pub trait ServerHost {{}}
+impl ServerHost for () {{}}
+pub enum HookId {{ Gather }}
+#[derive(Debug, PartialEq)]
+pub struct Answered<T> {{ pub answer: T, pub mod_id: &'static str }}
+pub trait Hooks {{ {traits} }}
+{dispatch}
+}}
+use generated::Answered;
+fn main() {{
+    let mut entries = vec![Answered {{ answer: 0, mod_id: "game" }}];
+    generated::dispatch_gather(&mut (), &mut entries);
+    let entry = |answer, mod_id| Answered {{ answer, mod_id }};
+    assert_eq!(entries, [entry(0, "game"), entry(1, "a"), entry(2, "a"), entry(3, "b")]);
+}}
+"#
+        );
+        let dir = root.join("target/answered-collect-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("main.rs");
+        let binary = dir.join("main");
+        std::fs::write(&source, program).unwrap();
+        let output = std::process::Command::new("rustc")
+            .arg("--edition=2024")
+            .arg(&source)
+            .arg("-o")
+            .arg(&binary)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let run = std::process::Command::new(binary).output().unwrap();
+        assert!(
+            run.status.success(),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+    }
+
+    #[test]
+    fn an_answered_collect_needs_answered_entries() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let hook = Hook {
+            name: "gather".into(),
+            contract: Contract::Collect,
+            out: Some("entries".into()),
+            answered_by_mod: true,
+            ..Hook::sample(
+                "horizon_client::game::native_hooks::gather::Game<'_>::native_gather",
+                Side::Server,
+            )
+        };
+        let method: syn::ItemFn = syn::parse_quote! {
+            fn native_gather(&mut self, entries: &mut Vec<u32>) {
+                let _ = (entries,);
+            }
+        };
+        let refused = emit(&root, std::iter::once(&hook), &[method], &[]).err();
+        assert_eq!(
+            refused.as_deref(),
+            Some("gather: output must be Vec<Answered<T>>")
         );
     }
 

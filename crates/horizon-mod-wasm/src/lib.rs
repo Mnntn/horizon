@@ -2,11 +2,17 @@
 //! (the same model as native mods: required and optional, semver on `horizon-mod.toml`
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
 //! Mods page.
+mod compile_child;
+#[cfg(feature = "runtime-fixture")]
+pub mod fixture;
 pub mod link;
+mod module_cache;
+pub use compile_child::compile_child;
 #[cfg(test)]
 #[path = "../tests/support/no_hooks.rs"]
 mod no_hooks;
 mod points;
+mod registration_capabilities;
 mod runtime;
 #[allow(
     dead_code,
@@ -61,7 +67,7 @@ pub enum Refusal {
     Toolchain { found: String, group: String },
     /// A dependency of this mod was refused, so its group can't link.
     DependencyRefused { dependency: String },
-    /// The mod declares game internals or an `access = "internals"` injection: native mods only.
+    /// The mod declares engine internals or an engine `access = "internals"` injection.
     Internals,
     /// The package's `mod.wasm` failed its checks.
     Package(String),
@@ -129,14 +135,13 @@ fn groups(packages: &[WasmPackage]) -> (Vec<Vec<usize>>, Vec<(String, Refusal)>)
         .iter()
         .map(|p| dependencies::from_manifest(&p.manifest.dependencies))
         .collect();
-    // Internals access is the native-only tier: such a mod, and every mod needing it, is refused.
+    // Engine internals are native-only. A mod dependency's internals stay inside the group.
     for (i, package) in packages.iter().enumerate() {
         if !package.manifest.internals.is_empty()
-            || package
-                .manifest
-                .inject
-                .iter()
-                .any(|inject| inject.access == Access::Internals)
+            || package.manifest.inject.iter().any(|inject| {
+                inject.access == Access::Internals
+                    && package.manifest.mod_point_dependency(&inject.at).is_none()
+            })
         {
             refused.insert(i, Refusal::Internals);
         }
@@ -341,6 +346,7 @@ pub fn refusal(id: &str) -> Option<Refusal> {
 /// startup: the same selection as content mods (`horizon_mod_package::selection`), so a wasm mod's
 /// `assets/` and `data/` load as content beside its code. Refusals are kept for [`refused`].
 pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
+    let cache = module_cache::ModuleCache::new(game_dir.join(module_cache::CACHE_DIR));
     let enabled = horizon_mod_package::mod_list::ModList::load(game_dir).enabled;
     let mut refused: Vec<_> = horizon_mod_package::selection::package_errors(
         horizon_mod_package::find(&game_dir.join(horizon_mod_package::mod_list::DIR))
@@ -395,7 +401,7 @@ pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
         .ok()
         .and_then(|exe| std::fs::read(exe.with_file_name("horizon-wasm-std.wasm")).ok())
     {
-        Some(std) => load(&std, packages),
+        Some(std) => load_with_cache(&std, packages, Some(&cache)),
         None => Loaded {
             modules: Vec::new(),
             mods: Vec::new(),
@@ -498,6 +504,14 @@ fn initialize_modules(modules: &[WasmMod], inventory: &[mod_api::PackageInfo]) -
 }
 
 pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
+    load_with_cache(std_member, packages, None)
+}
+
+fn load_with_cache(
+    std_member: &[u8],
+    packages: Vec<WasmPackage>,
+    cache: Option<&module_cache::ModuleCache>,
+) -> Loaded {
     let (groups, refused) = groups(&packages);
     let mut loaded = Loaded {
         refused,
@@ -527,7 +541,12 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
             name,
             module: &packages[i].module,
         }));
-        let result = WasmMod::instantiate(&engine, &members).and_then(|mods| {
+        let manifests: Vec<_> = indices
+            .iter()
+            .zip(&names)
+            .map(|(&i, name)| (name.as_str(), &packages[i].manifest))
+            .collect();
+        let result = WasmMod::instantiate(&engine, &manifests, &members, cache).and_then(|mods| {
             if mods.len() != indices.len() {
                 return Err(Refusal::Runtime("missing mod boundary exports".into()));
             }
@@ -543,6 +562,7 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
                         |r| r.take(),
                     )
                     .ok_or_else(|| Refusal::Runtime("subscriptions failed".into()))?;
+                registration_capabilities::check(&subscriptions)?;
                 let names: Vec<String> = subscriptions
                     .iter()
                     .map(|(name, _, _)| name.clone())
@@ -595,6 +615,26 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn installed_wasm_mixin_refuses_by_name() {
+        let root = std::env::temp_dir().join(format!("wasm-mixin-{}", std::process::id()));
+        let package = root.join("bad_mixin");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("horizon-mod.toml"), format!(
+            "id = 'bad_mixin'\nname = 'Bad mixin'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n[[native.mixin]]\nid = 'patch'\ntarget = 'game::tick'\nkind = 'HEAD'\nhelper = 'src/patch.rs'\n", "a".repeat(128)
+        )).unwrap();
+        let loaded = load_installed(&root, &[package]);
+        assert!(
+            loaded.refused.iter().any(|(id, reason)| id == "bad_mixin"
+                && reason
+                    .to_string()
+                    .contains("only [native] tables compile game code")),
+            "{:?}",
+            loaded.refused
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn package(
         id: &str,
@@ -868,4 +908,15 @@ mod mixed_install_tests {
             "lib is a native mod; wasm mod addon depends on it: mixed native and wasm dependencies aren't supported yet"
         );
     }
+}
+
+/// Resolve generated boundary operations for hand-written guest integration fixtures.
+#[cfg(feature = "listener-fixture")]
+pub fn fixture_import_id(owner: &str, method: &str) -> Option<u32> {
+    boundary::import_id(owner, method)
+}
+/// Resolve generated hook operations for hand-written guest integration fixtures.
+#[cfg(feature = "listener-fixture")]
+pub fn fixture_export_id(owner: &str, method: &str) -> Option<u32> {
+    boundary::export_id(owner, method)
 }

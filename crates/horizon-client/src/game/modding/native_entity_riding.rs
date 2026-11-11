@@ -20,8 +20,8 @@ impl Game<'_> {
         passenger: EntityRef,
     ) -> Option<[f64; 3]> {
         let at = if let Some(rider) = rider {
-            if let Some(index) = self.boats.iter().position(|boat| boat.id == vehicle_id) {
-                Some(self.boat_dismount_target(index, f64::from(rider.width()), rider.yaw))
+            if let Some(boat) = self.boats.iter().find(|boat| boat.id == vehicle_id) {
+                Some(self.boat_dismount_target(boat, f64::from(rider.width()), rider.yaw))
             } else if let Some(mount) = vehicle {
                 Some(
                     self.horse_dismount_mobs(mount, rider)
@@ -427,7 +427,20 @@ impl Game<'_> {
         if previous_vehicle.is_some() {
             match rider {
                 Target::Player => self.stop_riding(),
-                Target::Mob(id) => self.dismount_mob(id),
+                Target::Mob(id) => {
+                    if previous_vehicle.is_some_and(|v| {
+                        self.persist.mount_notifications.contains(&(id, v, false))
+                            && self.persist.removals.iter().any(|target| {
+                                matches!(*target, Target::Boat(n) | Target::Cart(n) if n == v)
+                            })
+                    }) {
+                        // This explicit callback mutation completes the in-flight edge,
+                        // rather than recursively notifying it a second time.
+                        self.dismount_mob_reentrant(id);
+                    } else {
+                        self.dismount_mob(id);
+                    }
+                }
                 _ => return false,
             }
             if self.native_vehicle_id(rider).is_some() {
@@ -608,9 +621,9 @@ impl Game<'_> {
         let Some(t) = self.native_entity_target(entity) else {
             return false;
         };
-        if self.native_vehicle_id(t).is_none() {
+        let Some(vehicle) = self.native_vehicle_id(t) else {
             return false;
-        }
+        };
         match t {
             Target::Mob(id) => self.dismount_mob(id),
             Target::Player | Target::Guest(_) => {
@@ -618,7 +631,11 @@ impl Game<'_> {
             }
             _ => return false,
         }
-        self.native_vehicle_id(t).is_none()
+        let stopped = self.native_vehicle_id(t).is_none();
+        if stopped {
+            self.release_removed_vehicle(vehicle);
+        }
+        stopped
     }
     /// Gets every passenger off the entity (`Entity.ejectPassengers`), last
     /// first as vanilla walks the list, so `mob_ride` hears them in its

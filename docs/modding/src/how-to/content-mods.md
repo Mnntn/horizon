@@ -5,12 +5,32 @@ Trait mods declare content through `BlocksEvent` and `ItemsEvent`, using API-own
 `Item::new(id, template)`, passing identifier strings, then set the overrides. The drafts are unvalidated; admission reports malformed values with the content loader's refusal messages.
 These are load-time declaration drafts, not live registry entries. The game admits them
 with the content-file checks, atomically for each namespace, before resources load.
-A block's `item` defaults to false in code.
+A block's `item` defaults to false in code. Each mod receives its own declaration
+batch. New identifiers from code—including block entity types and other registrar
+declarations—may use any namespace owned by that mod's manifest. Bare names use
+the mod ID; an explicit owned namespace stays unchanged. An unowned namespace
+refuses registration with a diagnostic naming both the mod and namespace. This
+is identical for native and wasm mods. Attaching a Part to an existing vanilla or
+foreign block or item is a reference, not a new declaration, and remains allowed.
 
 Code declarations carry component patches as ordered `Vec<(String, Option<Tag>)>`:
 `Some(tag)` sets the named component and `None` removes it (without a `!` prefix).
 The game converts this opaque NBT data at load; file declarations below still use JSON.
 No declaration conversion runs per tick.
+
+## Choosing what remains after removal
+
+Implement `BlockPart::remove_block` for a block that leaves a support or another
+state behind when removed. This server-only replacement receives the dimension,
+position, removed state and `moved_by_piston`. Answer `Some(state)` to choose the
+replacement, or `None` to keep vanilla's fluid block (air when dry). Only the
+removed block's own Part is called, not the replacement block's Part.
+
+The chosen state goes through the normal `setBlock` effects with flags 3, plus
+64 for piston movement. An unknown or unregistered state is refused with a
+reason and the vanilla replacement is written. This covers `Level.removeBlock`,
+not every direct `setBlock` or the separate `destroyBlock` path. The level view
+is read-only while answering, on both native and wasm.
 
 ## Making a content mod
 
@@ -368,6 +388,23 @@ player models, in the first person's own third-person view and in other players'
 with a kinetic weapon. A code mod that must decide by stack, hand or entity answers the `get_arm_pose` hook instead,
 which wins over the declared key.
 
+Code mods can also register a namespaced custom pose once in `Hooks::register` through
+`Registrar::register_arm_pose("mymod:flip", uses_both_arms, affects_offhand)`. Keep its
+`CustomArmPose` token and return `ArmPose::Custom(token)` from `get_arm_pose`. The two
+flags independently control the humanoid's two-arm ordering and whether the other
+hand's pose gives way. The token carries these flags as Wire data, so the pose's
+flag getters do not require a registration table inside a wasm guest. Duplicate, malformed and foreign-namespace ids refuse registration.
+
+In `arm_pose_transform`, match `event.pose` to that token and set `event.angles.right`
+or `event.angles.left` to absolute `[pitch, yaw, roll]` in radians. `event.right_arm`
+identifies the physical arm; `event.humanoid` supplies both stacks, the use state,
+and the poses selected after `get_arm_pose` answers. Transformers follow vanilla's
+physical-arm application order and do not run for a suppressed pose.
+Each non-finite angle leaves the base model component unchanged. The transform runs
+only for selected registered poses, on local players, remote players and humanoid mobs;
+swing and mob-specific animations still run afterward and can change those angles.
+Native and wasm mods use the same registration, token and Wire angle value.
+
 ```json
 { "template": "minecraft:stick", "arm_pose": "toot_horn" }
 ```
@@ -478,6 +515,11 @@ as vanilla's; without one it draws as the missing texture). It does nothing on i
 attribute modifiers. A world opened without the mod drops the effect from its players and mobs. Clients join a server
 only with the same mods' effects, as with its blocks.
 
+Code mods read a registered type's classification with `effect_key.category(host)`,
+which returns `EffectCategory::Beneficial`, `Harmful` or `Neutral`. For an active
+instance, use `active_effect.id.category(host)`. The read works on both sides and
+returns `None` before the effect registry is complete; it never guesses a category.
+
 A mod entity type is declared in `data/<id>/horizon/entity_type/<name>.json`. It copies a vanilla type:
 `minecraft:snowball`, a thrown item projectile, or a living mob (below). A thrown type's `item` is one of the mod's own
 items (one type per item), and `damage` (0 by default) is what a hit deals to anything it hits, as `thrown` damage from
@@ -497,6 +539,29 @@ it. A world opened without the
 mod keeps the saved ones as they are, frozen in place. Not yet: a dispenser doesn't throw it, and a vanilla client on a
 server with it may be disconnected when one spawns.
 
+A code mod can launch a thrown type with
+`host.spawn_projectile_from_rotation(owner, &entity_type, &stack, offset, power, inaccuracy)`.
+This is the owner-based `Projectile.spawnProjectileFromRotation` operation, not a summon:
+ownership is set before shooting and the existing launch hook runs after insertion.
+It supports registered mod thrown types and vanilla snowballs, eggs, pearls, potions,
+experience bottles and wind charges. Spread uses the projectile's own random in x/y/z
+order, and known owner movement is inherited (vertical movement only when airborne).
+It does not consume an item, award use statistics or apply cooldowns; invalid parameters
+or unsupported types return `None` without spawning or drawing random values.
+The owner must be in the current level; a guest in another dimension is refused.
+The carried item count is one; the supplied stack is unchanged. Once the projectile is
+in the level, the stack's enchantments run their `projectile_spawned` effects on it, as
+vanilla's `Projectile.applyOnProjectileSpawned` does after a throw: in the stack's order,
+each effect's requirements tested with the level random just before it applies, and its
+own draws from the projectile's random. `ignite`, `apply_impulse`, `play_sound` and an
+`all_of` of them apply; `apply_mob_effect` and `apply_exhaustion` do nothing to a
+projectile, as in vanilla. A stack with any other `projectile_spawned` effect (blocks,
+damage, explosions, particles, summons, functions, item damage) is refused until the
+engine applies it too (#2670), so this operation never silently discards one.
+Owner launch also refuses unsupported requirement contexts (including entity flags),
+and invalid clamped level-value ranges before insertion. Supported requirements
+are entity type predicates, random chance, and their boolean combinations.
+
 A living type copies a mob, `minecraft:zombie` or `minecraft:villager`, the way NeoForge's
 `EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla class. It has no `item` or `damage`. `attributes`
 sets default attribute values that differ from its template's (`EntityAttributeCreationEvent`), by attribute id, and
@@ -505,6 +570,30 @@ only for attributes the template has; one it lacks stops the content root's buil
 ```json
 { "template": "minecraft:zombie", "attributes": { "minecraft:max_health": 40.0, "minecraft:movement_speed": 0.3 } }
 ```
+
+A living type can set `sounds.ambient`, `sounds.hurt`, `sounds.death` and `sounds.step`:
+
+```json
+{
+  "template": "minecraft:wandering_trader",
+  "sounds": {
+    "ambient": "bird:entity.vulture.ambient",
+    "hurt": "bird:hurt",
+    "death": "bird:death",
+    "step": "none"
+  }
+}
+```
+
+Each omitted slot inherits the template's existing selection, including runtime choices
+such as a villager's trading voice and the supporting block's footstep sound. An explicit
+full `namespace:path` id selects that sound event from the resource packs; `"none"` mutes
+only that slot. Omission and `"none"` are different: a villager with no step override
+still plays `minecraft:block.stone.step` on stone. Invalid ids stop content admission,
+with the entity and sound slot in the error. These four slots cover ordinary ambient,
+hurt, death and footstep playback; additional events such as trading interactions or
+projectile attacks keep their existing sounds. Native and wasm packages use this same
+content definition and resource table.
 
 A code mod can also register an attribute type of its own with `Registrar::declare_attribute(path, default,
 min, max, syncable, sentiment)` (vanilla's `RangedAttribute` in the attribute registry). Only both-side
@@ -518,6 +607,18 @@ id, so the network ids are the same on every side running the same mods — befo
 so a mod's entity set may name its own new attribute. Values sanitize through the definition (NaN maps to the
 minimum, everything else clamps), and saves, item modifiers and the sync set carry the attribute by its string
 id.
+
+A code mod can declare a datapack registry of its own with `Registrar::declare_datapack_registry(path, sync,
+fields)` (NeoForge's `DataPackRegistryEvent.NewRegistry`; [#811](https://github.com/arismoko/horizon/issues/811)).
+`path` lands in the mod's namespace (`spell` of `example` is `example:spell`), and `fields` is a flat record
+schema: `Bool`, `Int { min, max }`, `Float { min, max }`, `Text { max_len }`, `Identifier` or `Reference { registry }`,
+each required or given a default. Entry `addon:fire` is `data/addon/example/spell/fire.json`
+(`DatapackRegistryDeclaration::entry_file`), the registry's namespace being a folder as NeoForge's modded
+registries have it. The game decodes entries against the schema without running mod code, so native and wasm
+mods get the same bounds: an undeclared key, a missing required key, a wrong type or an out-of-range value fails
+the entry, and a default never stands in for invalid data. The engine adds no entry-size or field-count limit
+of its own. Only both-side packages may declare registries. This slice declares and validates; loading the
+entries from packs, the duplicate check across mods and typed reads follow in the next parts of #811.
 
 A code mod can also use `Registrar::declare_entity_attributes(path, template, attributes)` during registration.
 That declaration starts from the vanilla template's attribute row, replacing the content row's overrides.
@@ -590,8 +691,12 @@ namespaces = ["kaisyn", "towns_and_towers"]
 ```
 
 A listed namespace is the mod's as its id is: its `assets/` and `data/` files load, and the game reads its tags,
-recipes, names and loot. Blocks, items, creative tabs, mob effects, entity types and menu types are declared in
-`data/<id>/horizon/` only. `minecraft`, `c` and
+recipes, names and loot. Blocks, items, creative tabs, mob effects, entity types and menu types may be declared in
+`data/<owned_namespace>/horizon/`. The same owned set governs code declarations.
+For example, a package with ID `ported_farmersdelight` and
+`namespaces = ["farmersdelight"]` can declare `farmersdelight:cooking_pot`
+and its `farmersdelight:` block entity type without changing saved-world IDs.
+The namespace collision fence below still applies. `minecraft`, `c` and
 `horizon` cannot be listed. Two mods that are on may not own the same namespace (one's id or listed namespace being
 the other's): the game keeps the first in load order and leaves the other's content out, with "mods A and B both use
 the namespace N; turn one of them off" in the log. Paths use vanilla's resource characters, at most 65,536 files, 16
@@ -656,6 +761,74 @@ Spawn modifiers also apply to those biomes: `add_spawns` appends `spawners` (one
 (`energy_budget` and `charge`) for its `entity_types`, and `remove_spawn_costs` removes them. Entity type selectors
 accept an id, `#tag`, list of ids, or NeoForge's `any`, `or`, `and` or `not`.
 
+Carver modifiers edit the biome's `carvers`: `add_carvers` appends `carvers` (an id or a list of ids) that it lacks, and
+`remove_carvers` takes them out. They read the root's `worldgen/carvers.json` for the ids that exist, so a carver a
+data pack adds is not known to them, and carver tags are not read. NeoForge's docs call these legacy carvers: noise
+caves are not carvers.
+
+NeoForge calls a modifier once in each of five phases (`BEFORE_EVERYTHING`, `ADD`, `REMOVE`, `MODIFY`,
+`AFTER_EVERYTHING`, in that order; its public biome modifier documentation). Horizon applies every addition, then every
+removal, then every `MODIFY` modifier, in mod order within each. NeoForge's own modifier types only add and remove;
+`MODIFY` is for the single values (climate, colours) that a mod's own modifier type changes, so Horizon's is its own
+type, `horizon:modify_biome`, which sets any of `temperature`, `downfall`, `has_precipitation`, `temperature_modifier`
+(`none` or `frozen`) and `effects` colours (`sky_color`, `fog_color`, `water_color`, `water_fog_color`,
+`foliage_color`, `dry_foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
+
+```json
+{
+  "type": "horizon:modify_biome",
+  "biomes": "#minecraft:is_forest",
+  "temperature": 0.3,
+  "has_precipitation": true,
+  "effects": { "sky_color": 12632319, "grass_color": "#80a0ff" }
+}
+```
+
+What the file leaves out stays. A colour is an integer 0 to 0xFFFFFF or `#rrggbb`; the biome keeps `#rrggbb`, with the
+sky, fog and water fog colours as its `minecraft:visual/...` attributes, where 26.3 keeps them. A value of the wrong
+type, a colour out of range, an unknown colour name or a `temperature_modifier` other than `none` or `frozen` skips that
+modifier with a warning naming the mod and file. `BEFORE_EVERYTHING` and `AFTER_EVERYTHING` have no modifier type
+here, so the API names no phase for them.
+
+A `null` for `foliage_color`, `dry_foliage_color` or `grass_color` removes that override from the biome's `effects`, so the
+colormap tints it again; removing one the biome lacks changes nothing. The other colours are required or are attributes,
+so a `null` there skips the modifier with a warning. The removal form is inferred from the title of NeoForge's change
+"Add ability to remove color overrides in BiomeSpecialEffectsBuilder" (neoforged/NeoForge#3528, `26.3.0.19-beta`), whose
+field list is not public; it is not confirmed against NeoForge's code. In code, `foliage_color`, `dry_foliage_color` and
+`grass_color` are `Option<BiomeColourChange>` (`Set { rgb }` or `Remove`).
+
+A modifier also sets the biome's ambient and music attributes, in an `attributes` object with the vanilla keys and
+values of a biome file (`warped_forest.json` has all of them). Each key present replaces the biome's whole value;
+the keys it leaves out stay:
+
+```json
+{
+  "type": "horizon:modify_biome",
+  "biomes": "minecraft:plains",
+  "attributes": {
+    "minecraft:visual/ambient_particles": [{ "particle": { "type": "minecraft:ash" }, "probability": 0.25 }],
+    "minecraft:audio/ambient_sounds": {
+      "loop": "minecraft:ambient.warped_forest.loop",
+      "additions": { "sound": "minecraft:ambient.warped_forest.additions", "tick_chance": 0.0111 },
+      "mood": { "sound": "minecraft:ambient.warped_forest.mood", "tick_delay": 6000, "block_search_extent": 8, "offset": 2.0 }
+    },
+    "minecraft:audio/background_music": { "default": { "sound": "zinc:music.dunes", "min_delay": 12000, "max_delay": 24000 } },
+    "minecraft:audio/music_volume": 0.5
+  }
+}
+```
+
+The particle list may also be written `{ "argument": [...] }`. A particle or sound is a namespaced id and a chance or
+volume is 0 to 1; the mood needs its sound, `tick_delay`, `block_search_extent` and `offset`; `additions` is one
+object or a list; a music entry (`default`, `creative` or `underwater`) needs a sound and independently nonnegative `min_delay` and
+`max_delay`. Any other attribute, or a value that is not valid, skips the modifier with a warning naming the mod,
+file and attribute. A client plays these from the biome data the server sends. In code, `ModifyBiome` has
+`ambient_particles`, `ambient_loop`, `ambient_additions`, `ambient_mood`, `background_music` and `music_volume`; the
+three ambient sound fields together make the one `ambient_sounds` value, and a value out of range refuses the mods at
+startup.
+
+**When they apply.** Modifiers are applied while the world's worldgen data is loaded, before any chunk is generated: the content build writes the modified biomes into the content root, and when a world opens, `horizon_client::vanillagen::biome_modifiers_over_packs` applies them again over the world's data packs (`shared_data_with` for the generator, `packed_biomes` for the game's biome table), so a pack that replaces a vanilla biome keeps the mods' changes and a pack's own biome a tag selects gets them. Modifiers a mod declares in code (`Registrar::declare_biome_modifier`) register before any world opens and are read at the same moment. The generator's data is loaded once per bundle and set of packs and shared by the world's dimensions, so a modifier never applies halfway through a world. The dedicated server is the same game run headless (`horizon-client --dedicated`, [server.md](../../../server.md)), so it takes this path too; `horizon-server` only supervises it.
+
 A biome holder set can also use Horizon's own `horizon:climate` type, alone or nested in those boolean sets; it is not
 a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in
 [Fabric's public biome weather API](https://maven.fabricmc.net/docs/yarn-1.21-rc1+build.1/net/minecraft/world/biome/Biome.Weather.html)),
@@ -673,16 +846,38 @@ load. Climate sets apply only to `biomes`, not `features`.
   "features": "zinc:ore_zinc", "step": "underground_ores" }
 ```
 
+A code mod declares the same modifiers without a file: `Registrar::declare_biome_modifier(path, modifier)` takes a
+`BiomeModifier` (its `biomes`, and an operation: `AddFeatures`, `RemoveFeatures`, `AddSpawns`, `RemoveSpawns`,
+`AddSpawnCosts`, `RemoveSpawnCosts`, `AddCarvers`, `RemoveCarvers` or `ModifyBiome`, whose `Option` fields are the
+values above). `BiomeModifier::json` renders it as the file above, so a declared modifier and
+a shipped one are applied by the same code, in the same order (additions first, then removals, then modifications, mods in dispatch
+order, declarations in registration order). An id outside the mod's namespace or that is not a file path, a repeated
+id, an empty list, a name that is not namespaced, an unknown generation step, a spawner of weight 0 or with its
+smallest group above its largest, a spawn cost that is not finite, a climate number that is not finite, a colour above
+0xFFFFFF and a temperature modifier other than `none` or `frozen` refuse the mods at startup, naming the mod.
+Declared modifiers are
+read by the API today; the game does not apply them until it feeds them through the content loader (tracked on
+arismoko/horizon#2732).
+
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A
 biome no modifier names keeps its text, and a world without mods keeps vanilla's biomes byte for byte. A modifier
 naming a biome, biome tag, feature, feature tag, entity type or entity type tag the game doesn't have (another mod's, a
-`#c:` convention tag), or of a type not read yet (`add_carvers`, a mod's own serializer), is skipped with a warning
+`#c:` convention tag), or of a type not read yet (a mod's own serializer), is skipped with a warning
 naming the mod and file; the mods still load. A malformed modifier of a type
 that is read (an unknown step, a missing field, `minCount > maxCount`) stops the build, and the game starts without
 content mods ("content mods not loaded: ..." in the log). Feature tags are vanilla's for now (`#tag` in `features`
 doesn't read a mod's `placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to
 it too.
+
+**A biome of your own.** A mod's `data/<ns>/worldgen/biome/<path>.json` (any namespace but `minecraft`) adds a biome.
+The game loads it into its biome table after vanilla's biomes, sorted by path and then namespace, so vanilla's biome ids
+never move. A joining client receives it in the biome registry with its data even when it has the vanilla pack, builds
+it from that data, and plays its colours, ambient particles, ambient sounds and music from it; a client with the same
+mod already has it. Its network id is its place in the registry sorted by path, then namespace, as in vanilla.
+Saved worlds name a column's biomes, not their ids: a world saved before the mod existed holds only vanilla names and
+loads unchanged; a world saved with the mod and opened without it reads the mod's biomes as plains, and the next save
+writes plains. A mod biome appears in the world only where a dimension's biome source or a worldgen file uses it.
 
 A pool element may be one of Lithostitched's: `lithostitched:limited` (`delegate`, `limit`, `min_depth`) places its
 `delegate` at most `limit` times in one structure start, and `lithostitched:guaranteed` (`delegate`, `count`,
@@ -711,3 +906,5 @@ Seats follow passenger order; extra passengers use the last point. Offsets scale
 the entity and rotate with its yaw.
 
 Vanilla `FishingHook.shouldStopFishing` tests exact `Items.FISHING_ROD` identity, while the renderer chooses the holding arm using `instanceof FishingRodItem`. Broadening these checks for content rods is intentional.
+
+Ambient additions accept any finite `tick_chance`, without clamping to the unit interval. Music delays need not be ordered.

@@ -10,8 +10,8 @@ use horizon_world::{
 };
 use std::io;
 
-struct BoatItemRay<'a, 'r>(&'a Game<'r>);
-impl RayWorld for BoatItemRay<'_, '_> {
+pub(in crate::game) struct OutlineFluidRay<'a, 'r>(pub(in crate::game) &'a Game<'r>);
+impl RayWorld for OutlineFluidRay<'_, '_> {
     type Error = io::Error;
     type Block = BlockStateId;
     type Fluid = Option<(f32, bool, Fluid)>;
@@ -93,7 +93,7 @@ impl Game<'_> {
         let dir = horizon_world::view_direction::view_vector(self.pitch, self.yaw);
         let end = start.add_vector(dir.scale(self.reach()));
         let hit = clip_world(
-            &mut BoatItemRay(self),
+            &mut OutlineFluidRay(self),
             start,
             end,
             RayBlockMode::Outline,

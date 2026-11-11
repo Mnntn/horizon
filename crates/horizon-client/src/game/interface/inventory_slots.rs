@@ -2,6 +2,9 @@
 //! slot positions and hit tests, highlights, and the crafting result slot.
 use super::*;
 
+#[cfg(test)]
+thread_local! { pub(in crate::game) static SLOT_POSITIONS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) }; }
+
 impl Game<'_> {
     /// A screen closed or lost its pointer: discard the unfinished click gesture.
     pub(super) fn reset_inventory_clicks(&mut self) {
@@ -148,7 +151,18 @@ impl Game<'_> {
         hud_layout::paint(batch, &self.gui.atlas, &draws);
         self.native_item_decorations(stack, x, y, batch);
     }
+    /// The open container screen's player-inventory origin (`getXOrigin`/
+    /// `getYOrigin`): the build's, or the frame's own arithmetic with no
+    /// build yet.
     pub(super) fn inventory_origin(&self, batch: &HudBatch) -> (f32, f32) {
+        match self.built_container(batch) {
+            Some(layout) => layout.origin,
+            None => self.inventory_origin_unbuilt(batch),
+        }
+    }
+    /// `inventory_origin` from the game's state alone: the container build's
+    /// own arithmetic, and the fallback when no build holds this size.
+    pub(super) fn inventory_origin_unbuilt(&self, batch: &HudBatch) -> (f32, f32) {
         if self.screen == Screen::Creative {
             return Self::creative_origin(batch);
         }
@@ -158,6 +172,8 @@ impl Game<'_> {
     }
     /// InventoryMenu / CraftingMenu slot layouts.
     pub(super) fn slot_position(&self, i: usize) -> (f32, f32) {
+        #[cfg(test)]
+        SLOT_POSITIONS.with(|count| count.set(count.get() + 1));
         if self.creative_inventory_open()
             && let Some(position) = Creative::inventory_slot_position(i)
         {
@@ -239,11 +255,33 @@ impl Game<'_> {
         if mod_screen_shown { None } else { stock }
     }
 
+    /// The slot under the cursor (`AbstractContainerScreen.getHoveredSlot`),
+    /// from the build's slot boxes rather than a fresh grid, so the hit test
+    /// is the one the frame draws with. None while the recipe book covers the
+    /// menu in a narrow window (`AbstractRecipeBookScreen.isHovering`).
     pub(super) fn slot_at(&self, batch: &HudBatch, x: f32, y: f32) -> Option<usize> {
         if self.book_covers_menu(batch.width) {
             return None;
         }
-        let (ox, oy) = self.inventory_origin(batch);
+        match self.built_container(batch) {
+            Some(layout) => {
+                layout
+                    .slots
+                    .iter()
+                    .find(|(_, r)| {
+                        // AbstractContainerScreen.isHovering: the 16x16 slot
+                        // grows by one pixel on every side, so the gaps
+                        // between slots still hover one.
+                        x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + r[3]
+                    })
+                    .map(|&(slot, _)| slot)
+            }
+            None => self.slot_at_unbuilt(batch, x, y),
+        }
+    }
+    /// `slot_at` from the game's state alone, without a build.
+    fn slot_at_unbuilt(&self, batch: &HudBatch, x: f32, y: f32) -> Option<usize> {
+        let (ox, oy) = self.inventory_origin_unbuilt(batch);
         self.slots().into_iter().find(|&i| {
             let (sx, sy) = self.slot_position(i);
             // AbstractContainerScreen.isHovering: the 16x16 slot grows by one

@@ -29,6 +29,57 @@ pub enum BiomeSourceKind {
     MultiNoise,
     /// The End's islands (`minecraft:the_end`).
     End,
+    /// The mod's own `biome_points`: each biome where its climate intervals are the nearest to the
+    /// level's climate (`minecraft:multi_noise` with an inline `biomes` list).
+    Points,
+}
+
+/// Where one biome sits in a multi-noise biome source: the climate it is chosen for, as
+/// `Climate.ParameterPoint`. Every interval is `(min, max)` inside -2 to 2, with `min` not above
+/// `max`; a single value is `(v, v)`. The biome nearest to the level's climate at a position wins,
+/// and `offset` (0 to 1) makes this one count as farther away.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: mods build it themselves as part of a level's `biome_points`
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct BiomePoint {
+    /// The biome's id (`mymod:glowing_forest`, or a vanilla or data pack biome's).
+    pub biome: String,
+    /// `temperature`, -2 to 2.
+    pub temperature: (f32, f32),
+    /// `humidity`, -2 to 2.
+    pub humidity: (f32, f32),
+    /// `continentalness`, -2 to 2: low is ocean, high is inland.
+    pub continentalness: (f32, f32),
+    /// `erosion`, -2 to 2.
+    pub erosion: (f32, f32),
+    /// `depth`, -2 to 2: 0 is the surface and above 1 is underground.
+    pub depth: (f32, f32),
+    /// `weirdness`, -2 to 2.
+    pub weirdness: (f32, f32),
+    /// `offset`, 0 to 1.
+    pub offset: f32,
+}
+
+impl BiomePoint {
+    /// Whether the point is one the codec accepts: finite intervals inside -2 to 2, ordered, and
+    /// an offset inside 0 to 1.
+    fn is_valid(&self) -> bool {
+        let interval = |(min, max): (f32, f32)| {
+            (-2.0..=2.0).contains(&min) && (-2.0..=2.0).contains(&max) && min <= max
+        };
+        !self.biome.is_empty()
+            && [
+                self.temperature,
+                self.humidity,
+                self.continentalness,
+                self.erosion,
+                self.depth,
+                self.weirdness,
+            ]
+            .into_iter()
+            .all(interval)
+            && (0.0..=1.0).contains(&self.offset)
+    }
 }
 
 /// What a mod's dimension is made of. The default is the Overworld's shape
@@ -60,6 +111,8 @@ pub struct DimensionSettings {
     pub biome_source: BiomeSourceKind,
     /// The biomes a `Checkerboard` source alternates, at least one (vanilla sets no maximum).
     pub biomes: Vec<String>,
+    /// A `Points` source's biomes and the climate each is chosen for, at least one.
+    pub biome_points: Vec<BiomePoint>,
     /// A `Checkerboard`'s cell size as a power of two of chunks, 0 to 62 (vanilla's default is 2).
     pub biome_scale: u32,
     /// A `MultiNoise` source's preset: `minecraft:overworld` or `minecraft:nether`.
@@ -152,6 +205,7 @@ impl Default for DimensionSettings {
             biome: "minecraft:plains".into(),
             biome_source: BiomeSourceKind::Fixed,
             biomes: Vec::new(),
+            biome_points: Vec::new(),
             biome_scale: 2,
             biome_preset: "minecraft:overworld".into(),
             has_fixed_time: false,
@@ -272,6 +326,12 @@ impl DimensionSettings {
                 "a checkerboard needs at least one biome"
             }
             BiomeSourceKind::Checkerboard if self.biome_scale > 62 => "biome_scale must be 0 to 62",
+            BiomeSourceKind::Points if self.biome_points.is_empty() => {
+                "a points biome source needs at least one biome point"
+            }
+            BiomeSourceKind::Points if !self.biome_points.iter().all(BiomePoint::is_valid) => {
+                "a biome point needs a biome, six climate intervals from -2 to 2 with min not above max, and an offset from 0 to 1"
+            }
             BiomeSourceKind::MultiNoise
                 if !matches!(
                     self.biome_preset.as_str(),

@@ -1,6 +1,10 @@
 //! The shape of an injection point (#589): what a `#[point]` function hands its listeners. Shared
 //! by the `#[point]` attribute (the check at the function's head) and the mod API generator (the
 //! records, `PointId` and `points.json`), so the two always agree.
+pub mod catalog;
+/// Filename of the versioned SDK tool catalog.
+pub const SDK_CATALOG_FILE: &str = "mod-catalog.json";
+
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{FnArg, Pat, Type};
@@ -115,8 +119,6 @@ pub struct Shape {
     /// It has a raw form (`raw` in the attribute): the staging pass declared its raw record and
     /// listener types beside it ([`Shape::raw_items`]).
     pub raw: bool,
-    /// Staging-only raw dispatch, with no API record or API listeners.
-    pub raw_only: bool,
     /// A free function (`free` in the attribute), not an associated one.
     pub free: bool,
     /// The slot table module its expansion reaches (`table = "…"`): the game's `mod_points`, or a
@@ -216,15 +218,11 @@ pub fn raw_able(sig: &syn::Signature, impl_generics: Option<&syn::Generics>) -> 
 /// types the game carries as their `mod_api` mirrors. The generator resolves both once.
 pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape> {
     let (mut name, mut side, mut raw, mut free) = (sig.ident.to_string(), None, false, false);
-    let mut raw_only = false;
     let mut table: syn::Path = syn::parse_quote!(mod_points);
     let mut mirrors = Vec::new();
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("raw") {
             raw = true;
-        } else if meta.path.is_ident("raw_only") {
-            raw = true;
-            raw_only = true;
         } else if meta.path.is_ident("free") {
             free = true;
         } else if meta.path.is_ident("name") {
@@ -356,7 +354,6 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
         returns,
         borrowed_return,
         raw,
-        raw_only,
         free,
         table,
     })
@@ -621,7 +618,7 @@ impl Shape {
 
     /// Whether its API listeners have a record: every parameter has an API type.
     pub fn api(&self) -> bool {
-        !self.raw_only && self.api_refusal.is_none()
+        self.api_refusal.is_none()
     }
 
     /// The record's `cancel` or `result` field, with its type.

@@ -410,7 +410,7 @@ impl Game<'_> {
                 host.hub.system_message_to(message.clone(), |other| {
                     horizon_client::scoreboard::death_message_reaches(board, &name, other)
                 });
-                if self.options.dedicated.is_some() {
+                if self.is_dedicated_server() {
                     crate::game::dedicated::events::record(
                         "death",
                         &name,

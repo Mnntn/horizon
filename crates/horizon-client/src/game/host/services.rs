@@ -91,4 +91,18 @@ impl RenderAssets for Game<'_> {
         );
         self.native_model(id)
     }
+    fn render_pipeline(&self, id: &Identifier) -> Result<RenderPipelineRef, RenderPipelineError> {
+        mod_api::__private::check_access(
+            "render_pipeline",
+            mod_api::__private::LoadAccess::PublishedResources,
+        );
+        self.pack.render.render_pipeline(id)
+    }
+    fn animation(&self, id: &Identifier) -> Option<AnimationHolder> {
+        mod_api::__private::check_access(
+            "animation",
+            mod_api::__private::LoadAccess::PublishedResources,
+        );
+        self.pack.render.animation(id)
+    }
 }

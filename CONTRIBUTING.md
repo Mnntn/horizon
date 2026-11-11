@@ -116,6 +116,12 @@ crates you touched (and the launcher's), generated files, `Cargo.lock`, the Pyth
 your change can affect. Without the vanilla data on your machine it lists those harnesses instead; CI runs them.
 `--quick` skips the harnesses. It exits non-zero when something fails.
 
+Reviews on this fork read the diff, the design and CI; they do not run your change. So for anything a player or a
+mod author can see, please start the game once and try it (single player is enough:
+`cargo build --profile fast -p horizon-game`, or `horizon-ctl` for agents) and say in one line what you did, under
+"Tried in game" in the template. It is not a gate: "no, could not run it here" is an acceptable answer, and it tells
+the reviewer where to look harder.
+
 For the game workspace, Clippy checks all targets of the touched crates and their transitive workspace dependents,
 including examples. The dependency scope includes optional, platform, build and development dependencies. Tests run
 library, binary, integration and doc tests without building unrelated example executables. Shared Cargo
@@ -136,6 +142,11 @@ claimed whole: claim one of the issues a tracker lists, or open one for the part
 A claim with no open pull request linking the issue (`Fixes #123` in the description, or a draft) is released after
 5 days, with a comment: open a draft early. Agents claim the same way.
 
+You can hold at most 5 claimed issues that no open pull request of yours links. A sixth `/claim` is refused with a
+comment that gives the count; opening a pull request for one of them, or `/unclaim` on one, frees a slot. The
+repository's collaborators, and the trusted contributors listed in the repository variable `CLAIM_LIMIT_EXEMPT`, are
+not limited.
+
 When your pull request changes the same functions as another open one, or closes the same issue, a bot comment names
 it (edited on every push, never repeated): talk to its author in the thread before you both finish the same work.
 
@@ -145,12 +156,11 @@ it (edited on every push, never repeated): talk to its author in the thread befo
   needs. There's no line limit; split by concern, never by size, and don't bundle unrelated changes.
 - **Fill in the template**: what and why, the vanilla reference, the pr_ready block, screenshots for anything you
   can see.
-- **Tick "Allow edits by maintainers".** When something small is left (a lint, a rebase, a nit) we push the fixup
-  ourselves instead of sending it back to you; only design questions come back.
-- **Once we've pushed to your branch, merge main into it; don't rebase or force-push.** A rebase or force-push
-  replaces our commits with yours and erases the fixes we added (it happened on #5188 and #5203). Tell your agent
-  too: `git merge origin/main`, never `git rebase` or `git push --force` on a branch a maintainer has touched. If
-  our fixes get erased anyway, we finish the work in our own pull request that keeps your commits and credits you.
+- **We never push to your branch on this fork.** When something small is left (a lint, a rebase, a nit) we carry
+  it in our own commits on top of yours in a rollup, and your pull request shows as merged with your commits
+  intact; only design questions come back to you. You don't need to tick "Allow edits by maintainers".
+- **Keep your branch yours.** You can push to it as you like. If you want to bring it up to date, `git merge
+  origin/main` is the safe way; a rebase or force-push is fine too, since nothing of ours lives on your branch.
 - **Tick its kind** in the template: `parity` (Horizon now does what vanilla does), `bug` (a crash or breakage),
   `perf`, `feature` (new for players), `extra` (Horizon-only, off by default), `tooling` or `docs`. A workflow sets
   that label, and area labels (`launcher`, `mobs`, `worldgen`, `rendering`...) from the paths you change.

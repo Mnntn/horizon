@@ -541,7 +541,7 @@ impl Rule {
         let mut refs: HashMap<String, BTreeMap<String, Option<String>>> = HashMap::new();
         for internal in internals {
             if !internal.cfg.is_empty()
-                || !matches!(internal.kind, "struct" | "enum" | "fn" | "method")
+                || !matches!(internal.kind, "struct" | "enum" | "type" | "fn" | "method")
             {
                 continue;
             }

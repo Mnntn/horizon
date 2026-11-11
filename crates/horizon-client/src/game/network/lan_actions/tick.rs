@@ -64,6 +64,7 @@ impl Game<'_> {
             let play = host.play.entry(conn).or_default();
             play.chat_spam = play.chat_spam.saturating_sub(1);
             play.command_spam = play.command_spam.saturating_sub(1);
+            play.recipe_checks = play.recipe_checks.saturating_sub(1);
             // commandSuggestionsProvider.tick: one answer a tick, to the latest request.
             play.suggestion_budget = true;
             self.guest_try_suggestions(conn);

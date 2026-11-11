@@ -1,7 +1,7 @@
-//! `PumpkinBlock.useItemOn`: shears carve a pumpkin into a carved pumpkin
+//! `PumpkinBlock.useItemOn`: shears (a stack able to `shears_carve`) carve a pumpkin into a carved pumpkin
 //! facing the clicked side (the side facing the player on the top and
 //! bottom), and the `carve/pumpkin` seeds pop out of that side.
-use super::Game;
+use super::{Game, item_abilities::ability};
 use horizon_client::{Result, items::ItemStack};
 use horizon_core::random::RandomSource;
 
@@ -14,7 +14,7 @@ impl Game<'_> {
         face: [i32; 3],
         held: Option<&ItemStack>,
     ) -> Result<bool> {
-        let Some(shears) = held.filter(|s| &*s.item == "minecraft:shears") else {
+        let Some(shears) = held.filter(|s| self.stack_shears(s, ability::SHEARS_CARVE)) else {
             return Ok(false);
         };
         let state = self.world.block(pos[0], pos[1], pos[2]);

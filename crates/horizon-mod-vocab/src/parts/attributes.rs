@@ -48,7 +48,7 @@ pub trait AttributesRegistrar {
     /// may name the mod's own new attribute. Sanitizing a value (NaN → min,
     /// else clamp) is the definition's own `sanitize`.
     ///
-    /// An id outside the mod's namespace (a vanilla attribute's included),
+    /// An id outside the mod's manifest-owned namespaces (a vanilla attribute's included),
     /// a malformed id, a duplicate — of this mod's or another's, caught
     /// where the declarations join the catalog — a non-finite default or
     /// bound, or bounds the default is not inside (`min > max` included)
@@ -74,22 +74,19 @@ impl AttributesRegistrar for PartRegistrar {
         syncable: bool,
         sentiment: Sentiment,
     ) -> Result<(), crate::AttributeRegistrationError> {
+        let id = match self.owned_declaration_id(path) {
+            Ok(id) => id,
+            Err(reason) => {
+                self.refused.push(reason);
+                return Err(crate::AttributeRegistrationError::InvalidId);
+            }
+        };
         let result = (|| {
             if crate::world::phase::LoadedMods::new()
                 .get(self.mod_id)
                 .is_some_and(|package| package.side() != crate::Side::Both)
             {
                 return Err(crate::AttributeRegistrationError::WrongSide);
-            }
-            let (namespace, name) = path.split_once(':').unwrap_or((self.mod_id, path));
-            if namespace.is_empty() || name.is_empty() || namespace != self.mod_id {
-                return Err(crate::AttributeRegistrationError::InvalidId);
-            }
-            let id = format!("{namespace}:{name}");
-            // The characters modifier and catalog ids allow (`ResourceLocation`'s).
-            let valid = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit() || b"_.-".contains(&c);
-            if !namespace.bytes().all(valid) || !name.bytes().all(|c| valid(c) || c == b'/') {
-                return Err(crate::AttributeRegistrationError::InvalidId);
             }
             if self.attributes.iter().any(|declared| declared.id == id) {
                 return Err(crate::AttributeRegistrationError::Duplicate);

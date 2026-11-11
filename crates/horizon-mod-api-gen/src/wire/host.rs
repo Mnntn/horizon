@@ -660,6 +660,16 @@ impl Cx {
 
 /// Generate the host boundary from the same source surface as the guest.
 pub fn generate_host(root: &std::path::Path) -> Result<String, String> {
+    host_and_coverage(root).map(|(code, _)| code)
+}
+
+/// The book's wasm boundary coverage page, generated from the same surface and host gap tables
+/// as the host boundary: the book's preprocessor renders it at build time.
+pub fn generate_coverage(root: &std::path::Path) -> Result<String, String> {
+    host_and_coverage(root).map(|(_, report)| report)
+}
+
+fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String> {
     let generated = crate::sources(root, crate::FillMode::Require)?;
     let providers = crate::capability_providers::generate(root, &[])?.0;
     let included = [
@@ -726,13 +736,6 @@ pub fn generate_host(root: &std::path::Path) -> Result<String, String> {
         .count();
     writeln!(report, "\nRequired gap total: {gaps}.").unwrap();
     report.push_str(include_str!("../../coverage-notes.md"));
-    std::fs::write(root.join("target/wire-coverage.md"), &report).map_err(|e| e.to_string())?;
-    if std::env::var_os("HORIZON_UPDATE_WIRE_COVERAGE").as_deref()
-        == Some(std::ffi::OsStr::new("1"))
-    {
-        std::fs::write(root.join("docs/modding/src/wasm-coverage.md"), &report)
-            .map_err(|e| e.to_string())?;
-    }
     writeln!(code, "pub const SUBSCRIBED: u32 = {count};").unwrap();
     code.push_str("pub fn hook_id(name: &str) -> Option<mod_api::HookId> { match name {\n");
     let ast = syn::parse_file(&generated.hooks).map_err(|e| e.to_string())?;
@@ -762,5 +765,5 @@ pub fn generate_host(root: &std::path::Path) -> Result<String, String> {
         .unwrap();
     }
     code.push_str("_ => None } } pub fn subscriptions_of(owner: &str, names: Vec<String>) -> &'static [Option<mod_api::HookId>] { names.into_iter().filter_map(|name| { let id = hook_id(&name); if id.is_none() { log::warn!(\"wasm {owner}: unknown hook {name}\"); } id.map(Some) }).collect::<Vec<_>>().leak() }\n");
-    Ok(code)
+    Ok((code, report))
 }

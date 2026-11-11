@@ -56,6 +56,11 @@ jobs:
       contents: read
       actions: read
     outputs:
+      rust_required: ${{ steps.selection.outputs.rust_required || 'true' }}
+      launcher_required: ${{ steps.selection.outputs.launcher_required || 'true' }}
+      tooling_required: ${{ steps.selection.outputs.tooling_required || 'true' }}
+      # The sample was PR-selected before centralization; keep main/dispatch behavior unchanged.
+      sample_required: ${{ steps.selection.outputs.sample_required || 'false' }}
       self_hosted: ${{ !inputs.github-fallback && steps.hosted.outputs.forced_github != 'true' && steps.runner.outputs.self_hosted || 'false' }}
       routing_reason: ${{ steps.runner.outputs.routing_reason }}
       # Every ignored-tests shard on main pushes and dispatches; empty on pull requests.
@@ -67,6 +72,16 @@ jobs:
       forced_github: ${{ steps.hosted.outputs.forced_github }}
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch this commit's history for selection
+        if: github.event_name == 'pull_request'
+        run: git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"
+      - name: Select checks once for this pull request
+        if: github.event_name == 'pull_request'
+        id: selection
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 tools/ci/rust_changes.py --all "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       # workflow_run omits pull_requests for fork runs. Record only immutable IDs;
       # the trusted controller reads this as bounded data, never as executable code.
       - name: Record the original PR base for boat recovery
@@ -92,6 +107,7 @@ jobs:
       # its snapshot fallback uses run creation time, bounded to an hour of queue age.
       # Fork pull requests remain on GitHub's runners.
       - id: runner
+        if: steps.selection.outputs.rust_required != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           # The run's snapshot, used when the live read is refused (the workflow token may lack Variables access).
@@ -120,9 +136,12 @@ jobs:
           fi
           ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} LEASE_SOURCE=$SOURCE CREATED=$CREATED bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
       - id: hosted
+        if: steps.selection.outputs.rust_required != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          BOAT_CI: ${{ !inputs.github-fallback && vars.BOAT_CI || 'off' }}
+          # Empty on a fork's pull request: boat_health.py then reads what boat-recovery published.
+          BOAT_CI: ${{ vars.BOAT_CI }}
+          BOAT_FALLBACK: ${{ inputs.github-fallback && 'true' || 'false' }}
           BOAT_USERS: ${{ vars.BOAT_CI_USERS }}
           AUTHOR: ${{ github.event.pull_request.user.login || github.actor }}
           ACTOR: ${{ github.triggering_actor }}
@@ -171,8 +190,8 @@ jobs:
     # build folder persists, so clippy re-checks only what changed. A fork's pull request, or a run while the
     # pool is down, stays on GitHub's runners with the snapshot cache below.
     needs: changes
-    if: github.event_name != 'schedule'
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'dyna-large' || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
+    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' }}
+    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'dyna-large' || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     # A cold lint (two full clippy graphs) takes 40+ minutes on GitHub runners: room to finish, main to save its cache.
     timeout-minutes: ${{ github.event_name == 'pull_request' && 75 || 100 }}
     env:
@@ -181,29 +200,29 @@ jobs:
       # Like verify, avoid scheduling eight large rustc processes inside a 16 GiB slot.
       JOBS: ${{ (needs.changes.outputs.self_hosted == 'true' || startsWith(needs.changes.outputs.hosted_label, 'boat')) && '-j4' || '' }}
     steps:
+      - name: Require successful check selection
+        if: needs.changes.result != 'success'
+        run: exit 1
+      - name: Documentation needs no Rust lint
+        if: needs.changes.outputs.rust_required == 'false'
+        run: echo 'Rust lint is not selected; repository hygiene still runs.'
+      # Not diff-selected: any tracked file can contain a captured tool notice.
       - uses: actions/checkout@v4
-      # Only this commit's own history (rust_changes.py's merge base, check_public_tree.py's range and HEAD
-      # ancestry), not every branch and tag: a full checkout fetched them all and took over a minute.
-      - name: Fetch this commit's history
-        if: github.event_name == 'pull_request'
-        run: git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"
-      - name: Does this pull request need Rust checks?
-        if: github.event_name == 'pull_request'
-        id: rust
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
-      - name: Install Dyna runner dependencies without root
-        if: steps.rust.outputs.required != 'false' && env.RUNNER_KIND == 'dyna'
+      - name: Check repository artifacts and workflow YAML
+        run: python3 tools/ci/check_repository_hygiene.py
+      - name: Check mod API boundary
+        if: needs.changes.outputs.rust_required != 'false'
+        run: python3 tools/ci/check_api_boundary.py --source-only
+      - name: Check Dyna dependencies (install fallback without root)
+        if: needs.changes.outputs.rust_required != 'false' && env.RUNNER_KIND == 'dyna'
         run: bash tools/ci/dyna_ci_deps.sh
-      - name: Install Rust toolchain and the ALSA and udev headers the client links against
-        if: steps.rust.outputs.required != 'false'
+      - name: Install Rust toolchain and the runner image's packages
+        if: needs.changes.outputs.rust_required != 'false'
         env:
           HOSTED: ${{ env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat' }}
         run: |
           if [ "$HOSTED" = true ]; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends $(grep -v '^#' tools/ci/runner-packages.txt)
           else
             if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
               curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
@@ -215,9 +234,9 @@ jobs:
             # Keep clippy-driver direct, but reuse sccache for ordinary dependency compilations.
             echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/tools/ci/clippy-cache.sh" >> "$GITHUB_ENV"
           fi
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
+          bash tools/ci/rustup_install.sh stable --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
       - name: Lint cache toolchain
-        if: steps.rust.outputs.required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
+        if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         id: toolchain
         run: |
           echo "hash=$(rustc +stable -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
@@ -226,7 +245,7 @@ jobs:
       # rust-cache's default removes workspace artifacts. Those are the expensive part here,
       # in two feature graphs; keep both. ci-cache.yml publishes a fresh snapshot from main every 6 hours.
       - uses: actions/cache/restore@v4
-        if: steps.rust.outputs.required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
+        if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         id: lint-cache
         with:
           path: |
@@ -240,7 +259,7 @@ jobs:
       # A restore-key hit can predate a profile or dependency change: a successful download
       # does not mean Cargo has artifacts for the requested graph (for example, #1190).
       - name: Report lint cache compatibility
-        if: steps.rust.outputs.required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
+        if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         env:
           REQUESTED_KEY: ${{ steps.lint-cache.outputs.cache-primary-key }}
           MATCHED_KEY: ${{ steps.lint-cache.outputs.cache-matched-key }}
@@ -261,26 +280,38 @@ jobs:
       # A fresh checkout otherwise makes every workspace source newer than the cached artifacts.
       # Only byte-identical Git objects regain their cached mtimes; changed inputs stay new.
       - name: Restore unchanged source timestamps
-        if: steps.rust.outputs.required != 'false'
+        if: needs.changes.outputs.rust_required != 'false'
         run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Check formatting and lint
-        if: steps.rust.outputs.required != 'false'
-        id: native-lint
+      - name: Check formatting
+        if: needs.changes.outputs.rust_required != 'false'
+        id: formatting
+        continue-on-error: true
         run: |
           cargo +stable fmt --all -- --check
           find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --config skip_children=true --check
           rustup run stable rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
-          cargo +stable clippy $JOBS --keep-going --workspace --all-targets -- -D warnings
+      - name: Lint native targets
+        if: needs.changes.outputs.rust_required != 'false'
+        id: native-lint
+        run: cargo +stable clippy $JOBS --keep-going --workspace --all-targets -- -D warnings
       - name: Lint the server build without sound or controllers
-        if: steps.rust.outputs.required != 'false'
+        if: needs.changes.outputs.rust_required != 'false'
         id: server-lint
         run: cargo +stable clippy $JOBS --keep-going -p horizon-client -p horizon-game -p horizon-mod-host --all-targets --no-default-features -- -D warnings
+      - name: The machine sample builds against this API
+        if: needs.changes.outputs.sample_required == 'true'
+        run: python3 tools/ci/check_machine_sample.py
       - name: The mod API builds for wasm32
-        if: steps.rust.outputs.required != 'false'
+        if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable check $JOBS -p horizon-mod-api --target wasm32-unknown-unknown --locked
+      - name: Propagate formatting failure
+        if: ${{ always() && steps.formatting.outcome == 'failure' }}
+        run: |
+          echo '::error::Formatting failed; see Check formatting. Independent build failures remain above.'
+          exit 1
       - name: Report lint compiler cache
-        if: ${{ !cancelled() && steps.rust.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
+        if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
       # Publish native work even if the independent wasm check fails. Pull requests only read
       # main's snapshots; they can never replace a cache subsequently consumed by main.
@@ -295,7 +326,8 @@ jobs:
 
   verify:
     needs: changes
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
+    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' }}
+    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: 45
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -304,25 +336,24 @@ jobs:
     env:
       VK_ICD_FILENAMES: /nonexistent/no-vulkan-in-verify.json
       VK_DRIVER_FILES: /nonexistent/no-vulkan-in-verify.json
+      # With Vulkan hidden, a runner with Mesa's GL software adapter (boat's image) would still run the GPU tests,
+      # on GL, and fail (#2841); Vulkan only leaves every runner with no adapter, so GPU tests skip here everywhere.
+      WGPU_BACKEND: vulkan
       JOBS: ${{ (needs.changes.outputs.self_hosted == 'true' || startsWith(needs.changes.outputs.hosted_label, 'boat')) && '-j4' || '' }}
       RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
+      - name: Require successful check selection
+        if: needs.changes.result != 'success'
+        run: exit 1
       - uses: actions/checkout@v4
       # Only this commit's own history (rust_changes.py's merge base, check_public_tree.py's range and HEAD
       # ancestry), not every branch and tag: a full checkout fetched them all and took over a minute.
       - name: Fetch this commit's history
         run: git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"
       - uses: actions/setup-python@v5
-        if: (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
+        if: needs.changes.outputs.tooling_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
           python-version: '3.12'
-      - name: Does this pull request need Rust checks?
-        if: github.event_name == 'pull_request'
-        id: rust
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       # A pull request adds only its own commits to main, so it reads those; main's pushes read every ref's history.
       - name: Keep game artifacts out of Git
         env:
@@ -337,9 +368,11 @@ jobs:
             python3 tools/check_public_tree.py --history
           fi
       - name: Check duplicate public native functions
+        if: needs.changes.outputs.rust_required != 'false'
         run: python3 tools/sync_upstream.py --check
       # docs/layers.md#built-in-addresses: every built-in outside address in the Horizon layer's home; the rest only shrinks.
       - name: Built-in addresses stay in their home
+        if: needs.changes.outputs.rust_required != 'false'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/check_addresses.py ${BASE_SHA:+--base "$BASE_SHA"}
@@ -348,27 +381,27 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/check_file_size.py ${BASE_SHA:+--base "$BASE_SHA"}
-      - name: Install Dyna runner dependencies without root
-        if: steps.rust.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true'
+      - name: Check Dyna dependencies (install fallback without root)
+        if: needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
-      - name: Install Rust toolchain and the ALSA and udev headers the client links against
-        if: steps.rust.outputs.required != 'false'
+      - name: Install Rust toolchain and the runner image's packages
+        if: needs.changes.outputs.rust_required != 'false'
         env:
           HOSTED: ${{ env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat' }}
           DYNA: ${{ needs.changes.outputs.self_hosted }}
         run: |
           if [ "$HOSTED" = true ]; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends $(grep -v '^#' tools/ci/runner-packages.txt)
           elif [ "$DYNA" = true ]; then
             if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
               curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
             fi
             export PATH="$CARGO_HOME/bin:$PATH"
           fi
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          bash tools/ci/rustup_install.sh stable --profile minimal --component rustfmt --component clippy
       # docs/layers.md: a crate depends only on its own layer or a lower one; today's exceptions only shrink.
       - name: Crates follow the layers
-        if: steps.rust.outputs.required != 'false'
+        if: needs.changes.outputs.rust_required != 'false'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/check_layers.py ${BASE_SHA:+--base "$BASE_SHA"}
@@ -376,7 +409,7 @@ jobs:
       # ci-cache.yml publishes this snapshot from main every 6 hours; pull requests only read it.
       # Profile overrides in Cargo.toml are part of rust-cache's key; unchanged dependencies still restore.
       - uses: Swatinem/rust-cache@v2
-        if: steps.rust.outputs.required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
+        if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
           # A new key: the dependency-only snapshot under the old one blocked saving this one.
           shared-key: verify-workspace
@@ -391,31 +424,58 @@ jobs:
       # cargo test, not nextest: nextest's process per test reloads each binary's shared tables for every test, and on
       # these 4-core runners it was no faster (#4978).
       - name: Build the runtime holder test actor
-        if: steps.rust.outputs.required != 'false'
+        if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable build $JOBS -p horizon-mod-package --features runtime-process --example holder_actor
       - name: Test Rust core and voxel kernel correctness
-        if: steps.rust.outputs.required != 'false'
+        if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable test $JOBS --workspace --lib --bins --tests
       # Separate timings make rebuilds between Cargo invocations visible without changing the test selection.
       # The full content-root tests (#[ignore]d: minutes each on a laptop). The same build as above; they need the
       # prepared vanilla data, so without it they pass at once. Keep the target selection identical to avoid
       # recompiling the workspace with a different dependency graph.
       - name: Test ignored mod content roots
-        if: steps.rust.outputs.required != 'false'
+        if: needs.changes.outputs.rust_required != 'false'
         run: |
           cargo +stable test $JOBS --workspace --lib --bins --tests mod_content::tests:: -- --ignored
+      # Derive caller inputs from slot rows on the checked-out PR merge result.
+      # Keep this before doc tests so their failures cannot hide stale slots.
+      - name: Validate prebuilt source stage and listed slots
+        if: needs.changes.outputs.rust_required != 'false'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 tools/ci/stage_slots.py --base "${BASE_SHA:-HEAD^}"
       - name: Test Rust documentation examples
-        if: steps.rust.outputs.required != 'false'
+        if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable test $JOBS --workspace --doc
+      - name: Test listed call production export and real registry
+        if: needs.changes.outputs.rust_required != 'false'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 tools/ci/listed_calls.py --base "${BASE_SHA:-HEAD^}"
       - name: Report test compiler cache
-        if: ${{ !cancelled() && steps.rust.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
+        if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
-      # Last, and whatever happened above: a tooling failure must never skip the Rust tests.
+      # Last, so a tooling failure never skips the Rust tests. Only after every earlier step succeeded (success(),
+      # not !cancelled()): after a failure the Rust install was skipped, and tests that launch rustc would add a
+      # second, misleading failure.
       - name: Test offline research tooling
-        if: ${{ !cancelled() }}
+        if: ${{ success() && needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false' }}
         run: |
           python3 -m unittest discover -s tests -v
           python3 -m unittest discover -s tools/ci -p 'test_prepared_*.py' -v
+      # The mod-host map's tables (#2534), built on main's pushes instead of committed, so no PR has to regenerate
+      # them: docs/layering/mod-host-map.md points here. Main pushes only, never pull requests; about 17 s of Python
+      # measured locally, no build.
+      - name: Build the mod-host map tables
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        run: python3 tools/layering/scan_engine_mod_edges.py --map target/layering/mod-host-map-tables.md
+      - name: Upload the mod-host map tables
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mod-host-map
+          path: target/layering/mod-host-map-tables.md
+          if-no-files-found: error
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
@@ -430,26 +490,32 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.ignored_matrix) }}
-    runs-on: dyna-large
-    timeout-minutes: 60
+    # Owner-approved stopgap: #2944 removes this when the legs run under 15 minutes.
+    runs-on: ${{ (matrix.shard == 'horizon-client#1of2' || matrix.shard == 'horizon-client#2of2') && 'dyna-xlarge' || 'dyna-large' }}
+    # Temporary: #2944 brings client data legs under 15 minutes and restores the 60-minute cap.
+    timeout-minutes: ${{ (matrix.shard == 'horizon-client#1of2' || matrix.shard == 'horizon-client#2of2') && 90 || 60 }}
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Install Dyna runner dependencies
+      - name: Check Dyna dependencies (install fallback without root)
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain
         run: |
           if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
-          rustup toolchain install stable --profile minimal
+          bash tools/ci/rustup_install.sh stable --profile minimal
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '25'
+      - name: Record data-leg start and compiler cache
+        run: |
+          date -u '+data-leg start utc=%Y-%m-%dT%H:%M:%SZ'
+          sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
       # Missing data must fail on both main pushes and nightly dispatches.
       - name: Prepare checkout-keyed vanilla data
         id: data
@@ -464,6 +530,17 @@ jobs:
             fi
           done
           HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+      - name: Retain typed preparation diagnostics only
+        if: failure() && steps.data.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: preparation-diagnostic-${{ strategy.job-index }}
+          path: |
+            ${{ runner.temp }}/prepare-build.diagnostic.json
+            ${{ runner.temp }}/prepare.diagnostic.json
+            ${{ runner.temp }}/seed-extras.diagnostic.json
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Generate the fishing test's vanilla reference inputs
         if: steps.data.outputs.present != 'false' && (matrix.shard == 'horizon-client' || startsWith(matrix.shard, 'horizon-client#'))
         run: |
@@ -474,9 +551,28 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: stable
           SHARD: ${{ matrix.shard }}
+          HORIZON_DATA_LEG_TIMING: '1'
         run: |
           export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
           python3 tools/ci/with_xvfb.py python3 tools/ci/ignored_tests.py "$SHARD"
+      - name: Record data-leg end and compiler cache
+        if: always()
+        run: |
+          date -u '+data-leg end utc=%Y-%m-%dT%H:%M:%SZ'
+          # Whole-job cgroup high-water: compilation, tests and file cache, not per-test RSS
+          # or an isolated test-execution peak. Fixed kernel files only; telemetry is best effort.
+          echo 'data-leg memory_scope=whole_job_cgroup_including_compilation_tests_file_cache'
+          for metric in memory.peak memory.max memory.swap.peak memory.swap.max; do
+            field="${metric//./_}_bytes"
+            value=unavailable
+            if IFS= read -r sample 2>/dev/null < "/sys/fs/cgroup/$metric"; then
+              if [[ "$sample" =~ ^[0-9]+$ || "$sample" == max ]]; then
+                value="$sample"
+              fi
+            fi
+            echo "data-leg $field=$value"
+          done
+          sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
   # Never turn missing prepared-data coverage into a green main/nightly run.
   ignored-tests:
     needs: [changes, ignored-tests-shards]
@@ -512,27 +608,16 @@ jobs:
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).
   launcher:
     needs: changes
+    if: needs.changes.outputs.launcher_required != 'false'
     runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      # Only this commit's own history (rust_changes.py's merge base, check_public_tree.py's range and HEAD
-      # ancestry), not every branch and tag: a full checkout fetched them all and took over a minute.
-      - name: Fetch this commit's history
-        if: github.event_name == 'pull_request'
-        run: git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"
-      - name: Does this pull request change the launcher or a crate it builds?
-        if: github.event_name == 'pull_request'
-        id: launcher
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 tools/ci/rust_changes.py --launcher "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
-      - name: Install Dyna runner dependencies without root
-        if: steps.launcher.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true'
+      - name: Check Dyna dependencies (install fallback without root)
+        if: needs.changes.outputs.launcher_required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust and the headers GPUI links against
-        if: steps.launcher.outputs.required != 'false'
+        if: needs.changes.outputs.launcher_required != 'false'
         env:
           HOSTED: ${{ runner.environment == 'github-hosted' }}
           DYNA: ${{ needs.changes.outputs.self_hosted }}
@@ -546,15 +631,15 @@ jobs:
             fi
             export PATH="$CARGO_HOME/bin:$PATH"
           fi
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          bash tools/ci/rustup_install.sh stable --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@v2
-        if: steps.launcher.outputs.required != 'false' && runner.environment == 'github-hosted'
+        if: needs.changes.outputs.launcher_required != 'false' && runner.environment == 'github-hosted'
         with:
           workspaces: launcher
           shared-key: launcher
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check the launcher's formatting, lint and tests
-        if: steps.launcher.outputs.required != 'false'
+        if: needs.changes.outputs.launcher_required != 'false'
         working-directory: launcher
         env:
           JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
@@ -576,14 +661,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Install Dyna runner dependencies
+      - name: Check Dyna dependencies (install fallback without root)
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain
         run: |
           if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
-          rustup toolchain install stable --profile minimal
+          bash tools/ci/rustup_install.sh stable --profile minimal
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -616,7 +701,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Install Dyna runner dependencies
+      - name: Check Dyna dependencies (install fallback without root)
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Use system Python for parity harnesses
         run: |
@@ -628,7 +713,7 @@ jobs:
           if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
-          rustup toolchain install stable --profile minimal
+          bash tools/ci/rustup_install.sh stable --profile minimal
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

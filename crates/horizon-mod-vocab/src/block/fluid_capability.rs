@@ -219,9 +219,12 @@ impl SizedFluidIngredient {
 
 /// Fluid tanks, as NeoForge 26.3's `Capabilities.Fluid.BLOCK`: a block's tanks as one side
 /// reaches them, numbered from 0 for that side, as [`ITEMS`](crate::ITEMS)' slots. The game
-/// answers it for a mod block's tanks (`block_entity_fluids`) and for a cauldron, one tank of
-/// 1000 mB that holds water in thirds and lava only whole; a cauldron has no block entity, so it
-/// is answered by position. Powder snow is no fluid: its cauldron has no answer.
+/// answers it for a mod block's tanks (`block_entity_fluids`) and for a cauldron: one tank
+/// holding the content its block has, vanilla's water (a bucket in thirds) and lava (a bucket
+/// only whole) or a content a mod registered through `register_cauldron_fluid_content`, filled
+/// and drained by whole levels; an empty cauldron takes any fluid that has a content. A
+/// cauldron has no block entity, so it is answered by position. Powder snow is no fluid: its
+/// cauldron has no content and no answer.
 pub const FLUIDS: CapabilityKey<dyn ResourceHandler<FluidResource>> = CapabilityKey {
     name: "horizon:fluids",
     default: Some(|host, at| {

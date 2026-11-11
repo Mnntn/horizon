@@ -23,7 +23,10 @@ fn send(sender: &PlayerSender, data: Vec<u8>) {
         channel: CHANNEL.into(),
         data,
     });
-    sender.send(packet.encode());
+    match packet.try_encode() {
+        Ok(body) => sender.send(body),
+        Err(error) => eprintln!("[lan] far terrain send refused: {error}"),
+    }
 }
 
 impl Game<'_> {

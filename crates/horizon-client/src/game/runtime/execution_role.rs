@@ -34,6 +34,13 @@ impl ExecutionRole {
         }
     }
 
+    /// A dedicated server: the logical server with no local player, whose console,
+    /// event stream and user lists exist. The integrated server thread keeps
+    /// `options.dedicated` set too, so only the role tells the two apart.
+    pub fn is_dedicated_server(self) -> bool {
+        self == Self::DedicatedServer
+    }
+
     /// Single-player worlds (on the integrated server thread) keep the owner's state in
     /// `Level` and write `players/data/<singleplayer_uuid>.dat` with the world; a dedicated
     /// server saves each connected player separately.
@@ -67,5 +74,11 @@ impl Game<'_> {
     /// connected, not which side this game is.
     pub(super) fn is_logical_server(&self) -> bool {
         self.options.execution_role.is_logical_server()
+    }
+
+    /// Whether this game is a dedicated server, not the integrated server thread (which
+    /// keeps `options.dedicated` set too).
+    pub(super) fn is_dedicated_server(&self) -> bool {
+        self.options.execution_role.is_dedicated_server()
     }
 }

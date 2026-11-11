@@ -30,7 +30,11 @@ def main():
                         help='probe hidden-section UUID ownership after kill/travel (root_child only)')
     parser.add_argument('--raise-root-before-kill', action='store_true',
                         help='load root Pos at y 210 without moving its frozen passengers')
+    parser.add_argument('--dismount-after-travel', choices=('grandchild', 'rejected'),
+                        help='dismount this destination descendant after travel, then tick')
     args = parser.parse_args()
+    if args.dismount_after_travel and args.action != 'travel':
+        parser.error('--dismount-after-travel requires --action travel')
     if args.raise_root_before_kill and args.action != 'kill':
         parser.error('--raise-root-before-kill requires --action kill')
     if args.cycle_chunk and (args.cases != ['root_child'] or args.action not in ('kill', 'travel')):
@@ -188,6 +192,12 @@ def main():
             observe()
             advance(5)
             observe('the_nether')
+            if args.dismount_after_travel:
+                reply(f'execute in minecraft:the_nether as @e[tag={args.dismount_after_travel},'
+                      'distance=0..] run ride @s dismount')
+                observe('the_nether')
+                advance(5)
+                observe('the_nether')
             checkpoint(f'after_travel_{kind}', 'the_nether')
             reply('execute in minecraft:the_nether run kill @e[tag=root,distance=0..]')
             reply('kill @e[tag=root]')

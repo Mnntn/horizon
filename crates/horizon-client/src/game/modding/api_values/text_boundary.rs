@@ -1,3 +1,5 @@
+#[path = "text_style_capture.rs"]
+mod text_style_capture;
 use super::{TryIntoApi, TryIntoEngine};
 use horizon_client_core::{component, text as engine};
 use horizon_core::{

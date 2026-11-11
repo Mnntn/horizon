@@ -27,6 +27,7 @@ pub mod hud_layout;
 #[doc(hidden)]
 pub mod hud_mode;
 pub(crate) mod key_mapping;
+pub(crate) mod keyframe_animation;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod mesher;
@@ -39,10 +40,12 @@ pub mod music;
 pub(crate) mod pack_finders;
 pub(crate) mod particle_keys;
 pub(crate) mod particle_providers;
+mod particle_stacks;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod particles;
 pub(crate) mod posed_parts;
+pub(crate) mod render_pipeline;
 pub(crate) mod scene;
 pub(crate) mod screenshot;
 pub(crate) mod terrain_draw;
@@ -52,3 +55,5 @@ pub mod widgets;
 pub(crate) mod world_draw;
 
 pub(crate) mod spectator_shader;
+
+pub(crate) mod arm_pose;

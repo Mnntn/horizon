@@ -1146,7 +1146,6 @@ impl Game<'_> {
             }
             action => action,
         };
-        let creative = self.creative;
         let rules = self.world.health_rules;
         let Some(p) = self.player.as_mut() else {
             self.combat.forget_noted(false);
@@ -1162,8 +1161,7 @@ impl Game<'_> {
             }
             EffectAction::Hurt(source, amount) => {
                 let mut canceled = false;
-                if !creative
-                    && let Some(id) = self.motion.health.damage.id(source)
+                if let Some(id) = self.motion.health.damage.id(source)
                     && let Ok(o) = p.hurt_blocking(
                         crate::game::entity::damage_level_of!(self, scoped),
                         &self.motion.health,
@@ -1179,8 +1177,7 @@ impl Game<'_> {
                 self.combat.forget_noted(canceled);
             }
             EffectAction::Poison => {
-                if !creative
-                    && p.health.health() > 1.0
+                if p.health.health() > 1.0
                     && let Some(id) = self.health_resources.damage.id("minecraft:magic")
                 {
                     let _ = p.hurt(
@@ -2580,9 +2577,8 @@ impl Game<'_> {
     }
     /// `EffectsInInventory`: panels to the right of survival/creative inventory.
     /// The caller draws the returned tooltip after every other tooltip.
-    /// `ScreenEvent.RenderInventoryMobEffects` fires here once a frame, with
-    /// room and effects to show; its layout is kept for
-    /// `inventory_effects_rect`.
+    /// `ScreenEvent.RenderInventoryMobEffects` fires when the build lays the
+    /// panels out once a frame, and its answer is kept in the build.
     pub(super) fn draw_inventory_effects(
         &self,
         batch: &mut HudBatch,
@@ -2590,7 +2586,10 @@ impl Game<'_> {
         image_width: i32,
     ) -> Option<Vec<(Text, u32)>> {
         let space = Self::effects_space(batch, [origin.0, origin.1], image_width as f32);
-        let layout = self.inventory_effects_layout(batch, &space);
+        let layout = self.built_container(batch).map_or_else(
+            || inventory_effects::EffectsLayout::vanilla(space.available()),
+            |layout| layout.effects_layout,
+        );
         let panels = self.effect_panels(&space, &layout);
         let hovered = inventory_effects::paint(
             batch,
@@ -2617,26 +2616,24 @@ impl Game<'_> {
         lines
     }
     /// The rectangle `draw_inventory_effects` covers, none with no effects
-    /// or too little room right of the window. It follows the layout the last
-    /// frame drew, so it lags a frame behind a change of the mod's choice.
+    /// or too little room right of the window, laid out as `layout` says.
     pub(super) fn inventory_effects_rect(
         &self,
         batch: &HudBatch,
         origin: [f32; 2],
         image_width: f32,
+        layout: &inventory_effects::EffectsLayout,
     ) -> Option<[f32; 4]> {
         let space = Self::effects_space(batch, origin, image_width);
-        let layout = self
-            .effects_layout
-            .get()
-            .unwrap_or_else(|| inventory_effects::EffectsLayout::vanilla(space.available()));
-        let panels = self.effect_panels(&space, &layout);
+        let panels = self.effect_panels(&space, layout);
         let first = panels.first()?;
         let width = panels.iter().map(|p| p.width).max()?;
         let height = (panels.len() as i32 - 1) * first.spacing + 32;
         Some([first.x as f32, first.y as f32, width as f32, height as f32])
     }
-    fn effects_space(
+    /// The room the effect panels lay out in (`EffectsInInventory`'s space):
+    /// the window's width, the container's origin and its image width.
+    pub(super) fn effects_space(
         batch: &HudBatch,
         origin: [f32; 2],
         image_width: f32,
@@ -2662,30 +2659,43 @@ impl Game<'_> {
         )
     }
     /// Vanilla's layout, as `native_screen_render_inventory_mob_effects`
-    /// leaves it, kept for the rect. No fire with no effect to show or no
-    /// room (vanilla returns first), nor with no mod listening.
-    fn inventory_effects_layout(
+    /// leaves it, for the panels and their exclusion rect. No fire with no
+    /// effect to show or no room (vanilla returns first), nor with no mod
+    /// listening. The answer is taken once a frame: the display's change
+    /// builds twice in one frame (`apply_ui_settings` then `observe_screen`),
+    /// and the second build reuses the first one's answer.
+    pub(super) fn inventory_effects_layout(
         &self,
-        batch: &HudBatch,
         space: &inventory_effects::EffectsSpace,
+        rect: [f32; 4],
     ) -> inventory_effects::EffectsLayout {
         let mut layout = inventory_effects::EffectsLayout::vanilla(space.available());
-        if !self.potions.effects.list.is_empty()
-            && space.available() >= 32
-            && mod_api::__private::listened(mod_api::HookId::ScreenRenderInventoryMobEffects)
+        if self.potions.effects.list.is_empty()
+            || space.available() < 32
+            || !mod_api::__private::listened(mod_api::HookId::ScreenRenderInventoryMobEffects)
         {
-            let view = self.screen_view(batch, self.screen);
-            let mut canceled = false;
-            self.native_screen_render_inventory_mob_effects(
-                &view,
-                space.available(),
-                &mut layout.compact,
-                &mut layout.offset,
-                &mut canceled,
-            );
-            layout.hidden = canceled;
+            return layout;
         }
-        self.effects_layout.set(Some(layout));
+        if let Some(answer) =
+            self.screen_state
+                .build
+                .effects_answer(self.frames, self.screen, *space)
+        {
+            return answer;
+        }
+        let view = self.screen_view_at(self.screen, rect);
+        let mut canceled = false;
+        self.native_screen_render_inventory_mob_effects(
+            &view,
+            space.available(),
+            &mut layout.compact,
+            &mut layout.offset,
+            &mut canceled,
+        );
+        layout.hidden = canceled;
+        self.screen_state
+            .build
+            .keep_effects_answer(self.frames, self.screen, *space, layout);
         layout
     }
     /// Effects saved in level.dat (`Player.active_effects`).

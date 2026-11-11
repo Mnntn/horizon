@@ -7,7 +7,7 @@ pub trait Hooks {
     /// push a `mod_api::Block` per block, the same declaration
     /// a content mod's `data/<id>/horizon/block/<path>.json` holds (a
     /// vanilla `template`, `properties`, `state_properties`, `shapes`...),
-    /// with its id in your mod's namespace. `item: true` gives it a block
+    /// with its id in a namespace owned by your mod's manifest. `item: true` gives it a block
     /// item, as a file does unless told not to (`..Default::default()`
     /// leaves it false). They join the content mods' blocks: the one whose
     /// id is that namespace when it is on (your models, textures, loot and
@@ -15,7 +15,9 @@ pub trait Hooks {
     /// look. Ids, saves and the check that a joining client has the same
     /// blocks are the files' (docs/modding/src/how-to/content-mods.md). Asked once at start, on every
     /// side, before any resource loads: push the same ones every time, from
-    /// nothing but your code. Declarations that don't pass the files' checks
+    /// nothing but your code. Unowned namespaces refuse registration, naming the mod
+    /// and namespace. Each mod receives its own declaration batch. Declarations
+    /// that don't pass the other files' checks
     /// are logged and that namespace's are left out.
     #[notes = r#"## Villager farming
 

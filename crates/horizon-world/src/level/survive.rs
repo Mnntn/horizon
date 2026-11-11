@@ -361,6 +361,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         ground: BlockStateId,
         ground_pos: BlockPos,
     ) -> bool {
+        // NeoForge's `BushBlock.canSurvive`: the soil's answer first, the plant's second.
+        let mut sustains = None;
+        self.level
+            .before_can_sustain_plant(state, ground, ground_pos, &mut sustains);
+        if let Some(sustains) = sustains {
+            return sustains;
+        }
         let mut may = None;
         self.level
             .before_may_place_on(state, ground, ground_pos, &mut may);

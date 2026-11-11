@@ -4,6 +4,7 @@
 //! and whose `encode` writes the id and payload. Packets Horizon does not
 //! model decode as `Unknown` and keep their raw payload.
 pub mod configuration;
+pub mod custom_payload;
 pub mod handshake;
 pub mod login;
 pub mod play;
@@ -15,7 +16,7 @@ use crate::buf::{Codec, Reader, Writer};
 /// Generate a state's packet enum from (Variant(Type) = ID) entries.
 #[macro_export]
 macro_rules! packet_enum {
-    ($(#[$meta:meta])* $name:ident, $ids:path { $($variant:ident($ty:ty) = $id:ident),* $(,)? }) => {
+    ($(#[$meta:meta])* $name:ident, $ids:path { $($variant:ident($ty:ty) = $id:ident $(=> $codec:ty)?),* $(,)? }) => {
         $(#[$meta])*
         #[derive(Clone, Debug, PartialEq)]
         pub enum $name {
@@ -43,7 +44,7 @@ macro_rules! packet_enum {
                 use $ids as ids;
                 let mut r = $crate::buf::Reader::new(payload);
                 let packet = match id {
-                    $(ids::$id => Self::$variant(<$ty as $crate::buf::Codec<$ty>>::read(&mut r)?),)*
+                    $(ids::$id => Self::$variant(<$crate::packet_codec!($ty $(, $codec)?) as $crate::buf::Codec<$ty>>::read(&mut r)?),)*
                     _ => return Ok(Self::Unknown(id, payload.to_vec())),
                 };
                 if r.remaining() != 0 {
@@ -56,17 +57,38 @@ macro_rules! packet_enum {
                 }
                 Ok(packet)
             }
-            /// The packet body: VarInt id then payload.
+            /// Validate directional constraints before allocating an encoded body.
+            pub fn try_encode(&self) -> $crate::Result<Vec<u8>> {
+                match self {
+                    $(Self::$variant(p) => <$crate::packet_codec!($ty $(, $codec)?) as $crate::buf::Codec<$ty>>::validate(p)?,)*
+                    Self::Unknown(_, _) => {}
+                }
+                Ok(self.encode())
+            }
+            /// The packet body: VarInt id then payload, for trusted values.
+            /// Use `try_encode` for values supplied by mods or other untrusted producers.
             pub fn encode(&self) -> Vec<u8> {
                 let mut w = $crate::buf::Writer::new();
                 w.varint(self.id());
                 match self {
-                    $(Self::$variant(p) => <$ty as $crate::buf::Codec<$ty>>::write(p, &mut w),)*
+                    $(Self::$variant(p) => <$crate::packet_codec!($ty $(, $codec)?) as $crate::buf::Codec<$ty>>::write(p, &mut w),)*
                     Self::Unknown(_, payload) => w.bytes(payload),
                 }
                 w.data
             }
         }
+    };
+}
+
+/// Select the default packet codec or an explicitly directional codec.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! packet_codec {
+    ($ty:ty) => {
+        $ty
+    };
+    ($ty:ty, $codec:ty) => {
+        $codec
     };
 }
 

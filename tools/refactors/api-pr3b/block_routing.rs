@@ -1,5 +1,10 @@
 extern crate self as horizon_world;
+extern crate self as log;
 extern crate self as mod_api;
+#[macro_export]
+macro_rules! warn {
+    ($($args:tt)*) => { eprintln!($($args)*) };
+}
 use std::sync::atomic::{AtomicUsize, Ordering};
 static CONVERSIONS: AtomicUsize = AtomicUsize::new(0);
 static CALLS: AtomicUsize = AtomicUsize::new(0);

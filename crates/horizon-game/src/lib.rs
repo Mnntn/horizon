@@ -24,6 +24,9 @@ pub const GAME_IDENTITY: [u8; horizon_mod_package::game_identity::MARK.len()] =
 /// Runs the game with the hooks registered so far, and returns when it ends. Register hooks
 /// (`horizon_platform::hooks::register`) before calling it.
 pub fn main() {
+    if let Some(code) = horizon_mod_host::compile_child(std::env::args_os().skip(1)) {
+        std::process::exit(code);
+    }
     let startup = horizon_client::entry::prepare();
     std::hint::black_box(&horizon_mod_package::holder::CAPABILITY);
     horizon_mod_host::main_with(Vec::new(), &[], &[], startup);

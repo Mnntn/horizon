@@ -64,9 +64,9 @@ impl Game<'_> {
             .clone();
         match target {
             t @ (Target::Player | Target::Guest(_)) => self
-                .for_player(t, |g| g.apply_consume_effect(stack, &effect, None, false))
+                .for_player(t, |g| g.apply_consume_effect(stack, &effect, None))
                 .flatten(),
-            Target::Mob(_) => self.apply_consume_effect(stack, &effect, Some(living), false),
+            Target::Mob(_) => self.apply_consume_effect(stack, &effect, Some(living)),
             _ => None,
         }
     }
@@ -409,8 +409,7 @@ mod tests {
             game.mobs.push(Mob::new(23, kind, Vec3::ZERO, 0.0));
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.player.as_mut().unwrap().entity_id = 20;
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let key = mod_api::__private::part_tests::effect_key("minecraft:speed");
             for id in [23, 20] {
                 let living = game.living(game.entity(id).unwrap()).unwrap();

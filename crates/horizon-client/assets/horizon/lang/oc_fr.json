@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s per %2$s, fins a %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "Pas afiliat a Mojang o Microsoft",
-  "key.emote": "Ròda d'emòtas"
+  "key.emote": "Ròda d'emòtas",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

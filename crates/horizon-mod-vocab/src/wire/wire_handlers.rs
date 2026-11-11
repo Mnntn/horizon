@@ -52,6 +52,8 @@ handler!(dyn GameTestFunction, "GameTestFunction");
 handler!(dyn ClientReloadListener, "ClientReloadListener");
 handler!(dyn BiomeColorResolver, "BiomeColorResolver");
 handler!(dyn BlockTintSource, "BlockTintSource");
+handler!(dyn Interaction, "Interaction");
+handler!(dyn SectionGeometry, "SectionGeometry");
 handler!(dyn ParticleProvider, "ParticleProvider");
 handler!(dyn EnchantmentDamageEffect, "EnchantmentDamageEffect");
 handler!(dyn CommandArgumentType, "CommandArgumentType");

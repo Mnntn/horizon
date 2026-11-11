@@ -42,6 +42,9 @@ pub struct ParticleOptions {
     /// `ItemParticleOption`: the particle sprite of each layer of the item's
     /// model as resolved for the ground.
     pub item: Option<Vec<String>>,
+    /// Stack sent by `ServerLevel.sendParticles`; clients resolve its ground model at seed 0.
+    /// Invalid, unknown or oversized stacks cause the send to return false.
+    pub item_stack: Option<crate::ItemStack>,
     /// `GeyserParticleOptions.waterBlocks` and `GeyserBaseParticleOptions`'
     /// `waterBlocks` and `burstImpulseBase` (0 where the type has none).
     pub geyser: Option<(i32, f32)>,
@@ -68,6 +71,7 @@ impl ParticleOptions {
             to_color: [1.0, 0.0, 0.0],
             trail: None,
             item: None,
+            item_stack: None,
             geyser: None,
             vibration: None,
         }

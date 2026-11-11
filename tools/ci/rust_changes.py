@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Keep verify's Rust steps for any change beyond documentation.
+"""Select CI checks from one fail-closed Git diff.
 
---launcher: whether the change is built into the launcher, its own workspace (release_train.LAUNCHER_PATHS).
+The default answers Rust selection; --launcher uses the launcher's dependency paths.
+--all emits the shared Rust, launcher, sample and tooling decisions for dyna-checks.
 """
 
 import argparse
@@ -37,9 +38,34 @@ def needs_launcher(paths):
 UNKNOWN_CHANGE = "Cargo.lock"
 
 
-def changed_paths(base, head):
-    # Renames must include deletions too: moving source into docs still affects Rust.
-    command = ["git", "diff", "--name-only", "--no-renames", "-z", f"{base}...{head}", "--"]
+def needs_sample(paths):
+    return any(path in ROOT_RUST or path == "tools/ci/check_machine_sample.py"
+               or path.startswith(("crates/horizon-mod-", "crates/horizon-core/",
+                                   "crates/horizon-game-discovery/")) for path in paths)
+
+
+def needs_tooling(changes):
+    paths = [path for _, path in changes]
+    return needs_rust(paths) or any(
+        path.startswith(("tools/", "tests/", ".github/", "docs/modding/", "roadmap/"))
+        or path in {"README.md", "ROADMAP.md", "docs/README.md"}
+        # Tests check linked target existence, even when they do not read its contents.
+        or status != "M"
+        for status, path in changes
+    )
+
+
+def selections(changes):
+    paths = [path for _, path in changes]
+    sample = needs_sample(paths)
+    return {"rust_required": needs_rust(paths) or sample,
+            "launcher_required": needs_launcher(paths),
+            "tooling_required": needs_tooling(changes), "sample_required": sample}
+
+
+def changed_entries(base, head):
+    # Disable rename folding: retain both deleted and added paths, including source moved into docs.
+    command = ["git", "diff", "--name-status", "--no-renames", "-z", f"{base}...{head}", "--"]
     for fetch_base in (False, True):
         # The event's base can be newer than the checked-out history (main moved on): fetch it once.
         if fetch_base:
@@ -47,17 +73,31 @@ def changed_paths(base, head):
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         diff = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
         if diff.returncode == 0:
-            return [path for path in diff.stdout.decode("utf-8").split("\0") if path]
+            fields = diff.stdout.decode("utf-8").split("\0")[:-1]
+            return list(zip(fields[::2], fields[1::2]))
     # Never an error and never "nothing changed": assume everything did.
     print(f"rust_changes: no diff for {base}...{head}; treating everything as changed", file=sys.stderr)
-    return [UNKNOWN_CHANGE]
+    return [("?", UNKNOWN_CHANGE)]
+
+
+def changed_paths(base, head):
+    return [path for _, path in changed_entries(base, head)]
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("base")
     parser.add_argument("head")
-    parser.add_argument("--launcher", action="store_true", help="answer for the launcher instead")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--launcher", action="store_true", help="answer for the launcher instead")
+    mode.add_argument("--all", action="store_true", help="emit centralized dyna-checks selections")
     args = parser.parse_args()
-    needs = needs_launcher if args.launcher else needs_rust
-    print(f"required={str(needs(changed_paths(args.base, args.head))).lower()}")
+    changes = changed_entries(args.base, args.head)
+    paths = [path for _, path in changes]
+    if args.all:
+        for name, required in selections(changes).items():
+            print(f"{name}={str(required).lower()}")
+    else:
+        needs = needs_launcher if args.launcher else needs_rust
+        print(f"required={str(needs(paths)).lower()}")
+        print(f"sample={str(needs_sample(paths)).lower()}")

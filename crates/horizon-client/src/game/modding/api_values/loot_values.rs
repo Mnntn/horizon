@@ -8,6 +8,7 @@ pub(crate) fn dispatch_loot_function(
     data: &serde_json::Value,
     ctx: &engine::LootContext<'_>,
     stack: &mut engine::LootStack,
+    tags: &dyn engine::LootTags,
 ) {
     if !mod_api::__private::listened(mod_api::HookId::LootFunction) {
         return;
@@ -15,7 +16,8 @@ pub(crate) fn dispatch_loot_function(
     let (Ok(ctx), Ok(mut value)) = (ctx.try_into_api(), stack.try_into_api()) else {
         return;
     };
-    mod_api::dispatch_loot_function(kind, data, &ctx, &mut value);
+    let tags = crate::game::loot_tags::LootTags(tags);
+    mod_api::loot_callbacks::native_loot_function(kind, data, &ctx, &mut value, &tags);
     // Stage the complete candidate before making the one engine write.
     if let Ok(value) = value.try_into_engine(&()) {
         *stack = value;
@@ -26,6 +28,7 @@ pub(crate) fn dispatch_loot_condition(
     data: &serde_json::Value,
     ctx: &engine::LootContext<'_>,
     holds: &mut bool,
+    tags: &dyn engine::LootTags,
 ) {
     if !mod_api::__private::listened(mod_api::HookId::LootCondition) {
         return;
@@ -33,7 +36,8 @@ pub(crate) fn dispatch_loot_condition(
     let Ok(ctx) = ctx.try_into_api() else {
         return;
     };
-    mod_api::dispatch_loot_condition(kind, data, &ctx, holds);
+    let tags = crate::game::loot_tags::LootTags(tags);
+    mod_api::loot_callbacks::native_loot_condition(kind, data, &ctx, holds, &tags);
 }
 
 #[cfg(test)]
@@ -225,6 +229,7 @@ impl TryIntoApi for engine::LootContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("loot_tags_tests.rs");
     use horizon_core::nbt::Tag;
     use mod_api::{Hooks, LootFunctionEvent, ModEntry, testing::with_mods};
     fn stack() -> engine::LootStack {
@@ -363,6 +368,7 @@ mod tests {
                 &serde_json::Value::Null,
                 &context(),
                 &mut output,
+                &TestTags,
             );
         });
         assert_eq!(output.count, -12);
@@ -393,12 +399,14 @@ mod tests {
                     &serde_json::Value::Null,
                     &context(),
                     &mut output,
+                    &TestTags,
                 );
                 dispatch_loot_condition(
                     "test:edit",
                     &serde_json::Value::Null,
                     &context(),
                     &mut holds,
+                    &TestTags,
                 );
             }
             assert_eq!(CONVERSIONS.with(|count| count.get()), 0);
@@ -486,6 +494,7 @@ mod tests {
                     &serde_json::Value::Null,
                     &context(),
                     &mut output,
+                    &TestTags,
                 );
             },
         );

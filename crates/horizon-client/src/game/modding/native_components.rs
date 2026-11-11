@@ -888,8 +888,7 @@ mod combat_query_tests {
 
     fn actor(game: &mut Game<'_>) -> mod_api::LivingRef {
         game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-        game.lan_acting_uuid = Some(123);
-        game.lan_acting_entity = Some(20);
+        crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
         mod_api::LivingRef::new(game.entity(20).unwrap())
     }
     fn resource(stack: &ItemStack) -> mod_api::ItemResource {

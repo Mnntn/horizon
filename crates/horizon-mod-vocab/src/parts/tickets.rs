@@ -6,11 +6,11 @@ pub(crate) fn installed_controllers() -> &'static [ControllerInfo] {
 
 /// The ticket controllers `mods` register, for a test's mods.
 #[cfg(any(test, feature = "testing"))]
-pub(crate) fn registered_controllers(mods: &[ModEntry]) -> Vec<ControllerInfo> {
-    if mods.is_empty() {
-        return Vec::new();
-    }
-    register_all(mods, |_| false).controllers
+pub(crate) fn registered_controllers(
+    mods: &[ModEntry],
+) -> (Vec<ControllerInfo>, Vec<crate::client::arm_pose::PoseInfo>) {
+    let registered = register_all(mods, |_| false);
+    (registered.controllers, registered.arm_poses)
 }
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
@@ -35,9 +35,12 @@ pub mod tests {
         r.register_ticket_controller("first:", true);
         r.register_ticket_controller("", true);
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
-        assert!(r.refused[0].contains("first registered ticket controller \"second:quarry\""));
-        assert!(r.refused[0].contains("not its own"));
-        assert!(r.refused[1].contains("no name") && r.refused[2].contains("no name"));
+        assert!(r.refused[0].contains("first declares \"second:quarry\""));
+        assert!(r.refused[0].contains("unowned namespace \"second\""));
+        assert!(
+            r.refused[1].contains("invalid identifier")
+                && r.refused[2].contains("invalid identifier")
+        );
         assert_eq!(r.controllers.len(), 2);
     }
 
@@ -74,8 +77,8 @@ pub mod tests {
 pub trait TicketsRegistrar {
     /// Register ticket controller `name`, the way NeoForge's `RegisterTicketControllersEvent`
     /// does once at startup, and keep the handle for `chunk.set_mod_forced`. `name` is
-    /// `quarry` or `mymod:quarry`; the controller's id is in the calling mod's namespace
-    /// (`mymod:quarry`), and another mod's namespace refuses the mods at startup, as does an id
+    /// `quarry` or `mymod:quarry`; the controller's id is in a namespace owned by the calling mod's manifest
+    /// (`mymod:quarry`), and an unowned namespace refuses the mods at startup, as does an id
     /// registered twice. `validates` is whether it validates its saved tickets: the
     /// `validate_tickets` hook then runs for it when a level loads them (NeoForge's
     /// `LoadingValidationCallback`). A world's tickets of a controller no loaded mod registers are

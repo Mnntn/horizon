@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Install Dyna runner dependencies without root
+      - name: Check Dyna dependencies (install fallback without root)
         if: runner.environment != 'github-hosted'
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchains and the ALSA and udev headers

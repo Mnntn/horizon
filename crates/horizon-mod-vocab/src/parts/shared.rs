@@ -133,41 +133,10 @@ pub enum ProvidedBy {
 }
 
 /// The parts attached by tag, by tag name, in registration order.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct TagParts {
     pub(crate) blocks: Vec<(Box<str>, Attached<dyn BlockPart>)>,
     pub(crate) items: Vec<(Box<str>, Attached<dyn ItemPart>)>,
-}
-
-/// What every mod's [`Hooks::register`](crate::Hooks::register) attached.
-#[derive(Default)]
-pub(crate) struct Installed {
-    pub(crate) recipe_book_types: HashMap<String, String>,
-    pub(crate) game_rule_categories: Vec<String>,
-    pub(crate) game_rules: Vec<crate::GameRuleDecl>,
-    pub(crate) game_rule_slots: Vec<u32>,
-    pub(crate) keys: Parts,
-    pub(crate) tags: TagParts,
-    pub(crate) block_entity_types: Vec<BlockEntityTypeDecl>,
-    pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
-    pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
-    pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
-    pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
-    pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
-    pub(crate) registry_keys: horizon_mod_runtime::registry_keys::Requests,
-    pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
-    pub(crate) resolved_block_entity_types: OnceLock<horizon_mod_runtime::registry_keys::Names>,
-    pub(crate) fluids: OnceLock<horizon_mod_runtime::registry_keys::Names>,
-    pub(crate) resolved_items: OnceLock<horizon_mod_runtime::registry_keys::Names>,
-    pub(crate) resolved_blocks: OnceLock<horizon_mod_runtime::block_definitions::Blocks>,
-    pub(crate) particles: OnceLock<horizon_mod_runtime::registry_keys::Particles>,
-    /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
-    pub(crate) controllers: Vec<ControllerInfo>,
-    pub(crate) structure_types: Vec<crate::world::structure_type::StructureTypeInfo>,
-    pub(crate) dimensions: Vec<crate::world::dimension::DimensionInfo>,
-    pub(crate) chunk_generators: Vec<crate::world::chunk_generator::ChunkGeneratorInfo>,
-    pub(crate) hook_bits: Vec<bool>,
-    pub(crate) tag_hook_bits: Vec<bool>,
 }
 
 pub(crate) fn requested_keys() -> &'static horizon_mod_runtime::registry_keys::Requests {
@@ -526,39 +495,11 @@ pub(crate) fn attached<'a, 'k, P: ?Sized>(
     id().and_then(|id| table.get(id)).map_or(&[], Vec::as_slice)
 }
 
-// no wire: process-local registration and dispatch storage contains trait objects and owning-mod identities.
-/// The game's [`Registrar`]: every mod's registrations, checked as they come.
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct PartRegistrar {
-    pub(crate) recipe_book_types: HashMap<String, String>,
-    pub(crate) game_rule_categories: Vec<String>,
-    pub(crate) game_rules: Vec<crate::GameRuleDecl>,
-    pub(crate) mod_id: &'static str,
-    pub(crate) mod_index: usize,
-    /// Parts registered so far, by every mod: the next part's `order`.
-    pub(crate) registered: usize,
-    pub(crate) parts: Parts,
-    pub(crate) tags: TagParts,
-    pub(crate) block_entity_types: Vec<BlockEntityTypeDecl>,
-    pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
-    pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
-    pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
-    pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
-    pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
-    pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
-    pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
-    pub(crate) controllers: Vec<ControllerInfo>,
-    pub(crate) structure_types: Vec<crate::world::structure_type::StructureTypeInfo>,
-    pub(crate) dimensions: Vec<crate::world::dimension::DimensionInfo>,
-    pub(crate) dimension_shape: fn(&crate::DimensionSettings) -> bool,
-    pub(crate) chunk_generators: Vec<crate::world::chunk_generator::ChunkGeneratorInfo>,
-    pub(crate) refused: Vec<String>,
-}
-
 impl PartRegistrar {
     pub(crate) fn new(mod_id: &'static str) -> Self {
         Self {
             recipe_book_types: HashMap::new(),
+            menu_recipe_books: HashMap::new(),
             game_rule_categories: Vec::new(),
             game_rules: Vec::new(),
             mod_id,
@@ -571,15 +512,19 @@ impl PartRegistrar {
             world_fluids: Vec::new(),
             entity_attribute_modifications: Vec::new(),
             attributes: Vec::new(),
+            datapack_registries: Vec::new(),
             spawn_placements: Vec::new(),
+            biome_modifiers: Vec::new(),
             registry_keys: Default::default(),
             effects: OnceLock::new(),
             controllers: Vec::new(),
+            arm_poses: Vec::new(),
             structure_types: Vec::new(),
             dimensions: Vec::new(),
             dimension_shape: |_| false,
             chunk_generators: Vec::new(),
             refused: Vec::new(),
+            self_refusal: None,
         }
     }
     /// `part`, of kind `kind`, for tag `tag`; none if it is refused.
@@ -668,11 +613,25 @@ pub(crate) fn register_all(
         }
     }
     let _scope = RestoreKeys(REGISTERING_KEYS.replace(Some(registrar.registry_keys.clone())));
-    let context = crate::RegistrationContext::new();
     for (index, hooks) in crate::entered_registration(mods, "register").enumerate() {
         registrar.mod_id = mods[index].id;
         registrar.mod_index = index;
+        let context = crate::RegistrationContext::new();
+        let rollback = registrar.registration_checkpoint();
         hooks.register(&mut registrar, &context);
+        let reason = context
+            .self_refusal
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .or_else(|| registrar.self_refusal.take());
+        if let Some(reason) = reason {
+            rollback(&mut registrar);
+            registrar.refused.push(format!(
+                "mod {} refused registration: {reason}",
+                mods[index].id
+            ));
+        }
     }
     registrar.expand_block_entity_parts();
     registrar.refuse_unknown_dimension_generators();
@@ -703,6 +662,7 @@ pub(crate) fn install_registrar(
     let game_rule_slots = slots.expect("every schema refusal was collected");
     let mut installed = Installed {
         recipe_book_types: registrar.recipe_book_types,
+        menu_recipe_books: registrar.menu_recipe_books,
         game_rule_slots,
         game_rules: registrar.game_rules,
         game_rule_categories: registrar.game_rule_categories,
@@ -712,8 +672,10 @@ pub(crate) fn install_registrar(
         entity_attributes: registrar.entity_attributes,
         world_fluids: registrar.world_fluids,
         attributes: registrar.attributes,
+        datapack_registries: registrar.datapack_registries,
         entity_attribute_modifications: registrar.entity_attribute_modifications,
         spawn_placements: registrar.spawn_placements,
+        biome_modifiers: registrar.biome_modifiers,
         resolved_block_entity_types: OnceLock::new(),
         registry_keys: Rc::try_unwrap(registrar.registry_keys)
             .unwrap_or_else(|_| unreachable!("registration scope has ended"))
@@ -724,6 +686,7 @@ pub(crate) fn install_registrar(
         resolved_blocks: OnceLock::new(),
         particles: OnceLock::new(),
         controllers: registrar.controllers,
+        arm_poses: registrar.arm_poses,
         structure_types: registrar.structure_types,
         dimensions: registrar.dimensions,
         chunk_generators: registrar.chunk_generators,
@@ -1161,3 +1124,8 @@ pub mod tests {
         TakesMore,
     }
 }
+
+#[path = "shared/registration_state.rs"]
+mod registration_state;
+pub(crate) use registration_state::Installed;
+pub use registration_state::PartRegistrar;

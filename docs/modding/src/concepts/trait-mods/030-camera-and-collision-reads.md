@@ -45,3 +45,29 @@ when the client level is replaced or the client disconnects; a same-level respaw
 keeps its epoch. This supplies identity, not client entity reads: the server-only
 entity data methods still reject client handles. Unlike `view_hit` and `raycast`, this does not find blocks
 in distant terrain or return a block behind a targeted entity.
+
+### Combat targeting
+
+`ClientHost::targeting()` and `set_targeting(ClientTargeting)` control liquid picking,
+entity occlusion and an optional crosshair entity override. Defaults preserve ordinary
+vanilla targeting. Set `pick_liquids` to include source and flowing fluid shapes, or
+`hit_through_walls` to ignore block occlusion for entity picks and attacks. An `entity`
+override must name a live entity in this client level; stale or self handles make the
+setter return `false` without changing the controls. The setter requires a logged-in
+client world. An override is rechecked for reach, held-item range and occlusion when
+used and disappears from reads after its level is replaced.
+
+Reach remains attribute-backed: use the server player's living handle and
+`set_attribute_base(host, "minecraft:block_interaction_range", value)` or
+`"minecraft:entity_interaction_range"`. The client's cached reach follows the server's
+attribute updates. Client targeting controls do not grant extra server reach.
+
+`client_attack_target` receives a mutable `targets` list before an ordinary melee click
+(spear jabs use their existing path). It starts with the crosshair entity. Replace it
+for redirection, append for multiple hits, or clear it to suppress an entity attack.
+`Flow::Cancel` cancels the batch. There is no batch cap; duplicates are sent once
+in first-occurrence order. Each target is checked again against live handles,
+attackability, reach, held-item range and the occlusion control. Clearing an entity hit
+does not mine the block behind it; an empty list on a block or miss keeps the ordinary
+path. Each accepted hit uses normal attack packets and prediction. Server validation
+and cooldowns still apply. Native and Wasm mods use the same typed API.

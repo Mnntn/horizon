@@ -172,10 +172,79 @@ pub fn lease_paths(
     Ok(paths)
 }
 
+/// Managed launches publish real context-root claims before creating the immutable record.
+/// Standalone entry uses `lease_paths` instead: it can only acquire already registered cache units.
+pub fn managed_lease_paths(
+    executable: &Path,
+    selection: &LaunchArguments,
+    data: &Path,
+    directory: &Path,
+) -> io::Result<Vec<(PathBuf, bool)>> {
+    let mut paths = lease_paths(executable, selection, data, directory)?;
+    for root in [&selection.context.game_dir, &selection.context.home] {
+        let root = root.canonicalize()?;
+        if !paths.iter().any(|(path, _)| *path == root) {
+            paths.push((root, false));
+        }
+    }
+    Ok(paths)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::locks::Release;
+
+    #[test]
+    fn managed_launch_binds_external_instance_and_log_roots() {
+        for separate in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            // Compare canonical identities on every platform, including Windows' extended prefix.
+            let root_path = root.path().canonicalize().unwrap();
+            let data = root_path.join("launcher");
+            let install = data.join("versions/game");
+            let game = root_path.join("instance");
+            let home = if separate {
+                root_path.join("logs")
+            } else {
+                game.clone()
+            };
+            for directory in [&install, &game, &home] {
+                std::fs::create_dir_all(directory).unwrap();
+            }
+            std::fs::write(install.join(".installed"), "").unwrap();
+            let executable = install.join("game");
+            std::fs::write(&executable, "test image").unwrap();
+            let mut command = Command::new(&executable);
+            command.current_dir(&game).env("HORIZON_HOME", &home);
+            let selection = LaunchArguments::for_command(&command).unwrap();
+            let trees = managed_lease_paths(&executable, &selection, &data, &game).unwrap();
+            for context in [&game, &home] {
+                let matching: Vec<_> = trees.iter().filter(|(path, _)| path == context).collect();
+                assert_eq!(matching.len(), 1);
+                assert!(
+                    !matching[0].1,
+                    "external roots have no installed completion marker"
+                );
+                assert!(!context.join(".installed").exists());
+            }
+            assert!(!trees.iter().any(|(path, _)| path == &root_path));
+            assert!(
+                trees
+                    .iter()
+                    .any(|(path, complete)| *path == install && *complete)
+            );
+            assert!(trees.iter().any(|(path, _)| *path == data.join("versions")));
+            let program = Program {
+                executable: executable.into_os_string(),
+                arguments: vec![],
+                environment: vec![],
+                directory: game,
+                raw_windows: None,
+            };
+            let _prepared = Prepared::new(data, trees, program, &selection.context).unwrap();
+        }
+    }
 
     #[test]
     fn direct_entry_blocks_cleanup_and_refuses_busy_or_deleted_install() {

@@ -188,7 +188,7 @@ const COLORS: [&str; 16] = [
 ];
 
 #[derive(Clone, Copy)]
-enum Action {
+pub enum Action {
     EmptyLava,
     EmptyWater,
     EmptySnow,
@@ -202,39 +202,7 @@ enum Action {
     CleanShulker,
 }
 
-/// Vanilla's per-cauldron item dispatch, built once and shared by all views.
-fn interactions() -> &'static [std::collections::HashMap<String, Action>; 4] {
-    use Action::*;
-    use std::sync::OnceLock;
-    static TABLE: OnceLock<[std::collections::HashMap<String, Action>; 4]> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        let mut maps = std::array::from_fn::<_, 4, _>(|_| std::collections::HashMap::new());
-        for map in &mut maps {
-            for (item, action) in [
-                ("lava_bucket", EmptyLava),
-                ("water_bucket", EmptyWater),
-                ("powder_snow_bucket", EmptySnow),
-            ] {
-                map.insert(format!("minecraft:{item}"), action);
-            }
-        }
-        for (kind, item, action) in [
-            (0, "potion", EmptyPotion),
-            (1, "bucket", FillWater),
-            (1, "glass_bottle", FillBottle),
-            (1, "potion", TopUpPotion),
-            (2, "bucket", FillLava),
-            (3, "bucket", FillSnow),
-        ] {
-            maps[kind].insert(format!("minecraft:{item}"), action);
-        }
-        for color in COLORS {
-            maps[1].insert(format!("minecraft:{color}_banner"), CleanBanner);
-            maps[1].insert(format!("minecraft:{color}_shulker_box"), CleanShulker);
-        }
-        maps
-    })
-}
+pub mod interactions;
 
 /// The cauldron interaction of the held item (`useItemOn`); the hand stack is
 /// changed through `player`. `removes_dye` is whether the held item is in the
@@ -245,25 +213,30 @@ pub fn interact(
     removes_dye: bool,
     player: &mut dyn Player,
 ) -> Interaction {
+    let entry = player.hand().as_ref().and_then(|held| {
+        interactions::Dispatcher::vanilla().select(&cauldron.name, &held.item, removes_dye)
+    });
+    interact_selected(cauldron, under_water, entry.as_ref(), player)
+}
+
+/// Apply an already selected vanilla entry; mod callbacks are handled by the action owner.
+pub fn interact_selected<H>(
+    cauldron: &BlockState,
+    under_water: bool,
+    entry: Option<&interactions::Entry<H>>,
+    player: &mut dyn Player,
+) -> Interaction {
     let Some(held) = player.hand().clone() else {
         return pass();
-    };
-    let kind = match cauldron.name.as_str() {
-        "minecraft:cauldron" => 0,
-        "minecraft:water_cauldron" => 1,
-        "minecraft:lava_cauldron" => 2,
-        "minecraft:powder_snow_cauldron" => 3,
-        _ => return pass(),
     };
     let level: u8 = cauldron
         .properties
         .get("level")
         .and_then(|l| l.parse().ok())
         .unwrap_or(0);
-    let item = &*held.item;
     let water_potion = held.data().and_then(|d| d.potion.as_deref()) == Some("minecraft:water");
     // Dispatcher.get: tags first, then the item map.
-    if kind == 1 && removes_dye {
+    if matches!(entry, Some(interactions::Entry::Dye)) {
         if held.data().and_then(|d| d.dyed_color).is_none() {
             return pass();
         }
@@ -289,7 +262,7 @@ pub fn interact(
         create_filled_result(player, ItemStack::new("minecraft:bucket", 1), true);
         changed(block, Some(sound), "fill_cauldron").with_event("minecraft:fluid_place")
     };
-    let Some(action) = interactions()[kind].get(item) else {
+    let Some(interactions::Entry::Vanilla(action)) = entry else {
         return pass();
     };
     match action {
@@ -582,3 +555,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "cauldron/interaction_tests.rs"]
+mod interaction_tests;

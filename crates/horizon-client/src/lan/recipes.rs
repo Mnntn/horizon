@@ -220,7 +220,8 @@ pub fn update_recipes(
         }
     };
     let mut w = Writer::new();
-    w.varint(PROPERTY_SETS.len() as i32);
+    let custom: BTreeMap<_, _> = additions.custom().collect();
+    w.varint((PROPERTY_SETS.len() + custom.len()) as i32);
     for (key, kind, fields) in PROPERTY_SETS {
         let mut set = BTreeSet::new();
         for recipe in &chosen {
@@ -249,6 +250,14 @@ pub fn update_recipes(
         w.string(&format!("minecraft:{key}"));
         w.varint(set.len() as i32);
         for id in set {
+            w.varint(id);
+        }
+    }
+    for (key, names) in custom {
+        let ids: BTreeSet<_> = names.iter().filter_map(|name| item(name)).collect();
+        w.string(key);
+        w.varint(ids.len() as i32);
+        for id in ids {
             w.varint(id);
         }
     }
@@ -304,6 +313,15 @@ const CONTENT_MAX: usize = 1_048_576 - 1024;
 pub struct ContentPart {
     pub recipes: Vec<(String, Value)>,
     pub last: Option<Vec<String>>,
+}
+impl ContentPart {
+    /// Decode a content part only within the same bound used by the sender.
+    pub fn decode(data: &[u8]) -> Result<Self, String> {
+        if data.len() > CONTENT_MAX {
+            return Err(format!("recipe content exceeds {CONTENT_MAX} bytes"));
+        }
+        serde_json::from_slice(data).map_err(|error| error.to_string())
+    }
 }
 
 /// The payloads for `types`' recipes among `sources` (`recipe_sources::sources`,
@@ -401,6 +419,104 @@ pub fn content() -> Arc<Vec<Vec<u8>>> {
 
 /// Horizon recipe viewer transfer channel.
 pub const TRANSFER_CHANNEL: &str = "horizon:recipe_transfer";
+
+/// Decode a transfer request: container, bounded recipe id, optional all flag.
+pub fn decode_transfer_request(data: &[u8]) -> horizon_protocol::Result<(i32, String, bool)> {
+    let mut reader = horizon_protocol::buf::Reader::new(data);
+    let container = reader.varint()?;
+    let id = reader.string(512)?;
+    let all = match reader.remaining() {
+        0 => false,
+        1 => reader.u8()? == 1,
+        _ => {
+            return Err(horizon_protocol::Error::new(
+                "recipe transfer request: trailing bytes",
+            ));
+        }
+    };
+    Ok((container, id, all))
+}
+
+/// Decode a fixed-shape transfer result, or an empty feature advertisement.
+pub fn decode_transfer_reply(data: &[u8]) -> horizon_protocol::Result<Option<(i32, u8)>> {
+    if data.is_empty() {
+        return Ok(None);
+    }
+    let mut reader = horizon_protocol::buf::Reader::new(data);
+    let reply = (reader.varint()?, reader.u8()?);
+    if reader.remaining() != 0 {
+        return Err(horizon_protocol::Error::new(
+            "recipe transfer reply: trailing bytes",
+        ));
+    }
+    Ok(Some(reply))
+}
+
+/// Horizon's check of a viewer transfer, worked out without moving anything
+/// (`Menu::check_transfer`); like `TRANSFER_CHANNEL`, an empty clientbound
+/// payload advertises it. A request is the menu id, a tag the client picks and
+/// the recipe's id; the reply is the menu id, the tag, the result as
+/// `TRANSFER_CHANNEL` sends it (`result_byte`) and, for `Missing`, the count
+/// of the recipe's cells nothing fills then each cell as a byte.
+pub const CHECK_CHANNEL: &str = "horizon:recipe_check";
+
+/// Whether `channel` is one of the recipe viewer's (`TRANSFER_CHANNEL`,
+/// `CHECK_CHANNEL`).
+pub fn viewer_channel(channel: &str) -> bool {
+    channel == TRANSFER_CHANNEL || channel == CHECK_CHANNEL
+}
+
+/// Tells a Horizon client the server answers both viewer channels: an empty
+/// payload on each.
+pub fn advertise_viewer_channels(g: &super::guest::Guest) {
+    for channel in [TRANSFER_CHANNEL, CHECK_CHANNEL] {
+        g.send(
+            &horizon_protocol::packets::play::Clientbound::CustomPayload(
+                horizon_protocol::packets::configuration::CustomPayload {
+                    channel: channel.into(),
+                    data: Vec::new(),
+                },
+            ),
+        );
+    }
+}
+
+/// A viewer transfer's result as the engine's menu gives it.
+pub fn transfer_result(
+    result: Result<(), crate::menu::place::TransferError>,
+) -> mod_api::RecipeTransferResult {
+    use crate::menu::place::TransferError;
+    use mod_api::RecipeTransferResult as R;
+    match result {
+        Ok(()) => R::Moves,
+        Err(TransferError::Missing) => R::Missing,
+        Err(TransferError::NoRoom) => R::NoRoom,
+        Err(TransferError::Unavailable) => R::NotIntoMenu,
+    }
+}
+
+/// The byte both transfer channels carry a result as.
+pub fn result_byte(result: mod_api::RecipeTransferResult) -> u8 {
+    use mod_api::RecipeTransferResult as R;
+    match result {
+        R::Moves => 0,
+        R::Missing => 1,
+        R::NoRoom => 2,
+        R::NotIntoMenu => 3,
+    }
+}
+
+/// The result a transfer channel's byte names; None for any other byte.
+pub fn byte_result(byte: u8) -> Option<mod_api::RecipeTransferResult> {
+    use mod_api::RecipeTransferResult as R;
+    Some(match byte {
+        0 => R::Moves,
+        1 => R::Missing,
+        2 => R::NoRoom,
+        3 => R::NotIntoMenu,
+        _ => return None,
+    })
+}
 
 #[cfg(test)]
 mod content_tests {
@@ -627,6 +743,15 @@ mod content_tests {
             parse(&file["key"]["a"]);
             parse(&file["shapes"]["star"]);
         });
+    }
+
+    #[test]
+    fn content_decode_bounds_before_deserializing() {
+        let mut body = br#"{"recipes":[],"last":null}"#.to_vec();
+        body.resize(1_047_552, b' ');
+        assert_eq!(ContentPart::decode(&body).unwrap().recipes, vec![]);
+        body.push(b' ');
+        assert!(ContentPart::decode(&body).unwrap_err().contains("exceeds"));
     }
 
     #[test]

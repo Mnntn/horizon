@@ -262,6 +262,14 @@ impl WorldDrawContext for GameWorldDrawContext<'_, '_> {
     fn quads(&mut self, quads: &[WorldQuad]) -> Result<(), DrawError> {
         self.game.native_world_draw_quads(&mut *self.surface, quads)
     }
+    fn pipeline_quads(
+        &mut self,
+        pipeline: RenderPipelineRef,
+        quads: &[PipelineQuad],
+    ) -> Result<(), PipelineDrawError> {
+        self.game
+            .native_world_draw_pipeline_quads(&mut *self.surface, pipeline, quads)
+    }
     fn usage(&self) -> WorldDrawUsage {
         self.game.native_world_draw_usage(&*self.surface)
     }

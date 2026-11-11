@@ -582,10 +582,14 @@ pub(super) fn crossbow_charge(p: &mut Poses, max: f32, ticks: f32, in_right: boo
 /// `HumanoidModel.SPYGLASS_ARM_ROT_X`.
 const SPYGLASS_ARM_ROT_X: f32 = 1.919_862_2;
 /// `HumanoidModel.poseRightArm` / `poseLeftArm`.
+#[path = "anim/custom_arm_pose.rs"]
+mod custom_arm_pose;
+
 fn pose_arm(p: &mut Poses, pose: ArmPose, right: bool, h: &Hum) {
     let arm = if right { "right_arm" } else { "left_arm" };
     let (hx, hy) = (p.get("head")[3], p.get("head")[4]);
     match pose {
+        ArmPose::Custom { angles, .. } => custom_arm_pose::apply(p, angles),
         ArmPose::Empty => p.yrot(arm, 0.0),
         ArmPose::Item => {
             let x = p.get(arm)[3];
@@ -674,16 +678,11 @@ pub(super) fn humanoid(p: &mut Poses, s: &State, h: &Hum) {
     }
     // The main arm is the right one: the off-hand pose goes first unless it
     // needs both hands.
-    if h.left.two_handed() {
-        pose_arm(p, h.right, true, h);
-        if !h.right.affects_offhand() {
-            pose_arm(p, h.left, false, h);
-        }
-    } else {
-        pose_arm(p, h.left, false, h);
-        if !h.left.affects_offhand() {
-            pose_arm(p, h.right, true, h);
-        }
+    for right in horizon_core::arm_pose::application_order(h.right, h.left)
+        .into_iter()
+        .flatten()
+    {
+        pose_arm(p, if right { h.right } else { h.left }, right, h);
     }
     // setupAttackAnimation: a WHACK or STAB swing of the swinging hand's arm.
     let hx = p.get("head")[3];

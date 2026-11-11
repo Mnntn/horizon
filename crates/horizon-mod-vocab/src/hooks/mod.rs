@@ -24,7 +24,7 @@
 //! | `contract` | `"listen"`, `"cancel"`, `"collect"` or `"replace"`; required |
 //! | `out` | the event field a cancel, collect or replace hook writes; not for `"listen"` |
 //! | `scope`, `key` | a Part method: the kind of Part (`"block"`, `"block_entity"`, `"item"`, `"menu"`, `"fluid"`) and the hook argument naming what it is attached to |
-//! | `answered_by` | `"mod"`: a global replace hook whose output also names the mod that answered |
+//! | `answered_by` | `"mod"`: a global replace hook whose output also names the mod that answered, or a global collect hook whose output is `Vec<Answered<T>>`: each mod pushes `T`s into its own empty batch and dispatch names that mod on each entry |
 //! | `host`, `context` | `"read"` or `"level"`; `"registration"`, `"data_load"`, `"loop"` or `"worldgen"` |
 //! | `neoforge`, `fabric`, `paper` | the counterpart's name, or a list of them, for the rustdoc and the gap lists |
 //! | `cancellable` | whether the NeoForge counterpart event is cancellable (documentation, not the contract) |

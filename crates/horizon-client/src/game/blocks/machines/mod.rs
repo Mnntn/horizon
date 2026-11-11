@@ -6,6 +6,7 @@ use super::{Game, spill, storage::is_shulker_box};
 use horizon_core::nbt::Tag;
 use mod_api::__private::game::*;
 
+pub(in crate::game) mod cauldron_contents;
 #[cfg(test)]
 mod contents_changed_tests;
 mod crafter;
@@ -777,6 +778,20 @@ impl Game<'_> {
         }
         for &(pos, _) in &view.parts {
             self.container_changed(pos);
+            // `ShelfBlockEntity.setChanged()` (the no-argument override posts
+            // `BLOCK_ACTIVATE`): a container writing a shelf's slot is heard.
+            if matches!(
+                self.world.block_entities.get(&pos),
+                Some(BlockEntity::Shelf(_))
+            ) {
+                let state = self.world.block(pos.0, pos.1, pos.2);
+                self.post_block_game_event(
+                    "minecraft:block_activate",
+                    [pos.0, pos.1, pos.2],
+                    None,
+                    Some(state),
+                );
+            }
         }
     }
     /// `BlockEntity.setChanged` at `pos`: comparators re-read the container.
@@ -1922,6 +1937,9 @@ enum Screen {
 }
 
 impl Game<'_> {
+    pub(super) fn machine_layout_selector(&self) -> Option<bool> {
+        self.machine_screen().map(|s| s == Screen::Hopper)
+    }
     fn machine_screen(&self) -> Option<Screen> {
         let key = self.container?;
         // A mod's screen over a hopper or dispenser menu lays out its own slots.
@@ -2992,5 +3010,50 @@ mod pot_hopper_insertion_tests {
             failures.is_empty(),
             "actual hopper/pot transfer missing: {failures:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::game_tests::tests::server_game;
+
+    /// `ShelfBlockEntity.setChanged` (no arguments) posts `BLOCK_ACTIVATE`:
+    /// a container writing a shelf's slot is a block activation.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_container_writing_a_shelf_posts_block_activate() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        let key = (2, 4, 3);
+        let state = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:oak_shelf")
+            .unwrap();
+        game.world.set(key.0, key.1, key.2, state).unwrap();
+        game.world
+            .block_entities
+            .insert(key, BlockEntity::Shelf(Box::default()));
+        let view = game
+            .containers()
+            .view(key, false)
+            .expect("the shelf's view");
+        super::super::sculk::TEST_POSTED_EVENTS.with(|e| *e.borrow_mut() = Some(Vec::new()));
+
+        game.view_changed(&view);
+
+        super::super::sculk::TEST_POSTED_EVENTS.with(|e| {
+            assert!(
+                e.borrow().as_ref().unwrap().contains(&(
+                    "minecraft:block_activate",
+                    [2.5, 4.5, 3.5],
+                    None
+                )),
+                "{:?}",
+                e.borrow()
+            );
+        });
     }
 }

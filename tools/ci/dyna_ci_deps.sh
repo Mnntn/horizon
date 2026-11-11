@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 # Install and cache the Ubuntu runner's build dependencies without root.
 set -euo pipefail
+# The baked runner image may already supply the exact dependency set. Only the
+# fallback prefix needs pkg-config/linker overrides; never apply them to the image.
+packages=(pkg-config libasound2-dev libudev-dev libxkbcommon-x11-dev libwayland-dev
+          libx11-xcb-dev libfontconfig-dev libvulkan-dev libxcursor1 libxi6 libxrandr2)
+baked=true
+for package in "${packages[@]}"; do
+  if [ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)" != installed ]; then
+    baked=false
+    break
+  fi
+done
+if "$baked"; then
+  echo "Runner dependencies already installed; using system headers and libraries"
+  echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+  echo "RUSTUP_HOME=$DYNA_CI_BUILD/rustup" >> "$GITHUB_ENV"
+  exit 0
+fi
 # The Ubuntu mirror proxy sometimes serves an index or package mid-sync ("File has unexpected size"): a later try
 # succeeds. Bounded, with a short growing pause; apt's own error is already on stderr, and after the last try the
 # command's exit status is returned, so `set -e` fails the step with that real error.
@@ -34,9 +51,7 @@ if [ ! -f "$prefix/.dyna-hash" ] || [ "$(< "$prefix/.dyna-hash")" != "$hash" ]; 
         -o "Dir::Cache::archives=$aptroot/archives" -o APT::Sandbox::User=root)
   retry apt-get "${opts[@]}" update
   retry apt-get "${opts[@]}" -y --download-only --no-install-recommends install \
-    pkg-config libasound2-dev libudev-dev libxkbcommon-x11-dev libwayland-dev \
-    libx11-xcb-dev libfontconfig-dev libvulkan-dev \
-    libxcursor1 libxi6 libxrandr2
+    "${packages[@]}"
   for deb in "$aptroot"/archives/*.deb; do
     # Build-essential already supplies matching libc, loader and system headers.
     case "${deb##*/}" in libc6_*|libc6-dev_*|linux-libc-dev_*) continue ;; esac

@@ -20,6 +20,14 @@ pub trait Hooks {
     /// player, an explosion or a mob breaks, not other breaks (leaves decaying,
     /// a torch losing its wall, a piston, `/setblock ... destroy`), nor a
     /// creative break or a tool that can't harvest the block, nor experience.
+    /// For deaths, `context.damage_source` carries the death invocation's
+    /// damage type and causing/direct IDs (not remembered player credit), and
+    /// `context.tool` is None (the entity context has no TOOL). Resolve the causing
+    /// ID through `host.entity` and `host.living` to read its main hand live with
+    /// `living.hand_item(host, Hand::Main)`, including earlier listeners' changes.
+    /// `context.weapon_item(host)` reads the recorded projectile weapon or the
+    /// live melee weapon, including a player's active auto-spin stack.
+    /// Block and use drops retain their tool meaning.
     /// Server-side, for every player.
     #[hook(
         side = "server",

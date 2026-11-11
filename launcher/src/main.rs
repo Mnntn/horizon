@@ -14,6 +14,7 @@ mod console;
 mod console_page;
 mod cull;
 mod datapacks_page;
+mod developer_play;
 mod export_page;
 mod frame;
 mod game_tools;
@@ -57,6 +58,7 @@ mod motion;
 mod multiplayer_page;
 mod native_consent;
 mod native_log_page;
+mod native_registry_consent;
 mod new_instance;
 mod owner_page;
 mod packs_page;
@@ -92,13 +94,13 @@ use gpui::{
 };
 use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
-use horizon_launcher::build_import;
 use horizon_launcher::i18n::{self, tr, trf};
 use horizon_launcher::instances;
 use horizon_launcher::native_mods;
 use horizon_launcher::native_status;
 use horizon_launcher::storage;
 use horizon_launcher::telemetry;
+use horizon_launcher::{build_import, identity};
 use native_consent::PendingConsent;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
@@ -1014,48 +1016,6 @@ impl Launcher {
             .clone()
     }
 
-    /// Builds the selected instance's native mods, once the player accepted the warning. The
-    /// build stays on the Horizon the instance plays (`native_mods::base_for`), unless the
-    /// warning was Update's: then it moves to that newer Horizon.
-    fn build_native(&mut self) {
-        if self.native_step.is_some() {
-            return;
-        }
-        self.pending_consent = None;
-        self.native_error = None;
-        // This attempt's own log, starting empty: an open panel shows it rather than the last
-        // attempt's (`native_log_page`).
-        self.native_log_reset();
-        let instance = instances::selected();
-        self.native_for = Some(instance.id.clone());
-        let plays = self.version_of(&instance).cloned();
-        let base = native_mods::base_for(plays.as_deref(), &self.installed, false);
-        let Some(base) = base else {
-            let error = tr("Install Horizon first.").to_string();
-            self.native_log_preflight(&error);
-            self.native_error = Some(error);
-            return;
-        };
-        let folder = match self.native_mods_to_build() {
-            Ok((folder, _)) => folder,
-            Err(e) => {
-                self.native_log_preflight(&e);
-                self.native_error = Some(e);
-                return;
-            }
-        };
-        self.native_step = Some(tr("Starting the build").into());
-        self.native_progress = None;
-        self.native_done = None;
-        let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            let result = native_mods::build(&base, &folder, &instance, None, |step| {
-                let _ = tx.send(Msg::NativeProgress(step.label(), step.progress()));
-            });
-            let _ = tx.send(Msg::Native(result));
-        });
-    }
-
     fn fetch_releases(&mut self) {
         self.releases = Load::Loading;
         let tx = self.tx.clone();
@@ -1188,82 +1148,7 @@ impl Launcher {
                         }
                     }
                 }
-                Msg::Session(session) => {
-                    self.load_auth_statuses(false);
-                    if let Some(tag) = self.starting_client.take() {
-                        let mut cmd = backend::client_command(&tag);
-                        let account::GameSession { file, offline, env } = match session {
-                            Ok(pass) => pass,
-                            Err(refused) => {
-                                // A keyring that didn't answer isn't a missing owner (#12179).
-                                if refused.keyring.is_none() {
-                                    self.owner = Some(false);
-                                    self.owner_screen_open = true;
-                                }
-                                self.client_error = Some(refused.in_window());
-                                self.starting_pack = None;
-                                self.joining = None;
-                                self.quick_play = None;
-                                continue;
-                            }
-                        };
-                        self.owner = Some(true);
-                        if let Some(file) = file {
-                            cmd.arg("--session-file").arg(file);
-                        }
-                        cmd.envs(env);
-                        // Still play, offline, and say why.
-                        if let Some(e) = offline {
-                            self.client_error = Some(format!("Playing offline: {e}"));
-                        } else if let Some(e) = account::take_unsaved() {
-                            self.client_error = Some(e);
-                        }
-                        self.accounts = Accounts::load();
-                        // A pack's Play button plays that pack; Play plays the selected instance.
-                        let (profile, run) = match self.starting_pack.take() {
-                            Some(work) => {
-                                let id = instances::list()
-                                    .into_iter()
-                                    .find(|i| i.work == work)
-                                    .map(|i| i.id);
-                                let applied =
-                                    horizon_launcher::modpacks::apply_profile(&mut cmd, &work);
-                                (applied, id)
-                            }
-                            None => {
-                                let instance = instances::selected();
-                                (instances::apply(&mut cmd, &instance), Some(instance.id))
-                            }
-                        };
-                        if let Err(e) = profile {
-                            self.client_error = Some(e);
-                            account::discard_unread_sessions();
-                            continue;
-                        }
-                        if let Some(code) = self.joining.take() {
-                            if let Err(e) = backend::join_friend(&mut cmd, &code) {
-                                self.client_error = Some(e);
-                            }
-                        }
-                        if let Some((flag, value)) = self.quick_play.take() {
-                            cmd.arg(flag).arg(value);
-                        }
-                        backend::append_game_args(&mut cmd);
-                        // Last, around every argument: the instance's pre-launch command,
-                        // wrapper and variables.
-                        let instance = run
-                            .as_ref()
-                            .and_then(|id| instances::list().into_iter().find(|i| &i.id == id));
-                        self.client_vars = instance
-                            .as_ref()
-                            .map(|i| i.vars(cmd.get_program()))
-                            .unwrap_or_default();
-                        cmd.envs(self.client_vars.iter().map(|(k, v)| (k, v)));
-                        let launch = instance.map(|i| i.launch).unwrap_or_default();
-                        self.starting_client = Some(tag);
-                        jar_launch::client(cmd, launch, run, self.tx.clone());
-                    }
-                }
+                Msg::Session(session) => self.handle_game_session(session),
                 Msg::JarConsent { jars, reply } => jar_launch::consent(window, jars, reply, cx),
                 Msg::JarClient { run, prepared } => {
                     self.starting_client = None;
@@ -1380,6 +1265,9 @@ impl Launcher {
                     }
                 }
                 Msg::Updates(Err(e)) => self.update_error = Some(e),
+                Msg::NativeRegistryConsent(inventory, reply) => {
+                    native_registry_consent::show(window, inventory, reply, cx)
+                }
                 Msg::NativeProgress(step, progress) => {
                     self.native_step = Some(step);
                     self.native_progress = Some(progress);
@@ -1889,7 +1777,11 @@ impl Launcher {
                 }
             }
             backend::play_step("reading the sign-in");
-            let session = account::session_for_game(&backend::game_home());
+            let session = if horizon_launcher::developer_offline::enabled(&tag) {
+                Ok(None)
+            } else {
+                account::session_for_game(&backend::game_home()).map(Some)
+            };
             backend::play_step("starting the game");
             let _ = tx.send(Msg::Session(session));
         });
@@ -3161,7 +3053,7 @@ impl Launcher {
                 .child(
                     shell::text(theme::night::TITLE, shell::c(n.ink))
                         .font_family(theme::DISPLAY_FONT)
-                        .child("Horizon"),
+                        .child(tr(identity::WINDOW_TITLE)),
                 )
         });
         shell::sidebar_plate(&t)
@@ -5638,8 +5530,8 @@ fn page_after_startup(page: Page, data_folder_failed: bool) -> Page {
 fn menus() -> Vec<Menu> {
     vec![
         Menu {
-            name: "Horizon Launcher".into(),
-            items: vec![MenuItem::action("Quit Horizon Launcher", Quit)],
+            name: identity::DISPLAY_NAME.into(),
+            items: vec![MenuItem::action(tr(identity::QUIT_LABEL), Quit)],
             disabled: false,
         },
         Menu {
@@ -5744,7 +5636,7 @@ fn main() {
                     titlebar: Some(titlebar::options()),
                     #[cfg(target_os = "linux")]
                     window_decorations: Some(gpui::WindowDecorations::Client),
-                    app_id: Some("horizon-launcher".into()),
+                    app_id: Some(identity::APP_ID.into()),
                     // GPUI draws a window without focus at most every 33 ms to save energy. A
                     // benchmark's window often starts without it (KDE keeps focus from windows
                     // a background process opens), and it measures drawing, not that limit.
@@ -5935,10 +5827,17 @@ mod tests {
     #[test]
     fn the_app_menu_has_quit() {
         let menus = super::menus();
-        assert_eq!(menus[0].name, "Horizon Launcher");
+        assert_eq!(
+            menus[0].name,
+            if cfg!(horizon_fork_launcher) {
+                "Horizon Fork Launcher (arismoko)"
+            } else {
+                "Horizon Launcher"
+            }
+        );
         assert!(matches!(
             &menus[0].items[0],
-            gpui::MenuItem::Action { name, .. } if name == "Quit Horizon Launcher"
+            gpui::MenuItem::Action { name, .. } if name == horizon_launcher::identity::QUIT_LABEL
         ));
     }
 
@@ -5951,3 +5850,5 @@ mod tests {
         assert_eq!(shown, ["0", "7", "999", "1,000", "12,300", "1,234,500"]);
     }
 }
+
+mod native_build;

@@ -932,7 +932,16 @@ mod tests {
                     let mut gpu = Vec::new();
                     let mut skin = Skin::new(&mut models, &mut frame);
                     render::render_skinned(
-                        &m, 0.4, camera, &atlas, 0x50a0, &data, &mut gpu, &mut skin,
+                        &m,
+                        0.4,
+                        camera,
+                        &atlas,
+                        0x50a0,
+                        &data,
+                        Default::default(),
+                        None,
+                        &mut gpu,
+                        &mut skin,
                     );
                     let bounds = skin.bounds;
                     if frame.reset {

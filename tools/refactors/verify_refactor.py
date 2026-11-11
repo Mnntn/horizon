@@ -11,7 +11,8 @@ def verify(script: Path, application_subject: str) -> None:
     root = script.resolve().parents[2]
     def git(*args: str) -> bytes:
         return subprocess.check_output(['git', '-C', str(root), *args])
-    commits = git('log', '--format=%H%x09%s', 'origin/mod-host-map..HEAD').decode().splitlines()
+    # The newest commit with that subject in HEAD's history: the refactors have landed on main, so no branch range.
+    commits = git('log', '--format=%H%x09%s', 'HEAD').decode().splitlines()
     commit = next(line.split('\t')[0] for line in commits if line.split('\t', 1)[1] == application_subject)
     with tempfile.TemporaryDirectory(prefix='verify-refactor-') as name:
         snapshot = Path(name)

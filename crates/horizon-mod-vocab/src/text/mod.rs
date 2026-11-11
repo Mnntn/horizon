@@ -5,7 +5,7 @@ use horizon_core::nbt::clone_tag;
 /// A component tree, retaining translation keys, styles and ordered children.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
-#[derive(horizon_mod_api_macros::Wire)]
+// no wire: handwritten Wire uses the validated iterative TextForm node table.
 pub struct Text {
     /// The component's contents before its children.
     pub content: TextContent,

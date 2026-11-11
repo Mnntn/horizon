@@ -793,6 +793,7 @@ pub(crate) fn with_resource_test_world(
     let w = MobWorld {
         goal_host: None,
         teams: Default::default(),
+        professions: crate::mobs::villager::profession_table(),
         loop_context: crate::test_resources::server_loop_context(),
         world: &world,
         registry,

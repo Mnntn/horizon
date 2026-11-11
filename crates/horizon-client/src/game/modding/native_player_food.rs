@@ -179,8 +179,7 @@ mod tests {
     /// The acting player with a body, as a hook's turn finds them.
     fn acting_player(game: &mut super::Game<'_>) -> PlayerRef {
         game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-        game.lan_acting_uuid = Some(123);
-        game.lan_acting_entity = Some(20);
+        crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
         game.player(123).unwrap()
     }
 

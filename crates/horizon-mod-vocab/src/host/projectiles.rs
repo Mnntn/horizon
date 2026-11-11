@@ -4,6 +4,41 @@ use crate::*;
 /// The server host's methods of the `projectiles` area, implemented by the game and reached through [`ServerHost`].
 #[horizon_mod_api_macros::host_area]
 pub trait ProjectilesServerHost {
+    /// Side: server. `Projectile.spawnProjectileFromRotation` for a thrown item
+    /// projectile: snowball, egg, pearl, potion, experience bottle, wind charge,
+    /// or a registered mod thrown type. Constructs at the owner's eyes minus
+    /// 0.1F blocks (wind charges use eye height directly), sets ownership before
+    /// shooting, inherits known movement
+    /// (vertical only while airborne), adds to the level and fires projectile_launch.
+    /// Spread draws x, y, z triangular noise from the new projectile's own random.
+    /// Once it is in the level, `stack`'s enchantments run their
+    /// `projectile_spawned` effects on it (`Projectile.applyOnProjectileSpawned`):
+    /// in the stack's order, each effect's requirements tested with the level
+    /// random just before it applies, its own draws from the projectile's random.
+    /// Does not consume the stack or apply item-use cooldowns or statistics.
+    /// None for an unavailable owner or one in another level, unsupported type,
+    /// invalid stack or non-finite shot parameter. Also refuses a stack with a
+    /// `projectile_spawned` effect the engine does not apply yet: `ignite`,
+    /// `apply_impulse`, `play_sound` and `all_of` of those apply
+    /// (`apply_mob_effect` and `apply_exhaustion` do nothing to a projectile,
+    /// as in vanilla); the block, damage, explosion, particle, summon,
+    /// function and item-damage effects are refused rather than skipped. No
+    /// random is drawn and nothing spawns on those refusals. Unsupported
+    /// requirement contexts (including entity flags) and invalid clamped
+    /// level-value ranges also refuse before insertion. Type predicates,
+    /// random chance and their boolean combinations are supported.
+    /// The original stack
+    /// is unchanged; carried count is one; the effects see the stack as given.
+    #[access(WorldOnly)]
+    fn spawn_projectile_from_rotation(
+        &mut self,
+        owner: LivingRef,
+        entity_type: &Identifier,
+        stack: &ItemStack,
+        offset: f32,
+        power: f32,
+        inaccuracy: f32,
+    ) -> Option<ProjectileRef>;
     /// Side: server.
     /// Narrows an entity to a projectile: one in the projectile list, a trident
     /// a player threw or a firework rocket. None for another kind, a stale

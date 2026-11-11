@@ -1,5 +1,5 @@
 use super::*;
-use horizon_mod_package::manifest::inject::mod_points::Point;
+use point_shape::catalog::Point;
 use quote::ToTokens;
 
 /// A mod crate `chemlib` in a fresh folder, with `lib.rs` and `tanks.rs`.
@@ -179,6 +179,46 @@ fn two_points_with_one_name_fail_the_build_naming_both() {
         error.contains("chemlib::tanks_drain") && error.contains("chemlib::tanks::drain"),
         "{error}"
     );
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// Snake-casing a path is not injective: `a::b_c` and `a_b::c` are both `a_b_c`. The build
+/// refuses them, naming both, and nothing is refused when they differ.
+#[test]
+fn paths_that_snake_case_to_one_name_fail_the_build_naming_both() {
+    let dir = crate_with(
+        "clash-paths",
+        "pub mod a;
+pub mod a_b;
+",
+        "",
+    );
+    fs::write(
+        dir.join("src/a.rs"),
+        "pub fn b_c() {}
+",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/a_b.rs"),
+        "pub fn c() {}
+",
+    )
+    .unwrap();
+    let error = mod_points(&dir, &WireTypes::new()).unwrap_err();
+    assert!(
+        error.contains("chemlib::a::b_c")
+            && error.contains("chemlib::a_b::c")
+            && error.contains("a_b_c"),
+        "{error}"
+    );
+    fs::write(
+        dir.join("src/a_b.rs"),
+        "pub fn d() {}
+",
+    )
+    .unwrap();
+    assert!(mod_points(&dir, &WireTypes::new()).is_ok());
     let _ = fs::remove_dir_all(dir);
 }
 

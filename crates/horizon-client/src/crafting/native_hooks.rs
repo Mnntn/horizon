@@ -32,9 +32,10 @@ pub fn native_ingredient(
 /// items stay in. Called once per load, after the recipes are resolved, with
 /// the `DataLoadContext` of the load that owns them (`origin()`
 /// `ServerDataLoad` on a server, `ClientPreload` on a client's own load),
-/// and again after `/reload`. An unknown set key, an item that is air or
-/// not a registered item is logged and skipped. The answer must be the same
-/// every time.
+/// and again after `/reload`. New keys in manifest-owned namespaces create
+/// custom input sets. Unknown vanilla keys, invalid or foreign new keys and
+/// air are logged and skipped; unregistered items are ignored. The answer
+/// must be the same every time.
 #[inline(never)]
 pub fn native_recipe_property_sets(
     context: &LoadContext,

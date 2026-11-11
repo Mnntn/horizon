@@ -82,7 +82,7 @@ impl PreparedFunctionCall {
 /// enabled ids from `datapacks.json` (`PackRepository.reload`).
 pub(super) struct PackStack {
     pub builtin: Option<DataPack>,
-    content: DataPack,
+    pub(super) content: DataPack,
     pub packs: Vec<Arc<DataPack>>,
     pub enabled: Vec<String>,
 }

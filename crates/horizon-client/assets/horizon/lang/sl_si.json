@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s za %2$s, do %3$s",
   "horizon.tempban.usage": "/tempban <igralec> <trajanje> [razlog]",
   "horizon.title.not_affiliated": "Ni povezan z Mojangom ali Microsoftom",
-  "key.emote": "Kolo izrazov"
+  "key.emote": "Kolo izrazov",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

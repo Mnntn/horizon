@@ -119,7 +119,19 @@ pub struct LootDrops<'a> {
     /// names one only while it remembers the player's hit (100 ticks), so one
     /// that dies to lava long after names none.
     pub player: Option<u128>,
-    /// What broke the block (`LootContextParams.TOOL`).
+    /// `LootContextParams.DAMAGE_SOURCE` of this death invocation. None for
+    /// non-death drops. Environmental deaths have a source but no causing entity.
+    /// `causing` and `direct` are the attacking and direct attacking entity IDs;
+    /// 0 means absent or unknown, as on the other damage hooks.
+    pub damage_source: Option<crate::entity::health::HurtSource<'a>>,
+    /// The direct projectile's recorded stack; use `weapon_item` for the death weapon.
+    // hidden: borrowed transport field; mods use the source-aware weapon_item read.
+    #[doc(hidden)]
+    pub weapon: Option<&'a ItemStack>,
+    /// The breaking or using tool (`LootContextParams.TOOL`). Always None for
+    /// entity deaths. For the attacker's live hand, resolve `damage_source.causing`
+    /// through `host.entity`, then `host.living`, and read `living.hand_item(host, Hand::Main)`.
+    /// This reads when called, including changes made by earlier loot listeners.
     pub tool: Option<&'a ItemStack>,
     /// The radius of the explosion that broke the block.
     pub explosion: Option<f32>,
@@ -133,6 +145,24 @@ pub struct LootDrops<'a> {
     /// leashed drops its lead on its next tick as a call of its own (`entity`
     /// the mob, `player` its killer, `table` empty, `used` false).
     pub used: bool,
+}
+
+impl LootDrops<'_> {
+    /// Vanilla's `DamageSource.getWeaponItem` for this death. Arrows return the
+    /// bow or crossbow recorded when fired; tridents return their own original
+    /// stack, preserving components even after the shooter changes hands.
+    /// Otherwise reads the direct entity's weapon when called: a player's recorded
+    /// auto-spin stack during Riptide, otherwise the live main hand.
+    /// Returns None for non-death drops or an absent or unavailable weapon.
+    pub fn weapon_item(&self, host: &dyn Host) -> Option<ItemStack> {
+        let source = self.damage_source?;
+        if let Some(weapon) = self.weapon {
+            return Some(weapon.clone());
+        }
+        let entity = host.entity(u32::try_from(source.direct).ok().filter(|id| *id != 0)?)?;
+        let living = host.living(entity)?;
+        backend_of(host)?.living_weapon_item(living)
+    }
 }
 
 /// An item that drops where a living entity died, before it is an item entity
@@ -654,7 +684,7 @@ pub enum UsePhase {
 }
 
 // no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
-/// A player's item use without a block or entity target (`RightClickItem`).
+/// A player's item use, including after target fallthrough (`RightClickItem`).
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct ItemClick<'a> {

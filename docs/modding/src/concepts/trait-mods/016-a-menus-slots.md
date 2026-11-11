@@ -3,6 +3,49 @@
 
 #### A menu's slots
 
+##### Mod-created recipe input sets
+
+`Hooks::recipe_property_sets` runs once after recipes resolve for each load and again after
+`/reload`. Add `RecipePropertyAddition::new("mymod:cooking_pot_input", items)` to its
+`event.additions`: a key in the listener's manifest-owned namespaces creates a set. Ownership
+uses the package ID plus the manifest's `namespaces`, so a package named
+`ported_farmersdelight` with `namespaces = ["farmersdelight"]` can create
+`farmersdelight:cooking_pot_input`. A later listener may extend an existing set but cannot
+create a new foreign key. Invalid keys, unknown vanilla keys and air are skipped with a
+warning; unregistered items do not participate in acceptance or network sync.
+
+Attach a `MenuPart` to the registered menu type and filter its input slot with the same set:
+
+```rust,ignore
+struct PotInput;
+#[mod_api::horizon_part]
+impl mod_api::MenuPart for PotInput {
+    fn menu_slot_rules(
+        &self,
+        context: &dyn mod_api::LoopContext,
+        event: &mut mod_api::MenuSlotRulesEvent<'_>,
+    ) {
+        if event.slot == 0 {
+            event.may_place &= context.mod_recipe_property_contains(
+                "farmersdelight:cooking_pot_input", event.stack.item(),
+            );
+        }
+    }
+}
+// In Hooks::register:
+// registrar.menu_part("farmersdelight:cooking_pot", PotInput);
+```
+
+The Host exposes the same `mod_recipe_property_contains(set, ItemKey)` query outside
+restricted menu callbacks. This query covers mod-created sets only: unknown sets, unknown
+items and vanilla set keys return false. Existing vanilla station acceptance is unchanged.
+The server reads its owning load; the client reads local preload sets before its first
+`UpdateRecipes`, then the authoritative server generation. A packet replaces the entire
+generation, including an empty one. Closing a screen or changing dimension retains it;
+disconnecting discards it. Reads allocate nothing and do not rescan recipes or registries.
+There is no second hook and no per-slot load callback.
+
+
 Client hooks can read the local player's menu with `host.local_player()?.container_menu(host)`,
 including the inventory when no container is open. `MenuRef::slot_count`, `slot` and `carried`
 read on either side; `slot` and `carried` return an outer `None` when the handle or slot is

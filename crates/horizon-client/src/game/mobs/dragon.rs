@@ -442,7 +442,7 @@ pub(in crate::game) struct Dragon {
     history: [(f64, f32); 64],
     head: usize,
     /// head, neck, body, tail1-3, wing1-2.
-    pub parts: [(Vec3, Vec3); 8],
+    pub parts: [residency::DragonPart; 8],
     nodes: Option<[[i32; 3]; 24]>,
     nearest_crystal: Option<usize>,
     /// The player a crystal destroyed while it held its pattern sends it
@@ -656,7 +656,7 @@ impl Dragon {
             head: 0,
             // The parts are entities of their own, at the origin until the first
             // `aiStep` places them (`tickPart`).
-            parts: [(Vec3::ZERO, Vec3::ZERO); 8],
+            parts: std::array::from_fn(|_| Default::default()),
             nodes: None,
             nearest_crystal: None,
             strafe_request: None,
@@ -3160,7 +3160,7 @@ impl Game<'_> {
                 self.spawn_orbs([p.x, p.y, p.z], (xp as f32 * 0.2) as u32);
             }
             let (id, at) = self.dragon.as_ref().map_or((0, p), |d| (d.id, d.position));
-            self.dragon.discard();
+            self.discard_resident_dragon();
             if fight {
                 self.dragon_killed();
             }
@@ -4741,7 +4741,7 @@ impl Game<'_> {
                 self.fight.dragon_uuid = Some(self.uuid_for(id));
                 self.fight.killed = false;
                 if !active {
-                    self.dragon.discard();
+                    self.discard_resident_dragon();
                     self.fight.dragon_uuid = None;
                 }
             }
@@ -4927,7 +4927,7 @@ impl Game<'_> {
         let id = dragon.id;
         // Finalization listeners can install another dragon after the initial
         // refusal check. Keep the constructor's existing replacement order.
-        self.dragon.replace(dragon);
+        self.replace_resident_dragon(dragon);
         self.place_dragon_parts();
         self.native_joins_flush(false, id).then_some(id)
     }
@@ -4941,7 +4941,7 @@ impl Game<'_> {
         d.id = id as u32;
         d.phase = Phase::from_id(10);
         d.join = horizon_client::join_seq::JoinSeq::next();
-        self.dragon.replace(d);
+        self.replace_resident_dragon(d);
         self.place_dragon_parts();
         if let Some(d) = self.dragon.as_mut() {
             for part in &mut d.parts {
@@ -4992,7 +4992,7 @@ impl Game<'_> {
     /// keeps pointing at the same crystal.
     pub(super) fn remove_remote_dragon(&mut self, id: i32) {
         if self.dragon.as_ref().is_some_and(|d| d.id as i32 == id) {
-            self.dragon.discard();
+            self.discard_resident_dragon();
             return;
         }
         let Some(index) = self.crystals.iter().position(|c| c.id as i32 == id) else {

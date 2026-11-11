@@ -4,7 +4,8 @@ pub mod game;
 pub use crate::game::{
     BlockEdit, BlockRun, Clock, ColumnBlocks, Config, ConfigFile, ConfigKind, CubeFace,
     DataMapType, ExperienceOrb, Falling, Heightmap, HeldItemSlot, Hit, MapDecoration, MapInfo,
-    MobRender, ModEvent, PhantomSpawnResult, PlayerRender, Shake, SleepProblem,
+    MobRender, ModEvent, ModMismatch, ModMismatchResolution, PhantomSpawnResult, PlayerRender,
+    Shake, SleepProblem,
 };
 mod __private {
     mod built {

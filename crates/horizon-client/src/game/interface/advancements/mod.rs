@@ -1081,6 +1081,9 @@ impl Game<'_> {
         } else {
             self.recipe_toast(&allowed);
         }
+        if !allowed.is_empty() {
+            self.invalidate_mod_book_placement_knowledge();
+        }
         if allowed.is_empty() || self.remote.is_some() || self.no_player_here() {
             return taken_back;
         }
@@ -2036,6 +2039,8 @@ impl Game<'_> {
     }
     /// `ItemUsedOnLocationTrigger` (placed_block, item_used_on_block).
     pub(super) fn trigger_block(&mut self, name: &str, pos: [i32; 3], stack: &ItemStack) {
+        #[cfg(test)]
+        crate::game::block_use_completion_tests::record(name, Some(stack));
         let me = self.player_entity_for(name);
         let it = item_view(stack);
         self.trigger(name, move |c, w| {
@@ -2060,6 +2065,8 @@ impl Game<'_> {
         self.trigger_block_use("minecraft:any_block_use", pos, Some(stack));
     }
     fn trigger_block_use(&mut self, name: &str, pos: [i32; 3], stack: Option<&ItemStack>) {
+        #[cfg(test)]
+        crate::game::block_use_completion_tests::record(name, stack);
         let me = self.player_entity_for(name);
         let it = stack.map(item_view);
         let centre = pos.map(|c| f64::from(c) + 0.5);

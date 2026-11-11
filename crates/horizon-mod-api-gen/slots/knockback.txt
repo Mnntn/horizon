@@ -1,0 +1,3 @@
+# Per-hit entries, not per-tick scans. An unused point adds one atomic load and branch.
+horizon_client_lib::mobs::knockback::Mob::knockback
+horizon_client_lib::mobs::knockback::Mob::knockback_full

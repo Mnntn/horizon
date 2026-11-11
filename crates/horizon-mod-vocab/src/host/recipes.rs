@@ -53,6 +53,8 @@ pub trait RecipesHost {
     /// Published asset/data read: available in Setup, Reloading and World.
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.
+    /// Returns the first category in category-id order when a type has several.
+    /// Any invalid declaration refuses the complete generation.
     /// Rebuilt when the recipe table changes. Does not unlock any recipes.
     #[access(PublishedResources)]
     fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory>;
@@ -81,6 +83,19 @@ pub trait RecipesClientHost {
     /// without requiring the recipe to be learned. The screen shows any refusal.
     #[access(WorldOnly)]
     fn transfer_recipe(&mut self, book_id: i32);
+    /// Side: client.
+    /// What `transfer_recipe(book_id)` would do now, worked out by the server
+    /// without moving anything: the player's inventory, the grid and every
+    /// container a mod lends the grid's recipes (a crafting station's chests,
+    /// which the client can't see) counted. For a viewer's "+", to mark the
+    /// inputs it lacks. The first call for a recipe asks and returns None;
+    /// the answer comes a moment later and is kept for that recipe while the
+    /// menu, the inventory and the grid stay as they were; while it is still
+    /// wanted it is asked again every two seconds, at most fifteen times for
+    /// one state of the menu. None outside a screen that
+    /// takes `transfer_recipe` and on a server that doesn't answer it.
+    #[access(WorldOnly)]
+    fn transfer_recipe_check(&mut self, book_id: i32) -> Option<RecipeTransferCheck>;
 }
 /// The handles' reads of the `recipes` area, implemented by the game and reached through [`Backend`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait

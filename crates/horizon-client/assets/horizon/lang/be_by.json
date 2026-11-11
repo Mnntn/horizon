@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s на %2$s, да %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "Не звязаны з Mojang або Microsoft",
-  "key.emote": "Кола эмоцый"
+  "key.emote": "Кола эмоцый",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s airson %2$s, gu %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
   "horizon.title.not_affiliated": "Gun a bhith ceangailte ri Mojang no Microsoft",
-  "key.emote": "Cuibhle emote"
+  "key.emote": "Cuibhle emote",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

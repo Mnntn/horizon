@@ -422,8 +422,7 @@ mod tests {
                 game.player = Some(
                     horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap(),
                 );
-                game.lan_acting_uuid = Some(123);
-                game.lan_acting_entity = Some(20);
+                crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
                 game.screen = super::super::Screen::Playing;
                 game.right = true;
                 let player = game.living(game.entity(20).unwrap()).unwrap();

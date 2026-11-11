@@ -573,6 +573,7 @@ mod tests {
             mod_fluids: vec![None; fluid.index() + 1],
             animated_layers: vec![],
             mod_tints: ModTints::default(),
+            section_geometry: std::sync::Arc::new([]),
             colormaps: Vec::new(),
             water_colormap: None,
         };

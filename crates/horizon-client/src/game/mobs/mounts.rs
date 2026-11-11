@@ -512,16 +512,22 @@ impl Game<'_> {
         let Some(i) = self.mount_index() else {
             return false;
         };
-        if keys.shift || !self.mobs[i].alive() {
+        // `Player.rideTick`: a sneaking rider gets off (`wantsToStopRiding`), and so does one on a
+        // dead mount. `LivingEntity.baseTick`: so does a rider whose eyes are in water on a mount
+        // of the `dismounts_underwater` tag (a server's player too: `leave_guest` tells their
+        // client). When `entity_mount` keeps it on, the mount still reads this tick's input.
+        let i = if keys.shift
+            || !self.mobs[i].alive()
+            || (dismounts_underwater(self.mobs[i].species()) && self.rider_eyes_in_water())
+        {
             self.dismount_mount();
-            return true;
-        }
-        // `LivingEntity.baseTick`: a rider whose eyes are in water gets off a mount of the
-        // `dismounts_underwater` tag (a server's player too: `leave_guest` tells their client).
-        if dismounts_underwater(self.mobs[i].species()) && self.rider_eyes_in_water() {
-            self.dismount_mount();
-            return true;
-        }
+            let Some(i) = self.mount_index().filter(|&i| self.mobs[i].alive()) else {
+                return true;
+            };
+            i
+        } else {
+            i
+        };
         let strafe = f32::from(u8::from(keys.left)) - f32::from(u8::from(keys.right));
         let forward = f32::from(u8::from(keys.forward)) - f32::from(u8::from(keys.backward));
         // LocalPlayer.aiStep: the riding jump charges while space is held.
@@ -557,6 +563,7 @@ impl Game<'_> {
             steer,
             sprint: keys.sprint || self.keys.held(Action::Sprint),
             jumping: keys.jump,
+            sneak: keys.shift,
             // A server's player (a LAN guest, single player's window) drives
             // a horse from its own client (`handleMoveVehicle`).
             client: self.lan_acting.is_some(),
@@ -1636,3 +1643,7 @@ mod off_level_tests {
 #[cfg(test)]
 #[path = "mounts/camel_jump_tests.rs"]
 mod camel_jump_tests;
+
+#[cfg(test)]
+#[path = "mounts/sneak_dismount_tests.rs"]
+pub(in crate::game) mod sneak_dismount_tests;

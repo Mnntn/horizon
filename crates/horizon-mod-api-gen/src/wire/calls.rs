@@ -994,6 +994,9 @@ pub(super) fn dispatch(types: &Types<'_>, methods: &[Method]) -> (String, Vec<St
         } else {
             call
         };
+        if m.owner == "Hooks" && m.name == "register" {
+            back.push_str("if let Some(reason) = crate::__private::take_registration_refusal(&p1) { crate::RegistrationRefusalRegistrar::registration_refusal(&mut host, reason); }");
+        }
         writeln!(
             arms,
             "{id} => {{ let receiver = {receiver}; {body} let answer = {answer}; out.put_owned(answer); {back} }}"

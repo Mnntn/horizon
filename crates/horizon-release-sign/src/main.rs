@@ -12,7 +12,7 @@
 //! may go out unsigned, or signed with a key nobody can check yet, only while release-keys.txt
 //! lists no key; once it lists one, anything launchers would refuse fails the release.
 
-use horizon_release_sign::{SIGNATURE, SUMS, Sha256, SigningKey, parse_keys, trusted_keys, verify};
+use horizon_release_sign::{SIGNATURE, SUMS, Sha256, SigningKey, parse_keys, verify};
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -23,7 +23,7 @@ fn main() -> ExitCode {
         Some("verify") => check_folder(&args[1..]),
         Some("keygen") => keygen(&args[1..]),
         _ => Err(
-            "usage: horizon-release-sign verify --tag <tag> [--key <base64>]... [--signature <file>] \
+            "usage: horizon-release-sign verify --tag <tag> [--key <base64>]... [--repository <owner/name>] [--signature <file>] \
              [--publishing] <folder> | keygen --public-out <file>"
                 .into(),
         ),
@@ -77,6 +77,11 @@ fn file_hash(path: &Path) -> Result<String, String> {
 fn check_folder(args: &[String]) -> Result<(), String> {
     let (tag, rest) = tag_of(args)?;
     let (keys, rest) = options(&rest, "--key");
+    let (repositories, rest) = options(&rest, "--repository");
+    let repository = repositories
+        .first()
+        .map(String::as_str)
+        .unwrap_or("horizon-rust/horizon");
     let (signature_file, rest) = options(&rest, "--signature");
     let signature_file = signature_file
         .into_iter()
@@ -94,20 +99,20 @@ fn check_folder(args: &[String]) -> Result<(), String> {
             .ok_or("verify needs the release's folder")?,
     );
     let keys = if keys.is_empty() {
-        trusted_keys()
+        horizon_release_sign::trusted_keys_for(repository)
     } else {
         parse_keys(&keys.join("\n"))?
     };
     let sums = std::fs::read(folder.join(SUMS)).map_err(|e| format!("{SUMS}: {e}"))?;
     let listed = match std::fs::read_to_string(folder.join(&signature_file)) {
         Ok(signature) if !keys.is_empty() => verify(&tag, &sums, &signature, &keys)?,
-        Ok(_) if publishing => {
+        Ok(_) if publishing && repository == "horizon-rust/horizon" => {
             println!(
                 "::warning::{tag}: signed, but release-keys.txt lists no key yet, so launchers can't check it"
             );
             horizon_release_sign::parse_sums(&String::from_utf8_lossy(&sums))?
         }
-        Err(_) if publishing && keys.is_empty() => {
+        Err(_) if publishing && keys.is_empty() && repository == "horizon-rust/horizon" => {
             println!(
                 "::warning::{tag}: published with {SUMS} but unsigned: release-keys.txt lists no key yet"
             );

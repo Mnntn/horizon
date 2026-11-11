@@ -179,7 +179,6 @@ impl Game<'_> {
             maps: Some(&maps),
         };
         let offers = self
-            .res
             .stations()
             .trades
             .offers_from_set(&ctx, set, &mut random);
@@ -191,7 +190,13 @@ impl Game<'_> {
     /// `AbstractVillager.getOffers`: generated on first use.
     pub(super) fn ensure_offers(&mut self, index: usize) {
         let species = self.mobs[index].species();
-        if species == Species::Villager && self.mobs[index].extra.profession.index().is_none() {
+        if species == Species::Villager
+            && self
+                .stations()
+                .professions
+                .state_index(&self.mobs[index].extra.profession)
+                .is_none()
+        {
             return;
         }
         let unset = self.mobs[index]
@@ -217,12 +222,9 @@ impl Game<'_> {
                 }
                 v
             } else {
-                let profession = horizon_client::mobs::villager::profession(
-                    m.extra.profession.index().unwrap_or(0),
-                )
-                .id;
+                let profession = m.extra.profession.id();
                 let level = m.extra.villager_level.max(1);
-                let set = merchant::Trades::set_for(profession, level);
+                let set = self.stations().trades.set_for(&profession, level);
                 if self.stations().trades.sets.contains_key(&set) {
                     self.offers_from_set(&set, &variant, origin)
                 } else {
@@ -263,7 +265,12 @@ impl Game<'_> {
             self.handle_mob_events(events)?;
             return Ok(true);
         }
-        let unresolved = species == Species::Villager && m.extra.profession.index().is_none();
+        let unresolved = species == Species::Villager
+            && self
+                .stations()
+                .professions
+                .state_index(&m.extra.profession)
+                .is_none();
         self.award_custom_stat("talked_to_villager", 1);
         if unresolved {
             let mut events = Vec::new();
@@ -284,9 +291,9 @@ impl Game<'_> {
         }
         let villager = species == Species::Villager;
         let profession = if villager {
-            horizon_client::mobs::villager::profession(m.extra.profession.index().unwrap_or(0)).id
+            m.extra.profession.id()
         } else {
-            "wandering_trader"
+            "minecraft:wandering_trader".into()
         };
         let level = if villager {
             m.extra.villager_level.max(1)
@@ -296,7 +303,7 @@ impl Game<'_> {
         let mut session = merchant::Session::new(trade.offers, villager);
         session.xp = trade.xp;
         session.level = level;
-        session.profession = format!("minecraft:{profession}");
+        session.profession = profession;
         session.variant = format!(
             "minecraft:{}",
             VILLAGER_TYPES[m.extra.variant as usize % VILLAGER_TYPES.len()]
@@ -341,11 +348,12 @@ impl Game<'_> {
             self.rand_sequences.give_back(id, r);
         }
         let Some(id) = state.mob else { return };
+        let professions = self.stations().professions.clone();
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return;
         };
         m.extra.flag2 = false;
-        if session.villager && m.extra.profession.index().is_none() {
+        if session.villager && professions.state_index(&m.extra.profession).is_none() {
             return;
         }
         if session.villager {
@@ -359,7 +367,11 @@ impl Game<'_> {
     }
     /// Opens a merchant menu without a mob (horizon-ctl `trade`).
     pub(super) fn open_merchant(&mut self, profession: &str, variant: &str, level: i32) {
-        let profession = format!("minecraft:{}", profession.trim_start_matches("minecraft:"));
+        let profession = if profession.contains(':') {
+            profession.to_owned()
+        } else {
+            format!("minecraft:{profession}")
+        };
         let variant = format!("minecraft:{}", variant.trim_start_matches("minecraft:"));
         let level = level.clamp(1, 5);
         let origin = self
@@ -368,7 +380,7 @@ impl Game<'_> {
             .map_or([0.0; 3], |p| [p.position.x, p.position.y, p.position.z]);
         let mut offers = Vec::new();
         for l in 1..=level {
-            let set = merchant::Trades::set_for(&profession, l);
+            let set = self.stations().trades.set_for(&profession, l);
             offers.extend(self.offers_from_set(&set, &variant, origin));
         }
         let mut session = merchant::Session::new(offers, true);
@@ -428,7 +440,12 @@ impl Game<'_> {
         if mob
             .and_then(|id| self.mobs.iter().find(|m| m.id == id))
             .is_some_and(|m| {
-                m.species() == Species::Villager && m.extra.profession.index().is_none()
+                m.species() == Species::Villager
+                    && self
+                        .stations()
+                        .professions
+                        .state_index(&m.extra.profession)
+                        .is_none()
             })
         {
             if let Some(m) = self.station.as_mut().and_then(|s| s.merchant.as_mut()) {

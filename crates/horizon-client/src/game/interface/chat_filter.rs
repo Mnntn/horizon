@@ -139,7 +139,7 @@ impl Game<'_> {
             place.name(),
             action.name()
         );
-        if self.options.dedicated.is_none() {
+        if !self.is_dedicated_server() {
             log::info!("{summary}");
             return;
         }
@@ -386,7 +386,7 @@ impl Game<'_> {
             .map(|r| format!(": {r}"))
             .unwrap_or_default();
         host.hub.mute(uuid, &name, until, by, reason.clone());
-        if self.options.dedicated.is_some() {
+        if self.is_dedicated_server() {
             dedicated::log(
                 "INFO",
                 &format!("[chat-filter] {by} muted {name} {what}{why}"),
@@ -404,7 +404,7 @@ impl Game<'_> {
     pub(super) fn unmute(&mut self, host: &mut LanHost, name: &str, by: &str) -> Reply {
         match host.hub.unmute(name) {
             Some(name) => {
-                if self.options.dedicated.is_some() {
+                if self.is_dedicated_server() {
                     dedicated::log("INFO", &format!("[chat-filter] {by} unmuted {name}"));
                 }
                 Reply::translated("horizon.moderation.unmuted", &[Text::literal(name)])

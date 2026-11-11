@@ -1053,5 +1053,6 @@
   "horizon.tempban.success": "%1$s, %2$s süresince, %3$s tarihine kadar",
   "horizon.tempban.usage": "/tempban <oyuncu> <süre> [neden]",
   "horizon.title.not_affiliated": "Mojang veya Microsoft ile bağlantılı değildir",
-  "key.emote": "İfade Çarkı"
+  "key.emote": "İfade Çarkı",
+  "horizon.developer_offline.single_player": "Offline developer session: single-player only."
 }

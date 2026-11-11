@@ -285,16 +285,16 @@ def check(crate: Path):
 
 
 def generated_findings(target: Path):
-    """Scan the freshest API build output, never a fixture crate or stale profile.
+    """Scan the freshest vocabulary build output, never a fixture crate or stale profile.
 
     Source placeholders such as fn blocks() get their actual event field types
     from generation. Checking only the catalog would miss those public types.
     Cargo must run first; callers may not silently skip missing build output.
     """
     candidates = [p for p in target.rglob("mod_api_generated.rs")
-                  if re.fullmatch(r"horizon-mod-api-[0-9a-f]+", p.parent.parent.name)]
+                  if re.fullmatch(r"horizon-mod-vocab-[0-9a-f]+", p.parent.parent.name)]
     if not candidates:
-        return [Finding(str(target), 1, "missing-generated", "build horizon-mod-api before the full boundary audit")]
+        return [Finding(str(target), 1, "missing-generated", "build horizon-mod-vocab before the full boundary audit")]
     newest = max(candidates, key=lambda p: p.stat().st_mtime_ns)
     findings = []
     for name in ("mod_api_generated.rs", "mod_api_generated_host.rs"):
