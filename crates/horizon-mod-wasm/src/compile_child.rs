@@ -4,10 +4,10 @@ use std::{
     ffi::OsString,
     fs::OpenOptions,
     io::{self, Read},
-    path::Path,
+    path::{Path, PathBuf},
 };
 #[cfg(any(unix, all(test, not(windows))))]
-use std::{fs, io::Write, path::PathBuf};
+use std::{fs, io::Write};
 
 /// Owns both the spelling and validation of private input names.
 struct InputName(u32, u64);

@@ -764,7 +764,7 @@ fn sign_text_animated(data: &SignData) -> bool {
 
 /// How far the text of an outlined call sits in front of its outline, in
 /// text units (`Font.DisplayMode.POLYGON_OFFSET`, see `draw_text`).
-const TEXT_OVER_OUTLINE: f32 = 0.05;
+pub const TEXT_OVER_OUTLINE: f32 = 0.05;
 
 /// Draws a text call with the font atlas: 8x8 glyph cells, the outline as
 /// eight one-pixel offsets under the text.

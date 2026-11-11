@@ -2,9 +2,8 @@
 //! textures (resource packs included) in its own pass: with `WorldDrawn::block_sprites`, the arrays themselves.
 use super::Game;
 use horizon_client::block_sprites::{BlockSprites, Lookup, SpriteRef};
-use horizon_core::geometry::Direction;
 use horizon_world::registry::BlockStateId;
-use mod_api::{AtlasRegion, BlockFaceTexture, Identifier};
+use mod_api::{AtlasRegion, Identifier};
 
 #[allow(dead_code)]
 impl Game<'_> {
@@ -36,30 +35,56 @@ impl Game<'_> {
             .map(|texture| lookup.texture(texture))
             .collect()
     }
-    /// For a client mod drawing a block entity: the texture block state `state`'s model shows on its `side`
-    /// (`block/oak_planks`: vanilla's without their namespace, a mod's with it), by the name `native_draw_cube` and
-    /// `native_draw_quad` take, and that face's
-    /// tint index (-1 for none): a copycat block drawing a box of its material's textures with `native_draw_cube`,
-    /// kept with `BlockEntityDraw::keep`. The face culled against that side comes first, else the first facing it;
-    /// None when the model has no face that way or isn't baked. API @API:block_face_sprite@.
-    pub(super) fn block_face_sprite(
+    /// For a client mod drawing a block's faces itself (a copycat drawing its material's, from
+    /// `block_sprites`): the 0xRRGGBB colour a face of `state` with tint index `tint_index` is
+    /// multiplied by at `pos`, as the chunk mesher tints it there (`MeshTables::block_tints`:
+    /// `BlockColors`, biome blend included). None for an untinted face. A fluid's face
+    /// (`block_sprites::fluid_faces`: water at tint index 0) takes the water colour the fluid
+    /// mesher gives it (`MeshTables::water_tint`, the packs' water colormap included). This client's copy of the
+    /// world: the chunks around `pos` it has, as break particles read them (`particle_sprite`).
+    pub(super) fn block_tint_color(
         &self,
         state: BlockStateId,
-        side: Direction,
-    ) -> Option<BlockFaceTexture> {
-        let wanted = horizon_assets::model::Direction::ALL[side as usize];
-        let models = self
+        tint_index: i32,
+        pos: [i32; 3],
+    ) -> Option<u32> {
+        let (cx, cz) = (pos[0] >> 4, pos[2] >> 4);
+        let region: [[Option<&horizon_client::chunk::Chunk>; 3]; 3] = std::array::from_fn(|dz| {
+            std::array::from_fn(|dx| {
+                self.world
+                    .chunks
+                    .get(&(cx + dx as i32 - 1, cz + dz as i32 - 1))
+                    .map(|c| &**c)
+            })
+        });
+        let block = self
             .pack
-            .render
-            .model_catalog
-            .collect_seeded(state, 42)
-            .ok()?;
-        let faces = || models.iter().flat_map(|(_, model)| &model.faces);
-        let face = faces()
-            .find(|f| f.quad.cull == Some(wanted))
-            .or_else(|| faces().find(|f| f.quad.facing == wanted))?;
-        let name = self.pack.layer_names.get(&face.layer)?.clone();
-        Some(mod_api::BlockFaceTexture::new(name, face.quad.tint_index))
+            .context
+            .assets
+            .registry
+            .state(state)
+            .map_or("", |s| s.name.as_str());
+        if let Some((_, tint, _)) = horizon_client::block_sprites::fluid_faces(block) {
+            return (tint.is_some() && tint_index == 0).then(|| {
+                self.pack.context.tables.water_tint(
+                    pos,
+                    &region,
+                    world_biomes!(self),
+                    self.streaming.biome_zoom,
+                    self.streaming.biome_blend,
+                )
+            });
+        }
+        let tints = self.pack.context.tables.block_tints(
+            state,
+            pos,
+            &region,
+            world_biomes!(self),
+            self.streaming.biome_zoom,
+            self.streaming.biome_blend,
+            self.streaming.nether_shading,
+        );
+        tints(tint_index)
     }
     /// For a client mod: changes each time the resources load (a resource pack turned on or off can move every
     /// sprite): ask `block_sprites` again then. API 380.
@@ -83,7 +108,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or(u32::MAX, |r| r.sprite_split());
-        Lookup::new(&self.pack.context, split)
+        Lookup::new(&self.pack.context, split, &self.pack.layer_names)
     }
 }
 
@@ -216,6 +241,234 @@ mod texture_atlas_stitched_tests {
                     "looked up again in the new atlas"
                 );
             });
+        });
+    }
+}
+
+/// `FaceSprite::quad_on`, the copycat side of `block_sprites`.
+#[cfg(test)]
+mod quad_on_tests {
+    use horizon_core::geometry::Direction;
+
+    fn face(uv: [f32; 6]) -> mod_api::FaceSprite {
+        mod_api::FaceSprite {
+            sprite: mod_api::SpriteRef {
+                array: 0,
+                layer: 0,
+                animated: false,
+                cutout: false,
+            },
+            texture: "block/oak_log".into(),
+            rect: [0.0, 0.0, 1.0, 1.0],
+            inset: 0.0,
+            uv,
+            tint: None,
+            tint_index: -1,
+            translucent: false,
+        }
+    }
+
+    /// The point (a, b) of `side`, in its two axes, as `FaceSprite::uv` counts them.
+    fn side_point(side: Direction, p: [f32; 3]) -> [f32; 2] {
+        match side {
+            Direction::Down | Direction::Up => [p[0], p[2]],
+            Direction::North | Direction::South => [p[0], p[1]],
+            Direction::West | Direction::East => [p[2], p[1]],
+        }
+    }
+
+    /// Whatever the face's turn or mirror, the UV `quad` gives each corner (the rectangle's
+    /// (u0, v0), (u0, v1), (u1, v1), (u1, v0) in turn) is the one the material's own side shows
+    /// at that point, and the corners wind counterclockwise seen from outside.
+    #[test]
+    fn a_copycat_face_shows_its_material_turned_as_the_model_turns_it() {
+        let upright = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        // u = b, v = 1 - a: a quarter turn (a log on its side).
+        let turned = [0.0, 1.0, 0.0, -1.0, 1.0, 0.0];
+        // u = 1 - a, v = b: mirrored.
+        let mirrored = [1.0, 0.0, -1.0, 0.0, 0.0, 1.0];
+        let boxes = [([0.0; 3], [1.0; 3]), ([0.0, 0.0, 0.0], [1.0, 0.5, 1.0])];
+        for uv in [upright, turned, mirrored] {
+            let face = face(uv);
+            for side in Direction::ALL {
+                for (from, to) in boxes {
+                    let (corners, [u0, v0, u1, v1]) = face
+                        .quad_on(side, from, to)
+                        .expect("a turn of 90 degrees or a mirror fits a rectangle");
+                    let given = [[u0, v0], [u0, v1], [u1, v1], [u1, v0]];
+                    for (corner, given) in corners.iter().zip(given) {
+                        let [a, b] = side_point(side, *corner);
+                        let want = [
+                            (uv[0] + a * uv[2] + b * uv[4]) * 16.0,
+                            (uv[1] + a * uv[3] + b * uv[5]) * 16.0,
+                        ];
+                        assert!(
+                            (want[0] - given[0]).abs() < 1e-4 && (want[1] - given[1]).abs() < 1e-4,
+                            "{side:?} {uv:?} {from:?}..{to:?}: {corner:?} shows {given:?}, not {want:?}"
+                        );
+                    }
+                    let [p0, p1, p2, _] = corners;
+                    let e = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+                    let f = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+                    let n = side.normal().map(|v| v as f32);
+                    let out = (e[1] * f[2] - e[2] * f[1]) * n[0]
+                        + (e[2] * f[0] - e[0] * f[2]) * n[1]
+                        + (e[0] * f[1] - e[1] * f[0]) * n[2];
+                    assert!(out > 0.0, "{side:?} {uv:?}: the face looks inward");
+                }
+            }
+        }
+        // The half box's north face is cut at half height: its corners lie on z = 0, y up to 0.5.
+        let (corners, _) = face(upright)
+            .quad_on(Direction::North, [0.0; 3], [1.0, 0.5, 1.0])
+            .unwrap();
+        assert!(corners.iter().all(|c| c[2] == 0.0 && c[1] <= 0.5));
+        // A texture turned 22.5 degrees on the side, or sheared, fits no UV rectangle: no answer
+        // rather than wrong UVs.
+        let (s, c) = 22.5f32.to_radians().sin_cos();
+        let slanted = [
+            0.5 - 0.5 * c + 0.5 * s,
+            0.5 - 0.5 * s - 0.5 * c,
+            c,
+            s,
+            -s,
+            c,
+        ];
+        let sheared = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0];
+        for uv in [slanted, sheared] {
+            assert_eq!(
+                face(uv).quad_on(Direction::North, [0.0; 3], [1.0; 3]),
+                None,
+                "{uv:?}"
+            );
+        }
+    }
+}
+
+/// `block_tint_color`, the colour a copycat multiplies its material's tinted faces by.
+#[cfg(test)]
+mod block_tint_color_tests {
+    /// A grass block's tinted face takes a colour where it stands, and so does water's face
+    /// (tint index 0, as `block_sprites` reports it); stone has no tint, and an untinted
+    /// face (-1) none either.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_tinted_face_takes_its_colour_where_it_stands() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let registry = game.pack.context.assets.registry;
+            let grass = registry.default_state("minecraft:grass_block").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let water = registry.default_state("minecraft:water").unwrap();
+            use horizon_assets::resource_source::{ResourceRoot, ResourceSource};
+            use std::sync::Arc;
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../.local")
+                .join(format!(
+                    "tint-fixture-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                ));
+            let write = |path: &str, bytes: &[u8]| {
+                let path = root.join(path);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, bytes).unwrap();
+            };
+            let png = |rgb: Vec<u8>| {
+                let mut bytes = Vec::new();
+                let mut encoder = png::Encoder::new(&mut bytes, 256, 256);
+                encoder.set_color(png::ColorType::Rgb);
+                encoder.set_depth(png::BitDepth::Eight);
+                let mut writer = encoder.write_header().unwrap();
+                writer.write_image_data(&rgb).unwrap();
+                writer.finish().unwrap();
+                bytes
+            };
+            // Synthetic pixels only. Vanilla clamps t and r, then samples at
+            // x = trunc(255 * (1 - t)), y = trunc(255 * (1 - r*t)).
+            // (1,1) -> (0,0); (0.5,0.5) -> (127,191), index 49023.
+            // Neither biome has a grass override/modifier. Uniform chunks make
+            // the BiomeColors blend equal to that one pixel, independent of zoom.
+            let mut pixels = vec![0; 256 * 256 * 3];
+            pixels[..3].copy_from_slice(&[0x12, 0x34, 0x56]);
+            pixels[49023 * 3..49023 * 3 + 3].copy_from_slice(&[0xAB, 0xCD, 0xEF]);
+            let image = png(pixels);
+            for name in ["grass", "foliage", "dry_foliage"] {
+                write(
+                    &format!("assets/minecraft/textures/colormap/{name}.png"),
+                    &image,
+                );
+            }
+            write(
+                "data/minecraft/worldgen/biome/plains.json",
+                br#"{"temperature":1.0,"downfall":1.0}"#,
+            );
+            write(
+                "data/minecraft/worldgen/biome/cool.json",
+                br#"{"temperature":0.5,"downfall":0.5}"#,
+            );
+            // A separate, constant water map: every sample and every blend is
+            // 0x2468AC, never either grass pixel or a biome's default water colour.
+            write(
+                "assets/test/polytone/colormaps/water.png",
+                &png([0x24, 0x68, 0xAC].repeat(256 * 256)),
+            );
+            write(
+                "assets/test/polytone/colors.json",
+                br#"{"biome_colors":{"water":"test:water"}}"#,
+            );
+            let biomes = Arc::new(
+                horizon_client::biome::Biomes::load(&ResourceRoot::directory(root.clone()))
+                    .unwrap(),
+            );
+            let source = ResourceSource::directory(root.clone());
+            let old = &game.pack.context;
+            let tables = horizon_client::mesher::MeshTables::new(
+                &old.assets,
+                &old.render,
+                game.res.facts(),
+                horizon_client::models::load_visibility(&game.options.resources, registry).unwrap(),
+                None,
+            )
+            .unwrap()
+            .with_polytone_colormaps(&source, registry);
+            game.pack.context = Arc::new(horizon_client::streaming::WorkerContext {
+                assets: old.assets.clone(),
+                render: old.render.clone(),
+                tables: Arc::new(tables),
+                biomes: biomes.clone(),
+                light: old.light.clone(),
+                hidden_states: old.hidden_states.clone(),
+            });
+            game.world_biomes = Some(biomes.clone());
+            game.streaming.biome_blend = 0;
+            game.world.chunks.clear();
+            for (cx, name) in [(0, "minecraft:plains"), (4, "minecraft:cool")] {
+                for dz in -1..=1 {
+                    for dx in -1..=1 {
+                        let mut chunk = horizon_client::chunk::Chunk::empty(cx + dx, dz);
+                        for y in 0..96 {
+                            for z in 0..4 {
+                                for x in 0..4 {
+                                    chunk.set_biome_cell(x, y, z, biomes.id(name));
+                                }
+                            }
+                        }
+                        game.world.chunks.insert((cx + dx, dz), Arc::new(chunk));
+                    }
+                }
+            }
+            assert_eq!(game.block_tint_color(grass, 0, [8, 64, 8]), Some(0x123456));
+            assert_eq!(game.block_tint_color(grass, 0, [72, 64, 8]), Some(0xABCDEF));
+            for pos in [[8, 64, 8], [72, 64, 8]] {
+                assert_eq!(game.block_tint_color(water, 0, pos), Some(0x2468AC));
+                assert_eq!(game.block_tint_color(grass, -1, pos), None);
+                let untinted = game.block_tint_color(stone, 0, pos);
+                assert_eq!(untinted, None);
+                assert_eq!(untinted.unwrap_or(0xFFFFFF), 0xFFFFFF);
+                assert_eq!(game.block_tint_color(water, 1, pos), None);
+            }
+            std::fs::remove_dir_all(root).unwrap();
         });
     }
 }

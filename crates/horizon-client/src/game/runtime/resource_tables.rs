@@ -234,13 +234,9 @@ impl PackResources {
         )
         .map(Arc::new);
         Self {
-            layer_names: Arc::new(
-                render
-                    .sprite_layers
-                    .iter()
-                    .map(|(name, layer)| (*layer, name.trim_start_matches("minecraft:").to_owned()))
-                    .collect(),
-            ),
+            layer_names: Arc::new(horizon_client::block_sprites::texture_names(
+                &render.sprite_layers,
+            )),
             context: Arc::new(WorkerContext {
                 assets: assets.clone(),
                 render: render.clone(),

@@ -13,7 +13,7 @@ use horizon_assets::{
     model::{Direction, Material},
 };
 use horizon_client::{
-    block_entity_render::{TextRun, diffuse, diffuse_lights, push_text, vertex_light},
+    block_entity_render::{TEXT_OVER_OUTLINE, diffuse, diffuse_lights, vertex_light},
     containers::{BlockEntity, ModRevision},
     fast_hash::FxHashMap,
     gfx::Cull,
@@ -213,6 +213,9 @@ pub struct BlockEntityDraw {
     partial: f32,
     /// The level's game time, for animations.
     game_time: i64,
+    /// The client's animation clock, in ticks with the partial tick (`spin`):
+    /// the ticks its level ran (`TextureManager.tick`'s count), never set back.
+    animation: f64,
     /// The light the helpers draw with: the block's own
     /// (`LevelRenderer.getLightCoords`), 16 times sky light in bits 0..8 and
     /// 16 times block light in bits 8..16; set it to light a part otherwise.
@@ -288,11 +291,11 @@ pub(super) struct Spin {
 }
 
 impl Spin {
-    /// The turn at `game_time` plus `partial`, about the pivot, in the
-    /// block's coordinates. Counted in f64: a world's game time has more
-    /// ticks than an f32 holds exactly.
-    fn turn(&self, game_time: i64, partial: f32) -> Mat4 {
-        let t = game_time as f64 + f64::from(partial);
+    /// The turn at animation time `time` (ticks with the partial tick), about
+    /// the pivot, in the block's coordinates. Counted in f64: a long session
+    /// has more ticks than an f32 holds exactly.
+    fn turn(&self, time: f64) -> Mat4 {
+        let t = time;
         let degrees =
             (t * f64::from(self.degrees_per_tick) + f64::from(self.phase)).rem_euclid(360.0);
         Mat4::from_translation(self.pivot)
@@ -306,12 +309,11 @@ impl Spin {
 
 /// `vertices`, drawn relative to the block, moved to the camera by `origin`
 /// and each part of `spins` (starts relative to `vertices`) turned as it is
-/// at `game_time` plus `partial`, onto `out`.
+/// at animation time `time`, onto `out`.
 pub(super) fn place_turning(
     vertices: &[Vertex],
     spins: &[(usize, Option<Spin>)],
-    game_time: i64,
-    partial: f32,
+    time: f64,
     origin: Vec3,
     out: &mut Vec<Vertex>,
 ) {
@@ -320,7 +322,7 @@ pub(super) fn place_turning(
     for (i, v) in vertices.iter().enumerate() {
         while let Some((start, spin)) = next.next_if(|(start, _)| *start <= i) {
             let _ = start;
-            turn = spin.map(|s| s.turn(game_time, partial));
+            turn = spin.map(|s| s.turn(time));
         }
         let mut v = *v;
         if let Some(m) = turn {
@@ -362,6 +364,7 @@ impl BlockEntityDraw {
         Self {
             partial,
             game_time,
+            animation: 0.0,
             light,
             block,
             poses: vec![pose],
@@ -372,6 +375,17 @@ impl BlockEntityDraw {
             prepared: false,
             records: Vec::new(),
         }
+    }
+
+    /// This frame on the client's animation clock (`Game::animation_time`),
+    /// which turns its `spin` parts and `animation_time` reads.
+    pub(super) fn animated(mut self, time: f64) -> Self {
+        self.animation = time;
+        self
+    }
+    /// The frame's time on the animation clock (`native_draw_animation_time`).
+    pub(super) fn animation(&self) -> f64 {
+        self.animation
     }
 
     fn spinning(&self) -> bool {
@@ -502,20 +516,20 @@ impl BlockEntityDraw {
         self.kept = true;
     }
     /// What is drawn next turns by itself: `degrees_per_tick` degrees each
-    /// game tick (a shaft at `rpm` turns `rpm * 0.3`, as Create's do), about
-    /// `axis` through `pivot`, both in blocks from the block's corner
-    /// whatever the pose, counterclockwise seen from the axis' positive end,
-    /// `phase` degrees round at game time 0 (to mesh a cog with its
-    /// neighbour's). Draw the part at rest; the game turns it each frame from
-    /// the game time and the partial tick. With `keep` it goes on turning
-    /// with no call of `native_block_entity_submit` until what it was drawn
-    /// with changes: send a new speed in the update tag and the block is
-    /// drawn again (Flywheel's rotating instances, done on the CPU). The
-    /// angle is `game_time * degrees_per_tick + phase`, not a sum of turns:
-    /// with a new speed, pass the phase that keeps the part where it was
-    /// (`old_angle - game_time * new_speed`), or it jumps. Until
-    /// `still` or the next `spin`. A block entity's frame only: a mob's
-    /// (`native_mob_submit`) draws it at rest. API @API:spinning_geometry@.
+    /// tick of this client's animation clock (`animation`; a shaft at `rpm`
+    /// turns `rpm * 0.3`, as Create's do), about `axis` through `pivot`, both
+    /// in blocks from the block's corner whatever the pose, counterclockwise
+    /// seen from the axis' positive end. The angle is `animation *
+    /// degrees_per_tick + phase`. The clock is the client's own
+    /// (`Game::animation_time`), not the game time, which a server's time
+    /// updates set back: so a part turns smoothly. Draw the part at rest; the
+    /// game turns it each frame. With `keep` it goes on turning with no call
+    /// of `native_block_entity_submit` until what it was drawn with changes.
+    /// With a new speed, pass `old_angle - animation * new_speed` as the
+    /// phase, or it jumps. Quads drawn while it is active are lit where they
+    /// turn to (`quad`). Until `still` or the next `spin`. A block entity's
+    /// frame only: a mob's (`native_mob_submit`) draws it at rest. API
+    /// @API:spinning_geometry@.
     pub fn spin(&mut self, axis: [f32; 3], pivot: [f32; 3], degrees_per_tick: f32, phase: f32) {
         let spin = Spin {
             axis: Vec3::from_array(axis).normalize_or(Vec3::Y),
@@ -568,7 +582,15 @@ impl BlockEntityDraw {
         } else {
             normal
         };
-        let color = shaded(tint, diffuse(normal, self.lights));
+        // A turning part is lit where it turns to (`place_turning` turns the
+        // normal, the shader lights it, as `draw_block`'s faces are lit);
+        // a part standing still keeps its light in its colour.
+        let (color, normal) = if self.spinning() {
+            let n = (normal * 127.0).round();
+            (shaded(tint, 1.0), [n.x as i8, n.y as i8, n.z as i8, 127])
+        } else {
+            (shaded(tint, diffuse(normal, self.lights)), [0; 4])
+        };
         for (p, uv) in at.into_iter().zip(uv) {
             self.vertices.push(Vertex {
                 pos: p.to_array(),
@@ -579,7 +601,7 @@ impl BlockEntityDraw {
                 layer: 0,
                 color,
                 light: self.light,
-                normal: [0; 4],
+                normal,
                 glint_uv: [0.0, 0.0],
             });
         }
@@ -699,6 +721,16 @@ impl Game<'_> {
     /// the template) leave out: where they are and their block's state, for
     /// `mod_block_entity_geometry`. From the per-chunk list of
     /// `BlockEntities::mods_near`, not a scan of every block entity.
+    /// The client's animation clock, in ticks: the ticks its level has run
+    /// (`texture_ticks`, `TextureManager.tick`'s count) and the level's partial
+    /// tick (`Clock::fraction`, held while frozen), never the camera's, which
+    /// runs on in a frozen level and would turn parts back as it wraps.
+    /// Pausing and `/tick freeze` hold it and `SetTime` never sets it back, so a
+    /// `spin` part turns smoothly whatever the server's clock does; each client
+    /// counts from its own start.
+    pub(super) fn animation_time(&self) -> f64 {
+        self.texture_ticks as f64 + self.clock.fraction()
+    }
     pub(super) fn untemplated_mod_block_entities(&self, camera: DVec3) -> Vec<([i32; 3], u32)> {
         self.world
             .block_entities
@@ -740,6 +772,7 @@ impl Game<'_> {
         let mut draw = BlockEntityDraw {
             partial,
             game_time: self.world.game_time,
+            animation: self.animation_time(),
             light: 0,
             block: [0; 3],
             poses: Vec::new(),
@@ -794,8 +827,7 @@ impl Game<'_> {
                         place_turning(
                             &entry.vertices,
                             &entry.spins,
-                            draw.game_time,
-                            draw.partial,
+                            draw.animation,
                             origin,
                             &mut draw.vertices,
                         );
@@ -848,14 +880,7 @@ impl Game<'_> {
                 }
             } else {
                 let drawn = draw.vertices.split_off(start);
-                place_turning(
-                    &drawn,
-                    &spins,
-                    draw.game_time,
-                    draw.partial,
-                    origin,
-                    &mut draw.vertices,
-                );
+                place_turning(&drawn, &spins, draw.animation, origin, &mut draw.vertices);
             }
         }
         *out = draw.vertices;
@@ -934,7 +959,7 @@ impl Game<'_> {
     pub(super) fn native_draw_scale(&self, draw: &mut BlockEntityDraw, by: [f32; 3]) {
         draw.scale(by);
     }
-    /// Begin time-based rotation using the surface's one implementation.
+    /// What is drawn next turns by itself on the animation clock (`BlockEntityDraw::spin`).
     pub(super) fn native_draw_spin(
         &self,
         draw: &mut BlockEntityDraw,
@@ -945,14 +970,14 @@ impl Game<'_> {
     ) {
         draw.spin(axis, pivot, degrees_per_tick, phase);
     }
-    /// End time-based rotation for subsequent geometry.
+    /// What is drawn next stands still again, after `spin`.
     pub(super) fn native_draw_still(&self, draw: &mut BlockEntityDraw) {
         draw.still();
     }
     /// Keeps what this call drew, with neither `native_block_entity_submit` nor
     /// `native_block_entity_render_bounding_box` called until its state, block entity,
-    /// light or resource packs change. Parts marked with `spin` keep turning from the
-    /// game time; other geometry stays as submitted. Do not bake frame-dependent
+    /// light or resource packs change. Parts marked with `spin` keep turning on the
+    /// animation clock; other geometry stays as submitted. Do not bake frame-dependent
     /// values into kept vertices: item glint and time-dependent item models stop
     /// where they were, and neighboring blocks do not invalidate the cache.
     pub(super) fn native_draw_keep(&self, draw: &mut BlockEntityDraw) {
@@ -965,6 +990,11 @@ impl Game<'_> {
     /// The level's game time, for animations.
     pub(super) fn native_draw_game_time(&self, draw: &BlockEntityDraw) -> i64 {
         draw.game_time
+    }
+    /// The frame on this client's animation clock, in ticks with the partial tick
+    /// (`Game::animation_time`): what turns `spin` parts.
+    pub(super) fn native_draw_animation_time(&self, draw: &BlockEntityDraw) -> f64 {
+        draw.animation
     }
     /// The light the helpers draw with: the block's own
     /// (`LevelRenderer.getLightCoords`), 16 times sky light in bits 0..8 and
@@ -1003,16 +1033,22 @@ impl Game<'_> {
         true
     }
 
-    /// Draws `text` under `draw`'s pose as a sign draws its lines
-    /// (`Font.drawInBatch` in a `BlockEntityRenderer`): in the pose's x-y
-    /// plane, one unit a font pixel, y down, its left end at `at`, facing
+    /// Draws `text` under `draw`'s pose as vanilla's `Font.drawInBatch` draws a
+    /// component in the world (a sign's line, a text display's): in the pose's
+    /// x-y plane, one unit a font pixel, y down, its left end at `at`, facing
     /// +z. Scale the pose first as a sign does (`draw.scale([1.0 / 64.0,
-    /// -1.0 / 64.0, 1.0 / 64.0])` for its letters, 8 pixels high). Each span
-    /// is drawn in its own colour, the others in the 0xRRGGBB `color`;
-    /// `glowing` text is full bright (a glow ink sac's), the rest lit by
-    /// `draw.light`; a nonzero 0xRRGGBB `outline` rings each glyph, as glowing
-    /// sign text's. Returns the width drawn, in font pixels: centre a line
-    /// by starting it at minus half its width. API @API:draw_text@.
+    /// -1.0 / 64.0, 1.0 / 64.0])` for its letters, 8 pixels high). It is drawn
+    /// with its styles, through the path name tags and text displays use
+    /// (`HudBatch::text_styled_world`): each span's colour (the rest in the
+    /// 0xRRGGBB `color`), bold, italic, underline, strikethrough, obfuscated,
+    /// its font, inline objects and `§` codes, right-to-left text in visual
+    /// order. `glowing` text is full bright (a glow ink sac's), the rest lit by
+    /// `draw.light`. With `outline`, a 0xRRGGBB colour (`Some(0)` is black),
+    /// each glyph is ringed with it as glowing sign text is
+    /// (`Font.drawInBatch8xOutline`). Returns the width drawn, in font pixels
+    /// (`Font.width`): centre a line by starting it at minus half its width.
+    /// Obfuscated glyphs change only when the block is drawn again, so kept
+    /// text (`keep`) stands still. API @API:draw_text@.
     pub(super) fn native_draw_text(
         &self,
         draw: &mut BlockEntityDraw,
@@ -1020,44 +1056,69 @@ impl Game<'_> {
         at: [f32; 2],
         color: u32,
         glowing: bool,
-        outline: u32,
+        outline: Option<u32>,
     ) -> f32 {
-        let glyph = |c: char| self.gui.atlas.glyph_cell(c);
+        let opaque =
+            |c: u32| horizon_client::hud::rgba((c >> 16) as u8, (c >> 8) as u8, c as u8, 255);
+        let atlas = &self.gui.atlas;
+        let mut batch = horizon_client::hud::HudBatch::scratch([1, 1]);
+        let (width, front) = match outline {
+            Some(ring) => batch.text_styled_outline_world(
+                atlas,
+                text,
+                at[0],
+                at[1],
+                opaque(color),
+                opaque(ring),
+            ),
+            None => (
+                batch.text_styled_world(atlas, text, at[0], at[1], opaque(color), false),
+                0,
+            ),
+        };
+        // Glyphs new to the atlas upload with this frame (`Game::text_patches`).
+        self.text_patches.borrow_mut().append(&mut batch.patches);
         let light = if glowing { 240 | 240 << 8 } else { draw.light };
-        let matrix = draw.pose();
-        let mut x = at[0];
-        for span in &text.spans {
-            let shown = horizon_client::bidi::visual_str(&span.text);
-            let width: f32 = shown.chars().map(|c| glyph(c).advance).sum();
-            let call = TextRun {
-                matrix,
-                x,
-                y: at[1],
-                text: &shown,
-                style: &Default::default(),
-                color: 0xFF00_0000 | (span.style.color.unwrap_or(color) & 0xFF_FFFF),
-                outline: if outline == 0 {
-                    0
-                } else {
-                    0xFF00_0000 | (outline & 0xFF_FFFF)
-                },
-                light,
-                tier: 0,
+        let pose = draw.pose();
+        for (i, quad) in batch.vertices.as_chunks::<6>().0.iter().enumerate() {
+            // The text sits a hair in front of its outline, as a sign's does
+            // (`TEXT_OVER_OUTLINE`): one mesh, so no polygon offset.
+            let lift = if outline.is_some() && i * 6 >= front {
+                TEXT_OVER_OUTLINE
+            } else {
+                0.0
             };
-            push_text(
-                &glyph,
-                Some(self.gui.atlas.font.white()),
-                &call,
-                &mut draw.vertices,
-            );
-            x += width;
+            let corners = horizon_client::text_display::CORNERS.map(|c| quad[c]);
+            let at = corners.map(|v| {
+                pose.transform_point3(Vec3::new(v.pos[0], v.pos[1], v.depth + lift))
+                    .to_array()
+            });
+            if !super::draw_boundary::quad_allowed(
+                at,
+                corners.map(|v| v.uv),
+                draw.vertices.len(),
+                super::draw_boundary::MAX_DRAW_VERTICES,
+            ) {
+                continue;
+            }
+            for (pos, v) in at.into_iter().zip(corners) {
+                draw.vertices.push(Vertex {
+                    pos,
+                    uv: v.uv,
+                    layer: 0,
+                    color: v.color,
+                    light,
+                    normal: [0; 4],
+                    glint_uv: [0.0, 0.0],
+                });
+            }
         }
-        x - at[0]
+        width.ceil()
     }
-    /// The width of `text` in font pixels, as `draw_text` draws it, to centre a
-    /// line (`Font.width`).
-    pub(super) fn native_draw_text_width(&self, _draw: &BlockEntityDraw, text: &str) -> f32 {
-        horizon_client::hud::HudBatch::text_width(&self.gui.atlas, text)
+    /// The width of `text` in font pixels, as `draw_text` draws it, styles
+    /// included (`Font.width`), to lay a line out before drawing it.
+    pub(super) fn native_draw_text_width(&self, _draw: &BlockEntityDraw, text: &Text) -> f32 {
+        self.gui.atlas.font.width_text(text)
     }
 
     /// Draws a box from `from` to `to` (texels of 16 per block, as a block
@@ -1321,6 +1382,7 @@ mod tests {
         BlockEntityDraw {
             partial: 0.0,
             game_time: 0,
+            animation: 0.0,
             light: 0xF0F0,
             block: [0; 3],
             poses: vec![Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0))],
@@ -1342,6 +1404,36 @@ mod tests {
             w: 16,
             h: 16,
         }
+    }
+
+    /// A quad standing still has its light baked into its colour, as before; one drawn under
+    /// `spin` keeps its plain tint and its outward normal (`w = 127`, the shader lights it), and
+    /// once turned its normal points where the face does: up turned a quarter about +x faces +z.
+    #[test]
+    fn a_turning_quad_is_lit_where_it_turns_to() {
+        let mut draw = draw();
+        let top = [
+            [0.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0],
+        ];
+        let tint = 0x80_40_20;
+        draw.quad(top, [[0.0; 2]; 4], sprite(), tint);
+        draw.spin([1.0, 0.0, 0.0], [0.5; 3], 90.0, 0.0);
+        draw.quad(top, [[0.0; 2]; 4], sprite(), tint);
+        let (still, turning) = draw.vertices.split_at(4);
+        let lit = shaded(tint, diffuse(Vec3::Y, draw.lights));
+        assert!(still.iter().all(|v| v.normal == [0; 4] && v.color == lit));
+        assert!(
+            turning
+                .iter()
+                .all(|v| v.normal == [0, 127, 0, 127] && v.color == shaded(tint, 1.0))
+        );
+        let mut out = Vec::new();
+        place_turning(&draw.vertices, &draw.spins, 1.0, Vec3::ZERO, &mut out);
+        assert!(out[..4].iter().all(|v| v.normal == [0; 4]));
+        assert!(out[4..].iter().all(|v| v.normal == [0, 0, 127, 127]));
     }
 
     #[test]
@@ -2354,7 +2446,9 @@ mod tests {
     }
 
     /// `BlockEntityDrawContext::text` lays the font's glyphs out under the pose, a quad per
-    /// glyph from left to right, in the frame's light and the opaque colour it was given.
+    /// glyph from left to right, in the frame's light and the opaque colour it was given, with
+    /// the text's styles: bold widens it and doubles its glyphs, and an outline (black too)
+    /// rings each glyph with eight copies behind the text.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn text_lays_glyphs_out_under_the_pose_in_the_frames_light() {
@@ -2369,41 +2463,168 @@ mod tests {
                 ),
             )
             .unwrap();
+            let plain = mod_api::Text::literal("AÁ");
+            let mut style = mod_api::text::TextStyle::default();
+            style.bold = Some(true);
+            let bold = mod_api::Text::literal("A").with_style(style);
             let mut surface = draw();
             let mut drawn = GameBlockEntityDrawContext {
                 game,
                 surface: &mut surface,
             };
-            assert_eq!(drawn.text_width("A"), 6.0);
-            assert_eq!(drawn.text_width("AÁ"), 12.0);
-            drawn
-                .text(
-                    &mod_api::Text::literal("AÁ"),
-                    [0.0, 0.0],
-                    0xFF0000,
-                    false,
-                    0,
-                )
-                .unwrap();
+            assert_eq!(drawn.text_width(&mod_api::Text::literal("A")), Ok(6.0));
+            assert_eq!(drawn.text_width(&plain), Ok(12.0));
+            // Font.width: bold adds a pixel a glyph.
+            assert_eq!(drawn.text_width(&bold), Ok(7.0));
+            assert_eq!(
+                drawn.text(&plain, [0.0, 0.0], 0xFF0000, false, None),
+                Ok(12.0)
+            );
             assert_eq!(surface.vertices.len(), 8, "a quad per glyph");
             // Vanilla's bitmap providers: A is 8x8 with ascent 7; Á is 9x12 with ascent 10.
             // GlyphBitmap places the top at 7 - ascent; BakedSheetGlyph adds the pen's position.
+            let mut at: Vec<[f32; 3]> = surface.vertices.iter().map(|v| v.pos).collect();
+            at.sort_by(|a, b| a.partial_cmp(b).unwrap());
             assert_eq!(
-                surface.vertices.iter().map(|v| v.pos).collect::<Vec<_>>(),
+                at,
                 [
-                    [10.0, 8.0, 0.0],
-                    [18.0, 8.0, 0.0],
-                    [18.0, 0.0, 0.0],
                     [10.0, 0.0, 0.0],
-                    [16.0, 9.0, 0.0],
-                    [25.0, 9.0, 0.0],
-                    [25.0, -3.0, 0.0],
+                    [10.0, 8.0, 0.0],
                     [16.0, -3.0, 0.0],
+                    [16.0, 9.0, 0.0],
+                    [18.0, 0.0, 0.0],
+                    [18.0, 8.0, 0.0],
+                    [25.0, -3.0, 0.0],
+                    [25.0, 9.0, 0.0],
                 ]
             );
             // Red, as a vertex colour stores it (ABGR), opaque.
             assert!(surface.vertices.iter().all(|v| v.color == 0xFF00_00FF));
             assert!(surface.vertices.iter().all(|v| v.light == 0xF0F0));
+
+            // Bold: each glyph again a pixel to the right (Font's bold offset).
+            surface.vertices.clear();
+            let mut drawn = GameBlockEntityDrawContext {
+                game,
+                surface: &mut surface,
+            };
+            assert_eq!(drawn.text(&bold, [0.0, 0.0], 0xFFFFFF, true, None), Ok(7.0));
+            assert_eq!(surface.vertices.len(), 8, "the glyph twice");
+            assert!(surface.vertices.iter().all(|v| v.light == 240 | 240 << 8));
+
+            // A black outline: eight rings behind, then the text a hair in front of them.
+            surface.vertices.clear();
+            let mut drawn = GameBlockEntityDrawContext {
+                game,
+                surface: &mut surface,
+            };
+            drawn
+                .text(
+                    &mod_api::Text::literal("A"),
+                    [0.0, 0.0],
+                    0xFFFFFF,
+                    true,
+                    Some(0),
+                )
+                .unwrap();
+            assert_eq!(surface.vertices.len(), 9 * 4);
+            let (rings, front) = surface.vertices.split_at(8 * 4);
+            assert!(
+                rings
+                    .iter()
+                    .all(|v| v.color == 0xFF00_0000 && v.pos[2] == 0.0)
+            );
+            assert!(
+                front
+                    .iter()
+                    .all(|v| v.color == u32::MAX && v.pos[2] == TEXT_OVER_OUTLINE)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fractional_text_advance_rounds_up_for_drawing_and_measurement() {
+        use super::super::host::draw::GameBlockEntityDrawContext;
+        use horizon_assets::resource_source::{Resource, ResourceSource};
+        use mod_api::BlockEntityDrawContext;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+                "assets/minecraft/font/default.json".into(),
+                Resource::bytes(
+                    br#"{"providers":[{"type":"space","advances":{"X":2.25}}]}"#.to_vec(),
+                ),
+            )]));
+            game.gui.atlas.font = horizon_client::font::Font::metrics(&source);
+            let mut surface = draw();
+            let mut drawn = GameBlockEntityDrawContext {
+                game,
+                surface: &mut surface,
+            };
+            let text = mod_api::Text::literal("XX");
+            assert_eq!(drawn.text_width(&text), Ok(5.0));
+            assert_eq!(drawn.text(&text, [0.0; 2], 0xFFFFFF, false, None), Ok(5.0));
+            assert_eq!(
+                drawn.text(&text, [0.0; 2], 0xFFFFFF, true, Some(0)),
+                Ok(5.0)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn animation_clock_survives_pause_freeze_resume_and_time_updates() {
+        use horizon_protocol::packets::play;
+        use std::time::Duration;
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            game.clock = horizon_client::clock::FixedStep::client();
+            game.texture_ticks = 0;
+            game.clock.advance(Duration::from_millis(75), 50.0);
+            game.tick_frame_visuals(true);
+            assert_eq!(game.animation_time(), 1.5);
+            game.clock.end_frame(true);
+            game.clock.advance(Duration::from_millis(50), 50.0);
+            assert_eq!(game.animation_time(), 1.5);
+            game.clock.end_frame(false);
+            game.clock.set_frozen(true);
+            game.clock.end_frame(false);
+            assert_eq!(game.animation_time(), 2.0);
+            game.clock.advance(Duration::from_millis(25), 50.0);
+            let running = game.clock.world_runs();
+            game.tick_frame_visuals(running);
+            assert_eq!(game.texture_ticks, 1);
+            assert_eq!(game.animation_time(), 2.0);
+            assert_eq!(game.clock.camera_fraction(), 0.0);
+            game.handle_packet(play::Clientbound::SetTime(play::SetTime {
+                game_time: 0,
+                clocks: vec![],
+            }))
+            .unwrap();
+            assert_eq!(game.animation_time(), 2.0);
+            game.clock.set_frozen(false);
+            game.clock.end_frame(false);
+            game.clock.advance(Duration::from_millis(75), 50.0);
+            let running = game.clock.world_runs();
+            game.tick_frame_visuals(running);
+            assert_eq!(game.animation_time(), 2.5);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn atlas_reset_discards_queued_text_uploads() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.text_patches
+                .borrow_mut()
+                .push(horizon_client::font::Patch {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                    rgba: vec![255; 4],
+                });
+            game.forget_atlas_slots();
+            assert!(game.text_patches.borrow().is_empty());
         });
     }
 
@@ -2676,12 +2897,12 @@ mod tests {
         glyphs: 0,
     };
 
-    /// A part drawn after `spin` turns about its pivot by the game time and
-    /// partial tick (90 degrees a tick about +y takes +x to -z, by the right
+    /// A part drawn after `spin` turns about its pivot by the animation clock
+    /// (90 degrees a tick about +y takes +x to -z, by the right
     /// hand), its normal with it; what is drawn after `still` and before the
     /// spin stays; all of it is moved by the origin.
     #[test]
-    fn a_spinning_part_turns_with_the_game_time_and_the_rest_stays() {
+    fn a_spinning_part_turns_with_the_animation_clock_and_the_rest_stays() {
         let mut draw = draw();
         let at = |x: f32, y: f32, z: f32, normal: [i8; 4]| Vertex {
             pos: [x, y, z],
@@ -2697,7 +2918,7 @@ mod tests {
         let close = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-4);
         // A tick and a half: 135 degrees.
         let mut out = Vec::new();
-        place_turning(&draw.vertices, &draw.spins, 1, 0.5, origin, &mut out);
+        place_turning(&draw.vertices, &draw.spins, 1.5, origin, &mut out);
         assert!(close(out[0].pos, [11.0, 0.5, 0.5]), "{:?}", out[0].pos);
         let h = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
         assert!(
@@ -2708,17 +2929,16 @@ mod tests {
         assert!(close(out[2].pos, [10.0, 0.0, 0.0]), "{:?}", out[2].pos);
         // One tick: a quarter turn, +x to -z, the normal along.
         out.clear();
-        place_turning(&draw.vertices, &draw.spins, 1, 0.0, origin, &mut out);
+        place_turning(&draw.vertices, &draw.spins, 1.0, origin, &mut out);
         assert!(close(out[1].pos, [10.5, 0.5, 0.0]), "{:?}", out[1].pos);
         assert_eq!(out[1].normal, [0, 0, -127, 127]);
-        // Four ticks: all the way round, and a world's late game time is no
+        // Four ticks: all the way round, and a long session's late clock is no
         // less exact.
         out.clear();
         place_turning(
             &draw.vertices,
             &draw.spins,
-            4_000_000_000,
-            0.0,
+            4_000_000_000.0,
             origin,
             &mut out,
         );

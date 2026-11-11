@@ -3,7 +3,9 @@
 pub trait Hooks {
     /// `PlayerInteractEvent.RightClickItem`, immediately before `Item.use`.
     /// Cancel skips its Part and vanilla behaviour; its result defaults to
-    /// `Pass`. On the client only `Success` ends the hand loop.
+    /// `Pass`. `Success`, `SuccessServer` and `Consume` end the client's
+    /// hand loop. `Success` swings on the client, `SuccessServer` on the
+    /// server, and `Consume` has no swing.
     #[hook(
         side = "both",
         contract = "cancel",

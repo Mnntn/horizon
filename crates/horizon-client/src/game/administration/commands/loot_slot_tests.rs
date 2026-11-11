@@ -110,7 +110,8 @@ fn loot_replace_furnace_fuel_refuses_non_fuel() {
 fn item_commands_bypass_block_acceptance() {
     with_game(|game| {
         for slot in [1, 2] {
-            assert!(game.run_command("setblock 4 200 4 furnace"));
+            // Destroy first so repeated rows also place a fresh container.
+            assert!(game.run_command("setblock 4 200 4 furnace destroy"));
             assert!(game.run_command(&format!(
                 "item replace block 4 200 4 container.{slot} with minecraft:diamond 2"
             )));
@@ -120,7 +121,7 @@ fn item_commands_bypass_block_acceptance() {
                 Some(("minecraft:diamond".into(), 2))
             );
             assert!(game.run_command(&format!(
-                r#"item modify block 4 200 4 container.{slot} {{"function":"minecraft:set_count","count":3}}"#
+                r#"item modify block 4 200 4 container.{slot} {{"type":"minecraft:set_count","count":3}}"#
             )));
             assert_eq!(
                 game.slot_get(&Slot::Block([4, 200, 4], slot))
@@ -129,12 +130,12 @@ fn item_commands_bypass_block_acceptance() {
             );
         }
         for modify in [false, true] {
-            assert!(game.run_command("setblock 4 200 4 jukebox"));
+            assert!(game.run_command("setblock 4 200 4 jukebox destroy"));
             assert!(game.run_command(
                 "item replace block 4 200 4 container.0 with minecraft:music_disc_cat"
             ));
             let command = if modify {
-                r#"item modify block 4 200 4 container.0 {"function":"minecraft:set_count","count":0}"#
+                r#"item modify block 4 200 4 container.0 {"type":"minecraft:set_count","count":0}"#
             } else {
                 "item replace block 4 200 4 container.0 with minecraft:air"
             };
@@ -156,7 +157,8 @@ fn empty_loot_preserves_restricted_slots_but_clears_chest() {
             ("crafter{disabled_slots:[I;0]}", 0, "diamond"),
             ("chest", 0, "diamond"),
         ] {
-            assert!(game.run_command(&format!("setblock 4 200 4 {block} replace")));
+            // An unchanged block state makes `setblock ... replace` fail.
+            assert!(game.run_command(&format!("setblock 4 200 4 {block} destroy")));
             assert!(game.run_command(&format!(
                 "item replace block 4 200 4 container.{slot} with minecraft:{item}"
             )));
@@ -173,7 +175,7 @@ fn empty_loot_preserves_restricted_slots_but_clears_chest() {
             };
             assert_eq!(actual, expected, "{block} slot {slot}");
         }
-        assert!(game.run_command("setblock 4 200 4 chest replace"));
+        assert!(game.run_command("setblock 4 200 4 chest destroy"));
         assert!(game.run_command(r#"loot replace block 4 200 4 container.0 1 loot {"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]}"#));
         assert_eq!(
             game.slot_get(&Slot::Block([4, 200, 4], 0))

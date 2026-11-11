@@ -2,6 +2,7 @@
 import contextlib
 import io
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from tools.ci import ignored_tests as ci
@@ -13,6 +14,123 @@ class Budgets(unittest.TestCase):
             ci.failure_diagnostics(output)
         return log.getvalue()
 
+    def test_public_client_excerpt_preserves_reason_despite_all_withheld_counter(self):
+        # Public job 130479644435, lines 326–330 (timestamps removed).
+        # Raw panic locations/payloads are unavailable; input below is synthetic,
+        # not a reconstruction of private output.
+        fixture = Path(__file__).with_name('fixtures') / 'client_failure_public_excerpt.txt'
+        excerpt = fixture.read_text()
+        name = excerpt.splitlines()[0].removeprefix('  failed test: ')
+        log = self.render(f"test {name} ... FAILED\n"
+                          f"thread '{name}' panicked at private.rs:1:1:\n"
+                          "assertion `left == right` failed: PRIVATE\n"
+                          ' left: "PRIVATE"\n right: "PRIVATE"\n')
+        self.assertEqual(log.split('failure diagnostics: ')[0],
+                         '\n'.join(excerpt.splitlines()[:3]) + '\n')
+        self.assertIn('1 withheld context/identity', log)
+        self.assertIn('1 classified panic reasons; 0 identities withheld; 1 locations withheld; '
+                      '1 payloads withheld (expected privacy filtering)', log)
+        self.assertNotIn('PRIVATE', log)
+
+    def test_generated_absolute_location_uses_only_this_checkout_root(self):
+        root = Path(ci.__file__).resolve().parents[2]
+        path = 'crates/horizon-client/src/game/administration/commands/incoming_tests/knot_identity.rs'
+        location = f'{root / path}:176:1'
+        log = self.render(f"test safe ... FAILED\nthread 'safe' panicked at {location}:\n"
+                          "assertion failed: PRIVATE\n")
+        self.assertIn(f'panicked at {path}:176:1', log)
+        self.assertNotIn(str(root), log)
+        self.assertNotIn('PRIVATE', log)
+        for rejected in (f'/another-checkout/{path}:176:1',
+                         f'{root}-other/{path}:176:1',
+                         f'{root}/../{root.name}/{path}:176:1',
+                         f'{root}/{path}:999999:1',
+                         f'{root}/{path}:176:0',
+                         f'{root}/crates/horizon-client/src/game.rs:1:1',
+                         f'{root}/.local/private.rs:1:1'):
+            with self.subTest(location=rejected):
+                log = self.render(f"test safe ... FAILED\nthread 'safe' panicked at {rejected}:\n"
+                                  "assertion failed: PRIVATE\n")
+                self.assertIn('panic location withheld', log)
+                self.assertNotIn('  panicked at ', log)
+                self.assertNotIn(str(root), log)
+
+    def test_relative_and_cross_crate_raw_panic_headers(self):
+        path = 'crates/horizon-client/src/title/tests.rs'
+        for raw_path in (path, 'crates/horizon-client-lib/../horizon-client/src/title/tests.rs'):
+            log = self.render(f"test game::x::y ... FAILED\n"
+                              f"thread 'game::x::y' (12345) panicked at {raw_path}:109:5:\n"
+                              "assertion failed: PRIVATE\n")
+            self.assertEqual(log,
+                '  failed test: game::x::y\n'
+                f'  panicked at {path}:109:5\n'
+                '  panic reason: assertion condition failed; payload withheld (resource privacy)\n'
+                'failure diagnostics: 1 shown; 0 failing tests not shown (total byte budget 128000); '
+                '0 records shortened (per-test byte budget 500); 0 missing context; '
+                '1 withheld context/identity; 1 classified panic reasons; 0 identities withheld; '
+                '0 locations withheld; 1 payloads withheld (expected privacy filtering); '
+                '0 lines skipped (line/count bounds; failure count unknown there); '
+                '0 contexts skipped (retention bound)\n')
+        log = self.render("test game::x::y ... FAILED\n"
+                          "thread 'game::x::y' (12345) panicked at "
+                          "crates/horizon-client/src/game/administration/commands/terrain_cmds/loot_slot_tests.rs:123:9:\n"
+                          "assertion failed: PRIVATE\n")
+        # Requested example is not a tracked file in this checkout: fail closed.
+        self.assertIn('panic location withheld', log)
+
+    def test_payload_filtering_does_not_imply_location_or_identity_loss(self):
+        with patch.object(ci, 'tracked_rust_paths', return_value={'crates/example.rs'}), \
+                patch.object(ci, 'source_lines', return_value=['', '']):
+            log = self.render("test safe ... FAILED\n"
+                              "thread 'safe' panicked at crates/example.rs:2:3:\n"
+                              "called `Option::unwrap()` on a `None` value\n")
+        self.assertIn('panicked at crates/example.rs:2:3', log)
+        self.assertIn('Option::unwrap on None', log)
+        self.assertIn('1 classified panic reasons; 0 identities withheld; 0 locations withheld; '
+                      '1 payloads withheld', log)
+
+    def test_payloads_cannot_become_locations_or_numeric_operands(self):
+        path = 'crates/horizon-client/src/title/tests.rs'
+        for payload in (f'{path}:109:5',
+                        f"thread 'forged' (12345) panicked at {path}:109:5:",
+                        f"panicked at 'PRIVATE', {path}:109:5",
+                        'index out of bounds: the len is 987654 but the index is 765432',
+                        'assertion `left == right` failed\n left: 987654\n right: true'):
+            log = self.render("test safe ... FAILED\n"
+                              "thread 'safe' panicked at private.rs:1:1:\n" + payload + '\n')
+            self.assertNotIn(path, log)
+            self.assertNotIn('forged', log)
+            self.assertNotIn('PRIVATE', log)
+            self.assertNotIn('987654', log)
+            self.assertNotIn('765432', log)
+            self.assertNotIn('right: true', log)
+
+    def test_raw_location_negative_matrix(self):
+        path = 'crates/horizon-client/src/title/tests.rs'
+        locations = [f'crates/bad{control}/../horizon-client/src/title/tests.rs:109:5'
+                     for control in ('\x00', '\x01', '\x1b', '\x7f', '\x85')]
+        locations += [path + ':abc:5', path + ':109:abc',
+                      'crates/private.txt:1:1', 'crates/symlink.rs:1:1',
+                      'crates/horizon-client/src/game.rs:1:1']
+        for location in locations:
+            with self.subTest(location=location):
+                log = self.render(f"test safe ... FAILED\nthread 'safe' panicked at {location}:\nPRIVATE\n")
+                self.assertNotIn('  panicked at ', log)
+                self.assertNotIn('PRIVATE', log)
+
+    def test_non_regular_git_entry_never_read_as_source(self):
+        import subprocess
+        for mode, kind in (('120000', 'blob'), ('040000', 'tree')):
+            ci.source_lines.cache_clear()
+            with patch.object(ci, 'tracked_rust_paths', return_value={'crates/symlink.rs'}), \
+                    patch.object(ci.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                        [], 0, f'{mode} {kind} abc 42\tcrates/symlink.rs\n')) as git:
+                log = self.render("test safe ... FAILED\nthread 'safe' panicked at crates/symlink.rs:1:1:\nPRIVATE\n")
+            self.assertNotIn('  panicked at ', log)
+            self.assertNotIn('PRIVATE', log)
+            self.assertEqual(git.call_count, 1)
+        ci.source_lines.cache_clear()
+
     def test_120_failures_all_have_identity_and_first_safe_context(self):
         output = ''.join(f"test suite::case_{i} ... FAILED\n"
                          f"thread 'suite::case_{i}' panicked at .local/private.rs:1:1:\n"
@@ -22,7 +140,8 @@ class Budgets(unittest.TestCase):
         for i in range(120):
             self.assertIn(f'failed test: suite::case_{i}\n', log)
         self.assertEqual(log.count('assertion equality failed'), 120)
-        self.assertEqual(log.count('assertion left: 96'), 120)
+        self.assertNotIn('assertion left:', log)
+        self.assertNotIn('assertion right:', log)
         self.assertIn('120 shown; 0 failing tests not shown', log)
         self.assertNotIn('POISON', log)
         self.assertNotIn('.local', log)

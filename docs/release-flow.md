@@ -394,6 +394,135 @@ is out as soon as main's checks and parity-main pass. Meanwhile a player can pic
 Versions page (the last week's `nightly-<date>`, or a `vX.Y.Z`), and `horizon-server update --version <tag>` does
 the same for a server.
 
+## Prebuilt SDK retention design (arismoko/horizon, #3011)
+
+**Proposed for review, not enabled.** This is an availability policy, not an implementation or an instruction to
+build an SDK. Automated SDK pruning stays removed until this design is reviewed. SDK signing and authentication
+of downloads or caches belong to #3009; retaining a release does not authenticate it.
+
+### Current publication contract
+
+The fork's [Nightly workflow](../.github/workflows/nightly-build.yml) selects an SDK-paired source through
+[`tools/ci/nightly.py`](../tools/ci/nightly.py), then calls `require-sdk` before rotation and again before
+publication. A complete pair currently means a published, non-draft `prebuilt-<40 lowercase hex SHA>` release
+with `SHA256SUMS` and the four v4 archives (Linux client, Linux server, Windows GNU and macOS ARM64).
+The [SDK workflow](../.github/workflows/prebuilt-game.yml) publishes those exact-SHA releases without pruning.
+These workflows currently have separate concurrency groups (`nightly-build` and `prebuilt-game`): the two
+publication-time checks alone would not make concurrent deletion safe.
+
+Nightly publication rotates `nightly` to `nightly-YYYY-MM-DD`, replacing a previous dated release for the same
+day. It prunes dated releases whose date is strictly older than UTC today minus seven days; it never expires
+the current `nightly`. `nightly.py source_line` writes the full source commit into release notes, and
+`keep-source` preserves it under `nightly-source/<date>-<short>`. Those permanent source tags preserve source
+availability, not a promise to retain compiled SDKs forever.
+
+### Keep set and bound
+
+At one UTC instant T, let R be **all actually existing** current and dated Nightly releases, including drafts,
+plus matching Nightly tags without a release. Protect each one's resolved full source SHA, regardless of age.
+Do not assume a dated Nightly is gone just because its date is outside the usual seven-day window. A failed or
+stalled Nightly cleanup must not turn a still-downloadable game into an unpaired game.
+
+Keep every exact-SHA SDK referenced by R, and the **10 newest unreferenced exact-SHA SDK releases**, ordered by
+publication time (`published_at`) descending, then release ID descending as a deterministic tie-breaker.
+For drafts without `published_at`, use draft `created_at` as the provisional ordering timestamp;
+publication replaces that timestamp. Never use a published release's `created_at` for publication order:
+GitHub derives it from the target commit's date. Delete only the
+remaining unreferenced SDK releases. Count incomplete and draft SDK releases toward those 10 too: neither is
+an excuse to delete a referenced release. There is no age exemption or accumulating grace-period queue.
+The reserve covers SDKs published since the last Nightly pick that no Nightly references yet.
+Never delete unrelated tags, release families, permanent source tags or build branches in this operation.
+
+After a successful complete sweep the SDK release count is at most `distinct protected SHAs + 10` (assuming
+one exact-SHA release per SHA). Under normal dated-Nightly cleanup this is at most 19: eight inclusive UTC
+date buckets and one current Nightly, often fewer because pins overlap. This is a count bound, not a byte
+quota. If older Nightlies remain, the bound grows with their distinct pins; a hard global cap cannot coexist
+with preserving every retained Nightly. Report excess retained Nightlies for repair rather than overriding
+their protection. API failures likewise favor availability over the target bound.
+
+Installed games whose Nightly release has already expired are not additional server-side roots: their source
+tag stays, but their SDK may eventually be evicted. Keeping their SDK indefinitely would require an additional
+reference-registration contract and would defeat this bound. Do not delete a player's local SDK cache.
+
+### Complete source discovery, or no deletion
+
+1. While holding the shared publication lock below, enumerate the repository's entire releases API history,
+   following every pagination link to normal exhaustion, and enumerate every matching Git tag. A fixed limit
+   such as the existing Nightly pruner's `--limit 200`, the latest release, workflow run history, or a cached
+   release list is not sufficient. Record release IDs, names, draft status, timestamps and tag identities.
+2. For each `nightly` or valid `nightly-YYYY-MM-DD` root, resolve its actual Git tag to a commit. Recursively
+   peel annotated tags; require a full 40-digit lowercase commit SHA. Never interpret `target_commitish`
+   as the source pin: it can be a branch name, not the commit the built game used.
+3. For each Nightly release, require its notes' full `Source: commit <SHA>` pin and require equality with the
+   resolved tag commit. Cross-check any named permanent source tag against that same commit. A short SHA in
+   the title, today's main head, a date or the suffix of a source tag cannot substitute for the full pin.
+   A tag-only root is conservatively protected by its resolved commit; a release whose tag is missing or whose
+   pin is missing, ambiguous or inconsistent aborts the sweep, rather than guessing that it is obsolete.
+4. Build a deduplicated protected set and a reverse map of SHA to all roots for the review summary. Discover
+   SDK candidates only by the exact `prebuilt-[0-9a-f]{40}` release tag-name pattern. Resolve each candidate's tag
+   and require it to agree with the SHA in its name. An unreferenced draft whose exact-SHA tag is absent
+   (for example, a failed upload) still counts toward the reserve and is eligible for release-only deletion
+   outside it; do not invent or delete a tag for that draft. A referenced draft or missing tag still fails
+   closed. Other malformed SDK-family names or mismatches abort the sweep
+   for manual review. For every protected SHA require the corresponding SDK to exist and be complete under
+   the publication contract above. A missing pair is an availability incident: delete nothing and report it;
+   pruning neither rebuilds it nor silently removes its Nightly.
+5. Finish all discovery and validation before the first destructive request. Any missing page, truncated or
+   malformed response, permission/rate-limit/network error, unresolved tag (except the unreferenced SDK draft
+   exception above) or incomplete asset listing means
+   **zero deletions**, a failed run and an actionable summary. An empty result is accepted only after successful
+   exhaustive queries and tag reconciliation; a 404 or an API exception is not an empty history.
+
+### Publication/deletion exclusion
+
+Retention defaults to dry-run: it issues zero release or tag mutations and reports the protected roots,
+reserve and proposed deletions. Review a complete dry-run summary before enabling pruning. Mutation
+requires an explicit `--apply` switch; neither a schedule nor a saved plan implicitly enables it.
+On apply, acquire the shared lock and repeat complete discovery and validation to compute a fresh plan,
+not replay the earlier dry-run inventory. Keep the lock through deletion.
+
+Before enabling pruning, replace the independent workflow concurrency groups with one repository-wide,
+non-cancelling group, `nightly-sdk-publication`, used by the **entire** real Nightly workflow, SDK workflow and
+retention workflow. Acquire it before Nightly source selection and SDK readiness checks, not just before
+`gh release create`, and retain it through rotation, publication and cleanup. Entire-workflow serialization
+deliberately trades throughput for a simple invariant; do not nest a job lock inside that workflow lock.
+All dispatch, scheduled, retry and recovery paths that mutate these releases/tags must honor this exclusion.
+Manual operations must use the same serialized maintenance path, not out-of-band API writes.
+With GitHub Actions' default concurrency queue, a newer pending run can replace an older pending run even when
+`cancel-in-progress` is false. Treat a canceled pending publication or retention run as not executed; surface it
+and retry it, or use a supported durable queue. Never infer that every requested publication or sweep ran.
+
+A Nightly that wins the lock first publishes before retention discovers its roots; retention therefore keeps
+its pair. Retention that wins first finishes before Nightly selects and freshly checks an available pair.
+If a requested historical SDK was evicted, the later explicit Nightly request fails before rotating current;
+it does not publish a missing pair. SDK publishing cannot interleave with discovery either. Rechecking readiness
+without this exclusion leaves a check/delete/create race and is not an alternative.
+
+Within the lock, re-read root IDs and resolved pins and each candidate's release ID/tag immediately before
+deletion; unexpected changes abort remaining work. Delete by the inventoried release ID, never a newly looked-up
+name; remove its exact SDK tag only after successful release deletion and confirming the tag still has the
+inventoried value. Stop on a failed mutation and report completed deletions; an interrupted sweep may leave an
+unreferenced SDK tag, which a later sweep may remove only after the same full discovery and SHA checks.
+Do not claim transactional rollback. Concurrent manual writes bypassing the lock invalidate the guarantee,
+so pruning must remain disabled unless every authorized writer follows it.
+
+### Review cases
+
+| Case | Required outcome |
+| --- | --- |
+| Current `nightly` is months old while SDKs keep publishing | Keep its exact SDK regardless of count or date, plus the bounded unreferenced reserve. |
+| Current and several dated Nightlies share a SHA | One protected SDK; deleting one Nightly never releases the other roots' protection. |
+| Dated Nightly expires or is replaced by another on the same day | Its SDK becomes eligible only once no current, dated or tag-only root references it; the 10-release reserve still applies. |
+| An old dated Nightly remains after failed cleanup | Keep its SDK; report the larger protected set instead of inferring deletion from age. |
+| API history stops after a page, a source tag cannot resolve, or a release lacks its full source pin | No deletions; fail closed, even if known roots appear safe. |
+| A referenced SDK is missing assets or absent | No deletions; report the broken pair for recovery. |
+| Nightly and retention start together, including a retry using an old explicit base | Shared lock orders them; discovery protects an already published pair, or selection refuses the evicted base before rotation. |
+| A sweep dies after deleting a release but before its tag | No protected pair was eligible; rediscover everything before cleaning the orphan tag or resuming. |
+
+Implementation review must exercise these outcomes with synthetic paginated release/tag inventories and
+controlled publication/deletion interleavings, including annotated tags, API errors and partial mutation failure.
+No SDK compilation is needed to evaluate this design.
+
 ## Launcher releases
 
 `.github/workflows/launcher.yml` releases the launcher the same way. It starts on a push to main that changes

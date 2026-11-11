@@ -88,13 +88,7 @@ impl BlockStates {
                 }
             })
             .collect();
-        // Vanilla's names go without their namespace, as `native_draw_cube` takes them.
-        let textures = context
-            .render
-            .sprite_layers
-            .iter()
-            .map(|(name, layer)| (*layer, name.trim_start_matches("minecraft:").to_owned()))
-            .collect();
+        let textures = crate::block_sprites::texture_names(&context.render.sprite_layers);
         Self {
             states,
             context,
@@ -129,7 +123,7 @@ impl BlockStates {
     /// last state.
     pub fn sprites(&self, state: BlockStateId) -> Option<BlockSprites> {
         self.get(state)?;
-        Some(Lookup::new(&self.context, self.split).state(state))
+        Some(Lookup::new(&self.context, self.split, &self.textures).state(state))
     }
 
     /// The texture `sprite` shows, by the name `native_texture_sprites` takes (`block/grass_block_top`; a mod's with

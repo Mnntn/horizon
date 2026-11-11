@@ -7,11 +7,10 @@ impl Game<'_> {
         stack: &ItemStack,
     ) -> Option<bool> {
         if let Some(answer) = self.right_click_item(hand, stack) {
-            let success = answer == mod_api::InteractionResult::Success;
-            if success {
+            if answer == mod_api::InteractionResult::Success {
                 self.with_hand(hand, Game::swing_arm);
             }
-            return Some(success);
+            return Some(answer.consumes_action());
         }
         self.with_hand(hand, |g| g.use_item_in_hand(stack))
     }

@@ -178,8 +178,8 @@ pub trait BlockEntityDrawContext {
     }
     /// Keeps what this call drew, with neither `native_block_entity_submit` nor
     /// `native_block_entity_render_bounding_box` called until its state, block entity,
-    /// light or resource packs change. Parts marked with `spin` keep turning from the
-    /// game time; other geometry stays as submitted. Do not bake frame-dependent
+    /// light or resource packs change. Parts marked with `spin` keep turning on the
+    /// animation clock (`animation_time`); other geometry stays as submitted. Do not bake frame-dependent
     /// values into kept vertices: item glint and time-dependent item models stop
     /// where they were, and neighboring blocks do not invalidate the cache.
     fn keep(&mut self) {
@@ -192,6 +192,14 @@ pub trait BlockEntityDrawContext {
     /// The level's game time, for animations.
     fn game_time(&self) -> i64 {
         unimplemented!("BlockEntityDrawContext::draw_game_time")
+    }
+    /// The frame on this client's animation clock, in ticks with the partial tick: what
+    /// turns `spin` parts. It counts the ticks this client's level has run (vanilla's
+    /// `TextureManager.tick` count): pausing and `/tick freeze` hold it, and the server's
+    /// time updates never set it back, unlike `game_time`. Each client counts from its
+    /// own start, so it means nothing on the server or to another client.
+    fn animation_time(&self) -> f64 {
+        unimplemented!("BlockEntityDrawContext::draw_animation_time")
     }
     /// The light the helpers draw with: the block's own
     /// (`LevelRenderer.getLightCoords`), 16 times sky light in bits 0..8 and
@@ -258,11 +266,20 @@ pub trait BlockEntityDrawContext {
     ) -> bool {
         unimplemented!("BlockEntityDrawContext::draw_item")
     }
-    /// Begin time-based rotation using the surface's one implementation.
+    /// What is drawn next turns by itself: `degrees_per_tick` degrees each tick of the
+    /// animation clock (`animation_time`; a shaft at `rpm` turns `rpm * 0.3`), about `axis`
+    /// through `pivot`, both in blocks from the block's corner whatever the pose,
+    /// counterclockwise seen from the axis' positive end. Its angle is
+    /// `animation_time * degrees_per_tick + phase`: parts drawn with the same speed keep
+    /// their phases apart (a cog meshing with its neighbour). Draw the part at rest; the
+    /// game turns it each frame, and with `keep` without asking again until the block
+    /// entity changes. With a new speed, pass `old_angle - animation_time() * new_speed`
+    /// as the phase to keep the part where it was. Quads drawn while it is active are lit
+    /// where they turn to. Until `still` or the next `spin`. A mob's frame draws it at rest.
     fn spin(&mut self, axis: [f32; 3], pivot: [f32; 3], degrees_per_tick: f32, phase: f32) {
         unimplemented!("BlockEntityDrawContext::draw_spin")
     }
-    /// End time-based rotation for subsequent geometry.
+    /// What is drawn next stands still again, after `spin`.
     fn still(&mut self) {
         unimplemented!("BlockEntityDrawContext::draw_still")
     }
@@ -290,16 +307,20 @@ pub trait BlockEntityDrawContext {
     ) -> Result<(), TerrainModelError> {
         unimplemented!("BlockEntityDrawContext::draw_terrain_model")
     }
-    /// Draws `text` under `draw`'s pose as a sign draws its lines
-    /// (`Font.drawInBatch` in a `BlockEntityRenderer`): in the pose's x-y
-    /// plane, one unit a font pixel, y down, its left end at `at`, facing
-    /// +z. Scale the pose first as a sign does (`draw.scale([1.0 / 64.0,
-    /// -1.0 / 64.0, 1.0 / 64.0])` for its letters, 8 pixels high). Each span
-    /// is drawn in its own colour, the others in the 0xRRGGBB `color`;
-    /// `glowing` text is full bright (a glow ink sac's), the rest lit by
-    /// `draw.light`; a nonzero 0xRRGGBB `outline` rings each glyph, as glowing
-    /// sign text's. Returns the width drawn, in font pixels: centre a line
-    /// by starting it at minus half its width. API @API:draw_text@.
+    /// Draws `text` under `draw`'s pose as vanilla's `Font.drawInBatch` draws a component in
+    /// the world (a sign's line, a text display's): in the pose's x-y plane, one unit a font
+    /// pixel, y down, its left end at `at`, facing +z. Scale the pose first as a sign does
+    /// (`draw.scale([1.0 / 64.0, -1.0 / 64.0, 1.0 / 64.0])` for its letters, 8 pixels high).
+    /// Styles are drawn as name tags and text displays draw them: each span's colour (the
+    /// rest in the 0xRRGGBB `color`), bold, italic, underline, strikethrough, obfuscated, its
+    /// font, inline objects and `§` codes, right-to-left text in visual order. `glowing` text
+    /// is full bright (a glow ink sac's), the rest lit by `light`. With `outline`, a 0xRRGGBB
+    /// colour (`Some(0)` is black), each glyph is ringed with it as glowing sign text is
+    /// (`Font.drawInBatch8xOutline`; nine glyphs' worth of quads each). Returns the width
+    /// drawn, in font pixels (`Font.width`): centre a line by starting it at minus half its
+    /// width. Obfuscated glyphs change only when the block is drawn again: kept text stands
+    /// still. Clamp text read from NBT, and widen `native_block_entity_render_bounding_box`
+    /// for a long line. API @API:draw_text@.
     /// Refuses text deeper than 512 component nodes before applying any changes.
     fn text(
         &mut self,
@@ -307,13 +328,14 @@ pub trait BlockEntityDrawContext {
         at: [f32; 2],
         color: u32,
         glowing: bool,
-        outline: u32,
+        outline: Option<u32>,
     ) -> Result<f32, TextFormError> {
         unimplemented!("BlockEntityDrawContext::draw_text")
     }
-    /// The width of `text` in font pixels, as `draw_text` draws it, to centre a
-    /// line (`Font.width`).
-    fn text_width(&self, text: &str) -> f32 {
+    /// The width of `text` in font pixels, as `text` draws it, styles included
+    /// (`Font.width`), to lay a line out before drawing it.
+    /// Refuses text deeper than 512 component nodes.
+    fn text_width(&self, text: &Text) -> Result<f32, TextFormError> {
         unimplemented!("BlockEntityDrawContext::draw_text_width")
     }
     /// Draws model part `part` and the parts under it under `draw`'s pose, as
