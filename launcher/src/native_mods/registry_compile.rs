@@ -299,7 +299,6 @@ pub(super) fn compile(
         command,
         "Compiling registry mods and linking the prebuilt game",
         |_| {},
-        None,
         Some(fs::File::create(&messages).map_err(|e| e.to_string())?),
     );
     let outputs = super::registry_runtime::Outputs::read(&messages)?;

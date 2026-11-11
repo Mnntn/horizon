@@ -479,11 +479,7 @@ mod tests {
 
     #[test]
     fn a_build_made_in_another_mode_needs_a_build() {
-        use native_mods::Profile::{Developer, Optimized};
-        assert_eq!(
-            in_mode(State::UpToDate, Some(Developer), Optimized),
-            State::Outdated
-        );
+        use native_mods::Profile::Optimized;
         assert_eq!(in_mode(State::UpToDate, None, Optimized), State::Outdated);
         assert_eq!(
             in_mode(State::UpToDate, Some(Optimized), Optimized),
