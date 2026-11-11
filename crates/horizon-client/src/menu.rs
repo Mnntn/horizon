@@ -5977,4 +5977,6 @@ pub(crate) mod tests {
         }
         assert_eq!(seen, [potion.clone(), potion]);
     }
+    #[path = "../dfa_tests.rs"]
+    mod dfa;
 }

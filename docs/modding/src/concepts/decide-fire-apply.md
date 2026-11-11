@@ -36,6 +36,8 @@ Reentrant close/replace or same-menu click invalidates the outer decision. Refus
 
 Paths below are relative to this worktree's base. These are verified existing entry owners, not claims that their complete transitive caller graph is already migrated. The implementation must finish the vanilla caller oracle and per-route trace before claiming #784 complete.
 
+The current per-route evidence is in [route inventory](decide-fire-apply-routes.md): every generated client-lib target, each menu route's current owner with worktree line numbers, its read set, the existing public result each outcome maps to, the vanilla methods checked, and the open items for stage 2.
+
 | Hooks or route | Current owner and proposed treatment |
 | --- | --- |
 | `item_stacked_on_other` | `crates/horizon-client/src/menu.rs:384,3422`; authoritative hub path `crates/horizon-client/src/lan/menu.rs:926`. Freeze cursor and both stacks before dispatch; apply one validated answer. |
