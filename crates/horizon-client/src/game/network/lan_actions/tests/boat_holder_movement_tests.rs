@@ -117,7 +117,7 @@ fn group(g: &mut Game<'_>, packets: Vec<S>, token: i32) {
     g.lan.as_mut().unwrap().hub.guests.update(0, |p| {
         for packet in packets {
             p.inbox
-                .push_back(horizon_client::lan::guest::InboxItem::uncredited(packet));
+                .push_back(horizon_client::lan::guest::InboxItem::Packet(packet, None));
         }
     });
     // Real Hub queue/collision/event dispatch, before the receipt marker.

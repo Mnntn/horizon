@@ -334,3 +334,55 @@ fn large_private_raw_and_thousands_of_tiny_records_use_byte_credit_not_wire_caps
         });
     });
 }
+
+#[test]
+fn raw_disconnect_rejects_later_input_before_left_notification_is_polled() {
+    crate::raw_payloads::test_support::with_peer(|transport| {
+        let (mut hub, _out) = raw_hub(transport.clone());
+        let provider = hub.lan.shared.events.clone();
+        publish_packet(&hub, rotation(10.0));
+        publish_raw(&hub, vec![1]);
+        publish_packet(&hub, rotation(30.0));
+        publish_packet(&hub, S::Punch(horizon_protocol::packets::Empty));
+        with_input_context(|ctx| {
+            drop(hub.poll(ctx));
+            let first = hub.drain_packets(ctx);
+            assert!(hub.packets_paused());
+            assert_eq!(hub.guests[0].yaw, 10.0);
+            let mut disconnected = false;
+            for event in first {
+                if let HostEvent::RawPayload(delivery) = event {
+                    // The real endpoint path closes Transport immediately. This
+                    // fixture does not invent an early NetEvent::Left for Hub.
+                    delivery
+                        .endpoint
+                        .disconnect(mod_api::Text::literal("test raw disconnect"));
+                    disconnected = true;
+                }
+            }
+            assert!(disconnected && transport.closed());
+            assert!(
+                hub.guests[0].left_reason.is_empty(),
+                "Left has not been polled"
+            );
+            assert_eq!(hub.guests[0].inbox.len(), 2);
+            assert!(provider.stats().reserved_bytes > 0);
+            let resumed = hub.drain_packets(ctx);
+            assert!(
+                !resumed.iter().any(|event| matches!(
+                    event,
+                    HostEvent::Packet(_, _) | HostEvent::RawPayload(_)
+                ))
+            );
+            drop(resumed);
+            assert!(!hub.packets_paused());
+            assert_eq!(hub.guests[0].yaw, 10.0, "later movement must not apply");
+            assert!(hub.guests[0].inbox.is_empty());
+            assert_eq!(
+                provider.stats().reserved_bytes,
+                0,
+                "discarded input must refund all generic credits"
+            );
+        });
+    });
+}

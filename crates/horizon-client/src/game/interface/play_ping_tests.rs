@@ -59,7 +59,7 @@ fn pass(game: &mut Game<'_>, conn: u32, packet: S) {
         .update_connection(conn, |guest| {
             guest
                 .inbox
-                .push_back(horizon_client::lan::guest::InboxItem::uncredited(packet));
+                .push_back(horizon_client::lan::guest::InboxItem::Packet(packet, None));
         })
         .unwrap();
     // Already registered connections: this is a second level pass, without polling sockets.

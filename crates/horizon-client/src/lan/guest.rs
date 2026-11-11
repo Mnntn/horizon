@@ -147,8 +147,9 @@ pub enum InboxItem {
         crate::net::ingress::ReceiveLease<super::NetEvent>,
     ),
 }
+#[cfg(test)]
 impl InboxItem {
-    /// Engine-generated input (fake players and fixtures), not network ingress.
+    /// Unit-test input without a network provider reservation.
     pub fn uncredited(packet: play::Serverbound) -> Self {
         Self::Packet(packet, None)
     }

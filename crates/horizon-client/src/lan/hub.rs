@@ -2493,6 +2493,18 @@ impl Hub {
                 pass.started = false;
                 continue;
             };
+            // A raw root may close the physical endpoint before its Left event
+            // reaches the next frozen poll. Do not acknowledge or apply later
+            // input in this incarnation while waiting for that notification.
+            if !self.guests[i].left_reason.is_empty()
+                || self.guests[i].sender.payload_transport().closed()
+            {
+                let discarded = self.guests.update(i, |g| std::mem::take(&mut g.inbox));
+                drop(discarded);
+                pass.next += 1;
+                pass.started = false;
+                continue;
+            }
             if !self.here(&self.guests[i])
                 && !(self.guests[i].held && self.watches(&self.guests[i]))
             {
@@ -4351,6 +4363,14 @@ impl Hub {
         // (the swing starts the attack strength again, #7817).
         let mut held = false;
         loop {
+            // The I/O owner can also close concurrently between packets.
+            if !self.guests[i].left_reason.is_empty()
+                || self.guests[i].sender.payload_transport().closed()
+            {
+                let discarded = self.guests.update(i, |g| std::mem::take(&mut g.inbox));
+                drop(discarded);
+                break;
+            }
             if held
                 && !matches!(
                     self.guests[i].inbox.front(),
@@ -4362,9 +4382,6 @@ impl Hub {
             let Some(entry) = self.guests.update(i, |g| g.inbox.pop_front()) else {
                 break;
             };
-            if !self.guests[i].left_reason.is_empty() {
-                break;
-            }
             let packet = match entry {
                 InboxItem::Raw(delivery, credit) => {
                     credits.push(credit);
