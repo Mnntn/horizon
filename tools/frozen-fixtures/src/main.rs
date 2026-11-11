@@ -98,6 +98,9 @@ impl<'a> Visit<'a> for Scan<'_> {
                 || [STANDARD, CLIENT].contains(&bound.as_str())
             {
                 let mut reasons = self.risks.clone();
+                if !matches!(c.args.first(), Some(syn::Expr::Closure(_))) {
+                    reasons.push("indirect callback rather than an inline closure".into());
+                }
                 if bound != STANDARD && bound != CLIENT {
                     reasons.push("unresolved, custom, relative or local binding".into());
                 }
@@ -108,9 +111,9 @@ impl<'a> Visit<'a> for Scan<'_> {
                 if calls
                     .names
                     .iter()
-                    .any(|n| n != &name && !n.contains("::") && self.locals.contains(n))
+                    .any(|n| n != &name && !n.contains("::") && n.starts_with(char::is_lowercase))
                 {
-                    reasons.push("indirect local helper".into());
+                    reasons.push("indirect unqualified helper".into());
                 }
                 if self.locals.contains(&name) {
                     reasons.push("local function shadow".into());
@@ -212,7 +215,10 @@ fn main() {
     let mut records = Vec::new();
     for p in paths {
         let source = fs::read_to_string(&p).unwrap();
-        if !source.contains("with_game") && !source.contains("with_client_game") {
+        if !source.contains("with_game")
+            && !source.contains("with_client_game")
+            && !source.contains("with_frozen_")
+        {
             continue;
         }
         let ast = syn::parse_file(&source).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
@@ -290,6 +296,8 @@ mod tests {
             "use crate::game::native_entity_refs::tests::*; fn test(){with_game(|g|g.tick());}",
             "use crate::game::native_entity_refs::tests::with_game;fn side(){} fn test(){with_game(|g|side());}",
             "fn with_game(){} fn test(){with_game();}",
+            "fn test(){crate::game::native_entity_refs::tests::with_game(exercise);}",
+            "use crate::game::native_entity_refs::tests::with_game; use elsewhere::side; fn test(){with_game(|g|side(g));}",
         ] {
             assert_eq!(discover(source).1, 0, "{source}");
         }
