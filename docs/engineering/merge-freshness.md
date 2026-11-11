@@ -12,7 +12,10 @@ an intervening conflict, and 2 means `STALE` because evidence is unavailable.
 For STALE, merge current main into the owned branch once and obtain a fresh gate.
 
 The newest dyna-ci pull-request run associated with this PR and its current head
-must have successful latest-execution `lint` and `verify` jobs. Jobs are read
+must have successful latest-execution `lint` and `verify` jobs. Workflow runs
+are queried with both `event=pull_request` and `head_sha=<current head>` before
+pagination, avoiding GitHub's 1,000-result workflow search cap. Fork PRs are
+explicitly unavailable and fail closed; this advisory is for owned branches. Jobs are read
 with GitHub's paginated `filter=latest`: partial reruns may reuse successful
 jobs, but an older success cannot replace a latest failed or pending execution.
 Duplicate same-name evidence is rejected as ambiguous. `launcher` and
@@ -34,7 +37,7 @@ The command compares the intervening main files with the PR files. Either side
 touching a `slots/` component, Cargo.lock, or the explicit Wire layout fixtures
 and generated layout pin files makes it STALE.
 A shared `crates/<name>/` or `launcher/` scope also makes it STALE.
-When a crate scope overlaps, the output lists both sides' complete changed-path
+Only when a crate scope overlaps, the STALE output lists both sides' complete changed-path
 sets grouped by module directory, with per-side and per-directory counts. This
 lets the caller judge proximity without weakening the same-crate decision.
 Workflow and CI tooling paths are file-scoped, not directory-wide contracts:

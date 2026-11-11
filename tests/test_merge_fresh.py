@@ -16,7 +16,8 @@ SPEC.loader.exec_module(m)
 
 class Evidence:
     def __init__(self, base, head, main, files, pr_files):
-        self.pr = {'state': 'open', 'base': {'ref': 'main'}, 'head': {'sha': head}, 'changed_files': len(pr_files)}
+        self.pr = {'state': 'open', 'base': {'ref': 'main', 'repo': {'full_name': 'arismoko/horizon'}},
+                   'head': {'sha': head, 'repo': {'full_name': 'arismoko/horizon'}}, 'changed_files': len(pr_files)}
         self.main = main
         self.run = {'id': 12, 'run_attempt': 2, 'head_sha': head, 'event': 'pull_request', 'pull_requests': [{'number': 7}]}
         self.record = dict(schema_version=1, pr=7, run_id=12, attempt=2, base=base, head=head, merge='f' * 40)
@@ -137,6 +138,35 @@ class Freshness(unittest.TestCase):
                 self.assertIn('same file', m.check(api, 7))
                 api.main = api.record['base']
                 self.assertIsNone(m.check(api, 7))
+
+    def test_current_head_filter_avoids_workflow_search_cap(self):
+        api = self.history('crates/a/src/a.rs', 'crates/b/src/b.rs')
+        transport = m.GitHub('arismoko/horizon')
+        requests = []
+        def response(endpoint):
+            requests.append(endpoint)
+            if '&head_sha=' + api.pr['head']['sha'] in endpoint:
+                return {'workflow_runs': [api.run], 'total_count': 1}
+            # A repository with 2,500 runs exposes only 1,000 unfiltered results.
+            page = int(endpoint.rsplit('page=', 1)[1])
+            return {'workflow_runs': [dict(api.run, head_sha='0' * 40)] * (100 if page <= 10 else 0),
+                    'total_count': 2500}
+        original_pages = api.pages
+        api.pages = lambda endpoint, key: (transport.pages(endpoint, key)
+                                           if endpoint.startswith('actions/workflows/') else original_pages(endpoint, key))
+        with patch.object(transport, 'get', side_effect=response):
+            self.assertIsNone(m.check(api, 7))
+            self.assertEqual(requests, [f"actions/workflows/dyna-ci.yml/runs?event=pull_request&head_sha={api.pr['head']['sha']}&per_page=100&page=1"])
+            # Pin the failure shape that the head filter must avoid.
+            with self.assertRaises(m.Unavailable):
+                transport.pages('actions/workflows/dyna-ci.yml/runs?event=pull_request', 'workflow_runs')
+            self.assertTrue(requests[-1].endswith('page=11'))
+
+    def test_fork_pr_is_unavailable(self):
+        api = self.history('crates/a/src/a.rs', 'crates/b/src/b.rs')
+        api.pr['head']['repo']['full_name'] = 'contributor/horizon'
+        with self.assertRaisesRegex(m.Unavailable, 'fork PR'):
+            m.check(api, 7)
 
     def test_bad_evidence(self):
         good = self.history('crates/a/src/a.rs', 'crates/b/src/b.rs')
