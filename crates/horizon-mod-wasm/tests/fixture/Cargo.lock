@@ -193,17 +193,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-mod-points"
-version = "0.1.0"
-dependencies = [
- "horizon-mod-api",
- "horizon-mod-api-gen",
- "horizon-mod-point-shape",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "horizon-mod-runtime"
 version = "0.1.0"
 dependencies = [
@@ -454,7 +443,6 @@ name = "wasm-fixture"
 version = "0.1.0"
 dependencies = [
  "horizon-mod-api",
- "horizon-mod-points",
 ]
 
 [[package]]
