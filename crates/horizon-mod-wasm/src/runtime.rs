@@ -462,7 +462,6 @@ impl WasmMod {
     }
     pub(crate) fn instantiate(
         engine: &Engine,
-        _manifests: &[(&str, &horizon_mod_package::Manifest)],
         members: &[Member<'_>],
         cache: Option<&crate::module_cache::ModuleCache>,
     ) -> Result<Vec<Self>, Refusal> {

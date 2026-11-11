@@ -107,7 +107,6 @@ fn module(body: &str) -> WasmMod {
     let bytes = guest(*mod_api::wire::LAYOUT, body);
     WasmMod::instantiate(
         &engine,
-        &[],
         &[Member {
             name: "test",
             module: &bytes,
@@ -336,7 +335,6 @@ fn a_member_cannot_bypass_group_limits_with_private_memories() {
         wat::parse_str(r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (memory 1))"#).unwrap();
     let refusal = WasmMod::instantiate(
         &engine().unwrap(),
-        &[],
         &[Member {
             name: "private",
             module: &bytes,
@@ -358,7 +356,6 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
     .unwrap();
     let module = WasmMod::instantiate(
         &engine().unwrap(),
-        &[],
         &[
             Member {
                 name: "std",
@@ -434,7 +431,6 @@ fn real_members_link_when_built() {
     let engine = engine().unwrap();
     let modules = WasmMod::instantiate(
         &engine,
-        &[],
         &[
             Member {
                 name: "std",
@@ -564,7 +560,6 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
     let engine = engine().unwrap();
     let modules = WasmMod::instantiate(
         &engine,
-        &[],
         &[
             Member {
                 name: "first",
@@ -585,7 +580,6 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
     .unwrap();
     let refusal = WasmMod::instantiate(
         &engine,
-        &[],
         &[
             Member {
                 name: "first",
@@ -710,7 +704,6 @@ fn layout_mismatch_is_a_mods_page_refusal() {
     let bytes = guest(*mod_api::wire::LAYOUT ^ 1, "i64.const 0");
     let refusal = WasmMod::instantiate(
         &engine,
-        &[],
         &[Member {
             name: "test",
             module: &bytes,
@@ -1398,7 +1391,6 @@ fn trap_stops_group_not_independent_group() {
     let echo = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
     let members = WasmMod::instantiate(
         &engine,
-        &[],
         &[
             Member {
                 name: "trap",
@@ -1436,7 +1428,6 @@ fn a_refusal_keeps_every_member_of_the_group_answering() {
     let echo = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
     let members = WasmMod::instantiate(
         &engine,
-        &[],
         &[
             Member {
                 name: "flaky",

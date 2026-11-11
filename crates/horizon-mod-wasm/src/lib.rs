@@ -526,12 +526,7 @@ fn load_with_cache(
             name,
             module: &packages[i].module,
         }));
-        let manifests: Vec<_> = indices
-            .iter()
-            .zip(&names)
-            .map(|(&i, name)| (name.as_str(), &packages[i].manifest))
-            .collect();
-        let result = WasmMod::instantiate(&engine, &manifests, &members, cache).and_then(|mods| {
+        let result = WasmMod::instantiate(&engine, &members, cache).and_then(|mods| {
             if mods.len() != indices.len() {
                 return Err(Refusal::Runtime("missing mod boundary exports".into()));
             }
