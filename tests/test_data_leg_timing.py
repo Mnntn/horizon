@@ -15,7 +15,7 @@ import yaml
 
 class DataLegTimingTests(unittest.TestCase):
     def test_workflow_records_start_end_without_bypassing_filtered_runner(self):
-        steps = yaml.safe_load((ROOT / ".github/workflows/dyna-ci.yml").read_text())["jobs"]["ignored-tests-shards"]["steps"]
+        steps = yaml.safe_load((ROOT / ".github/workflows/main-data.yml").read_text())["jobs"]["ignored-tests-shards"]["steps"]
         start = next(i for i, s in enumerate(steps) if s.get("name") == "Record data-leg start and compiler cache")
         end = next(i for i, s in enumerate(steps) if s.get("name") == "Record data-leg end and compiler cache")
         run = next(i for i, s in enumerate(steps) if s.get("name") == "Run the ignored tests that need prepared data")

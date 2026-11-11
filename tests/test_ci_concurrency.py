@@ -42,8 +42,9 @@ def expression_value(expression, github):
     return evaluate(ast.parse(expression.replace("&&", " and ").replace("||", " or ").strip(), mode="eval").body)
 
 
-def concurrency_for(event, sha, number=None):
-    workflow = yaml.safe_load(WORKFLOW.read_text())
+def concurrency_for(event, sha, number=None, filename="dyna-ci.yml"):
+    workflow_path = WORKFLOW.with_name(filename)
+    workflow = yaml.safe_load(workflow_path.read_text())
     policy = workflow["concurrency"]
     github = {"event_name": event, "sha": sha, "ref": "refs/heads/main",
               "event": {"pull_request": {"number": number or ""}}}
@@ -63,12 +64,42 @@ def concurrency_for(event, sha, number=None):
 
 
 class ConcurrencyTests(unittest.TestCase):
-    def test_main_pushes_share_one_non_cancelling_group(self):
-        first = concurrency_for("push", "a" * 40)
-        next_push = concurrency_for("push", "b" * 40)
-        self.assertEqual(first[0], next_push[0], "main pushes must queue behind the running group")
-        self.assertIs(first[1], False, "a main push must not cancel the running run")
-        self.assertIs(next_push[1], False)
+    def test_gate_and_fixture_event_sha_namespaces(self):
+        groups = set()
+        for filename in ("dyna-ci.yml", "wasm-mods.yml"):
+            for event in ("push", "workflow_dispatch", "schedule", "pull_request"):
+                group, cancel = concurrency_for(event, "a" * 40, filename=filename)
+                self.assertNotIn(group, groups)
+                groups.add(group)
+                self.assertEqual(cancel, event == "pull_request")
+            first = concurrency_for("push", "a" * 40, filename=filename)
+            self.assertEqual(first, concurrency_for("push", "a" * 40, filename=filename))
+            self.assertNotEqual(first[0], concurrency_for("push", "b" * 40, filename=filename)[0])
+
+    def test_data_replaces_pending_only_and_never_gate(self):
+        # Model Actions' one-active/one-pending semantics using the parsed groups.
+        active, pending = {}, {}
+        for sha in ("A", "B", "C"):
+            for filename in ("dyna-ci.yml", "wasm-mods.yml", "main-data.yml"):
+                group, cancel = concurrency_for("push", sha, filename=filename)
+                self.assertFalse(cancel)
+                if group not in active:
+                    active[group] = sha
+                else:
+                    pending[group] = sha
+        data_group = concurrency_for("push", "A", filename="main-data.yml")[0]
+        self.assertEqual(active[data_group], "A")
+        self.assertEqual(pending[data_group], "C")
+        for filename in ("dyna-ci.yml", "wasm-mods.yml"):
+            for sha in ("A", "B", "C"):
+                group = concurrency_for("push", sha, filename=filename)[0]
+                self.assertEqual(active[group], sha)
+                self.assertNotIn(group, pending)
+        self.assertEqual(pending, {data_group: "C"})
+        for event in ("push", "workflow_dispatch"):
+            self.assertEqual(concurrency_for(event, "different", filename="main-data.yml"),
+                             (data_group, False))
+        self.assertNotEqual(concurrency_for("schedule", "C", filename="main-data.yml")[0], data_group)
 
     def test_pr_updates_cancel_only_the_same_pr_group(self):
         first = concurrency_for("pull_request", "a" * 40, 101)
