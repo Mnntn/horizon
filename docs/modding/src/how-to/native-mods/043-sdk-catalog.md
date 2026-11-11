@@ -2,11 +2,6 @@
 
 ## Machine-readable SDK catalog
 
-Tools discover a build's hooks and injection points through `mod-catalog.json`,
-shipped at the root of each prebuilt SDK and beside `points.json` in a developer
-source build's catalog directory. Converters, linters and IDE helpers must read
-this file rather than source paths. Internal source layout is not a tool API.
-
 Fork Nightlies also attach `mod-catalog.json` as a standalone release asset,
 listed in the signed `SHA256SUMS`. Download the current
 [catalog asset](https://github.com/arismoko/horizon/releases/download/nightly/mod-catalog.json)

@@ -6,12 +6,6 @@ From the root of the worktree containing the fixture and runtime to measure, bui
 and shared std, then run the release benchmark. This requires `rust-src` and the
 `wasm32-unknown-unknown` target for the pinned wasm toolchain:
 
-```sh
-cargo build -p cargo-horizon-mod
-(cd crates/horizon-mod-wasm/tests/fixture && "$OLDPWD/target/debug/cargo-horizon-mod" horizon-mod build --wasm --catalog points.json && "$OLDPWD/target/debug/cargo-horizon-mod" horizon-mod wasm-std "$OLDPWD/target/horizon-wasm-std.wasm" --catalog points.json)
-HORIZON_WASM_STD="$PWD/target/horizon-wasm-std.wasm" HORIZON_WASM_FIXTURE="$PWD/crates/horizon-mod-wasm/tests/fixture/target/horizon-mod/wasm_fixture.hmod" cargo test --release -p horizon-mod-wasm --features listener-fixture --test bench empty_subscribed_listener -- --ignored --exact --nocapture
-```
-
 Building the fixture rewrites `crates/horizon-mod-wasm/tests/fixture/horizon-mod.toml` with the
 generated wasm hash and toolchain identity. Inspect and discard those generated manifest changes
 after measurement rather than committing toolchain-specific hashes; preserve any intended edits.
@@ -96,12 +90,6 @@ my_library = "…"
 
 A mod carries native code or wasm code, not both. A wasm mod has no `[native]` table.
 
-A mod with `[[inject]]` listeners builds against the game's staged point catalog. Pass
-`--catalog path/to/points.json`, or set `HORIZON_WASM_STD` to the toolchain's std member
-with `points.json` beside it. Mods without listeners need no catalog. When packaging the
-wasm toolchain, `cargo horizon-mod wasm-std <out.wasm> --catalog <staged-points.json>`
-copies that catalog beside the std member.
-
 The std member also owns the group's shared state: its cache budget and the one table of handlers (capability providers and parts) that the mods of a
 group give the game, so a handler one mod of a group gave is usable by another mod of the same group. A
 mod built for a toolchain whose std lacks that table is refused at load; rebuild the mod and the std
@@ -149,20 +137,6 @@ the Mods page. An optional dependency is built in with the Cargo feature of its 
 entry in `Cargo.toml` is `optional = true` under that id; an absent one is left out of the group at
 load, and `if_installed!` keeps the mod from calling it.
 
-## Injection points
-
-API-typed `[[inject]]` listeners use the same generated `mod_points` records and constructors as
-native listeners. When injections are declared, the wasm build requires the pinned game's staged
-`points.json`, supplied via `--catalog` or beside the configured std member.
-Listeners register in the host's ordinary point list, with the same priority, dependency order,
-owner enable flag and stop behavior as native listeners. Mixins remain native-only.
-
-A point's record is a copy of every parameter as an API value, `&mut` parameters copied back
-after the listener, exactly as for a native listener; a point with a parameter that has no API type
-yet refuses an `api` listener at registration, naming it. `access = "internals"` (raw records,
-call kinds, support modules) is native-only: a `mod.wasm` declaring `[[internals]]` or an internals
-injection is refused at load with "internals access is native-only".
-
 ## ABI reference
 
 A dependency group consists of core wasm shared modules with `dylink.0`, not components.
@@ -189,28 +163,13 @@ Pointers and lengths below are wasm32 `u32` values. The game provides these impo
   retained reply. Host errors trap the call.
 - `host_reply(out_ptr)` copies that retained reply.
 
-Each guest exports:
-
-- `horizon_layout() -> u64`: the generated layout hash. A mismatch is refused.
-- `horizon_layout_ext() -> u64`, when `mod_points` is linked: the full point catalog's layout
-  hash. The loader checks it before accepting any listener.
-- `horizon_in(len) -> ptr`: the buffer into which the game writes the next call's input.
-- `horizon_hook(id) -> u64`: runs the generated export ID after the input is written. The high
-  32 bits are the reply pointer and the low 32 bits its length; `u32::MAX` as the length denotes
-  an error, with a Wire string at the pointer. The reply remains valid until the next call at
-  the same depth. A handler call starts its input with the handler's `u64` ID.
+Each guest exports the generated hook dispatcher, initialization and release operations.
 
 The reserved IDs are `INIT = 0xFFFF_FF00` (guest package-list initialization),
 `RELEASE = 0xFFFF_FF01` (guest handler IDs to release), and `HOST_RELEASE = 0xFFFF_FF02`
 (host object ID to release), and `HOST_LOG = 0xFFFF_FF03` (a guest panic string, with no reply).
 Other IDs index the generated import or export table. A hook reply
 contains its return value followed by writable arguments in field order.
-
-Points use that same hook export, call arena and execution budget. Place IDs are
-`0x8000_0000 + place`. The subscription query `0xBFFF_FFFF` returns `(place, injection_id)`
-pairs. Point call input starts with the `u32` subscription index. A `HostSide` point then carries
-a server/client boolean, followed by its listener record. Calls reply with unit and the record,
-which the host decodes completely before writing any field back.
 
 Wire values use little-endian numbers; lengths and collection counts are `u32`, strings are a
 byte length followed by UTF-8 bytes, options have a byte tag (`0` or `1`), enums have a `u32`

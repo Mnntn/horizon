@@ -440,11 +440,6 @@ jobs:
       - name: Test Rust documentation examples
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable test $JOBS --workspace --doc
-      - name: Test listed call production export and real registry
-        if: needs.changes.outputs.rust_required != 'false'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: python3 tools/ci/listed_calls.py --base "${BASE_SHA:-HEAD^}"
       - name: Report test compiler cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"

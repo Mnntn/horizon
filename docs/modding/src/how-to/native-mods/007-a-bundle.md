@@ -37,6 +37,3 @@ The placeholders above must be replaced by exact commits; the native template fi
 Unknown fields are refused. `icon.png` has no manifest key: when present it must be a valid,
 nonzero square PNG, at most 512 × 512 pixels and 256 KiB encoded. It is optional for both content
 and code mods; the scaffold does not create one.
-
-Injections belong in the same manifest as top-level `[[inject]]` tables, with `access = "api"` or `"internals"`. The decision ladder, the fields and the
-forms are in the modding book: [Injections](../../injections.md).

@@ -37,7 +37,3 @@ that entered it exits, even if the converted guard is retained. A nested native 
 outer frame's package until it returns. Worker threads have no scope unless the runtime enters
 a native call and package scope there. Registry ids are stored, not interned: entering a package
 clones an owned id on every call (borrowed static ids do not allocate).
-
-A code mod may listen at the game's injection points as a rare escape hatch, through a crate-root function
-named by `[[inject]].with`, taking a `mod_points` record; the form
-and its limits are in [Injections](../../injections.md).

@@ -214,11 +214,6 @@ API's own, converted on the game side.
 
 ## Injections stay, and the API comes first
 
-`[[inject]]` is the shared native/wasm escape hatch for what the API does not yet reach. The rule is
-API first: a mod needing something the API lacks asks for the hook that replaces the injection, and the
-injection is the stopgap until it exists. The [injections chapter](../injections.md) holds the current forms,
-the decision ladder and the hook-request format.
-
 ## The order of the build route
 
 Compiling a native mod against a game already built is the route that makes native mods cheap, and each step

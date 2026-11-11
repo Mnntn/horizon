@@ -26,7 +26,7 @@
 
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
-- [Mixins](mixins.md)
+- [Native mixins](mixins.md)
 
 # Reference
 
