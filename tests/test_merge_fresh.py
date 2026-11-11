@@ -1,6 +1,7 @@
 """Local git histories supply independent commit/file evidence; no network or Rust."""
 import copy
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -99,6 +100,26 @@ class Freshness(unittest.TestCase):
         self.assertIn('shared contract', m.check(api, 7))
         api.main = api.record['base']
         self.assertIsNone(m.check(api, 7))
+
+    def test_same_crate_cli_lists_both_sides_by_module(self):
+        api = self.history('crates/horizon-client/src/game/items/item.rs',
+                           'crates/horizon-client/src/game/world/persist/save.rs')
+        api.comparison['files'].append({'filename': 'crates/horizon-client/src/game/items/stack.rs'})
+        api.pr_files.append({'filename': 'launcher/src/native_mods/build.rs'})
+        api.pr['changed_files'] = 2
+        output = io.StringIO()
+        with patch.object(m, 'GitHub', return_value=api), patch('sys.argv', ['merge_fresh.py', '7']), patch('sys.stdout', output):
+            self.assertEqual(m.main(), 1)
+        self.assertEqual(output.getvalue(),
+                         'STALE: same crate changed: crates/horizon-client\n'
+                         'Intervening main (2 changed paths):\n'
+                         '  crates/horizon-client/src/game/items/ (2)\n'
+                         '    item.rs\n    stack.rs\n'
+                         'PR (2 changed paths):\n'
+                         '  crates/horizon-client/src/game/world/persist/ (1)\n'
+                         '    save.rs\n'
+                         '  launcher/src/native_mods/ (1)\n'
+                         '    build.rs\n')
 
     def test_tooling_and_workflows_are_file_scoped(self):
         self.assertIsNone(m.check(self.history('tools/ci/ignored_tests.py', 'tools/ci/nightly.py'), 7))

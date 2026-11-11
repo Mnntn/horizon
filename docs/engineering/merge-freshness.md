@@ -34,6 +34,9 @@ The command compares the intervening main files with the PR files. Either side
 touching a `slots/` component, Cargo.lock, or the explicit Wire layout fixtures
 and generated layout pin files makes it STALE.
 Shared files or a shared `crates/<name>/` or `launcher/` scope also make it STALE.
+When a crate scope overlaps, the output lists both sides' complete changed-path
+sets grouped by module directory, with per-side and per-directory counts. This
+lets the caller judge proximity without weakening the same-crate decision.
 Workflow and CI tooling paths are file-scoped, not directory-wide contracts:
 `tools/ci/ignored_tests.py` versus `tools/ci/nightly.py` (#3051 versus #3043)
 is disjoint, but changes to the same tooling or workflow file are STALE. Renames count both names; deletions count the removed name.
