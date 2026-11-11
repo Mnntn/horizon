@@ -124,6 +124,20 @@ class Freshness(unittest.TestCase):
             with self.subTest(mutate=mutate), self.assertRaises(m.Unavailable):
                 m.check(api, 7)
 
+    def test_reused_source_and_inconsistent_triples(self):
+        api = self.history('crates/a/src/a.rs', 'crates/b/src/b.rs')
+        api.artifacts[0]['name'] = 'gate-source-1'
+        api.record['attempt'] = 1
+        self.assertIsNone(m.check(api, 7))
+        old = dict(api.record)
+        api.artifacts.append({'id': 34, 'name': 'gate-source-2', 'expired': False})
+        new = dict(old, attempt=2)
+        api.source = lambda artifact: old if artifact['id'] == 33 else new
+        self.assertIsNone(m.check(api, 7))
+        new['merge'] = 'e' * 40
+        with self.assertRaises(m.Unavailable):
+            m.check(api, 7)
+
     def test_optional_skips_and_required_skips(self):
         api = self.history('crates/a/src/a.rs', 'crates/b/src/b.rs')
         api.jobs[2]['conclusion'] = api.jobs[3]['conclusion'] = 'skipped'
