@@ -30,9 +30,6 @@ mod planning;
 pub use planning::routes;
 mod crates;
 mod diagnostics;
-mod inject;
-mod inject_cache;
-mod inject_text;
 mod internals;
 mod internals_sync;
 mod registry_compile;
@@ -44,15 +41,11 @@ mod registry_runtime;
 mod registry_rustc;
 pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
 mod isolate;
-mod mod_points;
 mod package;
 mod patch;
 mod picker;
 mod prebuilt;
-mod sites;
-mod slots;
 #[cfg(all(test, target_os = "linux"))]
-mod source_server;
 
 pub use isolate::LeftOut;
 pub use picker::{needs_picker, Route, Routes};
