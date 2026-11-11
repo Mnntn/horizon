@@ -19,6 +19,7 @@ pub mod menu_extra;
 pub mod mod_list;
 pub mod mod_net;
 pub mod packets;
+pub mod payload_negotiation;
 pub mod quiet;
 pub mod registry;
 mod resolver;
