@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub(super) const PIG: &str = "00000251-0000-0000-0000-000000000001";
 
 pub(super) fn game(test: impl FnOnce(&mut Game<'_>)) {
-    crate::game::native_entity_refs::tests::with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.build_registries();
         game.load_server_loot();
         game.set_allow_commands(true);

@@ -51,7 +51,7 @@ mod camera_type_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_client_mod_picks_the_camera_type_f5_cycles_to() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.options.execution_role = super::ExecutionRole::Client;
             let mut seen = Vec::new();
             for _ in 0..3 {
@@ -68,7 +68,7 @@ mod camera_type_tests {
         )]
         .into();
         with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 use CameraType::*;
                 game.options.execution_role = super::ExecutionRole::Client;
                 game.cycle_camera();
@@ -134,7 +134,7 @@ mod camera_type_tests {
         )]
         .into();
         with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_client_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_client_game(|game| {
                 game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
                 game.title = None;
                 game.spectated_post_effect = Some("minecraft:creeper");

@@ -47,7 +47,7 @@ fn installed_block_entity_neighbor_parts_dispatch_through_game() {
     .into();
     mod_api::testing::with_mods(mods.clone(), || {
         mod_api::__private::part_tests::install_parts_fixture(&mods).unwrap();
-        with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             let directory = tempfile::tempdir().unwrap();
             game.save = Arc::new(horizon_client::save::SaveDir::new(
                 directory.path().to_path_buf(),
@@ -128,7 +128,7 @@ fn block_entity_neighbor_traversal_keeps_far_chunk_unloaded() {
     .into();
     mod_api::testing::with_mods(mods.clone(), || {
         mod_api::__private::part_tests::install_parts_fixture(&mods).unwrap();
-        with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world.chunks.clear();
             game.world

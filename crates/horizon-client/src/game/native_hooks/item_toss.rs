@@ -42,7 +42,7 @@ mod item_toss_tests {
         let heard = Arc::new(Mutex::new(0));
         let mods = vec![ModEntry::new("toss_probe", Box::new(Tosser(heard.clone())))];
         with_mods(mods.into(), || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 let eye = [0.5, 65.0, 0.5];
                 let stack = || ItemStack::new("minecraft:dirt", 1);
                 assert!(game.throw_from_eyes(stack(), eye, false, true).is_none());

@@ -5,7 +5,7 @@ use crate::game::native_entity_refs::tests::{with_client_game, with_game};
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn singleton_dragon_spawn_install_refusal_and_kill() {
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.dragon.discard();
         let before = game.next_entity;
         let id = game
@@ -36,7 +36,7 @@ fn singleton_dragon_spawn_install_refusal_and_kill() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn singleton_dragon_load_keeps_state_and_reserves_nine_ids() {
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.dragon.discard();
         let mut saved = Dragon::new(Vec3::new(2.0, 90.0, 3.0), 25.0, 0);
         saved.health = 73.0;
@@ -76,7 +76,7 @@ fn singleton_dragon_load_keeps_state_and_reserves_nine_ids() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn singleton_fight_dragon_install_reserves_nine_ids() {
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.dragon.discard();
         let before = game.next_entity;
         game.create_new_dragon();
@@ -94,7 +94,7 @@ fn singleton_fight_dragon_install_reserves_nine_ids() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn singleton_client_dragon_install_explicitly_replaces_network_owner() {
-    with_client_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_client_game(|game| {
         game.dragon.discard();
         let before = game.next_entity;
         game.spawn_remote_dragon(420, [1.0, 80.0, 2.0], 45.0);
@@ -114,7 +114,7 @@ fn singleton_client_dragon_install_explicitly_replaces_network_owner() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn singleton_late_dragon_id_reserves_all_eight_parts_once() {
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.dragon.discard();
         assert!(game.dragon.install(Dragon::new(Vec3::ZERO, 0.0, 0)).is_ok());
         let before = game.next_entity;
@@ -149,7 +149,7 @@ fn singleton_lifecycle_commands_unload_and_parked_owners() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn singleton_death_fight_scan_and_resets_discard_owners() {
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.spawn_remote_dragon(601, [1.0, 80.0, 1.0], 0.0);
         game.dragon.as_mut().unwrap().death_time = 199;
         game.tick_dragon_death();
@@ -198,7 +198,7 @@ fn singleton_join_rejection_discards_the_installed_dragon() {
     mod_api::testing::with_mods(
         vec![mod_api::ModEntry::new("dragon-veto", Box::new(Veto))].into(),
         || {
-            with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 assert!(
                     game.spawn_dragon_spawned([1.0, 80.0, 1.0], SpawnSite::Plain)
                         .is_none()
@@ -238,7 +238,7 @@ fn singleton_live_owner_is_not_reported_as_departed() {
         )]
         .into(),
         || {
-            with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 let id = game
                     .spawn_dragon_spawned([1.0, 80.0, 1.0], SpawnSite::Plain)
                     .unwrap();

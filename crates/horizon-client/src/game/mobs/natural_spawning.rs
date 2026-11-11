@@ -1480,7 +1480,7 @@ mod tests {
     fn authoritative_world_border_gates_positions_and_whole_chunks() {
         use horizon_core::position::BlockPos;
         use horizon_world::level::LevelAccess;
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world.chunks.insert(
                 (0, 0),
@@ -1510,7 +1510,7 @@ mod tests {
     fn world_border_outer_chunk_gate_keeps_attempt_randomness() {
         use horizon_client::{chunk::Chunk, motion::PlayerMotion};
         use std::sync::Arc;
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world.chunks.insert(
                 (0, 0),

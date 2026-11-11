@@ -16,7 +16,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn host_resolves_stack_particle_sprites() {
-        crate::game::native_entity_refs::tests::with_client_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_client_game(|game| {
             mod_api::__private::resolve_particles(["minecraft:item"], |id| {
                 horizon_client::particles::ParticleType::from_name(id)
                     .map(|ty| mod_api::__private::ParticleKind::Vanilla(ty as u32))

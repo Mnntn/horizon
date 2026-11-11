@@ -117,7 +117,7 @@ fn projectile_restore_entries_keep_the_bound_arrow() {
             assert_eq!(before[0].entry.read(&VALUE), Ok(&10));
         };
         if path == 0 {
-            crate::game::native_entity_refs::tests::with_client_game(exercise);
+            crate::game::native_entity_refs::tests::with_frozen_client_game(exercise);
         } else {
             crate::game::native_guest_turn_tests::with_guests(exercise);
         }

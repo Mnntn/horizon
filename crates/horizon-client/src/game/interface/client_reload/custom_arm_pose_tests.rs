@@ -164,7 +164,7 @@ fn suppressed_custom_offhand_never_calls_its_transformer() {
             self.calls.lock().unwrap().push(event.right_arm);
         }
     }
-    with_client_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_client_game(|game| {
         game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
         game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
         game.offhand = Some(ItemStack::new("minecraft:stick", 1));

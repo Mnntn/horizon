@@ -62,7 +62,7 @@ mod entity_place_tests {
             }),
         )];
         with_mods(mods.into(), || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 let (foot, head) = (BlockPos::new(1, 64, 1), BlockPos::new(1, 64, 2));
                 let state = game.world.block(0, 0, 0);
                 assert!(game.place_canceled(1, foot, state, state, Some((head, state))));
@@ -73,7 +73,7 @@ mod entity_place_tests {
         assert_eq!(seen[0].0, BlockPos::new(1, 64, 1));
         assert!(matches!(&seen[0].1, Placement::Multi(blocks) if blocks.len() == 2));
         with_mods(Vec::new().into(), || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 let at = BlockPos::new(1, 64, 1);
                 let state = game.world.block(0, 0, 0);
                 assert!(!game.place_canceled(1, at, state, state, None));

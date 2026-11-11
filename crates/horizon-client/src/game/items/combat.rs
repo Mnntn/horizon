@@ -920,7 +920,7 @@ mod guest_hit_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_effect_hit_on_a_guest_credits_the_mob_that_swung() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 100.0, 0.5)).unwrap());
             for (id, kind, y) in [
                 (4, "minecraft:zombie", 90.0),

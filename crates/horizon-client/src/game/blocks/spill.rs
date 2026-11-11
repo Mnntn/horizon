@@ -1402,7 +1402,7 @@ mod crafter_drop_name_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
     fn actual_crafter_destruction_keeps_source_name_off_the_dropped_item() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.build_registries();
             game.set_allow_commands(true);
             game.world.chunks.insert(

@@ -7,7 +7,7 @@ use horizon_mod_runtime::attachments::ATTACHMENTS_KEY;
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn idle_tick_does_no_index_work_with_ten_thousand_bound_holders() {
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         for n in 0..10_000 {

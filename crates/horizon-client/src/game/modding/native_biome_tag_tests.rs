@@ -3,7 +3,7 @@ use crate::game::native_entity_refs::tests::with_game;
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn biome_tag_forwarder_distinguishes_unknown_tags_from_unknown_biomes() {
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.install_live_features();
         let level = game.level(game.dim.id()).unwrap();
         assert_eq!(

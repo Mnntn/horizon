@@ -705,7 +705,7 @@ mod off_level_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn retained_ancestor_does_not_consume_a_due_villager_sensor() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world.chunks.insert(
                 (0, 0),

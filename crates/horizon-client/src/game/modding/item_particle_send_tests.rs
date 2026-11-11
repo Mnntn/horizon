@@ -7,7 +7,7 @@ use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn stack_particle_crosses_server_packet_and_resolves_apple() {
     let mut transfer = None;
-    crate::game::native_entity_refs::tests::with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         mod_api::__private::resolve_particles(["minecraft:item"], |id| {
             horizon_client::particles::ParticleType::from_name(id)
                 .map(|ty| mod_api::__private::ParticleKind::Vanilla(ty as u32))
@@ -54,7 +54,7 @@ fn stack_particle_crosses_server_packet_and_resolves_apple() {
         transfer = Some((packet, sync));
     });
     let (packet, sync) = transfer.unwrap();
-    crate::game::native_entity_refs::tests::with_client_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_client_game(|game| {
         use horizon_protocol::packets::play::Clientbound;
         let mut reader = horizon_protocol::buf::Reader::new(&packet);
         let id = reader.varint().unwrap();

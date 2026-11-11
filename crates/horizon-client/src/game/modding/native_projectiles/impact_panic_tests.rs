@@ -73,7 +73,7 @@ fn shoot_listener_panic_after_admission_preserves_owned_rows() {
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 game.enter_level(dimension).unwrap();
                 game.options.dedicated = Some(Vec::new());
                 game.world
@@ -185,7 +185,7 @@ fn shoot_listener_panic_after_admission_preserves_owned_rows() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn normal_dispatch_returns_the_owned_pass_for_explicit_restore() {
     for dimension in [crate::game::Dim::Overworld, crate::game::Dim::Nether] {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.enter_level(dimension).unwrap();
             let journal = Journal::default();
             let owner = Owner {

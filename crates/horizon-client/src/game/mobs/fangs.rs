@@ -388,7 +388,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn taken_fangs_tick_keeps_survivors_before_both_spawns() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.fangs.list.clear();
             game.add_fangs([0.0, 80.0, 0.0], 0.0, 30, 0);
             game.add_fangs([1.0, 80.0, 0.0], 0.0, 30, 0);

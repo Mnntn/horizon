@@ -292,7 +292,7 @@ fn mob_taken_store_refuses_without_writing_and_missing_store_refuses() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn tnt_with_real_lifetime_accepts_first_store() {
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         game.summon_with_nbt("minecraft:tnt", [0.5, 70.0, 0.5], "{}")

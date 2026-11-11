@@ -131,7 +131,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn retained_passengers_occupy_seats_in_boarding_order() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             use horizon_client::mobs::Mob;
             use horizon_core::geometry::Vec3;
             let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();

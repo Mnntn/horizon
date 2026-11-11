@@ -3365,7 +3365,7 @@ mod tnt_impact_tests {
     /// blew up.
     fn runs_into_the_wall(rails: bool, at: Vec3, velocity: Vec3) -> bool {
         let mut result = false;
-        with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.world.chunks.insert(
                 (0, 0),
                 std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),

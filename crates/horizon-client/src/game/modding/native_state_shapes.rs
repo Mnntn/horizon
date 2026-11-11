@@ -119,7 +119,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn supplied_shape_state_does_not_replace_world_state() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
             let pos = [0, 64, 0];
             let stone = game

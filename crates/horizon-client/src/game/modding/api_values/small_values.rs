@@ -83,7 +83,7 @@ mod recipe_tests {
     #[test]
     #[ignore = "requires prepared game resources"]
     fn recipe_json_text_fields() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             assert_eq!(
                 game.recipe_ingredient("not json").unwrap_err(),
                 mod_api::RecipeJsonError::InvalidJson

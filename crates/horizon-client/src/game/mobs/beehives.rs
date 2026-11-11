@@ -553,7 +553,7 @@ mod stay_tests {
     #[test]
     #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
     fn every_ready_bee_of_a_hive_turn_gets_the_same_answer() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world.chunks.insert(
                 (0, 0),

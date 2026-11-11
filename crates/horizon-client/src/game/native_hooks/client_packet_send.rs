@@ -61,7 +61,7 @@ mod client_packet_send_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_client_mod_hears_and_cancels_packets_the_game_sends() {
         let slot = Serverbound::SetCarriedItem(SetCarriedItem { slot: 2 });
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.options.execution_role = super::ExecutionRole::Client;
             assert!(!game.client_packet_send_canceled(&payload("example:secret")));
         });
@@ -69,7 +69,7 @@ mod client_packet_send_tests {
         let mods: mod_api::Mods =
             vec![ModEntry::new("filter", Box::new(Filter(Arc::clone(&seen))))].into();
         with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 game.options.execution_role = super::ExecutionRole::Client;
                 assert!(!game.client_packet_send_canceled(&slot));
                 assert!(game.client_packet_send_canceled(&payload("example:secret")));

@@ -752,7 +752,7 @@ mod teleport_hook_tests {
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
-            with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 let at = Vec3::new(0.0, 65.0, 0.0);
                 game.player = Some(PlayerMotion::new(game.motion, at).unwrap());
                 game.lan_acting = Some(12);
@@ -961,7 +961,7 @@ mod fox_consumption_hook_tests {
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
-            with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 game.world
                     .chunks
                     .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
@@ -1068,7 +1068,7 @@ mod fox_consumption_hook_tests {
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
-            with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 // Legacy summon checks the actual server owner as well as
                 // the opened native lifecycle, like the production server does.
                 game.options.dedicated = Some(Vec::new());

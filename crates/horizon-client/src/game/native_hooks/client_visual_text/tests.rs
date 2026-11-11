@@ -3,7 +3,7 @@ use mod_api::{ClientHost, Text};
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn visual_read_uses_live_translations_styles_and_bidi_outside_drawing() {
-    crate::game::native_entity_refs::tests::with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         let host: &dyn ClientHost = game;
         let mut argument = Text::literal("Alex");
         argument.style.bold = Some(true);

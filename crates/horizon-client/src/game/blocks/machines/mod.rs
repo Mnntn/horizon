@@ -2112,7 +2112,7 @@ mod brewing_fuel_transfer_tests {
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
-            with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.world.chunks.insert(
                     (0, 0),
@@ -2173,7 +2173,7 @@ mod brewing_fuel_transfer_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn hopper_brewing_fuel_transfer_respects_stack_components() {
-        with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.world.chunks.insert(
                 (0, 0),
                 std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),

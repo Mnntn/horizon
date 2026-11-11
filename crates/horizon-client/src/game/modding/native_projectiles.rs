@@ -357,7 +357,7 @@ mod nested_spawn_tests {
 
     fn impact_handoff_balances_the_pass(park: bool) {
         use horizon_client::join_seq::residency::{Change, Journal, Kind, Owner};
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             if park {
                 game.enter_level(crate::game::Dim::Nether).unwrap();
             }

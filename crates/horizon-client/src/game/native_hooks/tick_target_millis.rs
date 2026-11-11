@@ -32,7 +32,7 @@ mod tick_target_millis_tests {
         )]
         .into();
         with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 game.options.execution_role = super::ExecutionRole::Client;
                 check(game);
             });
@@ -46,7 +46,7 @@ mod tick_target_millis_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_client_mod_sets_how_long_a_client_tick_lasts() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.options.execution_role = super::ExecutionRole::Client;
             assert_eq!(game.tick_target_millis(), 50.0);
         });

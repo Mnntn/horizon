@@ -244,7 +244,7 @@ fn production_login_and_local_body_constructor_admit_profile_and_real_loan() {
         connection::Pipe,
         packets::play::{self, Clientbound as C},
     };
-    crate::game::native_entity_refs::tests::with_client_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_client_game(|game| {
         let (pipe, _server) = Pipe::pair();
         game.connect_local(pipe, "SourceProfile").unwrap();
         let profile = game.remote.as_ref().unwrap().profile();
@@ -362,7 +362,7 @@ fn actual_dragon_admits_exactly_eight_checked_parts_with_independent_uuids() {
         copy_on_death: false,
         sync: false,
     };
-    crate::game::native_entity_refs::tests::with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(game.dim);
         let parent = game

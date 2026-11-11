@@ -737,7 +737,7 @@ mod tests {
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
                 game.screen = Screen::Inventory;
                 game.container = None;

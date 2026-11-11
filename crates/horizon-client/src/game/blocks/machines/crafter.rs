@@ -459,7 +459,7 @@ mod part_remainder_tests {
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("milk", Box::new(Remainders))].into();
         crate::game::api_values::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
                 let state = game
                     .block_state_id("minecraft:crafter[orientation=north_up]")

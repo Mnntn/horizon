@@ -34,7 +34,7 @@ fn ordinary_nested_entities_keep_the_complete_save_format() {
     .unwrap()
     .0;
     let mut executed = false;
-    crate::game::native_entity_refs::tests::with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         executed = true;
         let source = parse_snbt(
             r#"{

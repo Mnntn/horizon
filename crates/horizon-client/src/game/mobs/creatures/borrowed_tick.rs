@@ -740,7 +740,7 @@ mod off_level_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn borrowed_tick_resolves_the_retained_controller() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             use horizon_client::mobs::goals::{JUMP, LOOK, MOVE};
             game.options.dedicated = Some(Vec::new());
             game.world.chunks.insert(
@@ -782,7 +782,7 @@ mod off_level_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn resident_descendant_does_not_tick_until_detached() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world.chunks.insert(
                 (0, 0),

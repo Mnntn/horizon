@@ -81,7 +81,7 @@ mod tests {
                     }
                     .into();
                     mod_api::testing::with_mods(mods, || {
-                        with_game(|game| {
+                        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                             game.options.dedicated = Some(Vec::new());
                             prepare_entity_ticking_neighborhood(game, ChunkPos::new(0, 0));
                             let sand = game

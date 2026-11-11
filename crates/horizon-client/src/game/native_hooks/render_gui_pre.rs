@@ -34,7 +34,7 @@ mod local_sound_tests {
     fn a_screen_hooks_sound_reaches_audio_at_the_next_update() {
         let mods: mod_api::Mods = vec![ModEntry::new("click", Box::new(Mod))].into();
         with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 game.options.execution_role = super::ExecutionRole::Client;
                 game.audio.heard.clear();
                 game.native_render_gui_pre(&mut false);

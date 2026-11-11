@@ -322,7 +322,7 @@ mod tests {
         .into();
         mod_api::testing::with_mods(mods.clone(), || {
             crate::game::api_values::install_parts(&mods).unwrap();
-            with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 game.lan_acting_uuid = Some(123);
                 game.lan_acting_entity = Some(20);
                 game.lan_acting_name = Some("Steve".into());

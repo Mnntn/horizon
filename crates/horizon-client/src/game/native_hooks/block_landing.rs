@@ -62,7 +62,7 @@ mod landing_crossing_tests {
         .into();
         crate::game::api_values::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 let stone = game
                     .pack
                     .assets

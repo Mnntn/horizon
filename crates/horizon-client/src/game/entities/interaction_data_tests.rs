@@ -10,7 +10,7 @@ use std::sync::Arc;
 const EDITED: &str = "00000042-0000-0000-0000-000000000001";
 
 fn game(test: impl FnOnce(&mut Game<'_>)) {
-    crate::game::native_entity_refs::tests::with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.build_registries();
         game.set_allow_commands(true);
         game.world

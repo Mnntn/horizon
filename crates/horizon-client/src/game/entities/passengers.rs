@@ -704,7 +704,7 @@ mod off_level_tests {
     fn dying_riding_edges_do_not_depend_on_unrelated_retained_objects() {
         for retained in [false, true] {
             for dying_vehicle in [false, true] {
-                crate::game::native_entity_refs::tests::with_game(|game| {
+                crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                     let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
                     let mut vehicle = Mob::new(161, kind.clone(), Vec3::ZERO, 0.0);
                     let mut rider = Mob::new(162, kind.clone(), Vec3::ZERO, 0.0);
@@ -742,7 +742,7 @@ mod off_level_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn first_rider_order_does_not_depend_on_unrelated_retained_objects() {
         for retained in [false, true] {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
                 let mut vehicle = Mob::new(171, kind.clone(), Vec3::ZERO, 0.0);
                 vehicle.extra.rider = Some(172);
@@ -772,7 +772,7 @@ mod off_level_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn content_seat_positioning_counts_retained_passengers() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             let mut kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
             std::sync::Arc::make_mut(&mut kind).passenger_attachments =
                 vec![[1.0, 2.0, 3.0], [-1.0, 4.0, 5.0]];
@@ -804,7 +804,7 @@ mod off_level_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn dismounted_retained_multiseat_vehicle_snaps_each_frozen_passenger() {
         for name in ["minecraft:camel", "minecraft:happy_ghast"] {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
                 let kind = game.res.mob_types().get(name).unwrap().clone();
                 let mut root = Mob::new(70, pig.clone(), Vec3::new(10.0, 200.0, 20.0), 0.0);
@@ -896,7 +896,7 @@ mod off_level_tests {
             )]
             .into();
             mod_api::testing::with_mods(mods, || {
-                crate::game::native_entity_refs::tests::with_game(|game| {
+                crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                     game.options.dedicated = Some(Vec::new());
                     let at = Vec3::new(10.0, 200.0, 20.0);
                     if cart {
@@ -970,7 +970,7 @@ mod off_level_tests {
                 Vec::new().into()
             };
             mod_api::testing::with_mods(mods, || {
-                crate::game::native_entity_refs::tests::with_game(|game| {
+                crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                     game.options.dedicated = Some(Vec::new());
                     let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
                     let mut root = Mob::new(71, pig.clone(), Vec3::new(1.0, 200.0, 0.5), 0.0);
@@ -1017,7 +1017,7 @@ mod off_level_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn dying_objects_keep_passenger_links_until_removal() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
             let mut root = Mob::new(71, pig.clone(), Vec3::new(1.0, 200.0, 0.5), 0.0);
             root.health = 0.0;
@@ -1047,7 +1047,7 @@ mod off_level_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn synchronization_preserves_retained_controller_and_frozen_descendant() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
             let mut root = Mob::new(71, pig.clone(), Vec3::new(1.0, 80.0, 0.5), 0.0);
             root.extra.rider = Some(72);
@@ -1112,7 +1112,7 @@ mod nested_vehicle_discard_tests {
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 let at = Vec3::new(10.0, 200.0, 20.0);
                 if cart {
@@ -1176,7 +1176,7 @@ mod nested_vehicle_discard_tests {
         discard_during_dismount(true);
     }
     fn with_vehicle_tree(cart: bool, rejected: bool, test: impl FnOnce(&mut Game<'_>)) {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.options.game_dir = Some(
                 std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())

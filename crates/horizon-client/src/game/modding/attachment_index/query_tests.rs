@@ -24,7 +24,7 @@ fn values(game: &Game<'_>) -> Vec<u32> {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn query_snapshot_dimension_and_stale_writes() {
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         assert!(values(game).is_empty());
@@ -80,7 +80,7 @@ fn query_snapshot_dimension_and_stale_writes() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn query_writes_join_transaction_journal_without_implicit_commit() {
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         game.world

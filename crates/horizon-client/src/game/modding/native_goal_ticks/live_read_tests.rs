@@ -16,7 +16,7 @@ impl mobs::LiveMobs for OneMob<'_> {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn scoped_host_reads_live_other_mob_before_stale_snapshot() {
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         let kind = game
             .res
             .mob_types()
@@ -62,7 +62,7 @@ fn scoped_host_resolves_other_real_players_from_the_game() {
         atomic::{AtomicI32, AtomicUsize},
     };
 
-    with_game(|game| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
         crate::game::native_item_places::tests::open_to_lan(game);
         for id in [12, 13] {
             let (tx, _rx) = std::sync::mpsc::channel();

@@ -3524,7 +3524,7 @@ mod tests {
     fn resource_tooltip_uses_inventory_lines_and_explicit_flags() {
         use mod_api::{ItemResource, TooltipElement};
 
-        crate::game::native_entity_refs::tests::with_client_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_client_game(|game| {
             let stack = super::ItemStack::new("minecraft:iron_sword", 1);
             let resource = ItemResource::of(&crate::game::api_values::test_snapshot(&stack));
             let inventory: Vec<_> = game

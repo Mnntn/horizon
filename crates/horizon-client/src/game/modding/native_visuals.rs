@@ -195,7 +195,7 @@ mod tests {
         }
         let mods: mod_api::Mods = vec![ModEntry::new("visual", Box::new(Mod))].into();
         with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 let stone = game
                     .pack
                     .assets

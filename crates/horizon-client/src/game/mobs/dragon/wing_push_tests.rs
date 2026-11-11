@@ -6,7 +6,7 @@ use horizon_core::geometry::Vec3;
 #[test]
 #[ignore = "requires HORIZON_TEST_RESOURCES and fresh Horizon homes"]
 fn wing_contacts_restore_motion_and_sync_only_when_hurt_is_refused() {
-    with_game(|g| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|g| {
         g.creative = false;
         let initial = Vec3::new(0.25, -0.125, 0.75);
         let push = Vec3::new(0.5, f64::from(0.2_f32), -0.25);
@@ -70,7 +70,7 @@ fn wing_contacts_restore_motion_and_sync_only_when_hurt_is_refused() {
 #[test]
 #[ignore = "requires HORIZON_TEST_RESOURCES and fresh Horizon homes"]
 fn a_shield_faces_the_dragons_origin_not_the_wing_push() {
-    with_game(|g| {
+    crate::game::native_entity_refs::tests::with_frozen_game(|g| {
         g.creative = false;
         g.player = Some(PlayerMotion::new(g.motion, Vec3::ZERO).unwrap());
         g.armor[1] = Some(ItemStack::new("minecraft:leather_chestplate", 1));

@@ -1614,7 +1614,7 @@ mod off_level_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn underwater_dismount_skips_deep_frozen_descendants() {
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
             let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
             for (id, mount) in [(73, Some(72)), (74, Some(73)), (75, None), (76, Some(75))] {
                 let mut m = horizon_client::mobs::Mob::new(id, pig.clone(), Vec3::ZERO, 0.0);

@@ -36,7 +36,7 @@ mod tests {
     fn hud_mode_game_bridge_respects_client_and_guest_guards() {
         let mods: mod_api::Mods = vec![ModEntry::new("three-state", Box::new(ThreeState))].into();
         with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_game(|game| {
+            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
                 for role in [
                     ExecutionRole::IntegratedServer,
                     ExecutionRole::DedicatedServer,
