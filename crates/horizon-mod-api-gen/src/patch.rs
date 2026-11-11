@@ -474,11 +474,10 @@ fn replaceable(found: &Found, source: &mut Source) -> Result<(), String> {
             }
         }
         let mut associated = Associated(false);
-        associated.visit_signature(sig);
+        let (_, path, _) = block.trait_.as_ref().expect("a trait implementation");
+        associated.visit_signature(&crate::replace::qualified(sig, path));
         if associated.0 {
-            return Err(
-                "its signature names a trait-associated type or constant through Self".into(),
-            );
+            return Err("its signature names a trait-associated constant through Self".into());
         }
         let items = source.module(&found.module)?.items.clone();
         let mut types = BTreeSet::new();
