@@ -752,7 +752,7 @@ mod teleport_hook_tests {
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+            with_game(|game| {
                 let at = Vec3::new(0.0, 65.0, 0.0);
                 game.player = Some(PlayerMotion::new(game.motion, at).unwrap());
                 game.lan_acting = Some(12);

@@ -1176,7 +1176,7 @@ mod nested_vehicle_discard_tests {
         discard_during_dismount(true);
     }
     fn with_vehicle_tree(cart: bool, rejected: bool, test: impl FnOnce(&mut Game<'_>)) {
-        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+        crate::game::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.options.game_dir = Some(
                 std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())

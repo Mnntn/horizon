@@ -80,7 +80,7 @@ fn query_snapshot_dimension_and_stale_writes() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn query_writes_join_transaction_journal_without_implicit_commit() {
-    crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+    with_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         game.world

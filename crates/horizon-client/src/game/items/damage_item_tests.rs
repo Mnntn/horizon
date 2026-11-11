@@ -78,7 +78,7 @@ pub(in crate::game) fn with_wear_part(
     let mods: mod_api::Mods = vec![ModEntry::new("wear", Box::new(Mod(wear.clone())))].into();
     mod_api::testing::with_mods(mods.clone(), || {
         crate::game::api_values::install_parts(&mods).unwrap();
-        crate::game::native_entity_refs::tests::with_frozen_game(|game| test(game, &wear));
+        crate::game::native_entity_refs::tests::with_game(|game| test(game, &wear));
     });
 }
 

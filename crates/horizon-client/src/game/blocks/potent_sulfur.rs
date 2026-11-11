@@ -599,7 +599,7 @@ mod pass_tests {
             }
         }
 
-        crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+        crate::game::native_entity_refs::tests::with_game(|game| {
             for x in [0, 2, 4] {
                 game.world.chunks.insert(
                     (x, 0),

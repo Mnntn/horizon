@@ -32,7 +32,7 @@ mod tick_target_millis_tests {
         )]
         .into();
         with_mods(mods, || {
-            crate::game::native_entity_refs::tests::with_frozen_game(|game| {
+            crate::game::native_entity_refs::tests::with_game(|game| {
                 game.options.execution_role = super::ExecutionRole::Client;
                 check(game);
             });
