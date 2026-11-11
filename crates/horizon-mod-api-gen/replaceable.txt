@@ -1,13 +1,5 @@
-# Functions below the game module that are injection points (#589), one path per line in its own
-# crate. Everything in horizon_client::game is a point already; a function here gets a slot, so a
-# hot one (per block, per vertex, per frame) is listed only with its tick or frame time measured.
-# Crates horizon-mod-points is built on (core, world, items, ...) can't be listed.
-# Seeded with the survey's targets (classified.json), less the per-block and per-quad ones
-# (Chunk::get, Section::unpack, Mesher::face, HudBatch::fill/rect_uv, ParticleEngine::push):
-# their frame cost can't be measured without a GPU yet, so they wait for a number.
-horizon_mod_render::render::world_drawn
-horizon_mod_render::render::hand_drawn
-horizon_mod_render::render::render_needs
+# Functions below the game crate that a mixin can replace, one path per line. Every eligible
+# function of horizon_client::game is replaceable already.
 horizon_client_input::input::modify_input
 horizon_client_lib::clock::FixedStep::advance
 horizon_client_lib::extras_hud::draw_minimap
@@ -17,6 +9,9 @@ horizon_client_lib::item_activation::ItemActivation::tick
 horizon_client_lib::item_activation::animation_pose
 horizon_client_lib::lan::hub::Hub::set_mod_commands
 horizon_client_lib::menu::Menu::recompute
+horizon_client_lib::mobs::knockback::Mob::knockback
+horizon_client_lib::mobs::knockback::Mob::knockback_full
+horizon_client_lib::mobs::villager_brain::secondary::sense_secondary
 horizon_client_lib::motion::MotionWorld<'_,'_,'_>::controlled_simulation_tick_with_sprint_window
 horizon_client_lib::multiplayer::Screen::buttons
 horizon_client_lib::multiplayer::Screen::click
@@ -44,6 +39,8 @@ horizon_client_render::screen_effects::ScreenEffects::build
 horizon_client_render::sprites::Sprites::finish
 horizon_client_render::sprites::Sprites::register
 horizon_client_render::ui::menu_background
-# Low-frequency autosave scheduling: rate changes and world startup, not the per-tick path.
-horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0 | 25db725de8fb10cf
-horizon_client::game::Game<'_>::on_tick_rate_changed | self.next_autosave_interval | 0 | 2315e54a937d8ef4
+horizon_mod_render::render::hand_drawn
+horizon_mod_render::render::render_needs
+horizon_mod_render::render::world_drawn
+horizon_mod_render::render::world_view_drawn
+horizon_mod_render::render::world_views
