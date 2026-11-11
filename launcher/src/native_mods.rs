@@ -30,11 +30,9 @@ mod planning;
 pub use planning::routes;
 mod crates;
 mod diagnostics;
-mod inject;
-mod inject_cache;
-mod inject_text;
 mod internals;
 mod internals_sync;
+mod mixin_cache;
 mod registry_compile;
 mod registry_generate;
 mod registry_inventory;
@@ -44,15 +42,10 @@ mod registry_runtime;
 mod registry_rustc;
 pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
 mod isolate;
-mod mod_points;
 mod package;
 mod patch;
 mod picker;
 mod prebuilt;
-mod sites;
-mod slots;
-#[cfg(all(test, target_os = "linux"))]
-mod source_server;
 
 pub use isolate::LeftOut;
 pub use picker::{needs_picker, Route, Routes};
@@ -1040,7 +1033,7 @@ pub fn version_for(
         hash.update(target.name().as_bytes());
         hash.update([0]);
     }
-    // Private rows derive from the pinned SDK and inject declarations, all salted/hashed here.
+    // Private rows derive from the pinned SDK and internals declarations, all salted/hashed here.
     // bundles() reads folders in path order, which with their manifests decides trait dispatch
     // order: hashed in that order, a different order is another build.
     for b in bundles {
@@ -1734,7 +1727,7 @@ fn copy_bundle(bundle: &Bundle, to: &Path) -> Result<(), String> {
     package::copy(bundle, to)
 }
 
-/// Stage supporting modules for horizon-mixins, after unified injects are prepared.
+/// Stage supporting modules for horizon-mixins, before applying mixins.
 fn stage_mixins(mods: &[Bundle], to: &Path) -> Result<Vec<Bundle>, String> {
     if to.exists() {
         fs::remove_dir_all(to).map_err(|e| e.to_string())?;
@@ -2002,10 +1995,7 @@ fn pipeline(
             None => match prebuilt::fetch(&revision, target, || {
                 progress(Step::PrebuiltGame(revision.clone()))
             })? {
-                Ok(game) => match prebuilt::source_refusal(&game, &projects)? {
-                    Some(reason) => Err(reason),
-                    None => Ok(game),
-                },
+                Ok(game) => Ok(game),
                 Err(reason) => Err(reason),
             },
         };
@@ -2059,7 +2049,6 @@ fn pipeline(
                     "version": m.manifest.version,
                     "sha256": digests.get(&m.manifest.id).cloned().flatten(),
                     "internals": pinned.internals,
-                    "inject": pinned.inject,
                 })
             }).collect::<Vec<_>>(),
         })
@@ -2133,8 +2122,8 @@ fn pipeline(
         let fresh = real.join("stage.new");
         let _ = fs::remove_dir_all(&fresh);
         if needs_mixins {
-            let key = inject_cache::key(&revision, &mixins, profile, &ordered)?;
-            let snapshot = inject_cache::snapshot(&real, &key);
+            let key = mixin_cache::key(&revision, &mixins, profile, &ordered)?;
+            let snapshot = mixin_cache::snapshot(&real, &key);
             if snapshot.is_dir() {
                 progress(Step::CachedMixins);
                 sync(&snapshot, &fresh)?;
@@ -2173,11 +2162,11 @@ fn pipeline(
                 sync(&fresh, &partial)?;
                 fs::rename(&partial, &snapshot).map_err(|e| e.to_string())?;
             }
-            crate::storage::mark_used(&inject_cache::snapshot(&real, &key)).map_err(cache_error)?;
+            crate::storage::mark_used(&mixin_cache::snapshot(&real, &key)).map_err(cache_error)?;
         } else {
             sync(&source, &fresh)?;
         }
-        // Publish the staged tree and catalog after validating the mods' sites.
+        // Publish the staged tree and catalog after validating the mods' internals.
         let pending = real.join("stage.pending");
         let catalog_dir = real.join("catalog.partial");
         let _ = fs::remove_dir_all(&pending);
@@ -2197,12 +2186,11 @@ fn pipeline(
                 "--",
             ])
             .arg(tree)
-            .arg(catalog.join(inject::POINTS))
             .arg(catalog.join(internals::INTERNALS))
             .arg(horizon_mod_package::manifest::API)
             .env("CARGO_TARGET_DIR", real.join("target"));
-            run(pass, "Marking the game's injection points", |_| {})?;
-            internals::Catalog::read(catalog).and_then(|catalog| catalog.with_mods(mods.iter()))
+            run(pass, "Preparing game internals", |_| {})?;
+            internals::Catalog::read(catalog)
         };
         // A mod pins the game as its revision ships it. horizon-mixins reprints each file it
         // edits and may add fields, which moves fingerprints, so a mixin build's catalog keeps
@@ -2224,20 +2212,14 @@ fn pipeline(
             internals::keep_pins(&catalog_dir, &pinned_catalog).map_err(discard)?;
             let _ = fs::remove_dir_all(&pristine);
             let _ = fs::remove_dir_all(&pinned_catalog);
-            catalog = internals::Catalog::read(&catalog_dir)
-                .and_then(|catalog| catalog.with_mods(mods.iter()))
-                .map_err(discard)?;
+            catalog = internals::Catalog::read(&catalog_dir).map_err(discard)?;
         }
         mods.iter()
             .try_for_each(|bundle| catalog.check(&bundle.manifest))
             .map_err(|error| discard(error.to_string()))?;
         let _ = fs::remove_dir_all(&fresh);
         fs::rename(&pending, &fresh).map_err(|error| discard(error.to_string()))?;
-        for name in [
-            inject::POINTS,
-            horizon_mod_package::SDK_CATALOG_FILE,
-            internals::INTERNALS,
-        ] {
+        for name in [horizon_mod_package::SDK_CATALOG_FILE, internals::INTERNALS] {
             fs::rename(catalog_dir.join(name), real.join(name))
                 .map_err(|error| discard(error.to_string()))?;
         }
@@ -2251,10 +2233,10 @@ fn pipeline(
         // inserts mod projects, and before Cargo resolves any mod-controlled dependencies.
         let game_lock = read_lock(&fresh)?;
         let game = registry_lock::RegistryLock::parse(&game_lock)?;
-        let catalog = internals::Catalog::read(&real)?.with_mods(mods.iter())?;
+        let catalog = internals::Catalog::read(&real)?;
         let has_api = api::stage(&fresh, &projects, &declared, &resolution, &catalog)?;
         for project in &projects {
-            catalog.log_raw(&project.bundle.manifest)?;
+            catalog.log_mixins(&project.bundle.manifest)?;
         }
         let paths = mods
             .iter()
@@ -3316,58 +3298,6 @@ mod tests {
         assert!(bundles(&many.join("notes")).is_err());
     }
 
-    #[test]
-    fn generated_tool_input_is_separate_from_pack_resources() {
-        let root = dir("mixed-mixin-input");
-        let incoming = root.join("incoming");
-        for (id, injection) in [
-            ("plain", ""),
-            (
-                "ordinary",
-                "[[native.module]]\nid='ordinary'\nfile='crates/horizon-client/src/game.rs'\nname='ordinary'\nsource='src/lib.rs'\n",
-            ),
-            (
-                "slot_injection",
-                "[[inject]]\nid='hook'\nat='horizon_client::game::tick'\nkind='head'\nwith='hook'\nhash='signature'\n",
-            ),
-        ] {
-            let project = incoming.join(id);
-            write_bundle(&project, id, "fn hook() {}");
-            fs::write(
-                project.join(NATIVE_MANIFEST),
-                project_manifest(id, "1", A, B) + injection,
-            )
-            .unwrap();
-            for tree in ["assets", "data"] {
-                fs::create_dir_all(project.join(tree).join(id)).unwrap();
-                fs::write(project.join(tree).join(id).join("table.txt"), id).unwrap();
-            }
-        }
-        let mods = bundles(&incoming).unwrap();
-        // A unified slot declaration is the launcher's: it never reaches horizon-mixins.
-        assert!(mods[0].needs_mixins());
-        assert!(!mods[1].needs_mixins() && !mods[2].needs_mixins());
-        let input = root.join("mixins");
-        stage_mixins(&mods, &input).unwrap();
-        assert!(!input.join("plain").exists() && !input.join("slot_injection").exists());
-        assert!(input.join("ordinary").join(MANIFEST).is_file());
-        assert!(mods
-            .iter()
-            .all(|bundle| !bundle.dir.join(MANIFEST).exists()));
-        for bundle in &mods {
-            let id = &bundle.manifest.id;
-            let copied = root.join("packages").join(id);
-            copy_bundle(bundle, &copied).unwrap();
-            for tree in ["assets", "data"] {
-                let resource = Path::new(tree).join(id).join("table.txt");
-                assert_eq!(fs::read_to_string(bundle.dir.join(&resource)).unwrap(), *id);
-                assert_eq!(fs::read_to_string(copied.join(resource)).unwrap(), *id);
-                assert!(!input.join(id).join(tree).exists());
-            }
-        }
-        fs::remove_dir_all(root).unwrap();
-    }
-
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
@@ -3582,77 +3512,6 @@ mod tests {
             assert!(error.contains("unknown field"), "{error}");
             assert!(error.contains(name), "{error}");
         }
-    }
-
-    #[test]
-    fn the_version_changes_with_the_revision_and_any_file_of_the_mods() {
-        let d = dir("key");
-        write_bundle(&d, "hello", "fn hook() {}");
-        let key = |revision: &str| {
-            version_for(
-                revision,
-                MIXINS_REV,
-                Profile::Balanced,
-                Target::Client,
-                None,
-                &bundles(&d).unwrap(),
-            )
-            .unwrap()
-        };
-        let first = key(A);
-        assert!(
-            first.starts_with("native-aaaaaaa-") && first.len() == "native-aaaaaaa-".len() + 12
-        );
-        assert!(is_native(&first) && !backend::is_game_tag(&first));
-        assert_eq!(first, key(A));
-        assert_ne!(
-            first,
-            version_for(
-                A,
-                MIXINS_REV,
-                Profile::Balanced,
-                Target::Client,
-                Some(rust_toolchain::WINDOWS_ARM64_TARGET),
-                &bundles(&d).unwrap(),
-            )
-            .unwrap(),
-            "the ARM64 toolchain has a separate installed build"
-        );
-        let path = d.join("horizon-mod.toml");
-        let original = fs::read_to_string(&path).unwrap();
-        let declaration = "\n[[inject]]\nid='source'\nat='horizon_client::game::Game::unlisted'\nkind='head'\naccess='internals'\nwith='hook'\nhash='0000000000000000'\n";
-        fs::write(&path, format!("{original}{declaration}")).unwrap();
-        let source = key(A);
-        assert_ne!(
-            first, source,
-            "source adapters require another game artifact"
-        );
-        assert_eq!(source, key(A), "unchanged private rows reuse the artifact");
-        fs::write(
-            &path,
-            format!(
-                "{original}{}",
-                declaration.replace("id='source'", "id='changed'")
-            ),
-        )
-        .unwrap();
-        assert_ne!(source, key(A), "private point identity is part of the key");
-        fs::write(path, original).unwrap();
-        assert_ne!(first, key(B));
-        assert_ne!(
-            first,
-            version_for(
-                A,
-                B,
-                Profile::Balanced,
-                Target::Client,
-                None,
-                &bundles(&d).unwrap()
-            )
-            .unwrap()
-        );
-        fs::write(d.join("src/lib.rs"), "fn hook() { let _ = 1; }").unwrap();
-        assert_ne!(first, key(A));
     }
 
     #[test]
@@ -4802,7 +4661,3 @@ mod registry_binary_tests {
 #[cfg(all(test, unix))]
 #[path = "native_mods/tests/runtime_leases.rs"]
 mod runtime_leases_tests;
-
-#[cfg(test)]
-#[path = "native_mods/tests/staged_lock.rs"]
-mod staged_lock_tests;

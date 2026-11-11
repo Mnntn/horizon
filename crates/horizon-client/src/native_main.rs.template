@@ -16,7 +16,7 @@ const _: () = assert!(
 );
 fn main() {
     let startup = horizon_client::entry::prepare();
-    horizon_client::entry::install_redirects(&[
+    horizon_client::entry::installed(&[
 /* MOD_REDIRECTS */
     ]);
     std::hint::black_box(&horizon_mod_package::holder::CAPABILITY);
@@ -24,8 +24,5 @@ fn main() {
     let mods: Vec<mod_api::ModEntry> = native_mods! {
     /* MOD_ENTRIES */
         };
-    let slots: &[horizon_client::entry::NativeSlot] = &[
-/* MOD_SLOTS */
-    ];
-    horizon_mod_host::main_with(mods, slots, BUILT_MODS, startup);
+    horizon_mod_host::main_with(mods, BUILT_MODS, startup);
 }

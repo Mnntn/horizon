@@ -115,20 +115,6 @@ impl Cache {
         })
     }
 
-    /// Create and open cache subdirectories without following a redirected component.
-    pub(crate) fn directory(&self, parts: &[&str]) -> Result<Dir, Error> {
-        let mut directory = self.directory.try_clone()?;
-        for part in parts {
-            match directory.create_dir(part) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error.into()),
-            }
-            directory = directory.open_dir_nofollow(part)?;
-        }
-        Ok(directory)
-    }
-
     pub(crate) fn bytes(&self) -> Result<u64, Error> {
         self.process(None, false)
     }

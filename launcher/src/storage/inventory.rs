@@ -294,7 +294,7 @@ impl Storage {
         let build_files = Category::BuildFiles;
         for name in [
             "built.json",
-            "points.json",
+            "mod-catalog.json",
             "internals.json",
             "build.log",
             "catalog.partial",

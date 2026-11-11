@@ -21,7 +21,7 @@ pub(super) fn key(
     let mut hash = Sha256::new();
     for part in [
         // Bump when launcher generation or validation changes the snapshot's contents.
-        "inject-mixin-split-v2",
+        "function-replacement-v1",
         super::STAGING,
         revision,
         mixins,

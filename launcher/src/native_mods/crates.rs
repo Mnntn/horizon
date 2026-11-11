@@ -78,9 +78,7 @@ pub(super) fn check_game_graph_names(
                     .filter_map(toml::Value::as_str)
                 {
                     let dep = dep.split_whitespace().next().unwrap_or(dep);
-                    if dep == super::api::API_PACKAGE
-                        || dep == super::api::POINTS_PACKAGE
-                        || facades.get(dep) == Some(&current.as_str())
+                    if dep == super::api::API_PACKAGE || facades.get(dep) == Some(&current.as_str())
                     {
                         continue;
                     }
@@ -823,13 +821,7 @@ version = "0.1.0"
         let root = stage.root().join(DIR).join("bake/Cargo.toml");
         for (package, path, valid) in [
             ("horizon-mod-api", "../../crates/horizon-mod-api", true),
-            (
-                "horizon-mod-points",
-                "../../crates/horizon-mod-points",
-                true,
-            ),
             ("horizon-mod-api", "../../other/horizon-mod-api", false),
-            ("horizon-mod-points", "../../crates/horizon-mod-api", false),
         ] {
             fs::write(&root, format!("[package]\nname='bake'\nversion='1'\n[dependencies]\napi={{package='{package}',path='{path}'}}\n")).unwrap();
             assert_eq!(super::wanted(stage.root(), &BTreeMap::new()).is_ok(), valid);

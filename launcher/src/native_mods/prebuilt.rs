@@ -76,44 +76,6 @@ pub(super) fn refusal(projects: &[api::Project<'_>]) -> Option<SourceReason> {
     projects.iter().find_map(project_refusal)
 }
 
-/// Refuse injections without compiled slots before selecting an artifact.
-pub(super) fn source_refusal(
-    game: &Path,
-    projects: &[api::Project<'_>],
-) -> Result<Option<SourceReason>, String> {
-    let catalog =
-        internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
-    for (_, route) in slot_routes(&catalog, projects) {
-        match route {
-            super::Route::Game { reason } => return Ok(Some(reason)),
-            super::Route::Invalid { reason } => return Err(reason),
-            super::Route::Prebuilt => {}
-        }
-    }
-    Ok(None)
-}
-
-/// One slot attachment decision per project, including named refusals. Cargo restrictions are
-/// reported separately by `project_refusal`; both consumers use the same slot router here.
-pub(super) fn slot_routes(
-    catalog: &internals::Catalog,
-    projects: &[api::Project<'_>],
-) -> Vec<(String, super::Route)> {
-    projects
-        .iter()
-        .map(|project| {
-            let manifest = &project.bundle.manifest;
-            let route = match super::slots::routes(catalog, manifest) {
-                Ok(_) => super::Route::Prebuilt,
-                Err(error) => super::Route::Invalid {
-                    reason: error.to_string(),
-                },
-            };
-            (manifest.id.clone(), route)
-        })
-        .collect()
-}
-
 /// Why `project` alone can't build against the prebuilt game, or `None` when it can.
 pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason> {
     {
@@ -299,66 +261,6 @@ fn cache_dir(revision: &str, name: &str) -> PathBuf {
     super::root()
         .join("prebuilt")
         .join(format!("{revision}-{}", name.trim_end_matches(".tar.gz")))
-}
-
-/// Read checked SDK metadata; the caller owns consent and the native-cache lease.
-pub(super) fn planning_catalog(
-    lease: &crate::native_cache::Cache,
-    revision: &str,
-) -> Result<internals::Catalog, SourceReason> {
-    let host = rust_toolchain::host().ok_or(SourceReason::Host)?;
-    let name = native::prebuilt_archive(host.target, false);
-    let game = cache_dir(revision, &name);
-    if game.join(IDENTITY).is_file() {
-        if let Ok(catalog) = internals::Catalog::read(&game) {
-            crate::storage::mark_used(&game).map_err(|error| SourceReason::Download {
-                why: super::cache_error(error),
-            })?;
-            return Ok(catalog);
-        }
-    }
-    let expected = release_sum(revision, &name)?;
-    let download = |why| SourceReason::Download { why };
-    let unit = format!("catalog-{revision}-{}", host.target);
-    let cache = super::root().join("internals-sync").join(&unit);
-    let directory = lease
-        .directory(&["internals-sync", &unit])
-        .map_err(|error| download(super::cache_error(error)))?;
-    crate::storage::mark_used(&cache).map_err(|error| download(super::cache_error(error)))?;
-    catalog_pair(&directory, &cache, &name, &expected, || {
-        crate::backend::get(&format!("{}/{name}", release_url(revision)))
-            .map_err(download)
-            .map(|response| response.into_reader())
-    })
-}
-
-fn catalog_pair<R: Read>(
-    directory: &cap_std::fs::Dir,
-    path: &Path,
-    name: &str,
-    expected: &str,
-    fetch: impl FnOnce() -> Result<R, SourceReason>,
-) -> Result<internals::Catalog, SourceReason> {
-    let download = |why| SourceReason::Download { why };
-    if directory.read_to_string("archive.sha256").ok().as_deref() == Some(expected) {
-        if let Ok(catalog) = internals::Catalog::read(path) {
-            return Ok(catalog);
-        }
-    }
-    let reader = fetch()?;
-    // A failed second rename must never leave an old marker authorizing a mixed pair.
-    match directory.remove_file("archive.sha256") {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(download(error.to_string())),
-    }
-    horizon_mod_package::internals::cache_catalogs(directory, name, reader, expected)
-        .map_err(|error| download(error.to_string()))?;
-    let catalog = internals::Catalog::read(path).map_err(download)?;
-    directory
-        .write("archive.sha256", expected)
-        .map_err(|error| download(error.to_string()))?;
-    Ok(catalog)
 }
 
 /// `name`'s sum in a `sha256sum` listing.
@@ -562,13 +464,12 @@ pub(super) fn compile(
             },
         );
     }
-    let catalog =
-        internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
+    let catalog = internals::Catalog::read(game)?;
     let generated = catalog
         .prepare(projects.iter().map(|project| &project.bundle.manifest))
         .map_err(|e| e.to_string())?;
     for project in projects {
-        catalog.log_raw(&project.bundle.manifest)?;
+        catalog.log_mixins(&project.bundle.manifest)?;
     }
     let _ = fs::remove_dir_all(out);
     fs::create_dir_all(out).map_err(|e| e.to_string())?;
@@ -599,10 +500,10 @@ pub(super) fn compile(
             .and_then(|l| l.get("name"))
             .and_then(toml::Value::as_str)
             .map_or_else(|| project.package.replace('-', "_"), str::to_owned);
-        // Compiled from a staged copy: the crate with its own points (#2339).
+        // Compile an isolated copy of the mod crate.
         let staged = out.join("staged").join(id);
         super::copy_bundle(project.bundle, &staged)?;
-        super::mod_points::stage(&staged, &catalog.wire)?;
+
         let source = staged.join(
             lib.and_then(|l| l.get("path"))
                 .and_then(toml::Value::as_str)
@@ -625,7 +526,6 @@ pub(super) fn compile(
                 .arg("--extern")
                 .arg(format!("horizon_client={}", game_library.display()))
                 .arg("--extern")
-                .arg(format!("mod_points={}", libraries["mod_points"].display()))
                 .arg("-o")
                 .arg(&rlib)
                 .arg(source);
@@ -712,7 +612,6 @@ pub(super) fn compile(
         .arg("--extern")
         .arg(format!("mod_api={}", api_library.display()))
         .arg("--extern")
-        .arg(format!("mod_points={}", libraries["mod_points"].display()))
         .arg("--extern")
         .arg(format!(
             "horizon_mod_package={}",
@@ -786,8 +685,8 @@ mod tests {
     fn facades_refuse_build_only_crates_and_ambiguous_runtime_metadata() {
         let deps = super::super::tests::dir("prebuilt-facade-eligibility");
         for name in [
-            "libpoint_shape-host.rmeta",
-            "libpoint_shape-target.rmeta",
+            "libfixture_meta-host.rmeta",
+            "libfixture_meta-target.rmeta",
             "libbuild_tool-one.rmeta",
             "libhorizon_core-one.rmeta",
         ] {
@@ -802,7 +701,7 @@ mod tests {
             facade_library(&deps, "horizon_core", &sdk).unwrap(),
             deps.join("libhorizon_core-one.rmeta")
         );
-        for krate in ["point_shape", "build_tool"] {
+        for krate in ["fixture_meta", "build_tool"] {
             let refusal = facade_library(&deps, krate, &sdk).unwrap_err();
             assert!(refusal.contains(krate), "{refusal}");
             assert!(
@@ -811,8 +710,8 @@ mod tests {
             );
         }
         // Even an incorrect allowlist cannot make lookup select one of two variants.
-        sdk.facade_crates.insert("point_shape".into());
-        assert!(facade_library(&deps, "point_shape", &sdk).is_err());
+        sdk.facade_crates.insert("fixture_meta".into());
+        assert!(facade_library(&deps, "fixture_meta", &sdk).is_err());
         fs::remove_dir_all(deps).unwrap();
     }
 
@@ -840,145 +739,6 @@ mod tests {
             ]
         );
         fs::remove_dir_all(deps).unwrap();
-    }
-
-    #[test]
-    fn injects_without_slots_are_invalid_and_never_plan_source() {
-        use serde_json::json;
-        let root = super::super::tests::dir("slot-planning");
-        let mut bundles = Vec::new();
-        for (id, mut entry) in [
-            (
-                "slotted",
-                json!({"at":"Example::slotted","kind":"head","access":"internals"}),
-            ),
-            (
-                "private_head",
-                json!({"at":"Example::private","kind":"head","access":"internals"}),
-            ),
-            (
-                "unlisted_call",
-                json!({"at":"Example::calls","kind":"before_call","access":"internals","call":"unlisted","nth":0,"ctx":"context"}),
-            ),
-            (
-                "api_refusal",
-                json!({"at":"Example::private","kind":"head","access":"api"}),
-            ),
-        ] {
-            let dir = root.join(id);
-            super::super::tests::write_bundle(&dir, id, "");
-            fs::write(
-                dir.join("Cargo.toml"),
-                "[package]\nname='mod_project'\n[dependencies]\nhorizon-mod-api='0.1'\n",
-            )
-            .unwrap();
-            let mut bundle = super::super::bundle_in(&dir).unwrap().unwrap();
-            entry["id"] = json!("probe");
-            entry["hash"] = json!("signature");
-            entry["with"] = json!("handler");
-            bundle.manifest.inject = vec![serde_json::from_value(entry).unwrap()];
-            bundles.push(bundle);
-        }
-        let catalog = internals::Catalog {
-            internals: ["Example::slotted", "Example::private", "Example::calls"].into_iter().map(|path| serde_json::from_value(json!({"path":path,"kind":"method","signature":"fn tick()","hash":"signature"})).unwrap()).collect(),
-            points: serde_json::from_value(json!([{"name":"tick","target":"Example::slotted","raw":true,"at_return":true,"listener":"Head","return_listener":"Return"}])).unwrap(),
-            ..Default::default()
-        };
-        let projects: Vec<_> = bundles
-            .iter()
-            .map(|bundle| api::Project::read(bundle).unwrap())
-            .collect();
-        let routes = slot_routes(&catalog, &projects);
-        let classes: Vec<_> = routes
-            .iter()
-            .map(|(_, route)| match route {
-                super::super::Route::Prebuilt => "prebuilt",
-                super::super::Route::Game { .. } => "source",
-                super::super::Route::Invalid { .. } => "invalid",
-            })
-            .collect();
-        assert_eq!(classes, ["prebuilt", "invalid", "invalid", "invalid"]);
-        let causes: Vec<_> = routes
-            .iter()
-            .filter(|(_, route)| matches!(route, super::super::Route::Game { .. }))
-            .map(|(id, _)| id.as_str())
-            .collect();
-        assert!(causes.is_empty());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn a_partial_catalog_pair_cannot_reuse_its_previous_marker() {
-        use super::super::{inject::POINTS, internals::INTERNALS};
-        fn packed(internals: &str, points: &str) -> Vec<u8> {
-            let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
-                Vec::new(),
-                flate2::Compression::fast(),
-            ));
-            for (name, text) in [("internals.json", internals), ("points.json", points)] {
-                let mut header = tar::Header::new_gnu();
-                header.set_size(text.len() as u64);
-                header.set_mode(0o644);
-                header.set_cksum();
-                tar.append_data(&mut header, name, text.as_bytes()).unwrap();
-            }
-            tar.into_inner().unwrap().finish().unwrap()
-        }
-        let root = super::super::tests::dir("catalog-pair");
-        let lease = crate::native_cache::Cache::acquire(&root).unwrap();
-        let directory = lease.directory(&["internals-sync", "catalog"]).unwrap();
-        let path = root.join("native/internals-sync/catalog");
-        let old = packed("[]", r#"{"points":[],"sites":[]}"#);
-        let old_hash = format!("{:x}", Sha256::digest(&old));
-        catalog_pair(&directory, &path, "game", &old_hash, || Ok(old.as_slice())).unwrap();
-        directory.remove_file(POINTS).unwrap();
-        let requests = std::cell::Cell::new(0);
-        catalog_pair(&directory, &path, "game", &old_hash, || {
-            requests.set(requests.get() + 1);
-            Ok(old.as_slice())
-        })
-        .unwrap();
-        assert_eq!(requests.get(), 1);
-        directory.remove_file(POINTS).unwrap();
-        directory.create_dir(POINTS).unwrap();
-        let new = packed(
-            r#"[{"path":"Changed","kind":"struct","signature":"struct Changed","hash":"new"}]"#,
-            r#"{"points":[],"sites":[]}"#,
-        );
-        let new_hash = format!("{:x}", Sha256::digest(&new));
-        assert!(catalog_pair(&directory, &path, "game", &new_hash, || Ok(new.as_slice())).is_err());
-        assert!(!directory.try_exists("archive.sha256").unwrap());
-        assert!(directory
-            .read_to_string(INTERNALS)
-            .unwrap()
-            .contains("Changed"));
-        directory.remove_dir(POINTS).unwrap();
-        directory
-            .write(POINTS, r#"{"points":[],"sites":[]}"#)
-            .unwrap();
-        assert!(
-            catalog_pair(&directory, &path, "game", &old_hash, || Ok(old.as_slice()))
-                .unwrap()
-                .internals
-                .is_empty()
-        );
-        let invalid = packed("[]", r#"{"points":"not a list","sites":[]}"#);
-        let invalid_hash = format!("{:x}", Sha256::digest(&invalid));
-        assert!(catalog_pair(&directory, &path, "game", &invalid_hash, || {
-            Ok(invalid.as_slice())
-        })
-        .is_err());
-        assert!(!directory.try_exists("archive.sha256").unwrap());
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink("internals-sync/catalog", root.join("native/redirect"))
-                .unwrap();
-            assert!(lease.directory(&["redirect", "child"]).is_err());
-            assert!(!path.join("child").exists());
-        }
-        drop(directory);
-        drop(lease);
-        fs::remove_dir_all(root).unwrap();
     }
 
     /// What [`refusal`] says of one mod whose Cargo.toml is `cargo`.

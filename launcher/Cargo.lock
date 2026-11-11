@@ -2816,7 +2816,6 @@ dependencies = [
  "horizon-friends",
  "horizon-mcp",
  "horizon-mod-package",
- "horizon-mod-point-emit",
  "horizon-platform",
  "horizon-port-pack",
  "horizon-prepare",
@@ -2871,7 +2870,6 @@ version = "0.1.0"
 dependencies = [
  "heck 0.5.0",
  "horizon-game-discovery",
- "horizon-mod-point-shape",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -2887,7 +2885,6 @@ dependencies = [
 name = "horizon-mod-api-macros"
 version = "0.1.0"
 dependencies = [
- "horizon-mod-point-shape",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -2903,7 +2900,6 @@ dependencies = [
  "getrandom 0.4.3",
  "horizon-core",
  "horizon-mod-api-macros",
- "horizon-mod-point-shape",
  "horizon-mod-vocab",
  "horizon-shader-api",
  "libc",
@@ -2923,25 +2919,6 @@ dependencies = [
  "wasmparser",
  "windows-sys 0.61.2",
  "zip",
-]
-
-[[package]]
-name = "horizon-mod-point-emit"
-version = "0.1.0"
-dependencies = [
- "horizon-mod-package",
- "serde",
-]
-
-[[package]]
-name = "horizon-mod-point-shape"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -2973,7 +2950,6 @@ dependencies = [
  "horizon-core",
  "horizon-hooks",
  "horizon-mod-api-gen",
- "horizon-mod-point-shape",
  "horizon-prepare",
  "horizon-protocol",
  "horizon-server-files",
