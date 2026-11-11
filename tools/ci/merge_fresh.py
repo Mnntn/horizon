@@ -118,7 +118,9 @@ def check(api, number):
     run = max(candidates, key=lambda r: r['id'])
     require(type(run.get('run_attempt')) is int and run['run_attempt'] > 0, 'missing run attempt')
     attempt = run['run_attempt']
-    jobs = api.pages(f"actions/runs/{run['id']}/attempts/{attempt}/jobs", 'jobs')
+    # GitHub's latest filter includes reused jobs from partial reruns, but never
+    # searches older successes when the latest same-name execution is red.
+    jobs = api.pages(f"actions/runs/{run['id']}/jobs?filter=latest", 'jobs')
     for name in ('lint', 'verify', 'launcher', 'pool-watch'):
         gates = [j for j in jobs if j.get('name') == name]
         require(len(gates) == 1, 'missing or ambiguous gate job: ' + name)
