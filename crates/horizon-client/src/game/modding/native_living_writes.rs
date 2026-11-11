@@ -491,7 +491,13 @@ mod tests {
                         tick_duration: duration,
                         ..Uses::default()
                     };
-                    game.inventory[game.selected] = Some(ItemStack::new(item, 2));
+                    game.potions.effects.clear();
+                    let stack = ItemStack::new(item, 2);
+                    game.inventory[game.selected] = Some(if item == "minecraft:potion" {
+                        stack.with_potion("minecraft:swiftness")
+                    } else {
+                        stack
+                    });
                     game.inventory[5] = Some(ItemStack::new("minecraft:arrow", 8));
                     assert!(game.living_start_using_item(player, Hand::Main));
                     let projectiles = game.creatures.projectiles.len();
@@ -506,6 +512,8 @@ mod tests {
                     assert!(uses.releases.is_empty());
                     if item == "minecraft:apple" {
                         assert_eq!(uses.effects, usize::from(duration == Some(1) && !cancel));
+                    } else if item == "minecraft:potion" {
+                        assert!(game.potions.effects.get("speed").is_some(), "potion effect was not applied");
                     }
                 }
             }
