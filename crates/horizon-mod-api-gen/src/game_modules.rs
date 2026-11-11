@@ -222,7 +222,7 @@ mod tests {
         assert!(expand(&root, include).unwrap().contains("mod new_area;"));
         fs::write(
             directory.join("shared.rs"),
-            "impl Game<'_> { fn vehicle_has_other_viewers() {} }",
+            "impl Game<'_> { fn vehicle_has_other_viewers() {} } impl Game<'_> { fn __fnr_vehicle_has_other_viewers(f: fn()) -> bool { true } fn __fnr_get_vehicle_has_other_viewers() -> Option<fn()> { None } }", 
         )
         .unwrap();
         assert!(lan_action_modules(&directory).is_ok());
