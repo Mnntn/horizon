@@ -32,7 +32,8 @@ pub(crate) fn lan_action_modules(directory: &Path) -> Result<String, String> {
                 if module == "shared"
                     && item.items.iter().all(|member| {
                         matches!(member, syn::ImplItem::Fn(method)
-                        if method.sig.ident == "vehicle_has_other_viewers"
+                        if (method.sig.ident == "vehicle_has_other_viewers"
+                            || method.sig.ident.to_string().starts_with("__fnr_"))
                             && method.sig.receiver().is_none())
                     })
                 {
