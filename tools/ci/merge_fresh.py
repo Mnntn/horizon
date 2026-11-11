@@ -128,9 +128,13 @@ def provenance(record, run, number, head, source_attempt):
 def check(api, number):
     pr = api.get(f'pulls/{number}')
     require(pr['state'] == 'open' and pr['base']['ref'] == 'main', 'requires open PR targeting main')
+    require(pr['head']['repo']['full_name'] == pr['base']['repo']['full_name'],
+            'fork PR source evidence is unavailable')
     head = sha(pr['head']['sha'])
     main = sha(api.get('git/ref/heads/main')['object']['sha'])
-    runs = api.pages('actions/workflows/dyna-ci.yml/runs?event=pull_request', 'workflow_runs')
+    # GitHub caps filtered workflow searches at 1,000 results: constrain by head
+    # before paginating instead of searching this repository's entire PR history.
+    runs = api.pages(f'actions/workflows/dyna-ci.yml/runs?event=pull_request&head_sha={head}', 'workflow_runs')
     candidates = [r for r in runs if r.get('event') == 'pull_request' and r.get('head_sha') == head
                   and any(p.get('number') == number for p in r.get('pull_requests', []))]
     require(candidates, 'no current-head PR gate run (main/dispatch cannot substitute)')
