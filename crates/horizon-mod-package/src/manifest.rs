@@ -274,7 +274,6 @@ impl Manifest {
                 .map(|n| n.mixin.as_slice())
                 .unwrap_or_default(),
             &m.id,
-            m.native.is_some(),
         )
         .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(entry) = m

@@ -104,8 +104,6 @@ impl<'de> Deserialize<'de> for Kind {
 /// Why a package's mixins are refused before any tool runs; `id` is `package:mixin`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MixinError {
-    /// The package is not a native mod: nothing else compiles game code.
-    NativeOnly { id: String },
     Invalid {
         id: String,
         field: &'static str,
@@ -116,10 +114,6 @@ pub enum MixinError {
 impl fmt::Display for MixinError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NativeOnly { id } => write!(
-                f,
-                "E_MIXIN_NATIVE_ONLY: {id}: [[native.mixin]] compiles game code and needs a [native] mod; a wasm mod uses a hook"
-            ),
             Self::Invalid { id, field, fix } => {
                 write!(f, "E_MIXIN_INVALID: {id}: invalid {field}; {fix}")
             }
@@ -129,16 +123,9 @@ impl fmt::Display for MixinError {
 impl std::error::Error for MixinError {}
 
 impl Mixin {
-    pub(super) fn check_all(
-        entries: &[Self],
-        mod_id: &str,
-        native: bool,
-    ) -> Result<(), MixinError> {
+    pub(super) fn check_all(entries: &[Self], mod_id: &str) -> Result<(), MixinError> {
         for entry in entries {
             let id = format!("{mod_id}:{}", entry.id);
-            if !native {
-                return Err(MixinError::NativeOnly { id });
-            }
             let invalid = |field, fix| MixinError::Invalid {
                 id: id.clone(),
                 field,
