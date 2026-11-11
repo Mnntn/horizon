@@ -1,7 +1,7 @@
 # Your first native mod
 
-A native mod is one flat Rust project that implements `mod_api::Hooks`, built by the launcher into the game it runs
-in. You need the launcher and a Horizon commit to build against.
+A native mod is one flat Rust project that implements `mod_api::Hooks`, compiled by the launcher against a prebuilt game SDK. You need the launcher and a Horizon commit
+with a published SDK.
 
 1. Make the project:
 
@@ -20,4 +20,6 @@ in. You need the launcher and a Horizon commit to build against.
    ```
 
 3. Build and run it in the launcher: `horizon-launcher native-build . --instance <instance> --trust-native-code`.
-   Add `--profile developer` while developing for an unoptimized game crate. The choice is remembered for that instance.
+   The launcher compiles the mod and links its executable without compiling game crates.
+   `E_NATIVE_NO_RELEASE` means the pinned commit needs a published SDK; choose a published commit.
+   See [build refusals](../how-to/native-mods/028-what-the-launcher-does.md#build-refusals) for unsupported inputs.

@@ -42,11 +42,5 @@ pub(super) fn github_native(
         );
     }
     println!("Build it next: horizon-launcher native-build --trust-native-code");
-    println!(
-        "{}",
-        tr(
-            "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance."
-        )
-    );
     Ok(())
 }

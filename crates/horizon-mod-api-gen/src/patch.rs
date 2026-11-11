@@ -33,6 +33,39 @@ pub struct PatchCrate {
     pub patched: Vec<Patched>,
 }
 
+/// A `[[native.module]]`: Rust items emitted as a module of the mirror of the module `file`
+/// holds, where the copies reach them by the paths they would have had in the game.
+#[derive(Debug, Clone)]
+pub struct SupportModule {
+    pub id: String,
+    /// The game source file, relative to the source root, as the row names it.
+    pub file: String,
+    pub name: String,
+    /// The payload's text.
+    pub text: String,
+    pub public: bool,
+}
+
+/// A `[[native.bridge]]`: horizon-mixins' accessor or invoker, emitted as an extension trait the
+/// mirror modules import, so the helpers' method calls resolve as they did on the game's type.
+#[derive(Debug, Clone)]
+pub struct Bridge {
+    pub id: String,
+    /// The generated method's name, `__horizon_mixins_<mod>_<id>`.
+    pub method: String,
+    /// `GET`, `GET_MUT`, `SET` or `INVOKE`.
+    pub kind: String,
+    pub target: String,
+    pub member: Option<String>,
+}
+
+/// What a mod set adds to the patch crate beside its copies.
+#[derive(Debug, Clone, Default)]
+pub struct Extras {
+    pub modules: Vec<SupportModule>,
+    pub bridges: Vec<Bridge>,
+}
+
 /// Why a target can't be copied out: a named refusal, never a game rebuild.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
@@ -138,6 +171,35 @@ impl Source {
         Ok(&self.parsed[path])
     }
 
+    /// The `macro_rules!` items, not exported, that the modules on `path` define, outermost
+    /// first: the macros a function in `path` may use by their bare names.
+    fn path_macros(&mut self, path: &str) -> Vec<syn::ItemMacro> {
+        let segments: Vec<&str> = path.split("::").collect();
+        let mut out = Vec::new();
+        for end in 1..=segments.len() {
+            out.extend(self.scope_macros(&segments[..end].join("::")));
+        }
+        out
+    }
+
+    /// The macros module `path` itself defines and those its `#[macro_use] mod` children do,
+    /// which textual scope carries on to the rest of `path`.
+    fn scope_macros(&mut self, path: &str) -> Vec<syn::ItemMacro> {
+        let Ok(module) = self.module(path) else {
+            return Vec::new();
+        };
+        let items = module.items.clone();
+        let mut out = module_macros(&items);
+        for item in &items {
+            if let Item::Mod(child) = item
+                && child.attrs.iter().any(|a| a.path().is_ident("macro_use"))
+            {
+                out.extend(self.scope_macros(&format!("{path}::{}", child.ident)));
+            }
+        }
+        out
+    }
+
     /// Whether `path` names a module of the game crate.
     fn is_module(&mut self, path: &str) -> bool {
         path == "horizon_client" || self.files.contains_key(path) || self.module(path).is_ok()
@@ -198,7 +260,7 @@ impl<'ast> Visit<'ast> for BodyCheck<'_> {
                 && self.local_macros.is_some_and(|local| local.contains(&name))
             {
                 self.refusal.get_or_insert(format!(
-                    "its body uses `{name}!`, a macro the game doesn't export"
+                    "its body uses `{name}!`, a macro defined outside its module's path"
                 ));
             }
         }
@@ -317,7 +379,17 @@ fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, Strin
 }
 
 /// Whether `function` can be copied and installed through its point's replacement slot.
-fn replaceable(found: &Found, local_macros: &BTreeSet<String>) -> Result<(), String> {
+fn replaceable(found: &Found, source: &mut Source) -> Result<(), String> {
+    // A crate-local macro defined in a module on the function's path moves with the copy (the
+    // mirror repeats it); one defined elsewhere would not resolve.
+    let on_path: BTreeSet<String> = source
+        .path_macros(&found.module)
+        .iter()
+        .filter_map(|mac| mac.ident.as_ref().map(ToString::to_string))
+        .collect();
+    let local_macros: BTreeSet<String> =
+        source.local_macros.difference(&on_path).cloned().collect();
+    let local_macros = &local_macros;
     let sig = &found.function.sig;
     if !crate::replace::eligible(&found.function.attrs, sig) {
         return Err(
@@ -406,6 +478,23 @@ fn defined(items: &[Item]) -> Vec<(syn::Ident, Vec<syn::Attribute>)> {
         .collect()
 }
 
+/// A module's own `macro_rules!` items that it does not export.
+fn module_macros(items: &[Item]) -> Vec<syn::ItemMacro> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Macro(mac)
+                if mac.ident.is_some()
+                    && mac.mac.path.is_ident("macro_rules")
+                    && !mac.attrs.iter().any(|a| a.path().is_ident("macro_export")) =>
+            {
+                Some(mac.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// The module's `use` items, as written.
 fn uses(items: &[Item]) -> Vec<&syn::ItemUse> {
     items
@@ -438,12 +527,19 @@ struct Tree {
     copies: Vec<proc_macro2::TokenStream>,
     /// Names the copies define, which the mirror must not also re-export.
     own: BTreeSet<String>,
+    /// At the root: whether there are bridges for every mirror module to import.
+    bridges: bool,
 }
 
 /// The patch crate for `targets` (as `[[mixin]]` rows write them), from the pinned game source
 /// at `root`. `krate` is the patch crate's name. Every target that can't be copied is refused by
 /// name; the crate is returned only when none is.
-pub fn generate(root: &Path, krate: &str, targets: &[String]) -> Result<PatchCrate, Vec<Refusal>> {
+pub fn generate(
+    root: &Path,
+    krate: &str,
+    targets: &[String],
+    extras: &Extras,
+) -> Result<PatchCrate, Vec<Refusal>> {
     let refuse = |target: &str, code, why: String| Refusal {
         target: target.to_owned(),
         code,
@@ -470,7 +566,7 @@ pub fn generate(root: &Path, krate: &str, targets: &[String]) -> Result<PatchCra
                 continue;
             }
         };
-        if let Err(why) = replaceable(&found, &source.local_macros) {
+        if let Err(why) = replaceable(&found, &mut source) {
             refusals.push(refuse(target, "E_MIXIN_NOT_REPLACEABLE", why));
             continue;
         }
@@ -578,10 +674,42 @@ pub fn generate(root: &Path, krate: &str, targets: &[String]) -> Result<PatchCra
             install: format!("{krate}::{}::{install}()", module_path.join("::")),
         });
     }
+    for module in &extras.modules {
+        match support_module(&source, module) {
+            Ok((path, tokens)) => {
+                let mut node = &mut tree;
+                for segment in path.split("::").skip(1) {
+                    node = node.children.entry(segment.to_owned()).or_default();
+                }
+                node.own.insert(module.name.clone());
+                node.copies.push(tokens);
+            }
+            Err((code, why)) => refusals.push(refuse(&module.id, code, why)),
+        }
+    }
+    let mut bridge_traits = Vec::new();
+    for bridge in &extras.bridges {
+        match bridge_trait(&mut source, bridge) {
+            Ok((path, trait_name, tokens)) => {
+                let mut node = &mut tree;
+                for segment in path.split("::").skip(1) {
+                    node = node.children.entry(segment.to_owned()).or_default();
+                }
+                node.own.insert(trait_name.to_string());
+                node.copies.push(tokens);
+                let mirror: syn::Path =
+                    syn::parse_str(&path.replacen("horizon_client", "crate", 1))
+                        .expect("a module path");
+                bridge_traits.push(quote!(pub use #mirror::#trait_name;));
+            }
+            Err((code, why)) => refusals.push(refuse(&bridge.id, code, why)),
+        }
+    }
     if !refusals.is_empty() {
         return Err(refusals);
     }
-    let body = match mirror(&mut source, "horizon_client", &tree) {
+    tree.bridges = !bridge_traits.is_empty();
+    let body = match mirror(&mut source, "horizon_client", &tree, tree.bridges) {
         Ok(body) => body,
         Err(why) => {
             return Err(targets
@@ -593,9 +721,14 @@ pub fn generate(root: &Path, krate: &str, targets: &[String]) -> Result<PatchCra
     let lib = quote! {
         //! Generated by the launcher: game functions copied out of the pinned source for the
         //! installed mods' `[[mixin]]` rows, patched by horizon-mixins. Not for editing.
-        #![allow(unused_imports, unused_mut, unused_variables, dead_code, unused_braces, unused_parens)]
+        #![allow(unused_imports, unused_macros, unused_mut, unused_variables, dead_code, unused_braces, unused_parens)]
         #![allow(clippy::all)]
         #body
+        /// The bridges' traits, which every mirror module imports.
+        #[doc(hidden)]
+        pub mod __fnr_bridges {
+            #(#bridge_traits)*
+        }
     };
     Ok(PatchCrate {
         lib: prettyplease_or_tokens(lib),
@@ -620,6 +753,7 @@ fn mirror(
     source: &mut Source,
     path: &str,
     tree: &Tree,
+    bridges: bool,
 ) -> Result<proc_macro2::TokenStream, String> {
     let items = source.module(path)?.items.clone();
     let original: syn::Path = syn::parse_str(&format!("::{path}")).expect("a module path");
@@ -678,17 +812,193 @@ fn mirror(
     let mut children = Vec::new();
     for (name, child) in &tree.children {
         let ident = format_ident!("{name}");
-        let inner = mirror(source, &format!("{path}::{name}"), child)?;
+        let inner = mirror(source, &format!("{path}::{name}"), child, bridges)?;
         children.push(quote!(pub mod #ident { #inner }));
     }
+    // Repeated before the children, which see them by textual scope as the game's did.
+    let macros = source.scope_macros(path);
     let copies = &tree.copies;
+    let bridge_import = bridges.then(|| {
+        quote!(
+            use crate::__fnr_bridges::*;
+        )
+    });
     Ok(quote! {
         pub use #original::*;
+        #bridge_import
+        #(#macros)*
         #(#explicit)*
         #(#uses)*
         #(#children)*
         #(#copies)*
     })
+}
+
+/// The module path whose file is `file`, and the support module's tokens.
+fn support_module(
+    source: &Source,
+    module: &SupportModule,
+) -> Result<(String, proc_macro2::TokenStream), (&'static str, String)> {
+    let path = source
+        .files
+        .iter()
+        .find(|(_, path)| path.ends_with(&module.file))
+        .map(|(name, _)| name.clone())
+        .ok_or((
+            "E_MIXIN_MODULE_DESTINATION",
+            format!(
+                "{} is not a file of the game crate (`horizon_client`); a support module goes \
+                 into one of its files",
+                module.file
+            ),
+        ))?;
+    let items = syn::parse_file(&module.text)
+        .map_err(|e| ("E_MIXIN_MODULE_SOURCE", e.to_string()))?
+        .items;
+    let name = format_ident!("{}", module.name);
+    let vis = if module.public {
+        quote!(pub)
+    } else {
+        quote!(pub(crate))
+    };
+    Ok((path, quote!(#vis mod #name { #(#items)* })))
+}
+
+/// The bridge's owner module, trait name and the trait with its impl, emitted in the mirror of
+/// the owner's module so its types are named as the game names them.
+fn bridge_trait(
+    source: &mut Source,
+    bridge: &Bridge,
+) -> Result<(String, syn::Ident, proc_macro2::TokenStream), (&'static str, String)> {
+    let method = format_ident!("{}", bridge.method);
+    let trait_name = format_ident!("__Fnr_Bridge_{}", bridge.method);
+    if bridge.kind == "INVOKE" {
+        let found = find(source, &bridge.target)?;
+        let owner = found.owner.as_ref().ok_or((
+            "E_MIXIN_BRIDGE_TARGET",
+            "an invoker's target is a method or associated function of a type".to_owned(),
+        ))?;
+        if !owner.generics.params.is_empty() || !found.function.sig.generics.params.is_empty() {
+            return Err((
+                "E_MIXIN_BRIDGE_TARGET",
+                "an invoker's type and method are not generic".into(),
+            ));
+        }
+        let self_ty = &owner.self_ty;
+        let original = &found.function.sig.ident;
+        let mut args = Vec::new();
+        let mut sig = found.function.sig.clone();
+        for (index, input) in sig.inputs.iter_mut().enumerate() {
+            match input {
+                syn::FnArg::Receiver(_) => args.push(quote!(self)),
+                syn::FnArg::Typed(typed) => {
+                    let name = format_ident!("__a{index}");
+                    *typed.pat = syn::parse_quote!(#name);
+                    args.push(quote!(#name));
+                }
+            }
+        }
+        sig.ident = method.clone();
+        let call = match &owner.trait_ {
+            Some((_, path, _)) => quote!(<#self_ty as #path>::#original(#(#args),*)),
+            None => quote!(<#self_ty>::#original(#(#args),*)),
+        };
+        let path = found.module.clone();
+        return Ok((
+            path,
+            trait_name.clone(),
+            quote! {
+                #[doc(hidden)]
+                #[allow(non_camel_case_types)]
+                pub trait #trait_name { #sig; }
+                impl #trait_name for #self_ty { #sig { #call } }
+            },
+        ));
+    }
+    let (front, owner) = bridge.target.rsplit_once("::").ok_or((
+        "E_MIXIN_BRIDGE_TARGET",
+        "a field bridge's target is a struct path".to_owned(),
+    ))?;
+    if !source.is_module(front) {
+        return Err((
+            "E_MIXIN_BRIDGE_TARGET",
+            format!("no module {front} in the game crate"),
+        ));
+    }
+    let items = source
+        .module(front)
+        .map_err(|why| ("E_MIXIN_BRIDGE_TARGET", why))?
+        .items
+        .clone();
+    let item = items
+        .iter()
+        .find_map(|item| match item {
+            Item::Struct(item) if item.ident == owner => Some(item.clone()),
+            _ => None,
+        })
+        .ok_or((
+            "E_MIXIN_BRIDGE_TARGET",
+            format!("no struct {owner} in {front}"),
+        ))?;
+    if item.generics.type_params().next().is_some() || item.generics.const_params().next().is_some()
+    {
+        return Err((
+            "E_MIXIN_BRIDGE_TARGET",
+            format!("{owner} is generic over types"),
+        ));
+    }
+    let member_name = bridge.member.as_deref().ok_or((
+        "E_MIXIN_BRIDGE_TARGET",
+        "a field bridge names its `member`".to_owned(),
+    ))?;
+    let field = match &item.fields {
+        syn::Fields::Named(fields) => fields
+            .named
+            .iter()
+            .find(|f| f.ident.as_ref().is_some_and(|i| i == member_name)),
+        syn::Fields::Unnamed(fields) => member_name
+            .parse::<usize>()
+            .ok()
+            .and_then(|i| fields.unnamed.get(i)),
+        syn::Fields::Unit => None,
+    }
+    .ok_or((
+        "E_MIXIN_BRIDGE_TARGET",
+        format!("{owner} has no field {member_name}"),
+    ))?;
+    let ty = &field.ty;
+    let member: syn::Member =
+        syn::parse_str(member_name).map_err(|e| ("E_MIXIN_BRIDGE_TARGET", e.to_string()))?;
+    let owner = &item.ident;
+    // A type generic over lifetimes gets a trait over the same lifetimes.
+    let (generics, args, _) = item.generics.split_for_impl();
+    let (declared, defined) = match bridge.kind.as_str() {
+        "GET" => (quote!(fn #method(&self) -> &#ty), quote!({ &self.#member })),
+        "GET_MUT" => (
+            quote!(fn #method(&mut self) -> &mut #ty),
+            quote!({ &mut self.#member }),
+        ),
+        "SET" => (
+            quote!(fn #method(&mut self, value: #ty)),
+            quote!({ self.#member = value; }),
+        ),
+        other => {
+            return Err((
+                "E_MIXIN_BRIDGE_TARGET",
+                format!("unknown bridge kind {other}"),
+            ));
+        }
+    };
+    Ok((
+        front.to_owned(),
+        trait_name.clone(),
+        quote! {
+            #[doc(hidden)]
+            #[allow(non_camel_case_types)]
+            pub trait #trait_name #generics { #declared; }
+            impl #generics #trait_name #args for #owner #args { #declared #defined }
+        },
+    ))
 }
 
 fn collect_names(tree: &syn::UseTree, out: &mut Vec<String>) {
@@ -715,6 +1025,7 @@ mod tests {
             &root(),
             "horizon_patch",
             &["horizon_client::game::autosave::Game<'_>::next_autosave_interval".into()],
+            &Extras::default(),
         )
         .unwrap();
         assert_eq!(
@@ -739,10 +1050,75 @@ mod tests {
                 "horizon_client::game::autosave::Game<'_>::no_such_function".into(),
                 "horizon_client_lib::clock::FixedStep::advance".into(),
             ],
+            &Extras::default(),
         )
         .unwrap_err();
         let codes: Vec<_> = error.iter().map(|r| r.code).collect();
         assert_eq!(codes, ["E_MIXIN_TARGET_MISSING", "E_MIXIN_NOT_REPLACEABLE"]);
+    }
+
+    #[test]
+    fn support_modules_and_bridges_land_in_the_mirror_their_rows_name() {
+        let extras = Extras {
+            modules: vec![SupportModule {
+                id: "support".into(),
+                file: "crates/horizon-client/src/game/world/autosave.rs".into(),
+                name: "fnr_support".into(),
+                text: "pub fn twice(n: i64) -> i64 { n * 2 }".into(),
+                public: false,
+            }],
+            bridges: vec![Bridge {
+                id: "ticks".into(),
+                method: "__horizon_mixins_m_ticks".into(),
+                kind: "GET_MUT".into(),
+                target: "horizon_client::game::Game".into(),
+                member: Some("ticks_until_autosave".into()),
+            }],
+        };
+        let crate_ = generate(
+            &root(),
+            "horizon_patch",
+            &["horizon_client::game::autosave::Game<'_>::next_autosave_interval".into()],
+            &extras,
+        )
+        .unwrap();
+        let lib = crate_.lib.replace(char::is_whitespace, "");
+        assert!(
+            lib.contains("pub(crate)modfnr_support{pubfntwice"),
+            "{}",
+            crate_.lib
+        );
+        assert!(
+            lib.contains("fn__horizon_mixins_m_ticks(&mutself)->&mut"),
+            "{}",
+            crate_.lib
+        );
+        assert!(lib.contains("{&mutself.ticks_until_autosave}"));
+        assert!(lib.contains(
+            "pubmod__fnr_bridges{pubusecrate::game::__Fnr_Bridge___horizon_mixins_m_ticks;}"
+        ));
+        assert!(lib.contains("usecrate::__fnr_bridges::*;"));
+        let error = generate(
+            &root(),
+            "horizon_patch",
+            &[],
+            &Extras {
+                modules: vec![SupportModule {
+                    file: "crates/horizon-client-lib/src/clock.rs".into(),
+                    ..extras.modules[0].clone()
+                }],
+                bridges: vec![Bridge {
+                    member: Some("no_such_field".into()),
+                    ..extras.bridges[0].clone()
+                }],
+            },
+        )
+        .unwrap_err();
+        let codes: Vec<_> = error.iter().map(|r| r.code).collect();
+        assert_eq!(
+            codes,
+            ["E_MIXIN_MODULE_DESTINATION", "E_MIXIN_BRIDGE_TARGET"]
+        );
     }
 }
 
@@ -760,7 +1136,7 @@ mod spike {
             .map(str::to_owned)
             .collect();
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        match super::generate(&root, "horizon_patch", &targets) {
+        match super::generate(&root, "horizon_patch", &targets, &super::Extras::default()) {
             Ok(crate_) => {
                 std::fs::create_dir_all(out.join("horizon_patch/src")).unwrap();
                 std::fs::write(out.join("horizon_patch/src/lib.rs"), &crate_.lib).unwrap();
@@ -769,6 +1145,218 @@ mod spike {
                 }
             }
             Err(refusals) => refusals.iter().for_each(|r| println!("REFUSED {r}")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod census {
+    use super::*;
+
+    /// Every function of the game module, by whether the copy route takes it and, if not, the
+    /// refusal it gets. `cargo test -p horizon-mod-api-gen --lib census -- --ignored --nocapture`
+    #[test]
+    #[ignore = "measurement: prints the census"]
+    fn refusal_census() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut source = Source::new(&root).unwrap();
+        let modules: Vec<String> = source.files.keys().cloned().collect();
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut total = 0;
+        // Call sites in copyable bodies: all, beneath a borrow, borrowing a call themselves.
+        let mut sites = [0usize; 3];
+        let mut copyable: Vec<String> = Vec::new();
+        let mut note = |why: String| *counts.entry(why).or_default() += 1;
+        for module in modules
+            .iter()
+            .filter(|m| m.starts_with("horizon_client::game"))
+        {
+            let items = source.module(module).unwrap().items.clone();
+            let mut functions: Vec<Found> = Vec::new();
+            fn walk(items: &[Item], module: &str, out: &mut Vec<Found>, traits: &mut usize) {
+                for item in items {
+                    match item {
+                        Item::Fn(f) => out.push(Found {
+                            module: module.into(),
+                            owner: None,
+                            function: syn::ImplItemFn {
+                                attrs: f.attrs.clone(),
+                                vis: f.vis.clone(),
+                                defaultness: None,
+                                sig: f.sig.clone(),
+                                block: (*f.block).clone(),
+                            },
+                        }),
+                        Item::Impl(block) if block.trait_.is_some() => {
+                            *traits += block
+                                .items
+                                .iter()
+                                .filter(|i| matches!(i, ImplItem::Fn(_)))
+                                .count();
+                        }
+                        Item::Impl(block) => {
+                            for member in &block.items {
+                                if let ImplItem::Fn(f) = member {
+                                    out.push(Found {
+                                        module: module.into(),
+                                        owner: Some(block.clone()),
+                                        function: f.clone(),
+                                    });
+                                }
+                            }
+                        }
+                        Item::Mod(inline) if inline.content.is_some() => {
+                            let test = inline
+                                .attrs
+                                .iter()
+                                .any(|a| a.to_token_stream().to_string().contains("test"));
+                            if !test {
+                                walk(
+                                    &inline.content.as_ref().unwrap().1,
+                                    &format!("{module}::{}", inline.ident),
+                                    out,
+                                    traits,
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let mut traits = 0;
+            walk(&items, module, &mut functions, &mut traits);
+            total += traits;
+            for _ in 0..traits {
+                note("refused: trait method".into());
+            }
+            for found in functions {
+                let attrs = &found.function.attrs;
+                if attrs.iter().any(|a| {
+                    a.path().is_ident("test")
+                        || (a.path().is_ident("cfg")
+                            && a.to_token_stream().to_string().contains("test"))
+                }) {
+                    continue;
+                }
+                total += 1;
+                let sig = &found.function.sig;
+                let why = if attrs
+                    .iter()
+                    .any(|a| a.path().is_ident("cfg") || a.path().is_ident("cfg_attr"))
+                    || found
+                        .owner
+                        .as_ref()
+                        .is_some_and(|b| b.attrs.iter().any(|a| a.path().is_ident("cfg")))
+                {
+                    "refused: compiled only under a cfg".to_owned()
+                } else if !crate::replace::lifetimes_only(&sig.generics)
+                    || found
+                        .owner
+                        .as_ref()
+                        .is_some_and(|b| !crate::replace::lifetimes_only(&b.generics))
+                {
+                    "refused: generic over types".to_owned()
+                } else if !crate::replace::eligible(attrs, sig) {
+                    "refused: const/async/unsafe/receiver other than &self or &mut self/impl Trait or !/inline(always)/track_caller"
+                        .to_owned()
+                } else {
+                    if replaceable(&found, &mut source).is_ok() {
+                        let owner = found.owner.as_ref().map(|b| {
+                            format!("{}::", plain(&b.self_ty.to_token_stream().to_string()))
+                        });
+                        copyable.push(format!(
+                            "{}::{}{}",
+                            found.module,
+                            owner.unwrap_or_default(),
+                            found.function.sig.ident
+                        ));
+                        let mut s = CallSites::default();
+                        s.visit_block(&found.function.block);
+                        sites[0] += s.all;
+                        sites[1] += s.beneath;
+                        sites[2] += s.borrowing;
+                    }
+                    match replaceable(&found, &mut source) {
+                        Ok(()) if referenced_call(&found.function.block) => {
+                            "copied, but upstream refuses call-site kinds: `&` over a call"
+                                .to_owned()
+                        }
+                        Ok(()) => "copied".to_owned(),
+                        Err(why) => format!("refused: {}", why.split(':').next().unwrap_or(&why)),
+                    }
+                };
+                note(why);
+            }
+        }
+        println!("game-module functions: {total}");
+        if let Ok(list) = std::env::var("FNR_CENSUS_LIST") {
+            std::fs::write(list, copyable.join("\n")).unwrap();
+        }
+        println!(
+            "call sites in copyable functions: {}; beneath `&` (value-wrapping kinds only with the \
+             carried narrowing): {}; borrowing a call in their own expression (refused): {}",
+            sites[0], sites[1], sites[2]
+        );
+        #[derive(Default)]
+        struct CallSites {
+            all: usize,
+            beneath: usize,
+            borrowing: usize,
+            references: usize,
+        }
+        impl<'ast> Visit<'ast> for CallSites {
+            fn visit_expr(&mut self, e: &'ast syn::Expr) {
+                if matches!(e, syn::Expr::Call(_) | syn::Expr::MethodCall(_)) {
+                    self.all += 1;
+                    self.beneath += usize::from(self.references > 0);
+                    self.borrowing += usize::from(referenced_call_in(e));
+                }
+                let reference = matches!(e, syn::Expr::Reference(_));
+                self.references += usize::from(reference);
+                syn::visit::visit_expr(self, e);
+                self.references -= usize::from(reference);
+            }
+            fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+            fn visit_macro(&mut self, _: &'ast syn::Macro) {}
+        }
+        fn referenced_call_in(e: &syn::Expr) -> bool {
+            let block = syn::Block {
+                brace_token: Default::default(),
+                stmts: vec![syn::Stmt::Expr(e.clone(), None)],
+            };
+            referenced_call(&block)
+        }
+        fn referenced_call(block: &syn::Block) -> bool {
+            // horizon-mixins' rule: a call beneath `&` outside macro arguments refuses every
+            // call-site kind on the function.
+            struct Find(bool);
+            impl<'ast> Visit<'ast> for Find {
+                fn visit_expr(&mut self, e: &'ast syn::Expr) {
+                    if let syn::Expr::Reference(r) = e {
+                        struct Call(bool);
+                        impl<'ast> Visit<'ast> for Call {
+                            fn visit_expr(&mut self, e: &'ast syn::Expr) {
+                                if matches!(e, syn::Expr::Call(_) | syn::Expr::MethodCall(_)) {
+                                    self.0 = true;
+                                }
+                                syn::visit::visit_expr(self, e);
+                            }
+                            fn visit_macro(&mut self, _: &'ast syn::Macro) {}
+                        }
+                        let mut c = Call(false);
+                        c.visit_expr(&r.expr);
+                        self.0 |= c.0;
+                    }
+                    syn::visit::visit_expr(self, e);
+                }
+                fn visit_macro(&mut self, _: &'ast syn::Macro) {}
+            }
+            let mut f = Find(false);
+            f.visit_block(block);
+            f.0
+        }
+        for (why, n) in counts {
+            println!("  {why}: {n} ({:.1}%)", 100.0 * n as f64 / total as f64);
         }
     }
 }

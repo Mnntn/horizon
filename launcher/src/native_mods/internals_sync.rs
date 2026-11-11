@@ -36,7 +36,7 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// No normal build reads this directory or its target. In particular, neither the attributes
-/// nor the warning-bearing metadata can reach the prebuilt or source build caches.
+/// nor the warning-bearing metadata can reach the normal build caches.
 pub(crate) fn check(folder: &Path) -> Result<Vec<ListedInternal>, Error> {
     let catalog = pinned_catalog_with_modules(folder)?;
     discover_catalog(folder, &catalog.directory)

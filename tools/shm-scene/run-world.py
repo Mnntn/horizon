@@ -19,7 +19,7 @@ shutil.copy(SAMPLE / 'Cargo.toml', adj / 'Cargo.toml')
 manifest = (SAMPLE/'horizon-mod.toml').read_text().split('\n[wasm]')[0]
 # The sample's native-only demo injection has no wasm guest export. Neither
 # benchmark installs it; machine logic and the rest of the source remain unchanged.
-manifest += '\n[native]\ngame = "26.3"\nhorizon = "' + os.environ['BENCH_BINARY_HEAD'] + '"\nmixins = "5a64af938ec86b00d53d16a408aabc0038fb3e57"\n'
+manifest += '\n[native]\ngame = "26.3"\nhorizon = "' + os.environ['BENCH_BINARY_HEAD'] + '"\nmixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"\n'
 manifest = manifest.replace('b5d6f467dc78deda3b072e700f767adb456cd349', '1975cf5a9033a3057e439c62b07af0683254e6fb')
 (adj / 'horizon-mod.toml').write_text(manifest)
 shutil.copy(pathlib.Path(os.environ['BENCH_STD']), BIN.parent / 'horizon-wasm-std.wasm')

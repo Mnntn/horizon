@@ -338,38 +338,6 @@ pub(super) fn relative(id: &str) -> String {
     format!("native-internals/{id}")
 }
 
-/// Give the catalog in `staged` the fingerprints of `pinned`, the same game before its mixins,
-/// for every declaration both list. What only the mixins added keeps its own.
-pub(super) fn keep_pins(staged: &Path, pinned: &Path) -> Result<(), String> {
-    let read = |dir: &Path| -> Result<Vec<serde_json::Map<String, serde_json::Value>>, String> {
-        let path = dir.join(INTERNALS);
-        let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
-    };
-    let key = |entry: &serde_json::Map<String, serde_json::Value>| {
-        (entry.get("path").cloned(), entry.get("kind").cloned())
-    };
-    let pins: std::collections::HashMap<_, _> = read(pinned)?
-        .into_iter()
-        .map(|entry| (key(&entry), entry))
-        .collect();
-    let mut entries = read(staged)?;
-    for entry in &mut entries {
-        if let Some(pin) = pins.get(&key(entry)) {
-            for field in ["signature", "hash"] {
-                if let Some(value) = pin.get(field) {
-                    entry.insert(field.into(), value.clone());
-                }
-            }
-        }
-    }
-    fs::write(
-        staged.join(INTERNALS),
-        serde_json::to_vec(&entries).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())
-}
-
 pub(super) fn stage(
     stage: &Path,
     project: &api::Project<'_>,
@@ -436,42 +404,6 @@ mod tests {
         assert!(source.contains("pub use horizon_client::game::Game;"));
         assert!(source.contains("pub use horizon_client::game::maps::dimension_id;"));
         fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn a_mixin_builds_catalog_keeps_the_unpatched_fingerprints() {
-        let root = super::super::tests::dir("keep-pins");
-        let (staged, pinned) = (root.join("staged"), root.join("pinned"));
-        for (dir, text) in [
-            (
-                &staged,
-                r#"[{"path":"g::Game","kind":"struct","signature":"reprinted","hash":"new","refs":["g::A"]},
-                    {"path":"g::Game::added","kind":"field","signature":"state","hash":"state"},
-                    {"path":"g::Game::run","kind":"field","signature":"field","hash":"field"}]"#,
-            ),
-            (
-                &pinned,
-                r#"[{"path":"g::Game","kind":"struct","signature":"as shipped","hash":"pin","refs":[]},
-                    {"path":"g::Game::run","kind":"method","signature":"method","hash":"method"}]"#,
-            ),
-        ] {
-            fs::create_dir_all(dir).unwrap();
-            fs::write(dir.join(INTERNALS), text).unwrap();
-        }
-        keep_pins(&staged, &pinned).unwrap();
-        let entries: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(staged.join(INTERNALS)).unwrap()).unwrap();
-        assert_eq!(
-            entries,
-            serde_json::json!([
-                // The pinned fingerprint, and everything else as the patched tree has it.
-                {"path":"g::Game","kind":"struct","signature":"as shipped","hash":"pin","refs":["g::A"]},
-                // Added by a mixin, or the same path under another kind: its own.
-                {"path":"g::Game::added","kind":"field","signature":"state","hash":"state"},
-                {"path":"g::Game::run","kind":"field","signature":"field","hash":"field"}
-            ])
-        );
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -16,38 +16,66 @@ use std::path::{Path, PathBuf};
 /// The patch crate's name: the copies' ids and the executable's `--extern` use it.
 pub(super) const CRATE: &str = "horizon_patch";
 
-/// A compiled patch crate and the `Redirect` expressions the generated `main` installs.
+/// A compiled patch crate and the install expressions the generated `main` reports.
 pub(super) struct Patch {
     pub rlib: PathBuf,
     pub installs: Vec<String>,
 }
 
-/// Why a mod's mixin tables can't take the copy route, before anything runs.
+/// Why a mod's tables can't take the copy route, before anything runs.
 fn table_refusals(bundle: &Bundle) -> Vec<String> {
     let id = &bundle.manifest.id;
     let native = bundle.manifest.native.as_ref();
-    let mut refusals = Vec::new();
-    for state in native.map(|n| n.state.as_slice()).unwrap_or_default() {
-        refusals.push(format!(
-            "E_MIXIN_STATE_LAYOUT: {id}:{}: a state field changes its type's layout, which the \
-             prebuilt game fixes; keep the value in an attachment",
-            state.id
-        ));
+    native
+        .map(|n| n.state.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .map(|state| {
+            format!(
+                "E_MIXIN_STATE_LAYOUT: {id}:{}: a state field changes its type's layout, which \
+                 the prebuilt game fixes; keep the value in an attachment (`mod_api` attachments \
+                 on the entity, block entity, level or player)",
+                state.id
+            )
+        })
+        .collect()
+}
+
+/// The support modules and bridges `bundles` add to the patch crate.
+fn extras(bundles: &[&Bundle]) -> Result<api_gen::patch::Extras, String> {
+    let mut extras = api_gen::patch::Extras::default();
+    let normalize = |s: &str| s.replace('-', "_").to_ascii_lowercase();
+    for bundle in bundles {
+        let id = &bundle.manifest.id;
+        let Some(native) = bundle.manifest.native.as_ref() else {
+            continue;
+        };
+        for module in &native.module {
+            let path = bundle.dir.join(&module.source);
+            extras.modules.push(api_gen::patch::SupportModule {
+                id: format!("{id}:{}", module.id),
+                file: module.file.clone(),
+                name: module.name.clone(),
+                text: fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
+                public: module.visibility.as_deref() == Some("pub"),
+            });
+        }
+        for bridge in &native.bridge {
+            let field = |key: &str| bridge.fields.get(key).and_then(toml::Value::as_str);
+            extras.bridges.push(api_gen::patch::Bridge {
+                id: format!("{id}:{}", bridge.id),
+                method: format!(
+                    "__horizon_mixins_{}_{}",
+                    normalize(id),
+                    normalize(&bridge.id)
+                ),
+                kind: field("kind").unwrap_or_default().to_owned(),
+                target: field("target").unwrap_or_default().to_owned(),
+                member: field("member").map(str::to_owned),
+            });
+        }
     }
-    for bridge in native.map(|n| n.bridge.as_slice()).unwrap_or_default() {
-        refusals.push(format!(
-            "E_MIXIN_BRIDGE: {id}:{}: the prebuilt game makes every member public, so a helper \
-             reaches it directly; a bridge would add methods to a type the game already compiled",
-            bridge.id
-        ));
-    }
-    for module in native.map(|n| n.module.as_slice()).unwrap_or_default() {
-        refusals.push(format!(
-            "E_MIXIN_MODULE_COPY: {id}:{}: support modules are not on the copy route yet",
-            module.id
-        ));
-    }
-    refusals
+    Ok(extras)
 }
 
 /// Builds the patch crate for `projects`' `[[mixin]]` rows against `game`, into `out`; `None`
@@ -81,21 +109,23 @@ pub(super) fn build(
     if !refusals.is_empty() {
         return Err(refusals.join("\n"));
     }
-    // Built once per pin, before the clock: the timing is the mixin build's own.
-    let tool = super::tool(rust, super::MIXINS_REV, &|_| {})?;
+    // Built once per pin and patch, before the clock: the timing is the mixin build's own.
+    let tool = super::mixins_patch::tool(rust, &|_| {})?;
     let source = super::source(sdk.commit())?;
     let started = std::time::Instant::now();
     let targets: Vec<String> = bundles
         .iter()
         .flat_map(|bundle| bundle.manifest.mixin.iter().map(|row| row.target.clone()))
         .collect();
-    let generated = api_gen::patch::generate(&source, CRATE, &targets).map_err(|refusals| {
-        refusals
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
+    let extras = extras(&bundles)?;
+    let generated =
+        api_gen::patch::generate(&source, CRATE, &targets, &extras).map_err(|refusals| {
+            refusals
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?;
     let ids: HashMap<&str, &str> = generated
         .patched
         .iter()
@@ -126,7 +156,10 @@ pub(super) fn build(
     // Each mod's rows, retargeted at the copies, as the tool's bundles.
     let mods = out.join("patch-mods");
     let _ = fs::remove_dir_all(&mods);
-    for bundle in &bundles {
+    for bundle in bundles
+        .iter()
+        .filter(|bundle| !bundle.manifest.mixin.is_empty())
+    {
         let dir = mods.join(&bundle.manifest.id);
         super::package::copy_tool_input(bundle, &dir)?;
         let mut rows = bundle.manifest.mixin.clone();
@@ -158,12 +191,18 @@ pub(super) fn build(
         )?;
     }
     let copied = started.elapsed();
-    let patched = out.join("patch-applied");
-    super::run(
-        super::apply(rust, &tool, &workspace, &mods, &patched),
-        "Applying the mixins to their functions",
-        |_| {},
-    )?;
+    // With no rows (only modules or bridges), the crate compiles as generated.
+    let patched = if targets.is_empty() {
+        workspace.clone()
+    } else {
+        let patched = out.join("patch-applied");
+        super::run(
+            super::apply(rust, &tool, &workspace, &mods, &patched),
+            "Applying the mixins to their functions",
+            |_| {},
+        )?;
+        patched
+    };
     let applied = started.elapsed();
     // The patched crate, against the prebuilt game and the mods.
     let rlib = out.join(format!("lib{CRATE}.rlib"));

@@ -21,6 +21,17 @@ pub(super) fn read(dir: &Path) -> Result<Option<Bundle>, String> {
     if package.manifest.native.is_none() {
         return Ok(None);
     }
+    if let Some(state) = package
+        .manifest
+        .native
+        .as_ref()
+        .and_then(|native| native.state.first())
+    {
+        return Err(crate::i18n::trf(
+            "E_MIXIN_STATE_LAYOUT: {mod}:{state}: native state changes the prebuilt game's layout; use an attachment instead",
+            &[("mod", &package.manifest.id), ("state", &state.id)],
+        ));
+    }
     package.directory_files(dir)?;
     Ok(Some(Bundle {
         manifest: package.manifest,
@@ -247,5 +258,22 @@ mod mixed_tests {
     #[test]
     fn native_to_wasm_matching_layout_is_still_unsupported() {
         assert_eq!(refusal("0123456789abcdef"), "lib is a wasm mod; native mod addon depends on it: mixed native and wasm dependencies aren't supported yet");
+    }
+}
+
+#[cfg(test)]
+mod state_tests {
+    #[test]
+    fn native_state_is_refused_before_staging() {
+        let dir = super::super::tests::dir("state-refusal");
+        super::super::tests::write_bundle(&dir, "stateful", "");
+        let path = dir.join(horizon_mod_package::manifest::MANIFEST);
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str("\n[[native.state]]\nid='autosave'\ntarget='game::Game'\nty='u32'\ninitial='0'\nconstructor=[]\n");
+        std::fs::write(path, text).unwrap();
+        let error = super::read(&dir).err().unwrap();
+        assert!(error.contains("E_MIXIN_STATE_LAYOUT"), "{error}");
+        assert!(error.contains("attachment"), "{error}");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -1,9 +1,5 @@
-//! The prebuilt game (#589): mods that need nothing but the mod API compile against a downloaded
-//! build of the game (`tools/prebuilt_game.py`, released daily by `prebuilt-game.yml`) with rustc
-//! alone instead of building the game from source. The route is chosen before
-//! anything runs: a mod set the prebuilt game can't serve, or a revision with no prebuilt
-//! release, builds from source, and the build log says why. A prebuilt build that fails is an
-//! error like any other build's, never retried from source.
+//! Native mods compile and link against the pinned prebuilt game.
+//! Unsupported inputs and unavailable SDKs are refused, never rebuilt locally.
 use super::{api, dependencies, internals, Target};
 use crate::i18n::{tr, trf};
 use crate::rust_toolchain::{self, Toolchain};
@@ -25,7 +21,7 @@ const UNPACKED_LIMIT: u64 = 8 << 30;
 
 /// Why a build compiles the game from source instead of using the prebuilt game.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SourceReason {
+pub enum Refusal {
     /// A mod has a build script, which the prebuilt route doesn't run.
     BuildScript { mod_id: String },
     /// A mod declares Cargo features, or asks the mod API for features of its own.
@@ -38,26 +34,26 @@ pub enum SourceReason {
     NoRelease { revision: String },
 }
 
-impl std::fmt::Display for SourceReason {
+impl std::fmt::Display for Refusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = match self {
             Self::BuildScript { mod_id } => trf(
-                "{mod} has a build script, so the game builds from source",
+                "E_NATIVE_BUILD_SCRIPT: {mod} has a build script; remove it and ship generated source in the mod",
                 &[("mod", mod_id)],
             ),
             Self::Features { mod_id } => trf(
-                "{mod} uses Cargo features, so the game builds from source",
+                "E_NATIVE_FEATURES: {mod} requests Cargo features; use the pinned SDK feature set",
                 &[("mod", mod_id)],
             ),
             Self::Host => {
-                tr("no prebuilt game for this computer, so the game builds from source").into()
+                tr("E_NATIVE_HOST: no prebuilt game supports this computer; use a supported host").into()
             }
             Self::Download { why } => trf(
                 "The prebuilt game couldn't be downloaded ({why}). Try again.",
                 &[("why", why)],
             ),
             Self::NoRelease { revision } => trf(
-                "no prebuilt game for {revision}, so the game builds from source",
+                "E_NATIVE_NO_RELEASE: no prebuilt game for {revision}; pin a commit with a published SDK",
                 &[("revision", &revision[..revision.len().min(10)])],
             ),
         };
@@ -65,38 +61,34 @@ impl std::fmt::Display for SourceReason {
     }
 }
 
-impl SourceReason {
-    pub(super) fn forces_source(&self) -> bool {
-        !matches!(self, Self::Download { .. })
-    }
-}
-
 /// The first structural reason these projects cannot use the prebuilt game.
-pub(super) fn refusal(projects: &[api::Project<'_>]) -> Option<SourceReason> {
+pub(super) fn refusal(projects: &[api::Project<'_>]) -> Option<Refusal> {
     projects.iter().find_map(project_refusal)
 }
 
 /// Why `project` alone can't build against the prebuilt game, or `None` when it can.
-pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason> {
+pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<Refusal> {
     {
         let mod_id = || project.bundle.manifest.id.clone();
         let cargo = &project.cargo;
         let package = cargo.get("package");
-        let has_script = package.and_then(|p| p.get("build")).is_some()
-            || project.bundle.dir.join("build.rs").is_file()
+        let build = package.and_then(|p| p.get("build"));
+        let has_script = build.is_some_and(|value| value.as_bool() != Some(false))
+            || (build.and_then(toml::Value::as_bool) != Some(false)
+                && project.bundle.dir.join("build.rs").is_file())
             || cargo
                 .get("build-dependencies")
                 .and_then(toml::Value::as_table)
                 .is_some_and(|t| !t.is_empty());
         if has_script {
-            return Some(SourceReason::BuildScript { mod_id: mod_id() });
+            return Some(Refusal::BuildScript { mod_id: mod_id() });
         }
         if cargo
             .get("features")
             .and_then(toml::Value::as_table)
             .is_some_and(|t| !t.is_empty())
         {
-            return Some(SourceReason::Features { mod_id: mod_id() });
+            return Some(Refusal::Features { mod_id: mod_id() });
         }
         for (_, dependencies) in project.dependency_tables() {
             for (key, value) in dependencies {
@@ -113,7 +105,7 @@ pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason
                     .is_some_and(|f| !f.is_empty())
                     || value.get("default-features").and_then(toml::Value::as_bool) == Some(false);
                 if own_features {
-                    return Some(SourceReason::Features { mod_id: mod_id() });
+                    return Some(Refusal::Features { mod_id: mod_id() });
                 }
             }
         }
@@ -130,9 +122,9 @@ pub(super) fn fetch(
     revision: &str,
     target: Target,
     downloading: impl FnOnce(),
-) -> Result<Result<PathBuf, SourceReason>, String> {
+) -> Result<Result<PathBuf, Refusal>, String> {
     let Some(host) = rust_toolchain::host() else {
-        return Ok(Err(SourceReason::Host));
+        return Ok(Err(Refusal::Host));
     };
     let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
     let dir = cache_dir(revision, &name);
@@ -141,7 +133,7 @@ pub(super) fn fetch(
         return Ok(Ok(dir));
     }
     let release = release_url(revision);
-    let download = |why: String| Ok(Err(SourceReason::Download { why }));
+    let download = |why: String| Ok(Err(Refusal::Download { why }));
     let expected = match release_sum(revision, &name) {
         Ok(sum) => sum,
         Err(reason) => return Ok(Err(reason)),
@@ -208,18 +200,6 @@ pub(super) fn fetch(
     Ok(Ok(dir))
 }
 
-/// Keep retryable failures distinct from structural reasons to compile the game locally.
-pub(super) fn or_source(game: Result<PathBuf, SourceReason>) -> Result<Option<PathBuf>, String> {
-    match game {
-        Ok(game) => Ok(Some(game)),
-        Err(reason) if reason.forces_source() => {
-            super::log_warning(&reason.to_string());
-            Ok(None)
-        }
-        Err(reason) => Err(reason.to_string()),
-    }
-}
-
 fn release_url(revision: &str) -> String {
     format!(
         "https://github.com/{}/releases/download/{}{revision}",
@@ -228,11 +208,11 @@ fn release_url(revision: &str) -> String {
     )
 }
 
-fn release_sum(revision: &str, name: &str) -> Result<String, SourceReason> {
-    let missing = || SourceReason::NoRelease {
+fn release_sum(revision: &str, name: &str) -> Result<String, Refusal> {
+    let missing = || Refusal::NoRelease {
         revision: revision.to_owned(),
     };
-    let download = |why: String| SourceReason::Download { why };
+    let download = |why: String| Refusal::Download { why };
     let sums = crate::backend::get_unless_missing(&format!("{}/{SUMS}", release_url(revision)))
         .map_err(download)?
         .ok_or_else(missing)?;
@@ -245,9 +225,9 @@ fn release_sum(revision: &str, name: &str) -> Result<String, SourceReason> {
 
 /// Checks release metadata without downloading the prebuilt game. Run only on a worker.
 /// Download failures are retryable, never permission to rebuild the game from source.
-pub fn prebuilt_availability(revision: &str, target: Target) -> Option<SourceReason> {
+pub fn prebuilt_availability(revision: &str, target: Target) -> Option<Refusal> {
     let Some(host) = rust_toolchain::host() else {
-        return Some(SourceReason::Host);
+        return Some(Refusal::Host);
     };
     let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
     let cached = cache_dir(revision, &name);
@@ -742,7 +722,7 @@ mod tests {
     }
 
     /// What [`refusal`] says of one mod whose Cargo.toml is `cargo`.
-    fn refusal_of(cargo: &str) -> Option<SourceReason> {
+    fn refusal_of(cargo: &str) -> Option<Refusal> {
         let name = std::thread::current().name().unwrap().replace(':', "-");
         let dir = super::super::tests::dir(&name);
         super::super::tests::write_bundle(&dir, "example", "");
@@ -780,33 +760,12 @@ mod tests {
     }
 
     #[test]
-    fn failed_download_never_selects_a_source_build() {
-        assert!(or_source(Err(SourceReason::Download {
-            why: "offline".into()
-        }))
-        .is_err());
-        assert_eq!(
-            or_source(Ok(PathBuf::from("cached-game"))).unwrap(),
-            Some(PathBuf::from("cached-game"))
-        );
-    }
-
-    #[test]
-    fn missing_host_or_release_still_allows_an_explicit_source_build() {
-        let _guard = super::super::TEST_STATE.lock().unwrap();
-        for reason in [
-            SourceReason::Host,
-            SourceReason::NoRelease {
-                revision: "deadbeef".into(),
-            },
-        ] {
-            assert!(or_source(Err(reason)).unwrap().is_none());
-        }
-    }
-
-    #[test]
     fn mods_on_the_mod_api_alone_take_the_prebuilt_game() {
         assert_eq!(refusal_of("[dependencies]\nhorizon-mod-api='0.1'"), None);
+        assert_eq!(
+            refusal_of("build=false\n[dependencies]\nhorizon-mod-api='0.1'"),
+            None
+        );
         assert_eq!(
             refusal_of("[dependencies.api]\npackage='horizon-mod-api'\nversion='0.1'"),
             None
@@ -829,15 +788,15 @@ mod tests {
         for (cargo, reason) in [
             (
                 "[dependencies]\nhorizon-mod-api={version='0.1',features=['testing']}",
-                SourceReason::Features { mod_id: id() },
+                Refusal::Features { mod_id: id() },
             ),
             (
                 "[dependencies]\nhorizon-mod-api='0.1'\n[features]\nextra=[]",
-                SourceReason::Features { mod_id: id() },
+                Refusal::Features { mod_id: id() },
             ),
             (
                 "build='make.rs'\n[dependencies]\nhorizon-mod-api='0.1'",
-                SourceReason::BuildScript { mod_id: id() },
+                Refusal::BuildScript { mod_id: id() },
             ),
         ] {
             assert_eq!(refusal_of(cargo), Some(reason), "{cargo}");

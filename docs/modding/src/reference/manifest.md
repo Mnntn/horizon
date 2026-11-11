@@ -35,8 +35,8 @@ my_mod.hmod
 
 There is no mod-id directory level inside the archive. `horizon-mod.toml` is the only manifest and the only
 source of the mod's id and version; Cargo's package name and version are not mod identity. IDs are plain
-`[a-z0-9_]{1,64}` names, also used as resource namespaces. The launcher writes `horizon-mixin.toml` in its
-staging area when needed. Hand-written tool manifests, `horizon-native.json`, and input `native/` or `rust/`
+`[a-z0-9_]{1,64}` names, also used as resource namespaces. The launcher writes `horizon-mixin.toml` for the copied functions in its
+patch-library workspace when needed. Hand-written tool manifests, `horizon-native.json`, and input `native/` or `rust/`
 folders are unsupported.
 
 ## `horizon-mod.toml`
@@ -52,6 +52,10 @@ refuse the manifest. Native mods may declare top-level `internals`, an array of 
 | `horizon` | string | the exact Horizon commit, 40 lowercase hex characters |
 | `mixins` | string | the exact horizon-mixins commit, 40 lowercase hex characters |
 | `module` | array of tables | optional support modules, written as `[[native.module]]` |
+
+`[[native.state]]` is refused by the launcher with `E_MIXIN_STATE_LAYOUT`; use attachments
+without changing the prebuilt game's layout. Native builds require a published SDK for `horizon`
+and use its fixed feature set. See [build refusals](../how-to/native-mods/028-what-the-launcher-does.md#build-refusals).
 
 A wasm mod adds `[wasm]` instead, written by `cargo horizon-mod build --wasm`
 ([Building to `mod.wasm`](../how-to/wasm-mods.md)):

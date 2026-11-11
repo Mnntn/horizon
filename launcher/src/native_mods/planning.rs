@@ -23,8 +23,11 @@ pub(super) fn classify(
     for bundle in &found {
         let route = match api::Project::read(bundle) {
             Ok(project) => {
-                let route = prebuilt::project_refusal(&project)
-                    .map_or(Route::Prebuilt, |reason| Route::Game { reason });
+                let route = prebuilt::project_refusal(&project).map_or(Route::Prebuilt, |reason| {
+                    Route::Invalid {
+                        reason: reason.to_string(),
+                    }
+                });
                 projects.push(project);
                 route
             }

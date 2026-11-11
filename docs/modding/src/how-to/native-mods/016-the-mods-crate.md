@@ -54,7 +54,7 @@ names the reachable build scripts and proc macros. Declining stops before any mo
 compiled. The existing native-code permission is also required; downloading a checksummed crate
 does not make its code trusted.
 
-On the optimized prebuilt route, Cargo compiles the mod's registry graph and the final wrapper
+For native builds, Cargo compiles the mod's registry graph and the final wrapper
 against immutable SDK binaries. Registry dependencies never cause an automatic source rebuild.
 The SDK must include its locked graph and runtime native-library inventory; older SDKs without
 that information refuse registry builds. The launcher preserves the compiler/cache wrapper chain
@@ -71,3 +71,8 @@ Cargo directories. Host-only build tools and proc macros are not packaged into t
 native providers or output filenames, escaping outputs, relative native search paths, and bundled
 framework outputs are refused explicitly. System libraries remain system dependencies. These
 restrictions do not trigger a source fallback.
+
+A mod's own build script is refused with `E_NATIVE_BUILD_SCRIPT`: ship generated source instead.
+`E_NATIVE_FEATURES` refuses mod feature declarations and custom SDK feature requests; use the
+pinned SDK's feature set. These restrictions do not prohibit the separately approved build scripts
+of registry dependencies.

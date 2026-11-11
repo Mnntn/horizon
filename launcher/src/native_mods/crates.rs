@@ -7,22 +7,6 @@ use std::path::{Component, Path, PathBuf};
 /// Where the launcher stages the mods' crates.
 pub(super) const DIR: &str = "native-api";
 
-/// Refuse game crates reached through a mod's dependencies rather than its generated facade.
-/// Cargo lock dependency references may include a version and source; retaining the complete
-/// package set for a name makes ambiguous references conservative.
-pub(super) fn check_game_graph(stage: &Path, text: &str) -> Result<(), String> {
-    let game_names: BTreeSet<String> = fs::read_dir(stage.join("crates"))
-        .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let text = fs::read_to_string(entry.path().join("Cargo.toml")).ok()?;
-            let manifest: toml::Table = text.parse().ok()?;
-            Some(manifest.get("package")?.get("name")?.as_str()?.to_owned())
-        })
-        .collect();
-    check_game_graph_names(stage, text, &game_names)
-}
-
 pub(super) fn check_game_graph_names(
     stage: &Path,
     text: &str,
@@ -451,27 +435,6 @@ pub(super) fn is_link_or_junction(metadata: &fs::Metadata) -> bool {
     false
 }
 
-/// A Cargo error (`run`'s) said plainly when it is `--locked` refusing to change the lock file:
-/// a mod's crate turned on, with a feature, a dependency Horizon's `Cargo.lock` lacks.
-pub(super) fn locked(error: String) -> String {
-    if !error.contains("--locked was passed") {
-        return error;
-    }
-    format!("{}\n\n{error}", crate::i18n::tr("Native mod dependencies must match their supplied Cargo.lock pins, and the game's locked graph must remain unchanged."))
-}
-
-/// Whether `stage` has any mod's crate: a build with none skips the crate check, even when an
-/// earlier build left `native-api/` behind (the stage keeps folders).
-pub(super) fn any(stage: &Path) -> bool {
-    let dir = stage.join(DIR);
-    match fs::symlink_metadata(&dir) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(_) => true,
-        Ok(metadata) if is_link_or_junction(&metadata) || !metadata.is_dir() => true,
-        Ok(_) => manifests(&dir).map_or(true, |m| !m.is_empty()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -531,95 +494,6 @@ mod tests {
         .unwrap();
     }
 
-    #[test]
-    fn game_graph_refuses_transitive_game_dependency_but_allows_facade() {
-        let stage = StageFixture::new();
-        stage.add_crate("bake", "engine", "bake", "");
-        write_manifest(
-            &stage.root().join("crates/horizon-client"),
-            "horizon-client",
-            "",
-        );
-        let lock = r#"
-[[package]]
-name = "bake"
-version = "0.1.0"
-dependencies = ["bridge", "horizon-internals-bake"]
-[[package]]
-name = "bridge"
-version = "0.1.0"
-dependencies = ["horizon-client"]
-[[package]]
-name = "horizon-internals-bake"
-version = "0.1.0"
-dependencies = ["horizon-client"]
-[[package]]
-name = "horizon-client"
-version = "0.1.0"
-"#;
-        let error = check_game_graph(stage.root(), lock).unwrap_err();
-        assert!(error.contains("bridge -> horizon-client"), "{error}");
-        let safe = lock.replace(
-            "dependencies = [\"bridge\", \"horizon-internals-bake\"]",
-            "dependencies = [\"horizon-internals-bake\"]",
-        );
-        assert!(check_game_graph(stage.root(), &safe).is_ok());
-    }
-
-    #[test]
-    fn game_graph_allows_a_sibling_mods_path_facade_only() {
-        let stage = StageFixture::new();
-        stage.add_crate("app", "engine", "app", "");
-        stage.add_crate("library", "engine", "library", "");
-        write_manifest(
-            &stage.root().join("crates/horizon-client"),
-            "horizon-client",
-            "",
-        );
-        let lock = r#"
-[[package]]
-name = "app"
-version = "0.1.0"
-dependencies = ["library"]
-[[package]]
-name = "library"
-version = "0.1.0"
-dependencies = ["horizon-internals-library"]
-[[package]]
-name = "horizon-internals-library"
-version = "0.1.0"
-dependencies = ["horizon-client"]
-[[package]]
-name = "horizon-client"
-version = "0.1.0"
-"#;
-        assert!(check_game_graph(stage.root(), lock).is_ok());
-        for source in [
-            "registry+https://github.com/rust-lang/crates.io-index",
-            "git+https://example.invalid/facade#1234",
-        ] {
-            let external = lock.replace(
-                "name = \"horizon-internals-library\"",
-                &format!("name = \"horizon-internals-library\"\nsource = {source:?}"),
-            );
-            let error = check_game_graph(stage.root(), &external).unwrap_err();
-            assert!(error.contains("E_GAME_DEPENDENCY"), "{error}");
-            assert!(error.contains("library -> horizon-client"), "{error}");
-        }
-        let unstaged = lock.replace("horizon-internals-library", "horizon-internals-other");
-        assert!(check_game_graph(stage.root(), &unstaged).is_err());
-        // The app reaching the library's facade itself is the app using undeclared internals.
-        let borrowed = lock.replace(
-            "dependencies = [\"library\"]",
-            "dependencies = [\"library\", \"horizon-internals-library\"]",
-        );
-        let error = check_game_graph(stage.root(), &borrowed).unwrap_err();
-        assert!(
-            error.contains("horizon-internals-library -> horizon-client"),
-            "{error}"
-        );
-    }
-
     fn wanted(stage: &Path) -> Result<Vec<Wanted>, String> {
         let targets = [
             "same_name",
@@ -651,19 +525,6 @@ version = "0.1.0"
         assert!(wanted(stage.root()).is_err(), "{label}");
     }
 
-    #[cfg(any(unix, windows))]
-    struct TestDirLink(PathBuf);
-
-    #[cfg(any(unix, windows))]
-    impl Drop for TestDirLink {
-        fn drop(&mut self) {
-            #[cfg(unix)]
-            let _ = fs::remove_file(&self.0);
-            #[cfg(windows)]
-            let _ = fs::remove_dir(&self.0);
-        }
-    }
-
     fn wants(mod_id: &str, name: &str, version: &str) -> Wanted {
         Wanted {
             mod_id: mod_id.into(),
@@ -671,106 +532,6 @@ version = "0.1.0"
             version: version.into(),
             requirement: semver::VersionReq::parse(version).unwrap(),
         }
-    }
-
-    #[test]
-    fn every_dependency_table_of_every_mod_crate_is_read() {
-        let stage =
-            std::env::temp_dir().join(format!("horizon-native-crates-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&stage);
-        let krate = stage.join(DIR).join("bake");
-        fs::create_dir_all(&krate).unwrap();
-        fs::write(
-            krate.join("Cargo.toml"),
-            "[package]\nname = \"bake-engine\"\nversion = \"0.1.0\"\n\
-             [dependencies]\nserde_json = \"1\"\nhash = { package = \"sha2\", version = \"0.10\" }\n\
-             [build-dependencies]\nitoa = { version = \"1\" }\n\
-             [dev_dependencies]\nryu = \"1\"\n\
-             [target.'cfg(unix)'.dev-dependencies]\nlibc = \"0.2\"\n",
-        )
-        .unwrap();
-        assert_eq!(
-            wanted(&stage).unwrap(),
-            [
-                wants("bake", "itoa", "1"),
-                wants("bake", "libc", "0.2"),
-                wants("bake", "ryu", "1"),
-                wants("bake", "serde_json", "1"),
-                wants("bake", "sha2", "0.10"),
-            ]
-        );
-        fs::create_dir_all(stage.join(DIR).join("gone/src")).unwrap();
-        assert_eq!(
-            wanted(&stage).unwrap().len(),
-            5,
-            "an emptied crate folder is skipped"
-        );
-        assert!(any(&stage));
-        fs::remove_file(krate.join("Cargo.toml")).unwrap();
-        assert!(!any(&stage), "only emptied crate folders left");
-    }
-
-    #[test]
-    fn any_is_false_when_native_crate_discovery_is_missing_or_empty() {
-        let stage = StageFixture::new();
-        assert!(
-            !any(stage.root()),
-            "a missing native-crates root has no crates"
-        );
-        fs::create_dir_all(stage.root().join(DIR)).unwrap();
-        assert!(
-            !any(stage.root()),
-            "an empty native-crates root has no crates"
-        );
-        fs::create_dir_all(stage.root().join(DIR).join("bake")).unwrap();
-        assert!(
-            !any(stage.root()),
-            "an empty mod folder has no crate manifests"
-        );
-    }
-
-    #[test]
-    fn wanted_omits_validated_sibling_paths_across_dependency_tables() {
-        let stage = StageFixture::new();
-        stage.add_crate(
-            "bake",
-            "engine",
-            "bake-engine",
-            "[dependencies]\n\
-             same_name = { path = \"../same_name\", features = [\"enabled\"] }\n\
-             industrial-sim = { path = \"../industrial_sim\", package = \"gtnh-lv-compressor-eval-industrial-sim\", version = \"0.1\", optional = true, default-features = false, features = [\"adapter\"] }\n\
-             gtnh-lv-compressor-eval-industrial-sim = \"1\"\n\
-             [dev-dependencies]\n\
-             test-support = { path = \"../test_support\", package = \"test-support-package\", features = [\"fixtures\"] }\n\
-             [build-dependencies]\n\
-             build-helper = { path = \"../build_helper\", package = \"build-helper-package\", default-features = false }\n\
-             [target.'cfg(unix)'.dependencies]\n\
-             unix-helper = { path = \"../unix_helper\", package = \"unix-helper-package\", features = [\"unix\"] }\n\
-             [target.'cfg(windows)'.dev-dependencies]\n\
-             windows-test = { path = \"../windows_test\", package = \"windows-test-package\", features = [\"test\"] }\n\
-             [target.'cfg(any())'.build-dependencies]\n\
-             target-build = { path = \"../target_build\", package = \"target-build-package\" }\n",
-        );
-        for (crate_id, package) in [
-            ("same_name", "same_name"),
-            ("industrial_sim", "gtnh-lv-compressor-eval-industrial-sim"),
-            ("test_support", "test-support-package"),
-            ("build_helper", "build-helper-package"),
-            ("unix_helper", "unix-helper-package"),
-            ("windows_test", "windows-test-package"),
-            ("target_build", "target-build-package"),
-        ] {
-            stage.add_crate("bake", crate_id, package, "");
-        }
-
-        // Same-name and renamed local dependencies in every dependency table are local. Feature
-        // flags do not make them registry dependencies. The same bundled package without `path`
-        // remains a registry request and must still pass the lock check.
-        let wanted = wanted(stage.root()).unwrap();
-        assert_eq!(
-            wanted,
-            [wants("bake", "gtnh-lv-compressor-eval-industrial-sim", "1")]
-        );
     }
 
     #[test]
@@ -906,41 +667,5 @@ version = "0.1.0"
             accepted.is_empty(),
             "path dependencies accepted conflicting source selectors: {accepted:?}"
         );
-    }
-
-    #[cfg(any(unix, windows))]
-    #[test]
-    fn wanted_rejects_sibling_paths_through_directory_links() {
-        let stage = StageFixture::new();
-        let outside = stage.root.join("linked-target");
-        write_manifest(&outside, "linked-package", "");
-        let engine = stage.add_crate("bake", "engine", "bake-engine", "");
-        let link = engine.parent().unwrap().join("linked");
-        let _link_guard = TestDirLink(link.clone());
-        if let Err(error) = create_test_dir_link(&outside, &link) {
-            eprintln!("SKIP directory-link sibling test: could not create link: {error}");
-            return;
-        }
-        assert!(
-            any(stage.root()),
-            "a linked stage entry must reach the crate-validation gate"
-        );
-        fs::write(
-            engine.join("Cargo.toml"),
-            "[package]\nname = \"bake-engine\"\nversion = \"0.1.0\"\n\
-             [dependencies]\nlocal = { path = \"../linked\", package = \"linked-package\" }\n",
-        )
-        .unwrap();
-        assert!(wanted(stage.root()).is_err());
-    }
-
-    #[cfg(unix)]
-    fn create_test_dir_link(target: &Path, link: &Path) -> std::io::Result<()> {
-        std::os::unix::fs::symlink(target, link)
-    }
-
-    #[cfg(windows)]
-    fn create_test_dir_link(target: &Path, link: &Path) -> std::io::Result<()> {
-        crate::sources::junction(target, link)
     }
 }

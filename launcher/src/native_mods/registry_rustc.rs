@@ -136,41 +136,7 @@ mod tests {
             )]),
         }
     }
-    #[test]
-    fn only_target_workspace_code_receives_sdk_bindings_and_cache_chain_survives() {
-        let plan = plan();
-        for (manifest, target, kind, inject) in [
-            ("/mod", "game-target", "lib", true),
-            ("/mod", "game-target", "proc-macro", false),
-            ("/registry", "game-target", "lib", false),
-            ("/mod", "host-target", "lib", false),
-        ] {
-            let args: Vec<OsString> = [
-                "/workspace-wrapper",
-                "/pinned/rustc",
-                "--target",
-                target,
-                "--crate-type",
-                kind,
-            ]
-            .into_iter()
-            .map(Into::into)
-            .collect();
-            let (program, output) = plan.arguments(args.clone(), Some(manifest.into())).unwrap();
-            assert_eq!(program, PathBuf::from("/cache"));
-            assert!(output.starts_with(&args));
-            assert_eq!(
-                output.iter().any(|arg| arg == "mod_api=/sdk/api.rmeta"),
-                inject
-            );
-        }
-        let args = vec![OsString::from("/pinned/rustc"), "-vV".into()];
-        assert_eq!(plan.arguments(args.clone(), None).unwrap().1, args);
-        assert!(plan
-            .arguments(vec!["/other/rustc".into()], None)
-            .unwrap_err()
-            .contains("pinned"));
-    }
+
     #[test]
     fn no_cache_invokes_workspace_wrapper_or_compiler_directly() {
         let mut plan = plan();

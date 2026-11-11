@@ -365,7 +365,7 @@ fn list_in(game_home: &Path, data: &Path) -> Vec<Instance> {
                 version: meta.version,
                 native_profile: meta
                     .native_profile
-                    .unwrap_or(crate::native_mods::Profile::Balanced),
+                    .unwrap_or(crate::native_mods::Profile::Optimized),
                 played: Duration::from_secs(meta.played_secs),
                 last_played: meta
                     .last_played

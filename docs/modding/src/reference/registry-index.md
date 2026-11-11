@@ -212,9 +212,10 @@ Rust build scripts and procedural macros run with your rights, but the game does
 a separate per-pin source and check cache in the launcher's `native/internals-sync/<commit>/` folder,
 never in the normal game or prebuilt target directories. The pin's source must be cached or
 downloadable; an unavailable source is `E_INTERNAL_SOURCE_UNAVAILABLE`, not a fallback to another
-pin. Compiler or catalog errors leave the manifest untouched. Raw listeners retain their generated
-typed constructors; source-routed listeners and support modules are explicitly refused, so their
-manually declared internals cannot be accidentally removed. Use `internals add` for those mods.
+pin. Compiler or catalog errors leave the manifest untouched. Discovery may prepare source and
+metadata-check game dependencies; it does not compile or link a game executable. This separate
+check cache is not a native mod build route. `[[native.state]]` is refused with
+`E_MIXIN_STATE_LAYOUT`; use attachments for per-object mod data.
 
 `internals add` and `update` download the same prebuilt archive layout as the launcher, check its `SHA256SUMS`, and
 read only `internals.json`; no game or mod code is run. Catalogs are kept by commit in
