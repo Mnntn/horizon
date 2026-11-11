@@ -3342,6 +3342,7 @@ mod crafting_remainder_tests {
         ));
         let mut book = ItemStack::new("minecraft:written_book", 1);
         book.data_mut().written = Some(crate::item_data::WrittenBook {
+            resolved: false,
             title: "Original".into(),
             author: "Author".into(),
             generation: 1,

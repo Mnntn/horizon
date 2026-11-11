@@ -590,13 +590,13 @@ fn squid_step(m: &mut Mob, client: bool) {
     } else {
         v[TENTACLE_ANGLE] = v[TENTACLE_MOVEMENT].msin().abs() * PI * 0.25;
         if !client {
-            let yd = if let Some((_, _, amp)) = m
+            let yd = if let Some(effect) = m
                 .extra
                 .effects
                 .iter()
-                .find(|e| e.0 == "minecraft:levitation" || e.0 == "levitation")
+                .find(|e| e.id == "minecraft:levitation" || e.id == "levitation")
             {
-                0.05 * f64::from(amp + 1)
+                0.05 * f64::from(effect.amplifier + 1)
             } else {
                 m.velocity.y - m.gravity()
             };
@@ -1760,7 +1760,7 @@ mod squid_tests {
             squid.no_ai = true;
             squid.tick(
                 w,
-                &mut horizon_core::random::LegacyRandom::new(0),
+                &mut crate::health::TestLevel::new(0).level(),
                 &mut Vec::new(),
             );
             assert_eq!(squid.velocity, Vec3::new(0.0, -0.0784000015258789, 0.0));

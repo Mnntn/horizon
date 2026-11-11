@@ -18,7 +18,7 @@ use std::{
 };
 
 const LAND: u16 = 1;
-const WATER: u16 = 2;
+pub(super) const WATER: u16 = 2;
 const AIR: u16 = 4;
 /// Set in a state's override byte once a mod part answered `isPathfindable` for it.
 const OVERRIDDEN: u8 = 0x80;

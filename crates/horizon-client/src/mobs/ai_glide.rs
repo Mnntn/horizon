@@ -11,7 +11,7 @@ use super::*;
 /// diving keeps at most 1 of its fall. The `ELYTRA_GLIDE` game event of
 /// every 10th tick is not ported here.
 pub(super) fn update_fall_flying(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
-    use horizon_world::player_inventory::EquipmentSlot;
+    use horizon_core::equipment_slot::EquipmentSlot;
     if !m.extra.fall_flying {
         return;
     }
@@ -45,8 +45,8 @@ pub(super) fn update_fall_flying(m: &mut Mob, w: &MobWorld, events: &mut Vec<Mob
     }
 }
 /// `EquipmentSlot`'s serialized name, which `equippable` names its slot by.
-fn glider_slot_name(slot: horizon_world::player_inventory::EquipmentSlot) -> &'static str {
-    use horizon_world::player_inventory::EquipmentSlot as S;
+fn glider_slot_name(slot: horizon_core::equipment_slot::EquipmentSlot) -> &'static str {
+    use horizon_core::equipment_slot::EquipmentSlot as S;
     match slot {
         S::MainHand => "mainhand",
         S::OffHand => "offhand",

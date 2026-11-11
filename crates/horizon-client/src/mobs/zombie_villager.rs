@@ -270,12 +270,12 @@ mod tests {
         map.insert("ConversionTime".into(), Tag::Int(7));
         read_nbt(&mut m, &Tag::Compound(map));
         assert!(is_converting(&m));
-        assert!(m.extra.effects.iter().all(|e| e.0 != "minecraft:weakness"));
+        assert!(m.extra.effects.iter().all(|e| e.id != "minecraft:weakness"));
         assert!(
             m.extra
                 .effects
                 .iter()
-                .any(|e| e.0 == "minecraft:strength" && e.1 == 7)
+                .any(|e| e.id == "minecraft:strength" && e.duration == 7)
         );
     }
     #[test]

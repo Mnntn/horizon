@@ -1159,7 +1159,6 @@ mod tests {
     #[test]
     fn an_invisible_blue_sheep_is_not_wololoed_from_five_blocks() {
         use crate::mobs::world::with_test_world;
-        use horizon_core::random::LegacyRandom;
         let mut outcomes = Vec::new();
         if !with_test_world(&[], |w, _| {
             for invisible in [false, true] {
@@ -1170,7 +1169,11 @@ mod tests {
                 let mut sheep = Mob::new(2, Arc::new(sheep_kind), Vec3::new(5.5, 64.0, 0.5), 0.0);
                 sheep.extra.color = 11;
                 if invisible {
-                    sheep.extra.effects.push(("minecraft:invisibility", 200, 0));
+                    sheep.extra.effects.push(crate::mobs::StoredEffect::new(
+                        "minecraft:invisibility",
+                        200,
+                        0,
+                    ));
                 }
                 let seen = [sheep.seen(None)];
                 let world = crate::mobs::MobWorld {
@@ -1180,11 +1183,11 @@ mod tests {
                 let mut m = evoker(0);
                 m.position = Vec3::new(0.5, 64.0, 0.5);
                 m.ai.goals.add(6, UseSpell::new(Spell::Wololo));
-                let mut lr = LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w: &world,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 };
                 let mut goals = std::mem::take(&mut m.ai.goals);

@@ -1467,11 +1467,11 @@ mod tests {
                 m.position = Vec3::new(8.5, 64.0, 8.5);
                 m.on_ground = true;
                 set_pregnant(&mut m, true);
-                let mut lr = LegacyRandom::new(3);
+                let mut test_level = crate::health::TestLevel::new(3);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 };
                 LaySpawn::lay(&mut m, &mut cx);

@@ -3334,7 +3334,7 @@ mod breeding_variant_tests {
                     }
                     let reward = if !ask_mods && id != "minecraft:fox" {
                         BreedExperience::Drawn(
-                            mob_drops.then(|| expected.next_int_bound(7).unwrap() + 1),
+                            mob_drops.then(|| (expected.next_int_bound(7).unwrap() + 1) as u32),
                         )
                     } else {
                         BreedExperience::Deferred

@@ -25,11 +25,11 @@ fn courtship(mates: &[[f64; 3]]) -> Option<(bool, Option<[i32; 3]>)> {
         let mut m = Mob::new(1, kind.clone(), Vec3::new(0.5, 64.0, 0.5), 0.0);
         m.extra.in_love = 600;
         m.on_ground = true;
-        let mut lr = LegacyRandom::new(0);
+        let mut test_level = crate::health::TestLevel::new(0);
         let mut events = Vec::new();
         let mut cx = Cx {
             w,
-            lr: &mut lr,
+            level: &mut test_level.level(),
             events: &mut events,
         };
         let mut goals = std::mem::take(&mut m.ai.goals);

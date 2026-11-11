@@ -799,23 +799,12 @@ pub fn seen(m: &Mob) -> Seen {
         invisible: m.is_invisible(),
         crouching: m.extra.crouching,
         armor: [
-            m.extra
-                .feet
-                .clone()
-                .or_else(|| m.extra.armor[3].as_ref().map(|s| s.item.clone())),
-            m.extra
-                .legs
-                .clone()
-                .or_else(|| m.extra.armor[2].as_ref().map(|s| s.item.clone())),
-            m.extra
-                .chest
-                .clone()
-                .or_else(|| m.extra.armor[1].as_ref().map(|s| s.item.clone())),
-            m.extra
-                .head
-                .clone()
-                .or_else(|| m.extra.armor[0].as_ref().map(|s| s.item.clone())),
-        ],
+            horizon_items::equipment::FEET,
+            horizon_items::equipment::LEGS,
+            horizon_items::equipment::CHEST,
+            horizon_items::equipment::HEAD,
+        ]
+        .map(|slot| m.extra.slot_id(slot).map(Into::into)),
         gossips: e.map(|e| e.gossips.clone()).unwrap_or_default(),
         last_gossip_time: e.map_or(0, |e| e.last_gossip_time),
         food_points: e.map_or(0, Ext::food_in_inventory),

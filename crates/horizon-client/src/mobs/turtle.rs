@@ -244,7 +244,7 @@ impl Goal for LayEgg {
             let at = [m.position.x, m.position.y, m.position.z];
             // `TurtleLayEggGoal` plays the sound with the level's random, then
             // draws the egg count from the turtle's own.
-            let pitch = 0.9 + cx.lr.next_float() * 0.2;
+            let pitch = 0.9 + cx.level.random().next_float() * 0.2;
             cx.events
                 .push(MobEvent::Sound("entity.turtle.lay_egg", at, 0.3, pitch));
             // Blocks.TURTLE_EGG with EGGS = nextInt(4) + 1 above the sand.
@@ -718,15 +718,15 @@ mod tests {
             m.extra.flag = true;
             m.extra.counter = 201;
             m.random = LegacyRandom::new(7);
-            let mut lr = LegacyRandom::new(11);
-            let mut level = lr.clone();
+            let mut test_level = crate::health::TestLevel::new(11);
+            let mut level = LegacyRandom::new(11);
             let pitch = 0.9_f32 + level.next_float() * 0.2_f32;
             let mut own = m.random.clone();
             let eggs = own.next_int_bound(4).unwrap() + 1;
             let mut events = Vec::new();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut test_level.level(),
                 events: &mut events,
             };
             let mut goal = LayEgg(MoveToBlock {
@@ -764,7 +764,7 @@ mod tests {
                 )),
                 "the new egg posts block_place from the turtle: {events:?}"
             );
-            assert_eq!(lr.state(), level.state());
+            assert_eq!(test_level.level().random().next_int(), level.next_int());
             assert_eq!(m.random.state(), own.state());
         });
         let _ = ran;

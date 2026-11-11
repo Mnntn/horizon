@@ -405,7 +405,6 @@ mod knockback_sync_tests {
     fn an_invisible_player_tempts_a_sulfur_cube_only_within_two_blocks() {
         use crate::mobs::goals::Cx;
         use crate::mobs::world::{test_player, with_test_world};
-        use horizon_core::random::LegacyRandom;
         let mut outcomes = Vec::new();
         if !with_test_world(&[], |w, _| {
             for invisible in [false, true] {
@@ -419,11 +418,11 @@ mod knockback_sync_tests {
                 kind.tempt = Arc::from(vec!["minecraft:iron_ingot".to_string()]);
                 let mut m = Mob::new(1, Arc::new(kind), Vec3::new(0.5, 64.0, 0.5), 0.0);
                 m.ai.goals.add(1, SulfurTempt { player: None });
-                let mut lr = LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w: &world,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 };
                 let mut goals = std::mem::take(&mut m.ai.goals);
@@ -1423,7 +1422,7 @@ impl Goal for SulfurTempt {
             })
         };
         // Attributes.TEMPT_RANGE 8, scaled by visibility (floor 2).
-        let range = (8.0 * p.visibility_percent(Some(m.kind.id.as_str()), cx.w.items)).max(2.0);
+        let range = (8.0 * p.visibility_percent(m.species())).max(2.0);
         let ok = p.alive
             && !p.spectator
             && (wants(&p.main_hand) || wants(&p.off_hand))
