@@ -9,7 +9,7 @@ use mod_api::{
     PayloadContextError, PayloadWork, PayloadWorkStatus, Registrar,
 };
 use std::sync::{
-    Mutex,
+    Mutex, Weak,
     atomic::{AtomicUsize, Ordering},
     mpsc,
 };
@@ -28,7 +28,7 @@ struct Probe {
     mode: Mode,
     events: Producer<NetEvent>,
     receiver: Mutex<Option<Consumer<NetEvent>>>,
-    transport: Mutex<Option<Arc<Transport>>>,
+    transport: Mutex<Weak<Transport>>,
     drops: Arc<AtomicUsize>,
     calls: AtomicUsize,
 }
@@ -55,7 +55,7 @@ impl IPayloadHandler for Probe {
             ctx.server_host(),
             Err(PayloadContextError::WrongThread)
         ));
-        let transport = self.transport.lock().unwrap().as_ref().unwrap().clone();
+        let transport = self.transport.lock().unwrap().upgrade().unwrap();
         for _ in 0..2 {
             let before = self.events.stats().reserved_bytes;
             let result = ctx.enqueue_work(Arc::new(ReentrantWork {
@@ -114,7 +114,9 @@ fn with_case(
     run: impl FnOnce(Arc<Probe>, Incoming, Endpoint, Box<dyn Fn() -> Vec<Vec<u8>>>),
 ) {
     let (events, receiver) = if mode == Mode::Pressure {
-        crate::lan::event_channel_with_capacity(1)
+        crate::lan::event_channel_with_capacity(
+            horizon_mod_runtime::byte_channel::message_overhead::<NetEvent>(),
+        )
     } else {
         crate::lan::event_channel()
     };
@@ -122,7 +124,7 @@ fn with_case(
         mode,
         events,
         receiver: Mutex::new(Some(receiver)),
-        transport: Mutex::new(None),
+        transport: Mutex::new(Weak::new()),
         drops: Arc::default(),
         calls: AtomicUsize::new(0),
     });
@@ -141,7 +143,7 @@ fn with_case(
                 .accept(transport.local.manifest.entries())
                 .unwrap();
             transport.finish_configuration().unwrap();
-            *probe.transport.lock().unwrap() = Some(transport.clone());
+            *probe.transport.lock().unwrap() = Arc::downgrade(&transport);
             let (sender, out) = PlayerSender::payload_executor_test_sender(transport.clone());
             let endpoint = Endpoint::server(sender);
             let incoming = Incoming::new(
