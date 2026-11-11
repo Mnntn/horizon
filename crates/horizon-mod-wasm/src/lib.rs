@@ -9,7 +9,6 @@ mod module_cache;
 #[cfg(test)]
 #[path = "../tests/support/no_hooks.rs"]
 mod no_hooks;
-mod points;
 mod registration_capabilities;
 mod runtime;
 #[allow(
@@ -22,7 +21,6 @@ mod runtime;
 pub(crate) mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
-pub(crate) use runtime::WeakWasmMod;
 pub use runtime::{CallClass, WasmHandler, WasmMod};
 
 pub(crate) trait NoAnswer {
@@ -41,7 +39,7 @@ pub(crate) fn call_refused<E: From<(mod_api::Identifier, String)>>() -> E {
 }
 
 use horizon_mod_package::dependencies;
-use horizon_mod_package::manifest::{Manifest, inject::Access};
+use horizon_mod_package::manifest::Manifest;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -65,7 +63,7 @@ pub enum Refusal {
     Toolchain { found: String, group: String },
     /// A dependency of this mod was refused, so its group can't link.
     DependencyRefused { dependency: String },
-    /// The mod declares engine internals or an engine `access = "internals"` injection.
+    /// The mod declares engine internals.
     Internals,
     /// The package's `mod.wasm` failed its checks.
     Package(String),
@@ -73,8 +71,6 @@ pub enum Refusal {
     Runtime(String),
     /// The mod was compiled against another generated boundary.
     Layout { built: u64, game: u64 },
-    /// The mod's generated point records differ from this game's.
-    PointLayout { built: u64, game: u64 },
     /// The game has no shared Rust standard library beside its executable.
     NoStd,
     /// A running group trapped or exhausted a resource limit.
@@ -106,9 +102,6 @@ impl std::fmt::Display for Refusal {
             Self::Package(why) => write!(f, "{why}"),
             Self::Runtime(why) => write!(f, "{why}"),
             Self::Layout { .. } => write!(f, "built for another version of the mod API"),
-            Self::PointLayout { .. } => {
-                write!(f, "built for another version of the mod points API")
-            }
             Self::NoStd => write!(f, "this game has no wasm standard library member"),
             Self::Stopped => write!(f, "stopped after a trap or resource limit"),
             Self::Busy => write!(f, "its wasm group is busy"),
@@ -135,12 +128,7 @@ fn groups(packages: &[WasmPackage]) -> (Vec<Vec<usize>>, Vec<(String, Refusal)>)
         .collect();
     // Engine internals are native-only. A mod dependency's internals stay inside the group.
     for (i, package) in packages.iter().enumerate() {
-        if !package.manifest.internals.is_empty()
-            || package.manifest.inject.iter().any(|inject| {
-                inject.access == Access::Internals
-                    && package.manifest.mod_point_dependency(&inject.at).is_none()
-            })
-        {
+        if !package.manifest.internals.is_empty() {
             refused.insert(i, Refusal::Internals);
         }
     }
@@ -437,8 +425,7 @@ pub struct Loaded {
 }
 
 impl Loaded {
-    /// Initializes programmatically loaded mods with the final inventory, then installs
-    /// their point listeners. Call once, before sealing the point registry.
+    /// Initializes programmatically loaded mods with the final inventory.
     pub fn initialize(
         &self,
         inventory: &[mod_api::PackageInfo],
@@ -472,7 +459,7 @@ fn initialize_selected<'a>(
     let mut refused = Vec::new();
     for (manifest, module) in modules {
         let result = if initialize_modules(std::slice::from_ref(module), inventory) {
-            points::listen(manifest, module)
+            Ok(())
         } else {
             Err(Refusal::Runtime("initialization failed".into()))
         };
@@ -751,11 +738,6 @@ mod tests {
 
     #[test]
     fn internals_access_refuses_the_mod_and_its_dependents_but_api_access_loads() {
-        let inject = |access: &str| {
-            format!(
-                "[[inject]]\nid = \"stop\"\nat = \"horizon_client::game::server_lifecycle::remember_shutdown\"\nkind = \"head\"\nwith = \"on_stop\"\naccess = \"{access}\"\nhash = \"h\"\n"
-            )
-        };
         let packages = vec![
             package(
                 "deep",
@@ -763,13 +745,14 @@ mod tests {
                 "",
                 'a',
                 "t",
-                &format!(
-                    "[[internals]]\npath = \"Game::world\"\nkind = \"field\"\nhash = \"h\"\n{}",
-                    inject("internals")
-                ),
+                "[[internals]]
+path = \"Game::world\"
+kind = \"field\"
+hash = \"h\"
+",
             ),
             package("user", "1.0.0", "deep = \"^1\"", 'b', "t", ""),
-            package("typed", "1.0.0", "", 'c', "t", &inject("api")),
+            package("typed", "1.0.0", "", 'c', "t", ""),
         ];
         let (groups, refused) = groups(&packages);
         assert_eq!(ids(&packages, &groups), [vec!["typed"]]);

@@ -6,15 +6,7 @@ static ENTITY_POST_CALLS: AtomicU32 = AtomicU32::new(0);
 
 pub mod area_macros;
 pub mod datapack;
-pub mod matrix;
 pub mod projectile_owner;
-pub mod replace;
-pub mod turn;
-pub use matrix::{mirrors, sum_return};
-pub mod shutdown;
-pub use replace::own_average;
-pub use shutdown::on_shutdown;
-pub use turn::turn_angle;
 
 #[derive(Default)]
 pub struct Mod;
@@ -109,12 +101,6 @@ impl Hooks for Mod {
             .build();
         registrar.block_entity_part(&reads, CounterReads).unwrap();
     }
-}
-
-// Only the guest ABI exports reach this fixture function; the bench target does not call it.
-#[allow(dead_code)]
-pub fn on_tick(_: mod_api::HostSide<'_>, args: &mut mod_points::TickArgs) {
-    args.cancel = true;
 }
 
 pub struct Counter;

@@ -1,18 +1,6 @@
 //! The build-tool fixture is a real shared module, not a component.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
-#[path = "fixture/src/matrix.rs"]
-mod matrix;
-#[path = "support/checks.rs"]
-mod matrix_checks;
-#[path = "support/no_hooks.rs"]
-mod no_hooks;
-#[path = "fixture/src/replace.rs"]
-mod replace;
-#[path = "fixture/src/shutdown.rs"]
-mod shutdown;
-#[path = "fixture/src/turn.rs"]
-mod turn;
 use horizon_mod_package::manifest::Package;
 use horizon_mod_wasm::{WasmPackage, load};
 
@@ -95,7 +83,6 @@ fn real_member() {
             "HORIZON_WASM_FIXTURE and HORIZON_WASM_STD must be set: run with the wasm-mods workflow's environment"
         );
     };
-    matrix_checks::baseline();
     let path = std::path::Path::new(&fixture);
     let manifest = Package::read(path).unwrap().manifest;
     let info = mod_api::PackageInfo::new(
@@ -114,9 +101,7 @@ fn real_member() {
     let loaded = load(&std::fs::read(std).unwrap(), vec![package]);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 1);
-    loaded
-        .initialize(&[info])
-        .expect("guest initialization and point registration");
+    loaded.initialize(&[info]).expect("guest initialization");
     mod_api::testing::with_mods(loaded.mods.into(), || {
         mod_api::__private::install_parts(
             mod_api::__private::mods(),
@@ -176,61 +161,4 @@ fn real_member() {
             Some(&mod_api::Tag::Int(17))
         );
     });
-    mod_points::__private::seal();
-    matrix_checks::check();
-    let mut args = mod_points::TickArgs::__new();
-    mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
-    assert!(
-        args.cancel,
-        "real wasm listener must modify the point record"
-    );
-    // The real point's expansion: its `&mut` place copied in and out of the wasm listener's
-    // record, its by-value message changed, and its cancel skipping the body.
-    // The guest built `shutdown::on_shutdown`, the source `native_listener` registers natively.
-    let _: mod_points::listeners::GameServerLifecycleRememberShutdownListener =
-        shutdown::on_shutdown;
-    for (before, message, after) in shutdown::CASES {
-        let mut failure = before.map(String::from);
-        remember_shutdown(&mut failure, message.into());
-        assert_eq!(failure.as_deref(), after, "{message}");
-    }
-    // The guest's `replace` (`replace::own_average`, emitted through `mod_points::replace!`):
-    // its value reaches the caller across the boundary, and the body never runs.
-    let _: fn(&mut mod_points::GameBeaconAverageArgs) -> u32 = replace::own_average;
-    for (a, b, value) in replace::CASES {
-        assert_eq!(average(a, b), value, "{a} {b}");
-    }
-    // The guest's head listener (`turn::turn_angle`): the body runs with its argument.
-    let _: mod_points::listeners::GameCommandsWrapDegreesListener = turn::turn_angle;
-    for (angle, wrapped) in turn::CASES {
-        assert_eq!(wrap_degrees(angle), wrapped, "{angle}");
-    }
-}
-
-/// `horizon_client::game::commands::wrap_degrees` (`Mth.wrapDegrees`), as the staging pass
-/// marks it.
-#[horizon_mod_api_macros::point(name = "game_commands_wrap_degrees", free)]
-fn wrap_degrees(angle: f32) -> f32 {
-    let wrapped = angle % 360.0;
-    if wrapped >= 180.0 {
-        wrapped - 360.0
-    } else if wrapped < -180.0 {
-        wrapped + 360.0
-    } else {
-        wrapped
-    }
-}
-
-/// `horizon_client::game::beacon::average`, as the staging pass marks it.
-#[horizon_mod_api_macros::point(name = "game_beacon_average", free)]
-fn average(a: u32, b: u32) -> u32 {
-    panic!("a replaced body ran: {a} {b}")
-}
-
-/// `horizon_client::game::server_lifecycle::remember_shutdown`, as the staging pass marks it.
-#[horizon_mod_api_macros::point(name = "game_server_lifecycle_remember_shutdown", free)]
-fn remember_shutdown(failure: &mut Option<String>, message: String) {
-    if failure.is_none() {
-        *failure = Some(message);
-    }
 }

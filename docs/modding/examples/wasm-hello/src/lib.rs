@@ -7,7 +7,6 @@ use mod_api::{
     Registrar, RegistrationContext, ServerChatEvent, ServerHost, StateConstraint, Text,
     UseItemEvent,
 };
-use mod_points::TickArgs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Default)]
@@ -30,7 +29,8 @@ impl ItemPart for Stick {
     ) -> Option<mod_api::InteractionResult> {
         if let HostSide::Server(host) = host {
             let item = event.stack.item().id(host);
-            host.messages()
+            let _ = host
+                .messages()
                 .broadcast(Text::literal(format!("a {item} was used")));
         }
         None
@@ -39,6 +39,21 @@ impl ItemPart for Stick {
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn server_tick(&self, host: &mut dyn ServerHost, event: &mut mod_api::ServerTickEvent<'_>) {
+        if !matches!(
+            event.phase,
+            mod_api::ServerTickPhase::ServerTickStart { .. }
+        ) {
+            return;
+        }
+        let ticks = TICKS.fetch_add(1, Ordering::Relaxed) + 1;
+        if ticks % 200 == 0 {
+            let _ = host
+                .messages()
+                .broadcast(Text::literal(format!("hello_wasm: {ticks} server ticks")));
+        }
+    }
+
     fn register(&self, registrar: &mut dyn Registrar, _cx: &RegistrationContext) {
         let item = registrar.item_key("minecraft:stick");
         registrar.item_part(item, Stick);
@@ -140,16 +155,4 @@ impl Hooks for Mod {
 
 static TICKS: AtomicU64 = AtomicU64::new(0);
 
-/// Listens at the game's tick, a point its `horizon-mod.toml` names: every 200 server ticks it
-/// says so in chat.
-pub fn tick(host: HostSide<'_>, _args: &mut TickArgs) {
-    let HostSide::Server(host) = host else { return };
-    let ticks = TICKS.fetch_add(1, Ordering::Relaxed) + 1;
-    if ticks % 200 == 0 {
-        host.messages()
-            .broadcast(Text::literal(format!("hello_wasm: {ticks} server ticks")));
-    }
-}
-#[cfg(target_arch = "wasm32")]
-include!(concat!(env!("OUT_DIR"), "/guest_injects.rs"));
 // ANCHOR_END: mod

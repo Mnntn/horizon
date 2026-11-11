@@ -1,7 +1,6 @@
 //! Cargo owns the group's crate graph. Each mod unit emits both its exact rlib and PIC member.
 use super::*;
 use std::collections::BTreeMap;
-mod points;
 
 struct Member {
     root: PathBuf,
@@ -9,8 +8,6 @@ struct Member {
     manifest: toml_edit::DocumentMut,
     krate: String,
     package: String,
-    registrations: String,
-    points: String,
 }
 
 fn copy(source: &Path, destination: &Path) -> Result<(), String> {
@@ -166,7 +163,7 @@ fn mod_dependencies(
 
 pub(super) fn build(
     root: &Path,
-    catalog: Option<&Path>,
+    _catalog: Option<&Path>,
     additional: &[PathBuf],
 ) -> Result<(), String> {
     let root = dunce::canonicalize(root).map_err(|e| e.to_string())?;
@@ -223,8 +220,6 @@ pub(super) fn build(
             krate: lib_name(package).ok_or("mod has no library")?,
             package: package["name"].as_str().ok_or("no package name")?.into(),
             manifest,
-            registrations: String::new(),
-            points: String::new(),
         });
     }
     let mut needed = std::collections::BTreeSet::new();
@@ -294,51 +289,15 @@ pub(super) fn build(
     for member in &members {
         std::fs::create_dir_all(&member.stage).map_err(|e| e.to_string())?;
     }
-    // The `mod_api` types a mod point's `api` record may hold, as the game's catalog lists them.
-    let wire: std::collections::BTreeSet<String> = match catalog {
-        Some(path) => {
-            let text =
-                std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let json: Value =
-                serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-            match json.get("wire") {
-                // No list: a mod point record holds no `mod_api` type.
-                None => Default::default(),
-                Some(wire) => serde_json::from_value(wire.clone())
-                    .map_err(|e| format!("{}: wire: {e}", path.display()))?,
-            }
-        }
-        None => Default::default(),
-    };
-    let point_registrations = points::prepare(&mut members, &wire, catalog)?;
     let mut configs = serde_json::Map::new();
     let mut features = Vec::new();
-    let mut point_names = std::collections::BTreeSet::<String>::new();
-    for (member, point_registration) in members.iter().zip(&point_registrations) {
+    for member in &members {
         copy(&member.root, &member.stage)?;
-        // Every member crate gets its own points (#2339), listed in the package it builds.
-        let points = horizon_mod_api_gen::points::mod_crate::stage_mod(&member.stage, &wire)?;
-        std::fs::write(
-            member
-                .root
-                .join(horizon_mod_package::manifest::inject::mod_points::FILE),
-            serde_json::to_string_pretty(&points).map_err(|e| e.to_string())? + "\n",
-        )
-        .map_err(|e| e.to_string())?;
         let path = member.stage.join("Cargo.toml");
         let mut cargo: toml_edit::DocumentMut = std::fs::read_to_string(&path)
             .map_err(|e| e.to_string())?
             .parse()
             .map_err(|e| format!("Cargo.toml: {e}"))?;
-        let lib = cargo
-            .get("lib")
-            .and_then(|lib| lib.get("path"))
-            .and_then(|p| p.as_str())
-            .unwrap_or("src/lib.rs");
-        let lib = member.stage.join(lib);
-        let mut source = std::fs::read_to_string(&lib).map_err(|e| e.to_string())?;
-        source.push_str(point_registration);
-        std::fs::write(lib, source).map_err(|e| e.to_string())?;
         // Expand workspace inheritance before moving this package into the group workspace.
         let member_metadata = metadatas
             .iter()
@@ -430,9 +389,7 @@ pub(super) fn build(
         cargo["lib"]["crate-type"] =
             toml_edit::value(["rlib", "cdylib"].into_iter().collect::<toml_edit::Array>());
         std::fs::write(path, cargo.to_string()).map_err(|e| e.to_string())?;
-        let (registrations, points) = (&member.registrations, &member.points);
-        point_names.extend(serde_json::from_str::<Vec<String>>(points).map_err(|e| e.to_string())?);
-        configs.insert(member.package.clone(), serde_json::json!({"id":member.manifest["id"].as_str(), "version":member.manifest["version"].as_str(), "stage":member.stage, "registrations":registrations,"points":points,"provided":crates.iter().filter(|c| **c != member.krate).map(String::as_str).collect::<Vec<_>>().join(",")}));
+        configs.insert(member.package.clone(), serde_json::json!({"id":member.manifest["id"].as_str(), "version":member.manifest["version"].as_str(), "stage":member.stage,"provided":crates.iter().filter(|c| **c != member.krate).map(String::as_str).collect::<Vec<_>>().join(",")}));
         if let Some(deps) = member
             .manifest
             .get("dependencies")
@@ -498,10 +455,6 @@ pub(super) fn build(
     workspace["workspace"]["resolver"] = toml_edit::value("3");
     std::fs::write(stage.join("Cargo.toml"), workspace.to_string()).map_err(|e| e.to_string())?;
     let mut command = cargo_command("build", "member", &stage, &target, &toolchain)?;
-    command.env(
-        "HORIZON_POINT_NAMES",
-        serde_json::to_string(&point_names).map_err(|e| e.to_string())?,
-    );
     command.arg("--workspace").env(
         "HORIZON_GROUP_WRAPPER",
         serde_json::to_string(&configs).map_err(|e| e.to_string())?,
@@ -566,14 +519,6 @@ pub(super) fn build(
         let mut wasm = toml_edit::Table::new();
         wasm["sha512"] = toml_edit::value(&hashes[&id]);
         wasm["toolchain"] = toml_edit::value(&toolchain.version);
-        // Binds the catalog the build listed to the package (#2339).
-        let points = std::fs::read(
-            member
-                .root
-                .join(horizon_mod_package::manifest::inject::mod_points::FILE),
-        )
-        .map_err(|e| e.to_string())?;
-        wasm["points"] = toml_edit::value(sha512_of(&points));
         for dep in dependencies {
             let Some(hash) = hashes.get(&dep) else {
                 continue;
@@ -632,25 +577,12 @@ pub fn rustc(mut args: Vec<String>) -> Result<(), String> {
             .display()
     ));
     let mut command = Command::new(compiler);
-    command
-        .env_remove("HORIZON_GUEST_REGISTRATIONS")
-        .env_remove("HORIZON_POINT_NAMES")
-        .env_remove(PROVIDED_ENV);
+    command.env_remove(PROVIDED_ENV);
     if config.is_object() && args.iter().any(|a| a == "cdylib") {
-        command
-            .env("HORIZON_GROUP_PACKAGE", &package)
-            .env(
-                "HORIZON_GUEST_REGISTRATIONS",
-                config["registrations"].as_str().ok_or("no registrations")?,
-            )
-            .env(
-                "HORIZON_POINT_NAMES",
-                config["points"].as_str().ok_or("no points")?,
-            )
-            .env(
-                PROVIDED_ENV,
-                config["provided"].as_str().ok_or("no provided crates")?,
-            );
+        command.env("HORIZON_GROUP_PACKAGE", &package).env(
+            PROVIDED_ENV,
+            config["provided"].as_str().ok_or("no provided crates")?,
+        );
         // Cargo's default disambiguator includes the staging package path. A mod's stable
         // identity must instead agree when its author and its dependents build separately.
         let mut index = 0;
@@ -686,10 +618,6 @@ pub fn rustc(mut args: Vec<String>) -> Result<(), String> {
         // The group rejects symbol overrides: export this unit without making its own
         // vtables and statics preemptible through self-imported GOT entries.
         args.push("-Zdefault-visibility=protected".into());
-        args.push(format!(
-            "--cfg=horizon_guest_registration=\"{}\"",
-            sha512_of(format!("{}{}", config["registrations"], config["points"]).as_bytes())
-        ));
     }
     let status = command.args(args).status().map_err(|e| e.to_string())?;
     if status.success() {
