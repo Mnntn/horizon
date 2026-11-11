@@ -164,7 +164,10 @@ impl Catalog {
             .collect()
     }
 
-    pub(super) fn log_raw(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), String> {
+    pub(super) fn log_mixins(
+        &self,
+        manifest: &horizon_mod_package::Manifest,
+    ) -> Result<(), String> {
         if !manifest.mixin.is_empty() {
             super::append_log(&crate::i18n::trf(
                 "{mod}: mixins compile game code",
@@ -174,8 +177,7 @@ impl Catalog {
         Ok(())
     }
 
-    /// Discovery opens the staged view, not the production declaration boundary. Keep the
-    /// exact raw constructors from the normal facade; they are not internal-use declarations.
+    /// Discovery opens the staged view, not the production declaration boundary.
     fn discovery_facade(&self, manifest: &horizon_mod_package::Manifest) -> Result<Facade, Error> {
         let mut manifest = manifest.clone();
         manifest.internals.clear();
@@ -415,7 +417,11 @@ mod tests {
     #[test]
     fn reads_and_pins_only_declared_internals() {
         let (dir, bundle, catalog) = fixture("pins");
-        fs::write(dir.join(INTERNALS), serde_json::to_string(&catalog.internals).unwrap()).unwrap();
+        fs::write(
+            dir.join(INTERNALS),
+            serde_json::to_string(&catalog.internals).unwrap(),
+        )
+        .unwrap();
         let read = Catalog::read(&dir).unwrap();
         let mut manifest = bundle.manifest.clone();
         manifest.internals[0].hash = None;

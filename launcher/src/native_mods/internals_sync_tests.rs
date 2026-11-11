@@ -96,7 +96,6 @@ fn pinned_module_catalog_uses_canonical_paths_and_fresh_source_twice() {
             assert_eq!(bytes, previous);
         }
         previous = Some(bytes);
-        let bundle = super::super::bundle_in(&fixture.folder).unwrap().unwrap();
     }
     assert_eq!(calls.get(), 2);
     assert_eq!(

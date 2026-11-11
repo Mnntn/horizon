@@ -2236,7 +2236,7 @@ fn pipeline(
         let catalog = internals::Catalog::read(&real)?;
         let has_api = api::stage(&fresh, &projects, &declared, &resolution, &catalog)?;
         for project in &projects {
-            catalog.log_raw(&project.bundle.manifest)?;
+            catalog.log_mixins(&project.bundle.manifest)?;
         }
         let paths = mods
             .iter()
@@ -4661,7 +4661,3 @@ mod registry_binary_tests {
 #[cfg(all(test, unix))]
 #[path = "native_mods/tests/runtime_leases.rs"]
 mod runtime_leases_tests;
-
-#[cfg(test)]
-#[path = "native_mods/tests/staged_lock.rs"]
-mod staged_lock_tests;

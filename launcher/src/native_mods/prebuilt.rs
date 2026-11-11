@@ -469,7 +469,7 @@ pub(super) fn compile(
         .prepare(projects.iter().map(|project| &project.bundle.manifest))
         .map_err(|e| e.to_string())?;
     for project in projects {
-        catalog.log_raw(&project.bundle.manifest)?;
+        catalog.log_mixins(&project.bundle.manifest)?;
     }
     let _ = fs::remove_dir_all(out);
     fs::create_dir_all(out).map_err(|e| e.to_string())?;
