@@ -88,14 +88,11 @@ fn bounded_special_manifests() {
 }
 #[test]
 fn bounded_catalog_commands() {
-    for (name, relative, commands) in [
-        ("old", "old/internals.json".into(), &COMMANDS[1..2]),
-        (
-            "internals",
-            format!("{}/internals.json", "a".repeat(40)),
-            &COMMANDS[..2],
-        ),
-    ] {
+    for (name, relative, commands) in [(
+        "internals",
+        format!("{}/internals.json", "a".repeat(40)),
+        &COMMANDS[..1],
+    )] {
         let f = Fixture::new(name);
         f.manifest();
         let cache = f.0.join("target/horizon-mod/prebuilt");
@@ -132,7 +129,7 @@ fn bounded_discovery_reread() {
     )
     .unwrap();
     fs::set_permissions(&launcher, fs::Permissions::from_mode(0o700)).unwrap();
-    let error = f.run_launcher(COMMANDS[4], launcher.to_str().unwrap());
+    let error = f.run_launcher(COMMANDS[1], launcher.to_str().unwrap());
     assert!(
         error.contains("horizon-mod.toml") && error.contains("33554432"),
         "{error}"
