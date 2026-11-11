@@ -21,6 +21,19 @@ pub(super) fn compile(
     resolution: &dependencies::Resolution,
     options: Options<'_>,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
+    // Function replacement compiles its patch library against the mods' rlibs, which this
+    // route leaves to Cargo; until it builds the patch library too, it refuses rather than
+    // drop the rows.
+    if let Some(project) = projects
+        .iter()
+        .find(|project| project.bundle.needs_mixins())
+    {
+        return Err(format!(
+            "E_MIXIN_REGISTRY_DEPS: {}: a mod with crates.io dependencies can't carry \
+             `[[native.mixin]]`, bridge, module or state tables yet",
+            project.bundle.manifest.id
+        ));
+    }
     let sdk = prebuilt::identity(game)?;
     let lock = sdk.registry_lock.as_ref().ok_or("The prebuilt SDK does not declare a locked registry graph; install an SDK that supports registry-bearing native mods")?;
     let links = sdk.native_links.as_ref().ok_or("The prebuilt SDK does not declare native library providers; registry-bearing mods cannot be linked safely")?;

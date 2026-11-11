@@ -31,6 +31,7 @@ mod registry_runtime;
 mod registry_rustc;
 pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
 mod isolate;
+mod mixins_patch;
 mod package;
 mod patch;
 mod picker;

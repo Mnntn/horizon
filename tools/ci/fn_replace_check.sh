@@ -15,6 +15,7 @@ root=$(git rev-parse --show-toplevel)
 # The game revision is the SDK's: its source is what a patched function is copied out of.
 revision=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['commit'])" "$2/horizon-prebuilt.json")
 mixins=$(sed -n 's/^pub const MIXINS_REV: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/index/native.rs")
+archive=$(sed -n 's/^pub const PREBUILT_ARCHIVE: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/index/native.rs")
 
 # FNR_KEEP=1 keeps the launcher's folder (toolchain, horizon-mixins, source): a warm build.
 if [ -n "${FNR_KEEP:-}" ]; then rm -rf "$scratch/mods" "$scratch/engine" "$scratch/run"; else rm -rf "$scratch"; fi
@@ -33,7 +34,7 @@ printf '%s' "$revision" > "$source/.horizon-revision"
 # The prebuilt game, where the launcher keeps a downloaded one.
 host=$(rustc -vV | sed -n 's/^host: //p')
 mkdir -p "$data/native/prebuilt"
-cp -a "$sdk" "$data/native/prebuilt/$revision-horizon-prebuilt-v3-$host-server"
+cp -a "$sdk" "$data/native/prebuilt/$revision-$archive$host-server"
 
 base=$data/versions/ci
 mkdir -p "$base/.local/horizon-client/26.3"
