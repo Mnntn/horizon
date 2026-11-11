@@ -11,6 +11,7 @@ launcher=$(realpath "$1")
 sdk=$(realpath "$2")
 scratch=$3
 resources=${4:-}
+if [ -n "$resources" ]; then resources=$(realpath "$resources"); fi
 root=$(git rev-parse --show-toplevel)
 # The game revision is the SDK's: its source is what a patched function is copied out of.
 revision=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['commit'])" "$2/horizon-prebuilt.json")
