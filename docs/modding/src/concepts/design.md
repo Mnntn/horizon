@@ -212,24 +212,9 @@ A wasm mod keeps running on a newer game while the hooks it imports are unchange
 always builds for `wasm32-unknown-unknown`: a hook that needs an engine type takes a plain-data type of the
 API's own, converted on the game side.
 
-## Injections stay, and the API comes first
+## Native game code changes
 
-## The order of the build route
-
-Compiling a native mod against a game already built is the route that makes native mods cheap, and each step
-rests on the one before:
-
-1. **The prebuilt game.** The game as a dylib with its metadata, built daily and published as prerelease
-   builds, so a native mod compiles against it instead of rebuilding the game.
-2. **Slots.** `[[inject]]` listeners fill compiled points without compiling game code.
-   A missing slot is refused, including on native.
-3. **The internals tier.** A per-mod declared list of game internals the prebuilt game exposes. It is native
-   only and logged, and each internal a mod needs is a request for an API.
-4. **Wasm points.** API `[[inject]]` listeners use the same records on native and wasm.
-   Engine internals and listed call sites are native only.
-
-A native mod that needs a supported source edit uses [mixins](../mixins.md),
-which compile game code. An inject never falls back to one.
+Hooks and Parts are the common API for native and wasm mods. Native mods can also use [function-replacement mixins](../mixins.md). The launcher compiles patched functions against the pinned prebuilt game without rebuilding it. Declare engine internals explicitly. Wasm mods use hooks and Parts only.
 
 ## No telemetry
 
