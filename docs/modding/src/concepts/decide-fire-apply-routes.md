@@ -132,7 +132,6 @@ cargo test -p horizon-client-lib --lib dfa_baseline_ -- --include-ignored
 ```
 
 The sources live under horizon-client, but `client_lib.rs` owns the `menu` module and its unit tests.
-Tests were not compiled or run during this review, as requested.
 
 ## Vanilla evidence
 
@@ -168,7 +167,7 @@ status; the matching/empty-slot branches were cross-checked with JDK `javap -c -
 | `MerchantContainer.updateSellItem` | Uses the second payment as the first matching candidate when the first is empty (without swapping stored slots); with nothing to pay it clears the result and future experience, otherwise matches an offer against the payments (retrying with them swapped), writes the result and its experience unless the offer is out of stock, and tells the client whether a result exists. | complete |
 | `MerchantResultSlot.onTake` | Check-take achievements first, then for the active offer takes the payment in either order, tells the merchant, awards the trade statistic, writes the shrunken payments back and adds the offer's experience to the villager. | complete |
 | `MerchantMenu.tryMoveItems` | Ignores an out-of-range index, sends each payment stack back to inventory slots 3..39 and gives up if one does not fit, then fills the payment slots from the selected offer's costs once both are empty. | complete |
-| `MerchantMenu.removed` | Calls the base `removed` first, clears the trading player, returns on the client, and on the server for a living connected player drops the two payment stacks. | smali (Java body unavailable) |
+| `MerchantMenu.removed` | Calls the base `removed` first, clears the trading player, returns on the client, and on the server drops the two payment stacks for a dead or disconnected player, or returns them to inventory for a living connected server player. | smali (Java body unavailable) |
 | `ServerPlaceRecipe.placeRecipe` | Two overloads. The menu overload first answers `PostPlaceAction.NOTHING` when the grid cannot be cleared and dropping is disallowed; otherwise it gathers inventory/grid contents and calls `tryPlaceRecipe`, returning its `RecipeBookMenu.PostPlaceAction`. The private one takes the recipe and the stacked contents and places after checking the grid stacks can still grow. | both complete |
 | `LivingEntity.onClimbable` | Spectators and gliding entities inside glide-through blocks are refused; a block in the climbable tag, or a usable trapdoor over a ladder, is accepted and its position remembered; otherwise false. | complete |
 
