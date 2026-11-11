@@ -110,5 +110,5 @@ fn module_free_add_commands_keep_prebuilt_output_and_never_run_launcher() {
     let prebuilt_text: toml::Value =
         toml::from_str(&fs::read_to_string(prebuilt.root.join("horizon-mod.toml")).unwrap())
             .unwrap();
-}
+    assert_eq!(declared, prebuilt_text);
 }
