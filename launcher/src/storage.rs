@@ -91,10 +91,6 @@ pub(crate) fn mark_used(path: &Path) -> Result<(), Error> {
 /// Fixed build-home caches. Instance and version inventory adds its protected entries separately.
 #[derive(Clone, Copy, Debug)]
 pub enum BuildCache {
-    Stage,
-    PendingStage,
-    NewStage,
-    Patched,
     Source,
     Tools,
     PrebuiltOutput,
@@ -109,10 +105,6 @@ pub enum BuildCache {
 impl BuildCache {
     fn relative(self) -> &'static str {
         match self {
-            Self::Stage => "native/stage",
-            Self::PendingStage => "native/stage.pending",
-            Self::NewStage => "native/stage.new",
-            Self::Patched => "native/patched",
             Self::Source => "native/source",
             Self::Tools => "native/tools",
             Self::PrebuiltOutput => "native/prebuilt-build",

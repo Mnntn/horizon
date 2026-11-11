@@ -268,46 +268,6 @@ impl Launcher {
         )
     }
 
-    /// The selected instance's saved preference, also offered by a needed Mods picker.
-    fn native_mods_row(&mut self, cx: &mut Context<Self>) -> Div {
-        let t = self.theme;
-        let profile = self.native_profile();
-        let picker = segments(
-            "settings-native-profile",
-            &[
-                (native_mods::Profile::Optimized, "Optimized"),
-                (native_mods::Profile::Balanced, "Balanced"),
-            ],
-            profile,
-            &t,
-            {
-                let this = cx.entity().downgrade();
-                move |choice, _, cx| {
-                    let _ = this.update(cx, |this, cx| {
-                        this.choose_native_profile(choice);
-                        cx.notify();
-                    });
-                }
-            },
-        );
-        let said = crate::build_mode::mode_note(profile);
-        let instance = self
-            .selected_instance()
-            .map_or(tr("Default"), |i| i.name.as_str());
-        ui::setting_row(
-            tr("Native mods"),
-            Some(
-                div()
-                    .child(trf(
-                        "Build-mode preference for {instance}. {detail}",
-                        &[("instance", instance), ("detail", said)],
-                    ))
-                    .into_any_element(),
-            ),
-            Some(picker.into_any_element()),
-        )
-    }
-
     /// Updates' two tiles (the mockup's `AboutTile`s): Horizon and its update, the launcher and its
     /// own.
     fn update_tiles(
@@ -442,8 +402,7 @@ impl Launcher {
         let game = card()
             .child(self.game_architecture_row(n, cx))
             .child(self.game_args_row(n + 1, cx))
-            .child(self.mods_auto_update_row(cx))
-            .child(self.native_mods_row(cx));
+            .child(self.mods_auto_update_row(cx));
         let ai = card()
             .child(self.no_ai_row(n, cx))
             .children(self.agents_section(cx));

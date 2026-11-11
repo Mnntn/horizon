@@ -170,10 +170,6 @@ fn root_replacement_cannot_redirect_sweep() {
 #[test]
 fn child_cargo_locks_prevent_clear_and_survive_idle_cleanup() {
     for (cache, expected) in [
-        (BuildCache::Stage, "native/stage"),
-        (BuildCache::PendingStage, "native/stage.pending"),
-        (BuildCache::NewStage, "native/stage.new"),
-        (BuildCache::Patched, "native/patched"),
         (BuildCache::Source, "native/source"),
         (BuildCache::Tools, "native/tools"),
         (BuildCache::PrebuiltOutput, "native/prebuilt-build"),

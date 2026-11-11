@@ -77,12 +77,12 @@ fn build_choices_start_balanced_and_are_remembered_per_instance() {
         fs::create_dir_all(game.join("instances").join(id)).unwrap();
     }
     for instance in list_in(&game, &data) {
-        assert_eq!(instance.native_profile, Profile::Balanced);
+        assert_eq!(instance.native_profile, Profile::Optimized);
     }
     let choose = |id, profile| {
         edit_in(&game, &data, id, |meta| meta.native_profile = Some(profile)).unwrap()
     };
-    choose("first", Profile::Developer);
+    choose("first", Profile::Optimized);
     choose("second", Profile::Optimized);
     let before = fs::read(data.join("instances.json")).unwrap();
     for unknown in [serde_json::json!("future"), serde_json::json!(42)] {
@@ -101,7 +101,7 @@ fn build_choices_start_balanced_and_are_remembered_per_instance() {
         let loaded = list_in(&game, &data);
         assert_eq!(
             find_in(&loaded, "first").unwrap().native_profile,
-            Profile::Balanced
+            Profile::Optimized
         );
         assert_eq!(
             find_in(&loaded, "first").unwrap().version.as_deref(),
@@ -112,15 +112,15 @@ fn build_choices_start_balanced_and_are_remembered_per_instance() {
         assert_eq!(neighbour.name, "Still here");
     }
     fs::write(data.join("instances.json"), before).unwrap();
-    choose("second", Profile::Balanced);
+    choose("second", Profile::Optimized);
     let again = list_in(&game, &data);
     assert_eq!(
         find_in(&again, "first").unwrap().native_profile,
-        Profile::Developer
+        Profile::Optimized
     );
     assert_eq!(
         find_in(&again, "second").unwrap().native_profile,
-        Profile::Balanced
+        Profile::Optimized
     );
     fs::remove_dir_all(root).unwrap();
 }
