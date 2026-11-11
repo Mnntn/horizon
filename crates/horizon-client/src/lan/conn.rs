@@ -6,6 +6,7 @@
 //! network threads ([`io_pool`]): they forward decoded packets to the game
 //! thread, frame, compress and encrypt what the game queues, and keep the
 //! keep-alive schedule on their own so a long tick never times a client out.
+use super::config_payloads::ConfigIo;
 use super::{
     Joined, NetEvent, Out, Shared,
     data::{CORE_PACK, SyncData},
@@ -1114,9 +1115,17 @@ fn login_and_configure(
     }
     c.reader.set_read_timeout(Some(READ_TIMEOUT)).map_err(e)?;
     // Configuration.
+    let payload_transport = Transport::new(shared.payload_local.clone(), Side::Server);
+    let mut config_io =
+        ConfigIo::new(c, payload_transport.clone(), shared.events.clone()).map_err(e)?;
+    let c = &mut config_io;
     let sync_data = shared.sync();
     let sync: &SyncData = &sync_data;
-    let send = |c: &mut Connection, p: cfg::Clientbound| {
+    let send = |c: &mut ConfigIo<'_>, p: cfg::Clientbound| {
+        if let cfg::Clientbound::Disconnect(packet) = p {
+            c.disconnect(packet.reason);
+            return Ok(());
+        }
         p.try_encode().and_then(|body| c.send(&body)).map_err(e)
     };
     send(
@@ -1148,7 +1157,6 @@ fn login_and_configure(
             features: sync.features.clone(),
         }),
     )?;
-    let payload_transport = Transport::new(shared.payload_local.clone(), Side::Server);
     let mut payload_negotiation = horizon_protocol::payload_negotiation::Negotiation::new(
         payload_transport.local.manifest.clone(),
     );
@@ -1223,6 +1231,9 @@ fn login_and_configure(
                     .finish_without_offer()
                     .map_err(|e| e.to_string())
                     .and_then(|()| {
+                        if payload_transport.epoch().is_some() {
+                            return Ok(());
+                        }
                         payload_transport.accept(payload_negotiation.accepted().unwrap_or_default())
                     });
                 if let Err(error) = admission {
@@ -1393,6 +1404,11 @@ fn login_and_configure(
         lost(shared, &format!("{name} ({})", uuid_string(uuid)), &text);
         return Ok(None);
     }
+    if let Some(epoch) = payload_transport.epoch()
+        && !epoch.wait_main()
+    {
+        return Err("configuration payload epoch ended".into());
+    }
     send(c, cfg::Clientbound::FinishConfiguration(Empty))?;
     loop {
         let (id, payload) = c.recv().map_err(e)?;
@@ -1413,6 +1429,7 @@ fn login_and_configure(
         }
     }
     payload_transport.finish_configuration()?;
+    c.finish()?;
     Ok(Some(Parts {
         payload_transport,
         uuid,
@@ -1424,7 +1441,7 @@ fn login_and_configure(
 }
 
 fn send_payload_control(
-    c: &mut Connection,
+    c: &mut ConfigIo<'_>,
     control: horizon_protocol::payload_negotiation::Control,
 ) -> Result<(), String> {
     c.send(
@@ -1436,16 +1453,16 @@ fn send_payload_control(
     )
     .map_err(|e| e.to_string())
 }
-fn payload_disconnect(c: &mut Connection, error: String) -> String {
+fn payload_disconnect(c: &mut ConfigIo<'_>, error: String) -> String {
     let reason = horizon_core::nbt::Tag::String(error.as_str().into());
-    let _ = c.send(&cfg::Clientbound::Disconnect(cfg::Disconnect { reason }).encode());
+    c.disconnect(reason);
     error
 }
 
 /// Consume transport metadata in every configuration receive loop. Application
 /// payloads stay ordered for the configuration dispatcher (not implemented here).
 fn receive_configuration(
-    c: &mut Connection,
+    c: &mut ConfigIo<'_>,
     id: i32,
     bytes: &[u8],
     transport: &Transport,
@@ -1467,6 +1484,11 @@ fn receive_configuration(
                 .accept(accepted)
                 .map_err(|e| payload_disconnect(c, e))?;
         }
+        return Ok(None);
+    }
+    if let cfg::Serverbound::CustomPayload(payload) = &packet
+        && c.application(payload.clone())?
+    {
         return Ok(None);
     }
     Ok(Some(packet))
@@ -1575,7 +1597,7 @@ fn rate_exceeded(shared: &Shared, average: f32) -> (horizon_core::nbt::Tag, Stri
 /// ServerConfigurationPacketListenerImpl.tick does. The id of a required
 /// pack the client declined, which disconnects it.
 fn offer_pack(
-    c: &mut Connection,
+    c: &mut ConfigIo<'_>,
     pack: &crate::server::properties::ResourcePackInfo,
     info: &mut ClientInformation,
     transport: &Transport,
@@ -1611,7 +1633,7 @@ fn offer_pack(
 /// configuration first is `finishCurrentTask` of the wrong task type, an
 /// error that drops the connection.
 fn accept_code_of_conduct(
-    c: &mut Connection,
+    c: &mut ConfigIo<'_>,
     text: &str,
     info: &mut ClientInformation,
     transport: &Transport,
@@ -1638,13 +1660,47 @@ fn accept_code_of_conduct(
 /// keep-alive every `KEEP_ALIVE_EVERY` meanwhile
 /// (ServerConfigurationPacketListenerImpl.tick).
 fn wait_alive<T>(
-    c: &mut Connection,
+    c: &mut ConfigIo<'_>,
     transport: &Transport,
     negotiation: &mut horizon_protocol::payload_negotiation::Negotiation,
     mut answer: impl FnMut(Result<cfg::Serverbound, String>) -> Option<Result<T, String>>,
 ) -> Result<T, String> {
+    if let Some(sender) = c.sender.clone() {
+        return std::thread::scope(|scope| {
+            let (stop, stopped) = channel::<()>();
+            scope.spawn(move || {
+                let start = Instant::now();
+                while stopped.recv_timeout(KEEP_ALIVE_EVERY) == Err(RecvTimeoutError::Timeout) {
+                    let id = i64::try_from(start.elapsed().as_millis()).unwrap_or(0);
+                    if sender
+                        .send_packet(&cfg::Clientbound::KeepAlive(cfg::KeepAlive { id }).encode())
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+            let result = loop {
+                let (id, payload) = match c.recv() {
+                    Ok(packet) => packet,
+                    Err(e) => break Err(e.to_string()),
+                };
+                let packet = match receive_configuration(c, id, &payload, transport, negotiation) {
+                    Ok(Some(packet)) => Ok(packet),
+                    Ok(None) => continue,
+                    Err(e) => Err(e),
+                };
+                if let Some(result) = answer(packet) {
+                    break result;
+                }
+            };
+            drop(stop);
+            result
+        });
+    }
     let result = {
-        let writer = Mutex::new(&mut c.writer);
+        let connection = &mut **c;
+        let writer = Mutex::new(&mut connection.writer);
         std::thread::scope(|scope| {
             let (stop, stopped) = channel::<()>();
             let keep_writer = &writer;
@@ -1664,7 +1720,7 @@ fn wait_alive<T>(
                 }
             });
             let result = loop {
-                let packet = match c.reader.recv() {
+                let packet = match connection.reader.recv() {
                     Ok((id, payload)) => cfg::Serverbound::decode_with_payload_codecs(
                         id,
                         &payload,
@@ -2850,6 +2906,7 @@ mod outgoing_budget_tests {
         let pending = Arc::default();
         let outbox = io_pool::Outbox::new(Arc::clone(&pending)).unwrap();
         PlayerSender {
+            payload_transport: Transport::empty(),
             undrained: Arc::default(),
             pending,
             held: Arc::default(),

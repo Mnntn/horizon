@@ -151,6 +151,10 @@ pub struct TickCtx<'a> {
 
 /// What the gameplay code has to do for a guest.
 pub enum HostEvent {
+    ConfigurationPayload(
+        super::config_payloads::ConfigSender,
+        crate::raw_payloads::Incoming,
+    ),
     /// A guest entered the world; load their saved state.
     Joined(u32),
     /// A guest left (state to save, entities to drop).
@@ -2318,6 +2322,9 @@ impl Hub {
         self.expire_arrivals(&mut events);
         for event in self.lan.poll() {
             match event {
+                NetEvent::ConfigurationPayload(sender, incoming) => {
+                    events.push(HostEvent::ConfigurationPayload(sender, incoming));
+                }
                 NetEvent::Joined(j) => {
                     while let Some(i) = self
                         .guests
