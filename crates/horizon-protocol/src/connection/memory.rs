@@ -72,16 +72,20 @@ impl Pipe {
     pub fn set_nonblocking(&mut self, nonblocking: bool) {
         self.nonblocking = nonblocking;
     }
-    /// Call `notify` whenever bytes arrive at this end or the pipe closes (also
-    /// now, if either already happened), as a poller's readiness would: a
-    /// non-blocking reader then reads until `WouldBlock`.
+    /// Call `notify` whenever bytes arrive, outgoing capacity is released, or
+    /// the pipe closes. Also notify now if readable, writable, or closed.
+    /// A non-blocking poller then reads and drains queued writes until
+    /// `WouldBlock`; notifications run outside the channel state locks.
     pub fn on_ready(&self, notify: impl Fn() + Send + Sync + 'static) {
         let incoming = &self.end.incoming;
         *incoming.notify.lock().unwrap() = Some(Arc::new(notify));
         let state = incoming.state.lock().unwrap();
-        let ready = !state.0.is_empty() || state.1;
+        let readable = !state.0.is_empty() || state.1;
         drop(state);
-        if ready {
+        let state = self.end.outgoing.state.lock().unwrap();
+        let writable = state.0.len() < CAPACITY || state.1;
+        drop(state);
+        if readable || writable {
             incoming.notify();
         }
     }
@@ -115,6 +119,12 @@ impl Read for Pipe {
         }
         let n = state.0.read(out)?;
         self.end.incoming.ready.notify_all();
+        drop(state);
+        if n != 0 {
+            // The peer registered its callback on its incoming channel, which
+            // is this end's outgoing channel. Wake it to drain queued writes.
+            self.end.outgoing.notify();
+        }
         Ok(n)
     }
 }
@@ -152,6 +162,36 @@ mod tests {
         custom_payload::{CustomPayload, PayloadCodecs, PayloadFlow, PayloadProtocol},
         play,
     };
+
+    #[test]
+    fn draining_full_pipe_wakes_nonblocking_writer_without_reply() {
+        let (mut writer, mut reader) = Pipe::pair();
+        writer.set_nonblocking(true);
+        writer.write_all(&vec![1; CAPACITY]).unwrap();
+        assert_eq!(
+            writer.write(&[2]).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        // Probe the released capacity from inside the callback as well: this
+        // would deadlock if a drain notified while holding its state lock.
+        let probe = writer.end.outgoing.clone();
+        writer.on_ready(move || {
+            let available = CAPACITY - probe.state.lock().unwrap().0.len();
+            let _ = tx.send(available);
+        });
+        assert!(rx.try_recv().is_err());
+        let mut bytes = [0; 3];
+        reader.read_exact(&mut bytes).unwrap();
+        assert_eq!(bytes, [1; 3]);
+        assert_eq!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), 3);
+        assert_eq!(writer.write(&[2, 3, 4, 5]).unwrap(), 3);
+        assert_eq!(
+            writer.write(&[5]).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        assert!(writer.end.incoming.state.lock().unwrap().0.is_empty());
+    }
 
     #[test]
     fn registered_large_packet_and_detached_roundtrip() {
