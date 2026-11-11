@@ -56,6 +56,7 @@ jobs:
       contents: read
       actions: read
     outputs:
+      windows_prebuilt_required: ${{ steps.windows_prebuilt.outputs.required || 'false' }}
       rust_required: ${{ steps.selection.outputs.rust_required || 'true' }}
       launcher_required: ${{ steps.selection.outputs.launcher_required || 'true' }}
       tooling_required: ${{ steps.selection.outputs.tooling_required || 'true' }}
@@ -82,6 +83,15 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 tools/ci/rust_changes.py --all "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+      - name: Select Windows prebuilt check paths
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        id: windows_prebuilt
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          git fetch -q --no-tags origin "$BASE_SHA"
+          python3 tools/ci/windows_prebuilt.py --select "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       # workflow_run omits pull_requests for fork runs. Record only immutable IDs;
       # the trusted controller reads this as bounded data, never as executable code.
       - name: Record the original PR base for boat recovery
@@ -323,6 +333,28 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ steps.lint-cache.outputs.cache-primary-key }}
+
+  # Informational until three consecutive green main pushes; not in the picker gate set.
+  windows-prebuilt-check:
+    needs: changes
+    if: needs.changes.outputs.windows_prebuilt_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - name: Install Windows cross compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-prebuilt-check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check generated Windows prebuilt crate graph
+        run: python3 tools/ci/windows_prebuilt.py
 
   verify:
     needs: changes
