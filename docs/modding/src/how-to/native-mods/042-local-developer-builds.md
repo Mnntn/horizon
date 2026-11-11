@@ -18,7 +18,16 @@ The command returns a `developer-…` tag. Select that exact tag, prepare its re
 instance to it. Automatic updates do not replace a local unsigned base. Remove it with
 `horizon-launcher remove DEVELOPER_TAG` when no instance needs it.
 
-A native mod build still requires a published prebuilt SDK for the base's exact commit.
-`E_NATIVE_NO_RELEASE` means that commit has no available SDK: pin a published commit instead.
-The native mod builder does not compile the local checkout or use its source snapshot as an SDK.
-For native mixins, the pinned source must also be available for copying the target functions.
+A native mod build needs the prebuilt SDK of the base's exact commit. A local commit has no
+published one, so build it from the same checkout and name its folder; one folder holds one side:
+
+```sh
+python3 tools/prebuilt_game.py build SDK_FOLDER            # add --server for a dedicated server
+HORIZON_LAUNCHER_DEVELOPER_SDK=SDK_FOLDER horizon-launcher native-build MODS --version DEVELOPER_TAG --trust-native-code
+```
+
+The variable is read for developer bases only, and the folder is used where it is. It must be
+that commit's build for this computer, side and the launcher's Rust, as a downloaded SDK must;
+anything else is refused. Without it, `E_NATIVE_NO_RELEASE` means the commit has no available
+SDK. The native mod builder never compiles the checkout itself. For native mixins, the pinned
+source must also be available for copying the target functions.

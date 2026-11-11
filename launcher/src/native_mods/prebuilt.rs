@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const IDENTITY: &str = "horizon-prebuilt.json";
+/// Names the folder of a prebuilt game built from a developer install's checkout
+/// (`tools/prebuilt_game.py build`). Read for developer installs only: their commit has no release.
+pub(super) const DEVELOPER_SDK: &str = "HORIZON_LAUNCHER_DEVELOPER_SDK";
 pub(super) const TEMPLATE: &str = "native_main.rs.template";
 const SUMS: &str = "SHA256SUMS";
 /// The optimization level of the `release` profile the prebuilt game is built with: the mods' code
@@ -117,15 +120,21 @@ pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<Refusal> {
 /// launcher's data (`downloading` is told before a download starts); `Err(reason)` inside when
 /// there is none to use, or its download failed. An archive that arrives must match the release's
 /// `SHA256SUMS` before it is unpacked, and its identity this revision, this computer and the
-/// launcher's Rust: a mismatch is an error, never a source build.
+/// launcher's Rust: a mismatch is an error, never a source build. `local` is a developer
+/// install's own prebuilt game ([`DEVELOPER_SDK`]): used where it is, under the same identity check.
 pub(super) fn fetch(
     revision: &str,
     target: Target,
+    local: Option<&Path>,
     downloading: impl FnOnce(),
 ) -> Result<Result<PathBuf, Refusal>, String> {
     let Some(host) = rust_toolchain::host() else {
         return Ok(Err(Refusal::Host));
     };
+    if let Some(local) = local {
+        check_identity(local, revision, host.target, target)?;
+        return Ok(Ok(local.to_owned()));
+    }
     let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
     let dir = cache_dir(revision, &name);
     if dir.join(IDENTITY).is_file() {
@@ -753,6 +762,16 @@ mod tests {
         assert!(check("abc123", "rustc x\nrelease: 0.0.1", host, "client").is_err());
         let longer = format!("release: {}.1", rust_toolchain::VERSION);
         assert!(check("abc123", &longer, host, "client").is_err());
+        // A developer's own prebuilt game is used where it is, and only when it is that build.
+        if let Some(this) = rust_toolchain::host() {
+            assert_eq!(
+                check("abc123", &rustc, this.target, "client").is_ok(),
+                this.target == host
+            );
+            let local = |revision| fetch(revision, Target::Client, Some(&dir), || ());
+            assert_eq!(local("abc123"), Ok(Ok(dir.clone())));
+            assert!(local("abc124").is_err());
+        }
         fs::remove_file(dir.join(IDENTITY)).unwrap();
         assert!(check_identity(&dir, "abc123", host, Target::Client).is_err());
         fs::remove_dir_all(dir).unwrap();

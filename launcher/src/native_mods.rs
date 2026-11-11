@@ -1678,8 +1678,13 @@ fn pipeline(
     let prebuilt = if exists {
         None
     } else {
+        let local = developer_key
+            .is_some()
+            .then(|| std::env::var_os(prebuilt::DEVELOPER_SDK))
+            .flatten()
+            .map(PathBuf::from);
         Some(
-            prebuilt::fetch(&revision, target, || {
+            prebuilt::fetch(&revision, target, local.as_deref(), || {
                 progress(Step::PrebuiltGame(revision.clone()))
             })?
             .map_err(|reason| reason.to_string())?,
