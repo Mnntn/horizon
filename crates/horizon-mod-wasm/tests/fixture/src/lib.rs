@@ -13,6 +13,21 @@ pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn register_json_animation_types(
+        &self,
+        _: &mod_api::RegistrationContext,
+        event: &mut mod_api::RegisterJsonAnimationTypesEvent<'_>,
+    ) {
+        // The guest pushes a plain batch; the host names this mod on each entry.
+        assert!(
+            event.types.is_empty(),
+            "the guest starts from its own batch"
+        );
+        event.types.push(mod_api::JsonAnimationType::Target(
+            mod_api::Identifier::parse("wasm_fixture:pulse").unwrap(),
+        ));
+    }
+
     fn entity_tick_listened(
         &self,
         _: &mut dyn mod_api::ServerHost,

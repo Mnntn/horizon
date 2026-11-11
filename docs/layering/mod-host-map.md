@@ -30,10 +30,11 @@ host implemented above the engine: a dev-dependency cycle gives the test build a
 engine↔`mod_api` value conversions (`game/modding/api_values`) are counted with the hook bodies: 117 engine files
 that stay use them.
 
-**Slots (phase 3): engine-owned table.** Eight production references: `entry.rs` (`mod_points::register`, `SlotListener`,
-`PointId`), `game.rs` (`seal`), `build.rs` and the `include!`s of generator output. The engine owns the slot table
-and the "anyone listening?" check; module discovery (`game_modules.rs`, `.game-area` markers) moves to a small engine
-crate both trees share, as agreed with upstream on #2534; `horizon-mod-api-gen` calls it.
+**Replacement slots: written by the SDK's staging pass.** The engine source carries none. A staged copy gets one
+`__REPLACE` array per crate and a check at the head of each replaceable function (`horizon-mod-api-gen`'s `replace`);
+`entry::installed` reports a patched copy that was not installed. Module discovery (`game_modules.rs`, `.game-area`
+markers) moves to a small engine crate both trees share, as agreed with upstream on #2534; `horizon-mod-api-gen`
+calls it.
 
 **Attachments: stay in the engine (phase 4 dropped).** Attachment storage lives in `horizon-mod-runtime`, which is
 already an engine-layer crate, so moving it buys no layering. `horizon-world`'s dependency on `horizon-mod-runtime`

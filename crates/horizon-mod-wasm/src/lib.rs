@@ -602,12 +602,14 @@ mod tests {
         let package = root.join("bad_mixin");
         std::fs::create_dir_all(&package).unwrap();
         std::fs::write(package.join("horizon-mod.toml"), format!(
-            "id = 'bad_mixin'\nname = 'Bad mixin'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n[[mixin]]\nid = 'patch'\ntarget = 'game::tick'\nkind = 'HEAD'\nhelper = 'src/patch.rs'\n", "a".repeat(128)
+            "id = 'bad_mixin'\nname = 'Bad mixin'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n[[native.mixin]]\nid = 'patch'\ntarget = 'game::tick'\nkind = 'HEAD'\nhelper = 'src/patch.rs'\n", "a".repeat(128)
         )).unwrap();
         let loaded = load_installed(&root, &[package]);
         assert!(
             loaded.refused.iter().any(|(id, reason)| id == "bad_mixin"
-                && reason.to_string().contains("E_MIXIN_NATIVE_ONLY")),
+                && reason
+                    .to_string()
+                    .contains("only [native] tables compile game code")),
             "{:?}",
             loaded.refused
         );

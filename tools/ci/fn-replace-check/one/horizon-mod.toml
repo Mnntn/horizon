@@ -12,7 +12,7 @@ game = "26.3"
 horizon = "HEAD"
 mixins = "MIXINS"
 
-[[mixin]]
+[[native.mixin]]
 id = "head0"
 target = "horizon_client::game::native_item_entity_refs::Game<'_>::item_entity_owner"
 kind = "HEAD"

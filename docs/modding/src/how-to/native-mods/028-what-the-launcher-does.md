@@ -22,7 +22,7 @@ The build has one route:
 3. Compile the mods against the SDK's game libraries. Registry dependencies use the mod's supplied
    lockfile and the same immutable SDK. The launcher asks for permission before executing dependency
    build scripts or procedural macros.
-4. For `[[mixin]]` rows, download the pinned game source, copy the targeted functions into one patch
+4. For `[[native.mixin]]` rows, download the pinned game source, copy the targeted functions into one patch
    library, apply the rows with horizon-mixins, and compile that library against the SDK. The game
    crates are not compiled. Each checked replacement is installed through its typed installer.
 5. Link the native executable, install it as `native-<commit>-<key>`, and select it for the instance.

@@ -1,4 +1,4 @@
-//! The mod's own crate. Its `[[mixin]]` helpers (`src/mixins/`) are compiled into copies of the
+//! The mod's own crate. Its `[[native.mixin]]` helpers (`src/mixins/`) are compiled into copies of the
 //! game functions they patch, not into this crate.
 #[derive(Default)]
 struct Mod;

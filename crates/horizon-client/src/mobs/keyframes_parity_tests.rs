@@ -54,7 +54,10 @@ fn every_vanilla_animation_samples_as_before_the_move() {
                 for step in -8..=steps {
                     let seconds = step as f32 / 64.0;
                     for scale in [1.0, 0.37, 2.5] {
-                        let moved = channel.sample(seconds, scale).map(f32::to_bits);
+                        let moved = channel
+                            .sample(seconds, scale)
+                            .expect("vanilla names only built-in interpolations")
+                            .map(f32::to_bits);
                         let before = oracle(&channel.keyframes, seconds, scale).map(f32::to_bits);
                         assert_eq!(moved, before, "{name} {bone} at {seconds}s x{scale}");
                         samples += 1;

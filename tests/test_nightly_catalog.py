@@ -40,6 +40,48 @@ def distribution(root):
 
 
 class NightlyCatalog(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "requires Bash")
+    def test_publisher_refuses_missing_or_disappearing_sdk_before_create(self):
+        shell = workflow_run("Publish as the `nightly` pre-release")
+        for fail_at in (1, 2, 0):
+            with self.subTest(fail_at=fail_at), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                distribution(root)
+                (root / "bin").mkdir()
+                # Stub only external boundaries; execute the workflow's actual control flow.
+                python = root / "bin/python3"
+                python.write_text('''#!/bin/bash
+set -eu
+command=$2
+printf 'python:%s\\n' "$command" >> "$CALLS"
+if [[ "$command" == require-sdk ]]; then
+  count=0
+  [[ ! -f "$COUNTER" ]] || read -r count < "$COUNTER"
+  count=$((count + 1))
+  echo "$count" > "$COUNTER"
+  [[ "$count" != "$FAIL_AT" ]] || exit 1
+fi
+''')
+                gh = root / "bin/gh"
+                gh.write_text('''#!/bin/bash
+printf 'gh:%s\\n' "$*" >> "$CALLS"
+''')
+                python.chmod(0o755)
+                gh.chmod(0o755)
+                calls = root / "calls"
+                result = subprocess.run(["bash", "-e", "-c", shell], cwd=root, capture_output=True,
+                                        text=True, env={**os.environ, "PATH": str(root / "bin") + os.pathsep + os.environ["PATH"],
+                                                       "CALLS": str(calls), "COUNTER": str(root / "counter"),
+                                                       "FAIL_AT": str(fail_at), "GITHUB_REPOSITORY": "arismoko/horizon",
+                                                       "SHA": "a" * 40, "SHORT": "a" * 7, "DATE": "2026-11-11",
+                                                       "SOURCE_TAG": "nightly-source/test"})
+                events = calls.read_text().splitlines()
+                created = any(event.startswith("gh:release create nightly ") for event in events)
+                self.assertEqual(result.returncode == 0, fail_at == 0, result.stderr)
+                self.assertEqual("python:rotate" in events, fail_at != 1)
+                self.assertEqual(created, fail_at == 0)
+                self.assertEqual(events.count("python:require-sdk"), 1 if fail_at == 1 else 2)
+
     def test_wrong_commit_and_dirty_source_refuse_before_generation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

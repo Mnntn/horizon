@@ -83,10 +83,6 @@ pub struct Manifest {
     /// Game internals used by this mod, fingerprinted against its pinned build.
     #[serde(default)]
     pub internals: Vec<Internal>,
-    /// Listeners at compiled slots; they never compile game code.
-    /// Source-level edits of game functions, native only: the one form that compiles game code.
-    #[serde(default)]
-    pub mixin: Vec<mixin::Mixin>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -110,6 +106,9 @@ pub struct Native {
     pub game: String,
     pub horizon: String,
     pub mixins: String,
+    /// Source-level edits of game functions, native only: the one form that compiles game code.
+    #[serde(default)]
+    pub mixin: Vec<mixin::Mixin>,
     #[serde(default)]
     pub module: Vec<Module>,
     /// Accessor and invoker bridges, forwarded as horizon-mixins' `[[bridge]]`.
@@ -235,7 +234,12 @@ impl Internal {
 
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let m: Manifest = toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
+        let m: Manifest = toml::from_str(text).map_err(|e| {
+            match toml::from_str::<toml::Table>(text) {
+                Ok(t) if t.contains_key("native") && t.contains_key("wasm") => format!("{MANIFEST}: a mod is [native] or [wasm], not both; only [native] tables compile game code, so a wasm mod has no mixin, bridge, state or module"),
+                _ => format!("{MANIFEST}: {e}"),
+            }
+        })?;
         Internal::check_all(&m.internals)?;
         if !m.internals.is_empty() && m.native.is_none() && m.wasm.is_none() {
             return Err(format!(
@@ -260,15 +264,30 @@ impl Manifest {
             }
         }
         if m.native.is_some() && m.wasm.is_some() {
-            return Err(format!("{MANIFEST}: a mod is [native] or [wasm], not both"));
+            return Err(format!(
+                "{MANIFEST}: a mod is [native] or [wasm], not both; only [native] tables compile game code, so a wasm mod has no mixin, bridge, state or module"
+            ));
         }
-        mixin::Mixin::check_all(&m.mixin, &m.id, m.native.is_some())
-            .map_err(|e| format!("{MANIFEST}: {e}"))?;
-        if let Some(entry) = m.mixin.iter().find(|entry| {
-            m.dependencies
-                .keys()
-                .any(|id| entry.target.split("::").next() == Some(id.replace('-', "_").as_str()))
-        }) {
+        mixin::Mixin::check_all(
+            m.native
+                .as_ref()
+                .map(|n| n.mixin.as_slice())
+                .unwrap_or_default(),
+            &m.id,
+        )
+        .map_err(|e| format!("{MANIFEST}: {e}"))?;
+        if let Some(entry) = m
+            .native
+            .as_ref()
+            .map(|n| n.mixin.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .find(|entry| {
+                m.dependencies.keys().any(|id| {
+                    entry.target.split("::").next() == Some(id.replace('-', "_").as_str())
+                })
+            })
+        {
             return Err(format!(
                 "{MANIFEST}: {}",
                 mixin::MixinError::Invalid {
@@ -281,7 +300,7 @@ impl Manifest {
         if let Some(native) = &m.native {
             // Native source edits share one id space.
             let mut ids: std::collections::HashSet<_> = std::collections::HashSet::new();
-            for id in m
+            for id in native
                 .mixin
                 .iter()
                 .map(|entry| &entry.id)
@@ -1392,7 +1411,7 @@ issues = \"http://example.org/issues\"
         assert!(
             Manifest::parse(&both)
                 .unwrap_err()
-                .contains("a mod is [native] or [wasm], not both")
+                .contains("a mod is [native] or [wasm], not both; only [native] tables compile game code, so a wasm mod has no mixin, bridge, state or module")
         );
     }
 
@@ -1410,7 +1429,7 @@ issues = \"http://example.org/issues\"
         assert!(
             Manifest::parse(&format!("{base}{missing_raw}"))
                 .unwrap_err()
-                .contains("unknown field `injection`")
+                .contains("a mod is [native] or [wasm], not both")
         );
         for unified in [""] {
             assert!(Manifest::parse(&format!("{base}{unified}")).is_ok());
@@ -1426,7 +1445,10 @@ issues = \"http://example.org/issues\"
             let error = Package::read_zip(&mut archive)
                 .err()
                 .expect("unknown native field refused before package classification");
-            assert!(error.contains("unknown field `injection`"), "{error}");
+            assert!(
+                error.contains("a mod is [native] or [wasm], not both"),
+                "{error}"
+            );
         }
     }
 

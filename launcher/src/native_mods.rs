@@ -482,7 +482,7 @@ impl Bundle {
 
     /// Whether horizon-mixins reads source to transform the game.
     fn needs_mixins(&self) -> bool {
-        !self.manifest.mixin.is_empty()
+        !self.native().mixin.is_empty()
             || !self.native().module.is_empty()
             || !self.native().bridge.is_empty()
             || !self.native().state.is_empty()
