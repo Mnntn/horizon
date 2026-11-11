@@ -96,7 +96,8 @@ def module_files(label, files):
 
 def conflict(main_files, pr_files):
     contracts = sorted(p for p in main_files | pr_files if shared(p))
-    overlap = sorted(main_files & pr_files)
+    overlap = sorted(path for path in main_files & pr_files
+                     if path.startswith(('tools/ci/', '.github/workflows/')))
     common = {crate(p) for p in main_files} & {crate(p) for p in pr_files} - {None}
     if contracts:
         reason = 'shared contract changed: ' + contracts[0]

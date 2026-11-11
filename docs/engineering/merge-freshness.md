@@ -33,13 +33,16 @@ for a PR editing shared contracts. Otherwise main must descend from that base.
 The command compares the intervening main files with the PR files. Either side
 touching a `slots/` component, Cargo.lock, or the explicit Wire layout fixtures
 and generated layout pin files makes it STALE.
-Shared files or a shared `crates/<name>/` or `launcher/` scope also make it STALE.
+A shared `crates/<name>/` or `launcher/` scope also makes it STALE.
 When a crate scope overlaps, the output lists both sides' complete changed-path
 sets grouped by module directory, with per-side and per-directory counts. This
 lets the caller judge proximity without weakening the same-crate decision.
 Workflow and CI tooling paths are file-scoped, not directory-wide contracts:
 `tools/ci/ignored_tests.py` versus `tools/ci/nightly.py` (#3051 versus #3043)
-is disjoint, but changes to the same tooling or workflow file are STALE. Renames count both names; deletions count the removed name.
+is disjoint, but changes to the same tooling or workflow file are STALE.
+Same-file edits outside these scopes and true contracts, such as README.md,
+do not independently make it STALE. Renames count both names; deletions count
+the removed name.
 Disjoint crates without a shared contract are FRESH. Compare file responses at
 GitHub's 300-file cap and incomplete PR pagination are unavailable, not FRESH.
 
