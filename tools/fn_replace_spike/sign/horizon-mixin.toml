@@ -1,0 +1,14 @@
+[mod]
+id = "fnr_fd"
+version = "0.1.0"
+
+# Farmer's Delight port row 42: the standing sign editor's sprite (editor_sprite, ordinal 1).
+[[injection]]
+id = "canvas_sign"
+target = "fnr_sign::draw_sign_editor"
+kind = "MODIFY_EXPRESSION_VALUE"
+selector = "editor_sprite(\"signs\", wood)"
+require = 1
+ordinal = 0
+helper = "canvas.rs"
+bindings = [{ name = "value", ty = "String", value = "$value" }, { name = "wood", ty = "&str", value = "wood" }]

@@ -1,0 +1,13 @@
+[mod]
+id = "fnr_autosave"
+version = "0.1.0"
+
+[[injection]]
+id = "autosave"
+target = "fnr_patch::next_autosave_interval"
+kind = "MODIFY_EXPRESSION_VALUE"
+selector = "autosave_interval(rate)"
+require = 1
+ordinal = 0
+helper = "autosave.rs"
+bindings = [{ name = "value", ty = "i64", value = "$value" }]

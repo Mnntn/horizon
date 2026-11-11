@@ -1,0 +1,20 @@
+id = 'fnr_autosave'
+name = 'Function replacement spike'
+version = '0.1.0'
+api = '0.2'
+side = 'both'
+capabilities = ['registries']
+[native]
+game = '26.3'
+horizon = '215d201fcdb0a2dcf1472a45a95b50b551cf2a36'
+mixins = '5a64af938ec86b00d53d16a408aabc0038fb3e57'
+
+[[inject]]
+id = "autosave"
+at = "horizon_client::game::Game<'_>::next_autosave_interval"
+kind = "modify_value"
+with = "autosave"
+access = "internals"
+call = "horizon_client::game::autosave_interval"
+nth = 0
+ctx = "25db725de8fb10cf"

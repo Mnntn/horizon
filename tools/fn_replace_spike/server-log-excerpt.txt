@@ -1,0 +1,20 @@
+Horizon: worldgen data loaded in 491.033102ms
+Horizon: live features ready in 557.849555ms
+Mod settings snapshot omitted keys: unsafe or unreadable entry, or enumeration limit
+Mod settings snapshot omitted keys: unsafe or unreadable entry, or enumeration limit
+Mod settings snapshot omitted keys: unsafe or unreadable entry, or enumeration limit
+Mod settings snapshot omitted keys: unsafe or unreadable entry, or enumeration limit
+[03:19:22] [Server thread/INFO]: Chat filter on: 45 words (server.toml [chat_filter]; enabled = false turns it off)
+[03:19:22] [Server thread/INFO]: Done (4.067s)! For help, type "help"
+[03:19:22] [Server thread/INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[03:19:22] [Server thread/INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[03:19:22] [Server thread/INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+fnr_autosave: autosave interval 12000 -> 24000 (listener called inline from the replaced copy)
+[03:19:58] [Server thread/INFO]: System chat: Set the target tick rate to 40.0 per second
+[03:20:03] [Server thread/INFO]: System chat: Stopping the server
+[03:20:03] [Server thread/INFO]: Stopping server
+[03:20:03] [Server thread/INFO]: Saving players
+[03:20:03] [Server thread/INFO]: Saving worlds
+[03:20:03] [Server thread/INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[03:20:03] [Server thread/INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[03:20:03] [Server thread/INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
