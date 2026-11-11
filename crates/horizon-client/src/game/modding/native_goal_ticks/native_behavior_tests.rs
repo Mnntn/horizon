@@ -4,7 +4,21 @@
 //! panic containment, and the typed `NoBrain` refusal — driven through the
 //! same goal-host view the goal tests use.
 use super::super::creatures;
-use super::super::native_entity_refs::tests::with_game;
+// Deliberate process-lifetime retention: one private read-only tree and decoded input
+// store for this module only. Rust statics are not dropped; the test harness must
+// remove horizon-frozen-inputs-<pid>-* temporary trees after the process exits.
+// Every call still registers keys and resolves Parts.
+fn with_game(test: impl FnOnce(&mut super::super::Game<'_>)) {
+    use crate::game::resource_load::frozen_gameplay_inputs::FrozenPreparedRoot;
+    use std::sync::OnceLock;
+    static ROOT: OnceLock<FrozenPreparedRoot> = OnceLock::new();
+    let root = ROOT.get_or_init(|| {
+        let source = std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources");
+        FrozenPreparedRoot::copy_from(std::path::Path::new(&source))
+            .expect("plain prepared fixture snapshot")
+    });
+    super::super::native_entity_refs::tests::with_game_at(root.path().to_owned(), test);
+}
 use super::tests::zombie;
 use horizon_client::health::DamageLevel;
 use horizon_client::join_seq::RestoreOrder;
