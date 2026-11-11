@@ -21,7 +21,6 @@ cap-std = "3.4.6"
 dunce = "1.0.5"
 horizon-mod-package = { path = "../horizon-mod-package", default-features = false, features = ["index", "prebuilt"] }
 horizon-mod-point-emit = { path = "../horizon-mod-point-emit" }
-horizon-mod-point-shape = { path = "../horizon-mod-point-shape" }
 horizon-port-pack = { path = "../horizon-port-pack" }
 rustc-demangle = "0.1"
 serde = { version = "1", features = ["derive"] }

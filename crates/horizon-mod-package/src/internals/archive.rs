@@ -11,7 +11,6 @@ use std::{
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 const CATALOG: &str = "internals.json";
-const POINTS: &str = "points.json";
 const CATALOG_LIMIT: u64 = 64 << 20;
 const ARCHIVE_LIMIT: u64 = 4 << 30;
 
@@ -76,7 +75,7 @@ impl From<std::io::Error> for CatalogError {
     }
 }
 
-/// Verify a prebuilt archive and cache only its root internals and points JSON files.
+/// Verify a prebuilt archive and cache only its root internals JSON file.
 ///
 /// The caller owns transport and the cache directory capability. Both files are checked
 /// before either is published; no game code or other archive member is unpacked.
@@ -134,12 +133,7 @@ fn cache_with_limit(
                 file: CATALOG,
                 source,
             })?;
-        let _: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&catalogs.points)
-            .map_err(|source| CatalogError::Json {
-                file: POINTS,
-                source,
-            })?;
-        for (name, text) in [(CATALOG, catalogs.internals), (POINTS, catalogs.points)] {
+        for (name, text) in [(CATALOG, catalogs.internals)] {
             let partial = format!("{name}.{unique}.partial");
             cache.write(&partial, text)?;
             cache.rename(&partial, cache, name)?;
@@ -147,7 +141,7 @@ fn cache_with_limit(
         Ok(entries)
     })();
     let _ = cache.remove_file(&archive);
-    for name in [CATALOG, POINTS] {
+    for name in [CATALOG] {
         let _ = cache.remove_file(format!("{name}.{unique}.partial"));
     }
     result
@@ -155,13 +149,12 @@ fn cache_with_limit(
 
 struct Catalogs {
     internals: String,
-    points: String,
 }
 
 fn catalogs_from_archive(reader: impl Read) -> Result<Catalogs, CatalogError> {
     let reader = flate2::read::GzDecoder::new(reader).take(8 << 30);
     let mut archive = tar::Archive::new(reader);
-    let (mut internals, mut points) = (None, None);
+    let mut internals = None;
     for entry in archive.entries()? {
         let entry = entry?;
         let path = entry.path()?;
@@ -169,7 +162,6 @@ fn catalogs_from_archive(reader: impl Read) -> Result<Catalogs, CatalogError> {
             p if p == Path::new(CATALOG) || p == Path::new("./internals.json") => {
                 (CATALOG, &mut internals)
             }
-            p if p == Path::new(POINTS) || p == Path::new("./points.json") => (POINTS, &mut points),
             _ => continue,
         };
         if target.is_some() {
@@ -187,7 +179,6 @@ fn catalogs_from_archive(reader: impl Read) -> Result<Catalogs, CatalogError> {
     }
     Ok(Catalogs {
         internals: internals.ok_or(CatalogError::Missing { file: CATALOG })?,
-        points: points.ok_or(CatalogError::Missing { file: POINTS })?,
     })
 }
 
@@ -196,13 +187,12 @@ mod tests {
     use super::*;
     const JSON: &str = r#"[{"path":"Example","kind":"struct","signature":"struct Example","hash":"abc","compiler_owned":{"ref":"Example::field"}}]"#;
 
-    fn archive(path: &str, kind: tar::EntryType, contents: &str, points: Option<&str>) -> Vec<u8> {
+    fn archive(path: &str, kind: tar::EntryType, contents: &str, _points: Option<&str>) -> Vec<u8> {
         let gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         let mut archive = tar::Builder::new(gzip);
         let unrelated = ("bin/game", tar::EntryType::Regular, "not code");
-        for (path, kind, contents) in std::iter::once((path, kind, contents))
-            .chain(points.map(|text| (POINTS, tar::EntryType::Regular, text)))
-            .chain(std::iter::once(unrelated))
+        for (path, kind, contents) in
+            std::iter::once((path, kind, contents)).chain(std::iter::once(unrelated))
         {
             let mut header = tar::Header::new_gnu();
             header.set_size(contents.len() as u64);
@@ -225,7 +215,6 @@ mod tests {
         );
         let found = catalogs_from_archive(bytes.as_slice()).unwrap();
         assert_eq!(found.internals, JSON);
-        assert_eq!(found.points, "{}");
         for path in [
             "deps/internals.json",
             "../internals.json",
@@ -246,20 +235,10 @@ mod tests {
         oversized.remove(1);
         let bytes = archive(CATALOG, tar::EntryType::Regular, &oversized, Some("{}"));
         assert!(catalogs_from_archive(bytes.as_slice()).is_ok());
-        for (bytes, expected) in [
-            (
-                archive(CATALOG, tar::EntryType::Symlink, JSON, Some("{}")),
-                "not a file",
-            ),
-            (
-                archive(CATALOG, tar::EntryType::Regular, JSON, None),
-                "no points.json",
-            ),
-            (
-                archive(POINTS, tar::EntryType::Regular, "{}", Some("{}")),
-                "repeated file",
-            ),
-        ] {
+        for (bytes, expected) in [(
+            archive(CATALOG, tar::EntryType::Symlink, JSON, Some("{}")),
+            "not a file",
+        )] {
             assert!(
                 catalogs_from_archive(bytes.as_slice())
                     .err()
@@ -271,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_only_after_checksum_and_both_json_checks() {
+    fn cached_only_after_checksum_and_json_check() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/catalog-cache-tests")
             .join(std::process::id().to_string());
@@ -293,12 +272,7 @@ mod tests {
                 .to_string()
                 .contains("checksum")
         );
-        for (text, points) in [
-            ("not JSON", "{}"),
-            ("{}", "{}"),
-            (JSON, "not JSON"),
-            (JSON, "[]"),
-        ] {
+        for (text, points) in [("not JSON", "{}"), ("{}", "{}")] {
             let invalid = archive(CATALOG, tar::EntryType::Regular, text, Some(points));
             let hash = format!("{:x}", Sha256::digest(&invalid));
             assert!(cache_catalogs(&dir, "game.tar.gz", invalid.as_slice(), &hash).is_err());

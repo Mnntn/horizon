@@ -1,7 +1,6 @@
 //! The trait mod: the launcher links this crate into the game and calls `hooks()`. Each
 //! method of `Hooks` is one of Horizon's hook points; implement the ones the mod needs
-//! (docs/modding/src/how-to/native-mods.md, "Trait mods"). Need a moment no hook covers? Follow the injection ladder in
-//! docs/modding/src/injections.md: hook, then a `Host`-bound trait injection, `Game` helper last.
+//! (docs/modding/src/how-to/native-mods.md, "Trait mods"). Need a moment no hook covers? Use a native mixin.
 use mod_api::{self, Hooks, PlayerLoggedInEvent, ServerHost, Text};
 
 #[derive(Default)]

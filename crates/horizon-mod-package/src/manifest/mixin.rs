@@ -118,7 +118,7 @@ impl fmt::Display for MixinError {
         match self {
             Self::NativeOnly { id } => write!(
                 f,
-                "E_MIXIN_NATIVE_ONLY: {id}: [[mixin]] compiles game code and needs a [native] mod; a wasm mod uses [[inject]] or a hook"
+                "E_MIXIN_NATIVE_ONLY: {id}: [[mixin]] compiles game code and needs a [native] mod; a wasm mod uses a hook"
             ),
             Self::Invalid { id, field, fix } => {
                 write!(f, "E_MIXIN_INVALID: {id}: invalid {field}; {fix}")
@@ -169,7 +169,7 @@ impl Mixin {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{Manifest, inject};
+    use super::super::Manifest;
     use super::*;
 
     const HEADER: &str =
@@ -188,78 +188,12 @@ mod tests {
     }
 
     #[test]
-    fn each_table_accepts_only_its_own_kinds() {
-        let inject_row = |kind: &str| {
-            let call = if inject::Kind::ALL
-                .iter()
-                .any(|k| k.name() == kind && k.slot() == inject::SlotKind::Site)
-            {
-                "call='self.step'\nnth=0\nctx='c'\n"
-            } else {
-                ""
-            };
-            format!("[[inject]]\nid='a'\nat='game::tick'\nkind='{kind}'\nwith='run'\n{call}")
-        };
-        let mixin_row = |kind: &str| ROW.replace("MODIFY_EXPRESSION_VALUE", kind);
-        let injects = inject::Kind::ALL.map(inject::Kind::name);
-        let mixins = Kind::ALL.map(Kind::name);
-        assert_eq!(
-            injects,
-            [
-                "head",
-                "return",
-                "replace",
-                "before_call",
-                "after_call",
-                "modify_value",
-                "wrap_call",
-                "wrap_if"
-            ]
-        );
-        assert_eq!(
-            mixins,
-            [
-                "HEAD",
-                "RETURN",
-                "BEFORE_CALL",
-                "AFTER_CALL",
-                "AFTER_ASSIGN",
-                "MODIFY_ARG",
-                "MODIFY_ARGS",
-                "MODIFY_CONSTANT",
-                "MODIFY_VARIABLE",
-                "MODIFY_EXPRESSION_VALUE",
-                "WRAP_OPERATION",
-                "OVERWRITE"
-            ]
-        );
-        let removed = ["modify_local", "expression", "field"];
-        for kind in injects.iter().chain(&mixins).chain(&removed) {
-            assert_eq!(
-                parse(&native(), &inject_row(kind)).is_ok(),
-                injects.contains(kind),
-                "[[inject]] {kind}"
-            );
-            assert_eq!(
-                parse(&native(), &mixin_row(kind)).is_ok(),
-                mixins.contains(kind),
-                "[[mixin]] {kind}"
-            );
-        }
-        let error = parse(&native(), &mixin_row("head")).unwrap_err();
-        assert!(
-            error.contains("unknown mixin kind `head`, expected one of HEAD, RETURN"),
-            "{error}"
-        );
-    }
-
-    #[test]
     fn a_mixin_outside_a_native_mod_is_refused_by_name() {
         let wasm = format!(
             "[wasm]\nsha512='{}'\ntoolchain='nightly'\n",
             "a".repeat(128)
         );
-        let expected = "E_MIXIN_NATIVE_ONLY: sample:autosave: [[mixin]] compiles game code and needs a [native] mod; a wasm mod uses [[inject]] or a hook";
+        let expected = "E_MIXIN_NATIVE_ONLY: sample:autosave: [[mixin]] compiles game code and needs a [native] mod; a wasm mod uses a hook";
         for code in [wasm.as_str(), ""] {
             let error = parse(code, ROW).unwrap_err();
             assert!(error.ends_with(expected), "{error}");
@@ -316,26 +250,9 @@ mod tests {
     }
 
     #[test]
-    fn a_mixin_never_targets_another_mods_function() {
-        let row = ROW.replace("game::Game::next_autosave", "chem_lib::transfer");
-        let dependency = "[dependencies]\nchem_lib='^1.0'\n";
-        // Without the dependency the path is a game path for the tool to resolve.
-        assert!(parse(&native(), &row).is_ok());
-        let error = parse(&format!("{dependency}{}", native()), &row).unwrap_err();
-        assert!(
-            error.ends_with("E_MIXIN_INVALID: sample:autosave: invalid target; a mixin targets a game function; inject at another mod's point with [[inject]]"),
-            "{error}"
-        );
-        // The inject form at that mod's point stays accepted.
-        let inject = "[[inject]]\nid='double'\nat='chem_lib::transfer'\nkind='head'\nwith='double'\nhash='h'\n";
-        assert!(parse(&format!("{dependency}{}", native()), inject).is_ok());
-    }
-
-    #[test]
-    fn mixins_bridges_states_modules_and_injects_share_one_id_space() {
+    fn mixins_bridges_states_modules_share_one_id_space() {
         let tables = [
             ROW.to_owned(),
-            "[[inject]]\nid='autosave'\nat='game::tick'\nkind='head'\nwith='run'\n".into(),
             "[[native.module]]\nid='autosave'\nfile='game.rs'\nname='runtime'\nsource='src/runtime.rs'\n".into(),
             "[[native.bridge]]\nid='autosave'\nkind='GET'\ntarget='game::Game'\nmember='world'\n".into(),
             "[[native.state]]\nid='autosave'\ntarget='game::Game'\nty='u32'\ninitial='0'\nconstructor=[]\n".into(),
@@ -361,8 +278,8 @@ mod tests {
         let manifest = Manifest::parse(&format!(
             "{HEADER}{}{}{}",
             native(),
-            tables[3],
-            tables[4].replace("id='autosave'", "id='count'")
+            tables[2],
+            tables[3].replace("id='autosave'", "id='count'")
         ))
         .unwrap();
         let native = manifest.native.unwrap();

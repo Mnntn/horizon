@@ -45,11 +45,6 @@ impl Fixture {
         fs::write(catalog.join("internals.json"), serde_json::json!([{
             "path": METHOD, "kind": "method", "signature": "impl PortedGame { fn tick(&mut self) -> u32 }", "hash": HASH,
         }]).to_string()).unwrap();
-        fs::write(
-            catalog.join("points.json"),
-            serde_json::json!({"points": [{"target": METHOD}], "sites": []}).to_string(),
-        )
-        .unwrap();
         let launcher = root.join("launcher-stub");
         // Verify the real command contract and emit a path without shell-interpolating it.
         fs::write(&launcher, "#!/bin/sh\n[ \"$1\" = native-build ] && [ \"$2\" = --catalog ] && [ \"$3\" = --trust-native-code ] && [ \"$6\" = \"$PWD\" ] || exit 19\nmkdir \"$5\"; cp \"$PWD/module-catalog/\"*.json \"$5/\"; printf '%s\\n' \"$5\"\nprintf invoked > \"$PWD/launcher-called\"\n").unwrap();
@@ -99,26 +94,8 @@ fn internals_add_uses_launcher_module_catalog_hash() {
 }
 
 #[test]
-fn inject_add_head_uses_launcher_module_catalog_hash() {
-    let fixture = Fixture::new(true);
-    fixture.run(&[
-        "inject", "add", METHOD, "--kind", "head", "--with", "listen",
-    ]);
-    let declared = fixture.manifest();
-    assert_eq!(declared.inject.len(), 1);
-    assert_eq!(declared.inject[0].at, METHOD);
-    assert_eq!(declared.inject[0].hash, Some(fixture.catalog_hash()));
-    assert!(fixture.root.join("launcher-called").is_file());
-}
-
-#[test]
 fn module_free_add_commands_keep_prebuilt_output_and_never_run_launcher() {
-    for args in [
-        vec!["internals", "add", METHOD, "--kind", "method"],
-        vec![
-            "inject", "add", METHOD, "--kind", "head", "--with", "listen",
-        ],
-    ] {
+    for args in [vec!["internals", "add", METHOD, "--kind", "method"]] {
         let modules = Fixture::new(true);
         let prebuilt = Fixture::new(false);
         let expected = modules.run(&args);

@@ -53,13 +53,7 @@ impl Drop for Fixture {
 fn large(path: &Path, limit: u64) {
     fs::File::create(path).unwrap().set_len(limit + 1).unwrap();
 }
-const COMMANDS: &[&[&str]] = &[
-    &["inject", "add", "lower::run", "--kind", "head"],
-    &["inject", "update"],
-    &["inject", "sync", "--repo", "game"],
-    &["internals", "add", "lower::run"],
-    &["internals", "sync"],
-];
+const COMMANDS: &[&[&str]] = &[&["internals", "add", "lower::run"], &["internals", "sync"]];
 #[test]
 fn bounded_manifest_commands() {
     let f = Fixture::new("manifest");
@@ -93,42 +87,8 @@ fn bounded_special_manifests() {
     }
 }
 #[test]
-fn bounded_slot_command() {
-    let f = Fixture::new("slot");
-    f.manifest();
-    let directory = f.0.join("game/crates/horizon-mod-api-gen/slots");
-    fs::create_dir_all(&directory).unwrap();
-    fs::write(f.0.join("game/Cargo.toml"), "[workspace]").unwrap();
-    let path = directory.join("example.txt");
-    large(&path, 4 << 20);
-    let before = fs::read(f.0.join("horizon-mod.toml")).unwrap();
-    let error = f.run(COMMANDS[2]);
-    assert!(
-        error.contains("example.txt") && error.contains("4194304"),
-        "{error}"
-    );
-    assert_eq!(fs::metadata(&path).unwrap().len(), (4 << 20) + 1);
-    assert_eq!(fs::read(f.0.join("horizon-mod.toml")).unwrap(), before);
-    #[cfg(unix)]
-    {
-        fs::remove_file(&path).unwrap();
-        std::os::unix::fs::symlink("/dev/zero", &path).unwrap();
-        assert!(f.run(COMMANDS[2]).contains("not a regular file"));
-        fs::remove_file(&path).unwrap();
-        let c = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
-        assert!(f.run(COMMANDS[2]).contains("not a regular file"));
-    }
-}
-
-#[test]
 fn bounded_catalog_commands() {
     for (name, relative, commands) in [
-        (
-            "points",
-            format!("{}/points.json", "a".repeat(40)),
-            &COMMANDS[..2],
-        ),
         ("old", "old/internals.json".into(), &COMMANDS[1..2]),
         (
             "internals",
@@ -142,7 +102,6 @@ fn bounded_catalog_commands() {
         let current = cache.join("a".repeat(40));
         fs::create_dir_all(&current).unwrap();
         fs::write(current.join("internals.json"), "[]").unwrap();
-        fs::write(current.join("points.json"), r#"{"sites":[]}"#).unwrap();
         let path = cache.join(relative);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         large(&path, 256 << 20);
