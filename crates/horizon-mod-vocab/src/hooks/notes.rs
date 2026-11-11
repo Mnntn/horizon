@@ -1683,7 +1683,7 @@ one, where vanilla gives the `by` one.
   change, in the order they were made, only while a mod listens: with no listener an update of the tickets looks at no chunk
   and allocates nothing, so the tick costs what it did. A level is told in its own tick, after the tickets were updated for its players.
 
-- [the renderer's hook points](#render-hook-points): `world_drawn`, called once the world is drawn with its colour, depth, matrices and entity geometry, and
+- [the renderer's functions](#render-functions): `world_drawn`, called once the world is drawn with its colour, depth, matrices and entity geometry, and
   `render_needs`, where a mod asks for the entity runs and the world's depth without a shader pack.
 
 - [entities](#entities) for server mods: `native_summon(dimension, kind, pos, nbt)` spawns any entity from its compound
