@@ -14,6 +14,93 @@ from pathlib import Path
 from tools import prebuilt_game
 
 
+class RegistryPatchTests(unittest.TestCase):
+    def test_sdk_carries_only_patched_crate_and_resolution_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged, sdk = root / "stage", root / "sdk"
+            patched = staged / "third_party" / "allocator-sys"
+            patched.mkdir(parents=True)
+            sdk.mkdir()
+            (staged / "Cargo.toml").write_text("[workspace]\nmembers=[]\n[patch.crates-io]\nallocator-sys={path='third_party/allocator-sys'}\n")
+            (patched / "Cargo.toml").write_text("[package]\nname='allocator-sys'\nversion='0.1.49'\n")
+            (patched / "src").mkdir()
+            (patched / "src/lib.rs").write_text("pub fn patched() {}")
+            (staged / "game.rs").write_text("must not ship")
+            patches = prebuilt_game.carry_patches(staged, sdk)
+            self.assertEqual(patches["crates-io"]["allocator-sys"]["path"], "patches/allocator-sys")
+            self.assertEqual((sdk / "patches/allocator-sys/src/lib.rs").read_text(), "pub fn patched() {}")
+            self.assertFalse((sdk / "game.rs").exists())
+            self.assertNotIn("workspace", (sdk / "Cargo.toml").read_text())
+
+    def test_source_symlink_is_refused_without_copying_its_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, sdk = root / "source", root / "sdk"
+            patched = source / "patch"
+            patched.mkdir(parents=True)
+            sdk.mkdir()
+            (source / "Cargo.toml").write_text("[patch.crates-io]\nallocator-sys={path='patch'}\n")
+            outside = root / "private.txt"
+            outside.write_text("must not ship")
+            (patched / "leak").symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                prebuilt_game.carry_patches(source, sdk)
+            self.assertFalse((sdk / "patches").exists())
+
+    def test_output_inventory_rejects_extra_files_and_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sdk = Path(directory)
+            patch = sdk / "patches/allocator-sys"
+            patch.mkdir(parents=True)
+            declared = patch / "Cargo.toml"
+            declared.write_text("manifest")
+            (sdk / "deps").mkdir()
+            for crate in ("horizon_mod_wasm", "horizon_mod_host"):
+                (sdk / "deps" / f"lib{crate}.so").write_bytes(b"")
+            (sdk / prebuilt_game.CATALOG).write_text("{}")
+            (sdk / prebuilt_game.IDENTITY).write_text(json.dumps({"patch_files": {
+                "patches/allocator-sys/Cargo.toml": prebuilt_game.sha256(declared)}, "files": {
+                prebuilt_game.CATALOG: prebuilt_game.sha256(sdk / prebuilt_game.CATALOG)}}))
+            prebuilt_game.check(sdk)
+            extra = patch / "extra.rs"
+            extra.write_text("not inventoried")
+            with self.assertRaisesRegex(SystemExit, "aren't compiler outputs"):
+                prebuilt_game.check(sdk)
+            extra.unlink()
+            extra.symlink_to(declared)
+            with self.assertRaisesRegex(SystemExit, "symlinks"):
+                prebuilt_game.check(sdk)
+            extra.unlink()
+            declared.write_text("modified")
+            with self.assertRaisesRegex(SystemExit, "inventory mismatch"):
+                prebuilt_game.check(sdk)
+
+
+class DeterministicArchiveTests(unittest.TestCase):
+    def test_workflow_archive_is_independent_of_creation_order_and_mtimes(self):
+        # Execute the workflow command itself, so a regression in its flags breaks this proof.
+        workflow = (prebuilt_game.ROOT / ".github/workflows/prebuilt-game.yml").read_text()
+        command = next(line.strip() for line in workflow.splitlines() if "tar --sort=name" in line)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archives = []
+            for index, order in enumerate([("a", "b"), ("b", "a")]):
+                work = root / str(index)
+                payload = work / "prebuilt/patches/crate"
+                payload.mkdir(parents=True)
+                for name in order:
+                    file = payload / name
+                    file.write_text(name)
+                    os.utime(file, (1000 + index, 1000 + index))
+                for folder in [payload, payload.parent, payload.parent.parent]:
+                    os.utime(folder, (2000 + index, 2000 + index))
+                subprocess.run(["bash", "-o", "pipefail", "-c", command], cwd=work,
+                               env={**os.environ, "ARCHIVE": "sdk.tar.gz"}, check=True)
+                archives.append((work / "sdk.tar.gz").read_bytes())
+            self.assertEqual(archives[0], archives[1])
+
+
 class AllocatorSelectionTests(unittest.TestCase):
     def test_staging_api_version_comes_from_the_package_manifest(self):
         with tempfile.TemporaryDirectory() as directory:

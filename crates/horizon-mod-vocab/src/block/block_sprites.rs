@@ -15,11 +15,15 @@ pub struct SpriteRef {
     pub cutout: bool,
 }
 /// One face of a block's model on one of its sides.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct FaceSprite {
     pub sprite: SpriteRef,
+    /// Its texture by the name `BlockEntityDrawContext::cube` and `quad` take (`block/oak_log`: vanilla's
+    /// without its namespace, a mod's with it), to draw the face elsewhere: a copycat block drawing its
+    /// material's faces on its own shape, with `uv` for the face's turn.
+    pub texture: String,
     /// Where the face lies on the side, in the side's two axes (`side_axes`), from 0 to 1 across the block:
     /// `[a0, b0, a1, b1]`. `[0, 0, 1, 1]` for a whole face.
     pub rect: [f32; 4],
@@ -31,9 +35,83 @@ pub struct FaceSprite {
     pub uv: [f32; 6],
     /// Its colour source, none for an untinted face: multiply the texture by the source's colour.
     pub tint: Option<TintSource>,
+    /// The model's tint index for the face, -1 for none: `ClientHost::block_tint_color` turns it into the
+    /// colour the face is multiplied by at a position.
+    pub tint_index: i32,
     /// It has partly clear pixels: drawn sorted and blended.
     pub translucent: bool,
 }
+impl FaceSprite {
+    /// This face drawn on side `side` of the box `from`..`to` (in blocks, 0 to 1 across a block) of
+    /// another block, as a copycat draws its material: the corners and the UV rectangle (`[u0, v0, u1,
+    /// v1]` in texels of 16 per side) to give `BlockEntityDrawContext::quad`, with [`FaceSprite::texture`]
+    /// as its sprite. The texture runs as it does on the material's own side, turned and mirrored as its
+    /// model turns it (`uv`: a log on its side, glazed terracotta), and is cut where the box covers the
+    /// side, so copycats side by side line up as the material's blocks would. The corners go
+    /// counterclockwise seen from outside the box. None when the texture doesn't run along the
+    /// side's axes (an element turned by 22.5 degrees about the side's normal): no UV rectangle
+    /// draws it, so draw it otherwise than with `quad`.
+    pub fn quad_on(
+        &self,
+        side: Direction,
+        from: [f32; 3],
+        to: [f32; 3],
+    ) -> Option<([[f32; 3]; 4], [f32; 4])> {
+        let (a, b) = match side {
+            Direction::Down | Direction::Up => (0, 2),
+            Direction::North | Direction::South => (0, 1),
+            Direction::West | Direction::East => (2, 1),
+        };
+        let normal = side.normal().map(|n| n as f32);
+        let axis = normal.iter().position(|n| *n != 0.0).unwrap_or(1);
+        let plane = if normal[axis] > 0.0 {
+            to[axis]
+        } else {
+            from[axis]
+        };
+        let mut ab = [
+            [from[a], from[b]],
+            [from[a], to[b]],
+            [to[a], to[b]],
+            [to[a], from[b]],
+        ];
+        let point = |[pa, pb]: [f32; 2]| {
+            let mut p = [0.0; 3];
+            p[axis] = plane;
+            p[a] = pa;
+            p[b] = pb;
+            p
+        };
+        let sub = |p: [f32; 3], q: [f32; 3]| [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
+        let [p0, p1, p2] = [point(ab[0]), point(ab[1]), point(ab[2])];
+        let (e, f) = (sub(p1, p0), sub(p2, p0));
+        let cross = [
+            e[1] * f[2] - e[2] * f[1],
+            e[2] * f[0] - e[0] * f[2],
+            e[0] * f[1] - e[1] * f[0],
+        ];
+        if cross[0] * normal[0] + cross[1] * normal[1] + cross[2] * normal[2] < 0.0 {
+            ab.reverse();
+        }
+        let [u0, v0, du_u, du_v, dv_u, dv_v] = self.uv;
+        let uv = ab.map(|[pa, pb]| [u0 + pa * du_u + pb * dv_u, v0 + pa * du_v + pb * dv_v]);
+        // `quad` gives its corners the rectangle's (u0, v0), (u0, v1), (u1, v1) and (u1, v0) in turn: start
+        // at a corner whose next one keeps its u, and the rectangle's order carries any turn or mirror.
+        // The first edge keeps u and the next keeps v; a texture that runs across the side's axes has
+        // no such corner.
+        let same = |p: f32, q: f32| (p - q).abs() < 1e-4;
+        let k = (0..4).find(|&i| {
+            same(uv[i][0], uv[(i + 1) % 4][0]) && same(uv[(i + 1) % 4][1], uv[(i + 2) % 4][1])
+        })?;
+        let order = [k, k + 1, k + 2, k + 3].map(|i| i % 4);
+        let (first, opposite) = (uv[k], uv[(k + 2) % 4]);
+        Some((
+            order.map(|i| point(ab[i])),
+            [first[0], first[1], opposite[0], opposite[1]].map(|t| t * 16.0),
+        ))
+    }
+}
+
 /// What a block draws on each side, in [`Direction::ALL`]'s order (down, up, north, south, west, east).
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
@@ -47,27 +125,6 @@ pub struct BlockSprites {
     pub particle: Option<SpriteRef>,
     /// The model is a plain cube: one whole face on each side, at its plane.
     pub cube: bool,
-}
-
-/// A model face's texture name and tint selector, as block drawing helpers accept them.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-#[derive(horizon_mod_api_macros::Wire)]
-pub struct BlockFaceTexture {
-    /// Texture name, for example `block/oak_planks` or a mod's namespaced texture.
-    pub texture: String,
-    /// Model tint index; -1 means no tint.
-    pub tint_index: i32,
-}
-
-impl BlockFaceTexture {
-    /// Describe a face texture without exposing the renderer's atlas or model types.
-    pub fn new(texture: String, tint_index: i32) -> Self {
-        Self {
-            texture,
-            tint_index,
-        }
-    }
 }
 
 /// An atlas the client stitches its sprites into (vanilla's `TextureAtlas`), as

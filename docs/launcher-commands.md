@@ -152,7 +152,7 @@ Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod proj
 - `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one)
 - `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (a full rebuild)
 - `--trust-native-code`: Allow native code for this install (remembered; revoke in Settings, Storage)
-- `--profile` (optimized, balanced, developer): This instance's build mode: optimized, balanced or developer. Remembers an explicit choice for this instance; otherwise uses its saved choice, starting at Balanced. Without a picker reason or explicit choice, installed mods use the prebuilt route
+- `--profile` (optimized, balanced, developer): This instance's build mode: optimized, balanced or developer. An explicit choice is remembered; otherwise the automatic picker uses a matching prebuilt SDK when possible.
 
 MCP: none: the player's switch.
 

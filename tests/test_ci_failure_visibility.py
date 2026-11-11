@@ -52,7 +52,9 @@ class Visibility(unittest.TestCase):
                             "thread 'broken' panicked at src/lib.rs:12:3:\n" + reason + "\n",
                             summary(failed=1))
             _, log = IgnoredTests().run_output(output, 101)
-            self.assertIn("len=3 index=4" if reason.startswith("index") else reason, log)
+            self.assertIn("index out of bounds" if reason.startswith("index") else reason, log)
+            self.assertNotIn('len=3', log)
+            self.assertNotIn('index=4', log)
 
     def test_source_comes_from_head_not_private_worktree(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -90,18 +92,19 @@ class Visibility(unittest.TestCase):
             run.assert_not_called()
 
     def test_numeric_boolean_and_private_operands(self):
-        for left, right, expected in (("1e-10", "-2.5e+30", "assertion left: 1e-10"),
-                                      ("NaN", "inf", "assertion left: NaN"),
-                                      ("-inf", "0.0", "assertion left: -inf"),
-                                      ("96", "93", "assertion left: 96"),
-                                      ("true", "false", "assertion right: false"),
-                                      ('"PRIVATE"', '[PRIVATE]', "operand withheld")):
+        for left, right in (("1e-10", "-2.5e+30"), ("NaN", "inf"),
+                            ("-inf", "0.0"), ("96", "93"), ("true", "false"),
+                            ('"PRIVATE"', '[PRIVATE]')):
             output = target(1, "test broken ... FAILED\n"
                             "thread 'broken' panicked at src/lib.rs:12:3:\n"
                             f"assertion `left == right` failed\n left: {left}\n right: {right}\n",
                             summary(failed=1))
             _, log = IgnoredTests().run_output(output, 101)
-            self.assertIn(expected, log)
+            self.assertIn('assertion equality failed; payload withheld', log)
+            self.assertNotIn('assertion left:', log)
+            self.assertNotIn('assertion right:', log)
+            self.assertNotIn(' left: ', log)
+            self.assertNotIn(' right: ', log)
             self.assertNotIn("PRIVATE", log)
 
     def test_list_failure_preserves_compiler_headings_not_source(self):

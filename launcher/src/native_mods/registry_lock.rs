@@ -185,6 +185,41 @@ impl RegistryLock {
         Ok(())
     }
 
+    /// Authorize only same-version registry-to-SDK substitutions in mod-owned records.
+    /// Game records keep their original edges, and the registry identity being replaced
+    /// is removed so it cannot authorize a second, non-SDK copy of the patched crate.
+    pub fn allow_game_patch_edges(
+        &mut self,
+        game: &Self,
+        names: &std::collections::BTreeSet<String>,
+    ) {
+        let replacements: BTreeMap<_, _> = game
+            .local
+            .keys()
+            .filter(|id| names.contains(&id.name))
+            .map(|id| {
+                (
+                    Identity {
+                        source: CRATES_IO.into(),
+                        ..id.clone()
+                    },
+                    id.clone(),
+                )
+            })
+            .collect();
+        self.packages.retain(|id, _| !replacements.contains_key(id));
+        for (id, record) in &mut self.packages {
+            if game.packages.contains_key(id) {
+                continue;
+            }
+            record.edges = record
+                .edges
+                .iter()
+                .map(|edge| replacements.get(edge).unwrap_or(edge).clone())
+                .collect();
+        }
+    }
+
     /// A closed, inert fetch workspace: no mod manifest, source, SDK path or Cargo config.
     pub fn fetch_workspace(&self, roots: &Self, dir: &std::path::Path) -> Result<(), String> {
         std::fs::create_dir_all(dir.join("src")).map_err(|e| e.to_string())?;
@@ -234,6 +269,32 @@ impl RegistryLock {
     /// Compare resolved identities and checksums, and normalize Cargo's optional dependency
     /// qualifiers before comparing edges. Adding a second version qualifies existing edges.
     pub fn check_resolution(&self, resolved: &Self, game: &Self) -> Result<(), String> {
+        // A reachable game-owned package must keep its identity and edges, including
+        // source-less registry patches. Unreachable engine crates need not be staged.
+        for (id, record) in resolved.packages.iter().chain(resolved.local.iter()) {
+            let owners: Vec<_> = self
+                .packages
+                .iter()
+                .chain(self.local.iter())
+                .filter(|(old, _)| old.name == id.name)
+                .collect();
+            if owners.is_empty() {
+                continue;
+            }
+            if !owners
+                .iter()
+                .any(|(old, pin)| *old == id && pin.edges == record.edges)
+            {
+                let labels = |edges: &std::collections::BTreeSet<Identity>| {
+                    edges
+                        .iter()
+                        .map(|edge| format!("{} {}", edge.name, edge.version))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                return Err(format!("Cargo.lock: game or pinned package {} moved or changed its dependency graph: [{}] -> [{}]", id.name, owners.iter().map(|(old, pin)| format!("{} {}: {}", old.name, old.version, labels(&pin.edges))).collect::<Vec<_>>().join("; "), labels(&record.edges)));
+            }
+        }
         for (id, record) in &resolved.packages {
             let Some(pin) = self.packages.get(id) else {
                 let versions = game
@@ -367,6 +428,55 @@ mod tests {
     fn lock(source: &str, checksum: &str) -> String {
         format!("version = 4\n[[package]]\nname = 'itoa'\nversion = '1.0.15'\nsource = '{source}'\nchecksum = '{checksum}'\n")
     }
+    fn patched_graph(version: &str, registry: bool) -> String {
+        let source = if registry {
+            "source='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'"
+        } else {
+            ""
+        };
+        format!("version=4\n[[package]]\nname='allocator'\nversion='1.0.0'\nsource='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\ndependencies=['allocator-sys']\n[[package]]\nname='allocator-sys'\nversion='{version}'\n{source}\n")
+    }
+
+    #[test]
+    fn isolated_game_patch_version_movement_is_refused() {
+        let game =
+            RegistryLock::parse("version=4\n[[package]]\nname='allocator-sys'\nversion='0.1.49'\n")
+                .unwrap();
+        let moved =
+            RegistryLock::parse("version=4\n[[package]]\nname='allocator-sys'\nversion='0.1.50'\n")
+                .unwrap();
+        let error = game
+            .check_resolution(&moved, &RegistryLock::default())
+            .unwrap_err();
+        assert!(error.contains("allocator-sys"), "{error}");
+    }
+
+    #[test]
+    fn isolated_game_patch_registry_source_movement_is_refused() {
+        let game =
+            RegistryLock::parse("version=4\n[[package]]\nname='allocator-sys'\nversion='0.1.49'\n")
+                .unwrap();
+        let moved = RegistryLock::parse(&format!("version=4\n[[package]]\nname='allocator-sys'\nversion='0.1.49'\nsource='{CRATES_IO}'\nchecksum='{}'\n", "a".repeat(64))).unwrap();
+        let error = game
+            .check_resolution(&moved, &RegistryLock::default())
+            .unwrap_err();
+        assert!(error.contains("allocator-sys"), "{error}");
+    }
+
+    #[test]
+    fn registry_to_game_owned_local_patch_is_pinned_and_movement_refuses_by_name() {
+        let game = RegistryLock::parse(&patched_graph("0.1.49", false)).unwrap();
+        game.check_resolution(&game, &RegistryLock::default())
+            .unwrap();
+        for (version, registry) in [("0.1.50", false), ("0.1.49", true)] {
+            let moved = RegistryLock::parse(&patched_graph(version, registry)).unwrap();
+            let error = game
+                .check_resolution(&moved, &RegistryLock::default())
+                .unwrap_err();
+            assert!(error.contains("allocator-sys"), "{error}");
+        }
+    }
+
     #[test]
     fn game_version_movement_is_named_and_added_versions_are_allowed() {
         let game = RegistryLock::parse(&lock(CRATES_IO, &"a".repeat(64))).unwrap();

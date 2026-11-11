@@ -449,8 +449,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `on_item_use_first` Part.
 - **`native_right_click_item(click, cancellation_result, canceled)`**: NeoForge's
   `PlayerInteractEvent.RightClickItem`, on both sides, before `Item.use` and its Part after target
-  fallthrough. Canceling answers with `cancellation_result` (default `Pass`). On the client,
-  every canceled result except `Success` continues to the other hand without a predicted swing.
+  fallthrough. Canceling answers with `cancellation_result` (default `Pass`). `Success`,
+  `SuccessServer` and `Consume` end the client's hand loop. Only `Success` predicts a swing.
 - **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_pre(dimension, piston,
   direction, extending, push, destroy, canceled)`** and **`native_piston_post(dimension, piston, direction, extending, push, destroy)`** (on `GameLevel`, like the block observers): a fluid flowing or fire
   spreading (`kind` `fluid` or `fire`) from `from` into `to`, and a piston moving blocks once its structure resolved (`native_piston_pre`, NeoForge's `PistonEvent.Pre`; `native_piston_post`, `PistonEvent.Post`, hears the move done).
@@ -1773,9 +1773,9 @@ still go on each event or registrar.
   vanilla's `PoseStack`): `native_draw_quad` (four corners and a sprite's UVs), `native_draw_cube` (a model element's box,
   its faces baked as a model's are, each a `CubeFace::new(sprite)`, `.with_uv(uv)` for UVs of its own), `native_draw_block` (a block
   state's model, as `submitBlockModel`: a moving part is often a block of the mod's own) and `native_draw_text`
-  (`BlockEntityDrawContext::text(text, at, rgb)`: a line of the game's font, as a sign's, in font pixels with y down as
-  `Font.drawInBatch` lays it out under the pose, opaque `0xRRGGBB`, in the frame's light; `set_light` to full bright for
-  a glowing display such as a nixie tube; `text_width` measures it to centre it). Sprites are the atlas's:
+  (`BlockEntityDrawContext::text(text, at, rgb, glowing, outline)`: a component in the game's font, as a sign's line or a
+  text display's, in font pixels with y down as `Font.drawInBatch` lays it out under the pose, with its styles   (bold, italic, underline, strikethrough, obfuscated, fonts, `§` codes), opaque `0xRRGGBB`, in the frame's light or full bright when
+  `glowing` (a nixie tube), ringed with `outline` when given; `text_width` measures it, styles included, to centre it).   Parts drawn after `spin` turn on the client's animation clock (`animation_time`) and are lit where they turn to. Sprites are the atlas's:
   `<ns>:block/...` and `block/...`, and a content mod's `assets/<ns>/textures/entity/` as `<ns>:entity/...`. Culling uses the bounds
   `native_block_entity_render_bounding_box` gives (NeoForge's `getRenderBoundingBox`): the block with a block of margin
   unless the mod widens them, or never culled when a bound is infinite. Both run every frame for every one in view: keep
@@ -2853,8 +2853,8 @@ registration path.
   `Item.use` and the item's `use_item` Part on both sides, after the same hand's target interaction falls through.
   `event.click` (`ItemClick`) contains the dimension, player's feet block position, player,
   hand and stack. `Flow::Cancel` skips the Part/template and returns `*event.cancellation_result`
-  (default `Pass`). Only `Success` ends the client's hand loop and predicts a swing; all other
-  canceled results continue to the other hand, including `SuccessServer` and `Consume`. A block
+  (default `Pass`). `Success`, `SuccessServer` and `Consume` end the client's hand loop. `Success`
+  predicts a swing, `SuccessServer` swings on the server, and `Consume` has no swing. A block
   success, block FAIL, or entity success prevents item fallback; the server fires this on the separate UseItem packet
   rather than on UseItemOn.
 

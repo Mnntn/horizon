@@ -1,6 +1,9 @@
 //! Cargo owns registry compilation and the final link; the SDK remains binary-only.
 use super::{api, dependencies, internals, prebuilt, registry_plan, registry_rustc};
-use crate::rust_toolchain::Toolchain;
+use crate::{
+    i18n::{tr, trf},
+    rust_toolchain::Toolchain,
+};
 use std::{
     collections::BTreeMap,
     fs,
@@ -22,8 +25,38 @@ pub(super) fn compile(
     options: Options<'_>,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
     let sdk = prebuilt::identity(game)?;
-    let lock = sdk.registry_lock.as_ref().ok_or("The prebuilt SDK does not declare a locked registry graph; install an SDK that supports registry-bearing native mods")?;
-    let links = sdk.native_links.as_ref().ok_or("The prebuilt SDK does not declare native library providers; registry-bearing mods cannot be linked safely")?;
+    let lock = sdk.registry_lock.as_ref().ok_or_else(|| tr("The prebuilt SDK does not declare a locked registry graph; install an SDK that supports registry-bearing native mods").to_string())?;
+    let mut patches = sdk.registry_patches.clone().ok_or_else(|| {
+        tr("The prebuilt SDK does not declare game registry patches; install a newer SDK")
+            .to_string()
+    })?;
+    let sdk_root = game.canonicalize().map_err(|e| e.to_string())?;
+    for (_, registry) in patches.iter_mut() {
+        for (_, spec) in registry
+            .as_table_mut()
+            .ok_or_else(|| tr("Invalid SDK patch registry").to_string())?
+            .iter_mut()
+        {
+            let spec = spec
+                .as_table_mut()
+                .ok_or_else(|| tr("Invalid SDK patch").to_string())?;
+            let relative = spec
+                .get("path")
+                .and_then(toml::Value::as_str)
+                .ok_or_else(|| tr("SDK patch has no path").to_string())?;
+            let path = sdk_root.join(relative).canonicalize().map_err(|e| {
+                trf(
+                    "SDK patch {path}: {error}",
+                    &[("path", relative), ("error", &e.to_string())],
+                )
+            })?;
+            if !path.starts_with(&sdk_root) {
+                return Err(tr("SDK patch escapes the verified SDK").into());
+            }
+            spec.insert("path".into(), path.to_string_lossy().into_owned().into());
+        }
+    }
+    let links = sdk.native_links.as_ref().ok_or_else(|| tr("The prebuilt SDK does not declare native library providers; registry-bearing mods cannot be linked safely").to_string())?;
     let catalog =
         internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
     let generated = catalog
@@ -232,8 +265,10 @@ pub(super) fn compile(
         })
         .collect();
     let wanted = super::crates::wanted(out, &declared_paths)?;
-    let plan = registry_plan::Plan::read(lock, projects, &wanted)?;
-    plan.fetch(rust, &out.join("fetch"))?;
+    let mut plan = registry_plan::Plan::read(lock, projects, &wanted)?;
+    plan.authorize_game_patches(&patches);
+    plan.fetch_with_patches(rust, &out.join("fetch"), &patches)?;
+    registry_plan::apply_patches(out, &patches)?;
     fs::write(
         out.join("Cargo.lock"),
         plan.mods.seed("version=4\npackage=[]\n")?,
@@ -244,15 +279,17 @@ pub(super) fn compile(
     plan.check_mods(&super::registry_lock::RegistryLock::parse(
         &super::read_lock(out)?,
     )?)?;
-    plan.mods.check_resolution(
+    plan.allowed.check_resolution(
         &super::registry_lock::RegistryLock::parse(&super::read_lock(out)?)?,
         &super::registry_lock::RegistryLock::default(),
     )?;
-    super::crates::check_game_graph_names(
-        out,
-        &super::read_lock(out)?,
-        &plan.game.game_package_names(),
-    )?;
+    let mut game_names = plan.game.game_package_names();
+    for registry in patches.values() {
+        for name in registry.as_table().expect("validated SDK patches").keys() {
+            game_names.remove(name);
+        }
+    }
+    super::crates::check_game_graph_names(out, &super::read_lock(out)?, &game_names)?;
     let inventory = metadata.inventory(&super::registry_lock::RegistryLock::default(), links)?;
     if inventory.added_crates > 0 && !options.consent.is_some_and(|ask| ask(&inventory)) {
         return Err(crate::i18n::tr("Registry dependency compilation was not approved").into());

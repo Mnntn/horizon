@@ -515,6 +515,7 @@ impl Game<'_> {
             .set_resource_root(self.pack.source.clone());
         self.maps.slots.forget();
         self.map_patches.clear();
+        self.text_patches.get_mut().clear();
         // Kept mod block entities name the old atlas's sprites, and their view distances the old
         // registry's states.
         self.kept_block_entities.get_mut().clear();

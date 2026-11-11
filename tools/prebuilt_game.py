@@ -7,7 +7,7 @@ native trait mods against it with rustc alone, in seconds, without the game's so
     python3 tools/prebuilt_game.py exports OUT            # each DLL's exported names, toward Windows' limit
 
 Each OS's folder is built on that OS: the proc-macro libraries in it run inside the player's own rustc.
-The folder holds only compiler outputs, never vanilla data; `build` refuses any other file.
+The folder holds compiler outputs and game-owned registry patch crates, never vanilla data; `build` refuses any other file.
 """
 
 import argparse
@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -30,7 +31,7 @@ LOCK = "Cargo.lock"
 # The launcher's generated `main.rs` comes from the game it links against.
 TEMPLATE = "native_main.rs.template"
 # Source files the folder carries besides compiler outputs.
-CARRIED = {IDENTITY: None, LOCK: ROOT / LOCK, TEMPLATE: ROOT / "crates/horizon-client/src" / TEMPLATE}
+CARRIED = {"Cargo.toml": None, IDENTITY: None, LOCK: ROOT / LOCK, TEMPLATE: ROOT / "crates/horizon-client/src" / TEMPLATE}
 # What the game's build script asks the `horizon-client` executable's link for (Windows' 8 MB main stack).
 LINK_ARG = "cargo:horizon-executable-link-arg="
 # Native libraries the build scripts point the final link at (the `windows` crates' MinGW import libraries):
@@ -234,6 +235,7 @@ def build(out: Path, server: bool) -> None:
     for name, source in CARRIED.items():
         if source is not None:
             shutil.copy2(source, out / name)
+    patches = carry_patches(staged, out)
     game = next(script for script in scripts if script["package_id"].split("#")[0].endswith("/horizon-client"))
     for manifest in (POINTS, INTERNALS, CATALOG):
         shutil.copy2(staged / manifest, out / manifest)
@@ -241,6 +243,7 @@ def build(out: Path, server: bool) -> None:
     link_args = executable_link_args(output)
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}
     identity = {
+        "format_version": 5,
         "commit": run(["git", "rev-parse", "HEAD"], cwd=ROOT).strip(),
         "rustc": run(["rustc", "-vV"]).strip(),
         "target": host,
@@ -249,12 +252,40 @@ def build(out: Path, server: bool) -> None:
         "rustflags": rustflags,
         "link_args": link_args,
         "facade_crates": eligible,
+        "registry_patches": patches,
+        "patch_files": {name: digest for name, digest in files.items() if name.startswith("patches/")},
         "registry_lock": (staged / "Cargo.lock").read_text(),
         "native_links": native_links(metadata, "horizon-mod-host"),
         "files": files,
     }
     (out / IDENTITY).write_text(json.dumps(identity, indent=2) + "\n")
     check(out)
+
+
+def carry_patches(staged: Path, out: Path) -> dict:
+    """Carry only game-owned registry patch crates, never the rest of the game source."""
+    patches = tomllib.loads((staged / "Cargo.toml").read_text()).get("patch", {})
+    for registry in patches.values():
+        for spec in registry.values():
+            source = staged / spec["path"]
+            if source.is_symlink() or any(path.is_symlink() for path in source.rglob("*")):
+                raise ValueError("game patch contains a symlink")
+            source = source.resolve()
+            if not source.is_relative_to(staged.resolve()):
+                raise ValueError("game patch escapes the staged source")
+            destination = out / "patches" / source.name
+            shutil.copytree(source, destination, symlinks=True)
+            if any(path.is_symlink() for path in destination.rglob("*")):
+                raise ValueError("copied game patch contains a symlink")
+            spec["path"] = str(destination.relative_to(out))
+    # This deliberately is not the game's buildable workspace manifest.
+    lines = []
+    for registry, entries in patches.items():
+        lines.append(f"[patch.{json.dumps(registry)}]")
+        for name, spec in entries.items():
+            lines.append(f"{json.dumps(name)} = {{ path = {json.dumps(spec['path'])} }}")
+    (out / "Cargo.toml").write_text("\n".join(lines) + "\n")
+    return patches
 
 
 def executable_link_args(output: Path) -> list[str]:
@@ -280,10 +311,20 @@ def extern_args(deps: Path, crate: str) -> list[str]:
 
 
 def check(out: Path) -> None:
-    """Only compiler outputs: a stray asset, vanilla file or anything else fails the build."""
+    """Only compiler outputs and exactly inventoried patch sources may ship."""
+    identity = json.loads((out / IDENTITY).read_text()) if (out / IDENTITY).is_file() else {}
+    patch_files = identity.get("patch_files", {})
+    links = [path for path in out.rglob("*") if path.is_symlink()]
+    if links:
+        sys.exit(f"prebuilt folder contains symlinks: {links}")
+    for name, digest in patch_files.items():
+        path = out / name
+        if not name.startswith("patches/") or ".." in Path(name).parts or not path.is_file() or sha256(path) != digest:
+            sys.exit(f"prebuilt patch inventory mismatch: {name}")
     stray = [
         path for path in out.rglob("*")
         if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name in (POINTS, INTERNALS, CATALOG)))
+        and str(path.relative_to(out).as_posix()) not in patch_files
         and not (path.parent == out / "deps" and path.name.endswith(SUFFIXES))
         and not (path.parent == out / "host" and path.name.endswith((".so", ".dll", ".dylib", ".dll.a")))
         and not (path.parent == out / NATIVE and path.name.endswith(NATIVE_SUFFIXES))

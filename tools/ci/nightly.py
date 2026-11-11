@@ -13,7 +13,7 @@ in their order and pushed as nightly/build-<date>-<n>; with no set, main alone. 
 this repository's checks passed (`dyna-checks` on the fork, `checks` and `parity-main` upstream), as for a release
 (release_train.green_main_head), or NIGHTLY_BASE when the caller gives that commit. It is published as the
 `nightly` pre-release; the previous one stays a week as nightly-<date>.
-On arismoko/horizon only, automatic selection additionally requires a complete published v4 SDK for the
+On arismoko/horizon only, automatic selection additionally requires a complete published v5 SDK for the
 exact SHA. Explicit bases without it fail; PR picks are disabled, and the final SHA is rechecked before pushing.
 Its notes list what reached main since the previous nightly, then the picked pull requests. Runs from main's
 checkout with `gh`; it reads and merges the branches with git and never runs anything from them.
@@ -230,7 +230,7 @@ def ready_sdk_shas() -> set[str]:
     releases = train.gh_json("api", "--paginate", "--slurp",
                              f"repos/arismoko/horizon/releases?per_page=100")
     required = {"SHA256SUMS"} | {
-        f"horizon-prebuilt-v4-{target}.tar.gz" for target in (
+        f"horizon-prebuilt-v5-{target}.tar.gz" for target in (
             "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu-server",
             "x86_64-pc-windows-gnu", "aarch64-apple-darwin")}
     return {release["tag_name"].removeprefix("prebuilt-")
@@ -247,7 +247,7 @@ def sdk_ready(sha: str) -> bool:
 def require_sdk(sha: str) -> None:
     """Refuse before rotating/publishing Nightly if its SDK disappeared."""
     if os.environ.get("GITHUB_REPOSITORY") == "arismoko/horizon" and not sdk_ready(sha):
-        raise SystemExit(f"Nightly publication refused: {sha} has no complete published v4 SDK pair")
+        raise SystemExit(f"Nightly publication refused: {sha} has no complete published v5 SDK pair")
 
 
 def green_base(repo: str, issue: str) -> Ref:
@@ -263,14 +263,14 @@ def green_base(repo: str, issue: str) -> Ref:
     else:
         sha = train.green_main_head(parity=True)
     if not sha:
-        checks = "dyna-checks and has a complete published v4 SDK" if fork else "checks and parity-main"
+        checks = "dyna-checks and has a complete published v5 SDK" if fork else "checks and parity-main"
         stop(repo, issue, f"the build stopped: no recent commit of main passed {checks}, so "
                           "none is green to build on. The next build after they pass takes it.")
     if not is_ancestor(sha, "refs/remotes/origin/main"):
         stop(repo, issue, f"the build stopped: {sha[:9]} is not on main.")
     sha = git("rev-parse", sha)
     if fork and explicit and not sdk_ready(sha):
-        stop(repo, issue, f"the build stopped: {sha} has no complete published v4 SDK pair.")
+        stop(repo, issue, f"the build stopped: {sha} has no complete published v5 SDK pair.")
     return Ref("main", sha, dt.datetime.fromisoformat(git("show", "-s", "--format=%cI", sha)))
 
 

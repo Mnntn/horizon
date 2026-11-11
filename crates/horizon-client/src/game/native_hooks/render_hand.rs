@@ -54,7 +54,8 @@ impl Game<'_> {
             to_world,
             horizon_client::block_entity_render::diffuse_lights(self.dim == Dim::Nether),
             std::mem::take(out),
-        );
+        )
+        .animated(self.animation_time());
         let mut canceled = false;
         self.native_render_hand(render, &mut draw, &mut canceled);
         *out = draw.into_vertices();

@@ -4,7 +4,8 @@ use super::*;
 impl Game<'_> {
     /// `PlayerInteractEvent.RightClickItem`, immediately before `Item.use`.
     /// Cancel skips its Part and vanilla behaviour; its result defaults to
-    /// `Pass`. On the client only `Success` ends the hand loop.
+    /// `Pass`. On the client `Success`, `SuccessServer` and `Consume` end the
+    /// hand loop; only `Success` predicts a swing.
     pub(in crate::game) fn native_right_click_item(
         &mut self,
         click: &ItemClick<'_>,

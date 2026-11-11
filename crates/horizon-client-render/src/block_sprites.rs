@@ -56,17 +56,48 @@ pub fn parse_state(registry: &BlockRegistry, text: &str) -> Option<BlockStateId>
     registry.resolve(&state).ok()
 }
 
-/// The sprites `context`'s resources hold, `split` layers to an array (`Renderer::sprite_split`).
+/// What a fluid block (`minecraft:water`, a bubble column, lava) shows on every side instead of a model:
+/// its still texture, its tint source (water's is the biome's, `MeshTables::water_tint`, at tint index 0)
+/// and whether it is translucent. None for any other block.
+pub fn fluid_faces(block: &str) -> Option<(&'static str, Option<TintSource>, bool)> {
+    match block {
+        "minecraft:water" | "minecraft:bubble_column" => {
+            Some(("block/water_still", Some(TintSource::Water), true))
+        }
+        "minecraft:lava" => Some(("block/lava_still", None, false)),
+        _ => None,
+    }
+}
+
+/// Each sprite layer's texture name, as `native_draw_cube` and `native_draw_quad` take it: vanilla's
+/// without its namespace (`block/stone`), a mod's with it (`mymod:block/gear`).
+pub fn texture_names(
+    sprite_layers: &std::collections::BTreeMap<String, u32>,
+) -> std::collections::HashMap<u32, String> {
+    sprite_layers
+        .iter()
+        .map(|(name, layer)| (*layer, name.trim_start_matches("minecraft:").to_owned()))
+        .collect()
+}
+
+/// The sprites `context`'s resources hold, `split` layers to an array (`Renderer::sprite_split`), and
+/// their names (`texture_names`).
 pub struct Lookup<'a> {
     context: &'a WorkerContext,
     split: u32,
+    names: &'a std::collections::HashMap<u32, String>,
 }
 
 impl<'a> Lookup<'a> {
-    pub fn new(context: &'a WorkerContext, split: u32) -> Self {
+    pub fn new(
+        context: &'a WorkerContext,
+        split: u32,
+        names: &'a std::collections::HashMap<u32, String>,
+    ) -> Self {
         Self {
             context,
             split: split.max(1),
+            names,
         }
     }
     /// The sprite at `layer` of all the layers.
@@ -112,19 +143,15 @@ impl<'a> Lookup<'a> {
             .registry
             .state(state)
             .map_or("", |s| s.name.as_str());
-        let fluid = match block {
-            "minecraft:water" | "minecraft:bubble_column" => {
-                Some(("block/water_still", Some(TintSource::Water), true))
-            }
-            "minecraft:lava" => Some(("block/lava_still", None, false)),
-            _ => None,
-        };
+        let fluid = fluid_faces(block);
         if let Some((texture, tint, translucent)) = fluid {
             let sprite = self.texture(texture);
             if let Some(sprite) = sprite {
                 for side in &mut sides {
                     side.push(FaceSprite {
                         sprite,
+                        texture: texture.to_owned(),
+                        tint_index: if tint.is_some() { 0 } else { -1 },
                         rect: [0.0, 0.0, 1.0, 1.0],
                         inset: 0.0,
                         uv: [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
@@ -199,6 +226,8 @@ impl<'a> Lookup<'a> {
             side,
             FaceSprite {
                 sprite: self.sprite(face.layer),
+                texture: self.names.get(&face.layer).cloned().unwrap_or_default(),
+                tint_index: q.tint_index,
                 rect: [a0, b0, a1, b1].map(snap),
                 inset: snap((depth - plane).abs()),
                 uv: uv.map(snap),
@@ -297,17 +326,20 @@ mod tests {
             )?),
             hidden_states: Arc::from([]),
         };
-        let lookup = Lookup::new(&context, 2048);
+        let names = texture_names(&context.render.sprite_layers);
+        let lookup = Lookup::new(&context, 2048, &names);
         let whole = [0.0, 0.0, 1.0, 1.0];
         let upright = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
 
         let stone = lookup.block("minecraft:stone").unwrap();
         assert!(stone.cube);
-        let top = stone.sides[Direction::Up as usize][0];
+        let top = &stone.sides[Direction::Up as usize][0];
         assert_eq!(
             (top.rect, top.inset, top.tint, top.sprite.array),
             (whole, 0.0, None, 0)
         );
+        // By the name the drawing helpers take, untinted.
+        assert_eq!((top.texture.as_str(), top.tint_index), ("block/stone", -1));
         assert_eq!(lookup.texture("minecraft:block/stone"), Some(top.sprite));
         assert_eq!(lookup.texture("block/stone"), Some(top.sprite));
         assert!(!top.sprite.animated && !top.sprite.cutout);
@@ -362,18 +394,23 @@ mod tests {
         );
 
         let leaves = lookup.block("oak_leaves").unwrap();
-        let leaf = leaves.sides[Direction::Up as usize][0];
+        let leaf = &leaves.sides[Direction::Up as usize][0];
         assert!(leaf.sprite.cutout);
         assert_eq!(leaf.tint, Some(TintSource::Foliage));
+        assert_eq!(
+            (leaf.texture.as_str(), leaf.tint_index),
+            ("block/oak_leaves", 0)
+        );
         assert!(matches!(
             lookup.block("spruce_leaves").unwrap().sides[0][0].tint,
             Some(TintSource::Fixed(0x61_9961))
         ));
 
         let water = lookup.block("water").unwrap();
-        let w = water.sides[Direction::Up as usize][0];
+        let w = &water.sides[Direction::Up as usize][0];
         assert!(w.sprite.animated && w.translucent);
         assert_eq!(w.tint, Some(TintSource::Water));
+        assert_eq!(w.texture, "block/water_still");
 
         let slab = lookup.block("stone_slab").unwrap();
         assert!(!slab.cube);
