@@ -117,11 +117,17 @@ fn published_tcp_attributes_players_and_orders_actions() {
                 std::thread::yield_now();
             }
             let port = game
-                .publish(super::super::lan::LanSettings {
-                    port: 0,
-                    guest_commands: false,
-                    force_game_mode: false,
+                .integrated
+                .as_ref()
+                .unwrap()
+                .call(|server| {
+                    server.publish(super::super::lan::LanSettings {
+                        port: 0,
+                        guest_commands: false,
+                        force_game_mode: false,
+                    })
                 })
+                .expect("integrated server answered publication request")
                 .unwrap();
             let mut peers = [
                 connect_peer(port, PLAYERS[0]),
