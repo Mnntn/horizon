@@ -127,6 +127,17 @@ class Freshness(unittest.TestCase):
         self.assertIn('same file', m.check(self.history('tools/ci/nightly.py', 'tools/ci/nightly.py'), 7))
         self.assertIn('same file', m.check(self.history('.github/workflows/check.yml', '.github/workflows/check.yml'), 7))
 
+    def test_same_root_doc_is_not_a_contract(self):
+        self.assertIsNone(m.check(self.history('README.md', 'README.md'), 7))
+
+    def test_current_base_ci_and_workflows_are_fresh(self):
+        for path in ('tools/ci/nightly.py', '.github/workflows/check.yml'):
+            with self.subTest(path=path):
+                api = self.history(path, path)
+                self.assertIn('same file', m.check(api, 7))
+                api.main = api.record['base']
+                self.assertIsNone(m.check(api, 7))
+
     def test_bad_evidence(self):
         good = self.history('crates/a/src/a.rs', 'crates/b/src/b.rs')
         mutations = [lambda a: a.record.update(head='0'*40), lambda a: a.record.update(attempt=1),
