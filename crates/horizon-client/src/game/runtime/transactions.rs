@@ -45,6 +45,10 @@ pub(super) struct Level {
     blocks: HashMap<Pos, BlockStateId>,
     /// Each player's inventory before this transaction first wrote it, by UUID.
     players: HashMap<u128, KeptPlayer>,
+    /// Synced player health and its unpublished update events before set_health.
+    player_health: HashMap<u128, KeptPlayerHealth>,
+    /// Mob health and synchronization dirtiness before set_health.
+    mob_health: HashMap<u32, (f32, bool)>,
     /// Each entity's inventory (`entity_slots`) before this transaction first wrote it.
     entities: HashMap<u32, Vec<Option<ItemStack>>>,
     /// Each mob's or armor stand's equipment before this transaction first
@@ -96,6 +100,11 @@ impl Kept {
             extras: world.block_entity_extras(pos),
         }
     }
+}
+
+struct KeptPlayerHealth {
+    data: horizon_world::synced_floats::SyncedFloats,
+    events_len: usize,
 }
 
 #[derive(Clone)]
@@ -260,6 +269,12 @@ impl Game<'_> {
                 for (uuid, kept) in level.players {
                     outer.players.entry(uuid).or_insert(kept);
                 }
+                for (uuid, kept) in level.player_health {
+                    outer.player_health.entry(uuid).or_insert(kept);
+                }
+                for (id, kept) in level.mob_health {
+                    outer.mob_health.entry(id).or_insert(kept);
+                }
                 for (id, kept) in level.entities {
                     outer.entities.entry(id).or_insert(kept);
                 }
@@ -351,6 +366,34 @@ impl Game<'_> {
             equipment: self.equipment.clone(),
             carried: self.carried.clone(),
         });
+    }
+    /// Called with the target player's body swapped in, before set_health changes it.
+    pub(super) fn journal_player_health(&mut self) {
+        let uuid = self.native_acting_id();
+        let Some(level) = self.transactions.last_mut() else {
+            return;
+        };
+        let Some(player) = self.player.as_ref() else {
+            return;
+        };
+        level
+            .player_health
+            .entry(uuid)
+            .or_insert_with(|| KeptPlayerHealth {
+                data: player.health.data.clone(),
+                events_len: player.events.len(),
+            });
+    }
+    pub(super) fn journal_mob_health(&mut self, id: u32) {
+        let Some(level) = self.transactions.last_mut() else {
+            return;
+        };
+        if let Some(mob) = self.mobs.iter().find(|m| m.id == id && !m.removed) {
+            level
+                .mob_health
+                .entry(id)
+                .or_insert((mob.health, mob.needs_sync));
+        }
     }
     /// Keeps `player`'s menu storage as it is, if a transaction is open and hasn't yet.
     pub(super) fn journal_menus(&mut self, player: mod_api::PlayerRef) {
@@ -658,6 +701,32 @@ impl Game<'_> {
             {
                 self.with_resident_slot(&self.dim.key(), id, |slot| {
                     *slot = Default::default();
+                });
+            }
+        }
+        for (id, (health, needs_sync)) in level.mob_health {
+            if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
+                mob.health = health;
+                mob.needs_sync = needs_sync;
+            }
+        }
+        for (uuid, kept) in level.player_health {
+            // Restoration must also reach a body tentatively set to zero health:
+            // native_as_player deliberately refuses dead bodies for public writes.
+            let target = if uuid == self.native_acting_id() {
+                Some(super::commands::Target::Player)
+            } else {
+                self.lan
+                    .as_ref()
+                    .and_then(|host| host.hub.holder_guest(uuid, self.dim.id()))
+                    .map(|guest| super::commands::Target::Guest(guest.conn))
+            };
+            if let Some(target) = target {
+                self.for_player(target, |g| {
+                    if let Some(player) = g.player.as_mut() {
+                        player.health.data = kept.data;
+                        player.events.truncate(kept.events_len);
+                    }
                 });
             }
         }

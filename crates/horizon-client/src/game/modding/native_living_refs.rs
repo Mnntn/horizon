@@ -607,13 +607,14 @@ impl Game<'_> {
         match self.native_living_target(living) {
             Some(t @ (Target::Player | Target::Guest(_))) => self
                 .for_player(t, |g| {
-                    let p = g.player.as_mut()?;
-                    let max = p.attribute("minecraft:max_health").ok()? as f32;
-                    p.set_health(health.min(max), false).ok()
+                    let max = g.player.as_mut()?.attribute("minecraft:max_health").ok()? as f32;
+                    g.journal_player_health();
+                    g.player.as_mut()?.set_health(health.min(max), false).ok()
                 })
                 .flatten()
                 .is_some(),
             Some(Target::Mob(id)) => {
+                self.journal_mob_health(id);
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                     return false;
                 };
@@ -1749,6 +1750,78 @@ mod tests {
             assert_eq!(living.health(game), Some(8.0));
             let accepted = living.set_health(game, 0.0);
             assert_eq!((accepted, living.health(game)), (true, Some(0.0)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn set_health_journal_restores_nested_player_and_mob_writes() {
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
+            game.mobs[0].needs_sync = false;
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.player.as_mut().unwrap().entity_id = 20;
+            super::super::native_entity_refs::tests::bind_local_player(game, 20, 123);
+            let player = game.living(game.entity(20).unwrap()).unwrap();
+            let mob = game.living(game.entity(12).unwrap()).unwrap();
+            let initial = (player.health(game), mob.health(game));
+            let dirty = game.player.as_ref().unwrap().health.data.is_dirty();
+            let events = game.player.as_ref().unwrap().events.len();
+            let outer = game.transaction_open();
+            assert!(player.set_health(game, 12.0));
+            assert!(mob.set_health(game, 8.0));
+            let inner = game.transaction_open();
+            assert!(player.set_health(game, 0.0));
+            assert!(mob.set_health(game, 0.0));
+            game.transaction_close(&inner, false);
+            assert_eq!(
+                (player.health(game), mob.health(game)),
+                (Some(12.0), Some(8.0))
+            );
+            let inner = game.transaction_open();
+            assert!(player.set_health(game, 0.0));
+            assert!(mob.set_health(game, 0.0));
+            game.transaction_close(&inner, true);
+            game.transaction_close(&outer, false);
+            assert_eq!((player.health(game), mob.health(game)), initial);
+            assert_eq!(game.player.as_ref().unwrap().health.data.is_dirty(), dirty);
+            assert_eq!(game.player.as_ref().unwrap().events.len(), events);
+            assert!(!game.mobs[0].needs_sync);
+            assert!(!game.player.as_ref().unwrap().health.dead);
+            assert!(!game.mobs[0].removed);
+            let commit = game.transaction_open();
+            assert!(player.set_health(game, 0.0));
+            assert!(mob.set_health(game, 0.0));
+            game.transaction_close(&commit, true);
+            assert_eq!(
+                (player.health(game), mob.health(game)),
+                (Some(0.0), Some(0.0))
+            );
+            assert!(game.mobs[0].needs_sync);
+            assert!(game.player.as_ref().unwrap().events.len() > events);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn set_health_journal_restores_zero_health_guest_outside_its_turn() {
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            let guest = game.player(12).unwrap();
+            let living = LivingRef::new(guest.entity());
+            let before = living.health(game).unwrap();
+            let tx = game.transaction_open();
+            assert!(living.set_health(game, 0.0));
+            assert_eq!(living.health(game), Some(0.0));
+            game.transaction_close(&tx, false);
+            assert_eq!(living.health(game), Some(before));
         });
     }
 

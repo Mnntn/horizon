@@ -205,7 +205,7 @@ fn compiled_guest_runs_in_actual_game_roots() {
                 usize::from(!trap),
                 "actual Game deferred publication must follow the root outcome, before teardown can suppress delivery"
             );
-            let roots = ROOTS.lock().unwrap();
+            let roots = ROOTS.lock().unwrap().clone();
             if case == "network_handler_trap" {
                 assert!(
                     roots.is_empty(),
@@ -227,7 +227,6 @@ fn compiled_guest_runs_in_actual_game_roots() {
                 "actual authoritative player mutation must follow root outcome"
             );
             assert_eq!(RECEIPTS.load(Ordering::SeqCst), usize::from(!trap));
-            drop(roots);
             if game.remote.is_some() {
                 game.leave_server(None).unwrap();
             }
