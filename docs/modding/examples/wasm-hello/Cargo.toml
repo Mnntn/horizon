@@ -3,14 +3,9 @@ name = "hello-wasm"
 version = "0.1.0"
 edition = "2024"
 publish = false
-build = "../../../../crates/horizon-mod-wasm/tests/points/build.rs"
 
 [dependencies]
 horizon-mod-api = { path = "../../../../crates/horizon-mod-api" }
 
-[build-dependencies]
-horizon-mod-api-gen = { path = "../../../../crates/horizon-mod-api-gen" }
-horizon-mod-package = { path = "../../../../crates/horizon-mod-package" }
 
-# A mod is its own project, not a member of the game's workspace.
 [workspace]

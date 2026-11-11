@@ -26,9 +26,6 @@ pub use horizon_mod_api_macros::Wire;
 /// Internal test-fixture attribute for modules with multiple hook sets; mods use `#[mod_api::horizon_mod]`.
 #[doc(hidden)]
 pub use horizon_mod_api_macros::__subscriptions;
-// hidden: written by `cargo horizon-mod build` on a staged copy's mod points, never by a mod
-#[doc(hidden)]
-pub use horizon_mod_api_macros::point as __point;
 /// Mark a hook implementation and derive its subscriptions.
 ///
 /// On `impl Hooks`, also exports `pub fn hooks()` using the mod's `Default`

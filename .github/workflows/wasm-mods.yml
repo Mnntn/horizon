@@ -71,31 +71,26 @@ jobs:
         with:
           # These custom-profile targets belong to staged, independent workspaces.
           cache-directories: .wasm-fixture-targets
-      - name: Compile and test emitted point records
-        run: |
-          manifest=crates/horizon-mod-point-shape/tests/record-wire/Cargo.toml
-          cargo test --manifest-path "$manifest" --features wasm-guest --locked
-          cargo check --manifest-path "$manifest" --features wasm-guest --target wasm32-unknown-unknown --locked
       - name: Build tool and shared member
         run: |
           cargo build -p cargo-horizon-mod
           cd crates/horizon-mod-wasm/tests/fixture
-          "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm --catalog points.json
-          "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod wasm-std "$GITHUB_WORKSPACE/target/horizon-wasm-std.wasm" --catalog points.json
+          "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm
+          "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod wasm-std "$GITHUB_WORKSPACE/target/horizon-wasm-std.wasm"
       - name: Validate and load the fixture
         env:
           HORIZON_WASM_FIXTURE: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/fixture/target/horizon-mod/wasm_fixture.hmod
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
         run: |
           cargo test -p horizon-mod-api --features wasm-guest --lib guest_pool_
-          cargo test -p horizon-mod-wasm --features listener-fixture --test real_member --test self_refusal --test native_listener --test no_wire_registration -- --include-ignored --nocapture
-          cargo test -p horizon-mod-wasm --features listener-fixture --lib guest_input_pool_stays_flat_for_100k_no_import_calls -- --ignored --nocapture
+          cargo test -p horizon-mod-wasm --test real_member --test self_refusal -- --include-ignored --nocapture
+          cargo test -p horizon-mod-wasm --lib guest_input_pool_stays_flat_for_100k_no_import_calls -- --ignored --nocapture
       - name: Build independent library members
         run: |
           tool="$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod"
           root="$GITHUB_WORKSPACE/crates/horizon-mod-wasm/tests/library-fixture"
           for member in library observer dependent; do
-            (cd "$root/$member" && "$tool" horizon-mod build --wasm --catalog "$root/points.json")
+            (cd "$root/$member" && "$tool" horizon-mod build --wasm)
           done
       - name: Load independently built library members
         env:
@@ -108,9 +103,8 @@ jobs:
         run: |
           tool="$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod"
           groups="$GITHUB_WORKSPACE/crates/horizon-mod-wasm/tests/groups"
-          catalog="$GITHUB_WORKSPACE/crates/horizon-mod-wasm/tests/library-fixture/points.json"
           for member in counter_lib alpha beta gamma hog; do
-            (cd "$groups/$member" && "$tool" horizon-mod build --wasm --catalog "$catalog")
+            (cd "$groups/$member" && "$tool" horizon-mod build --wasm)
           done
       - name: Load the group members
         env:
@@ -122,4 +116,4 @@ jobs:
         env:
           HORIZON_WASM_FIXTURE: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/fixture/target/horizon-mod/wasm_fixture.hmod
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
-        run: cargo test --release -p horizon-mod-wasm --features listener-fixture --test bench block_entity_ticks -- --ignored --nocapture
+        run: cargo test --release -p horizon-mod-wasm --test bench block_entity_ticks -- --ignored --nocapture

@@ -92,15 +92,8 @@ fn root_record_validation_is_identical_for_both_targets() {
 }
 
 #[test]
-fn wasm_listener_requires_root_declarations_and_native_modules_stay_native() {
-    let [native, wasm] = targets();
-    let injection = "[[inject]]\nid='tick'\nat='Game::tick'\nkind='head'\naccess='internals'\nhash='h'\nwith='tick'\n";
-    let error = Manifest::parse(&format!("{HEADER}{wasm}{injection}")).unwrap_err();
-    assert!(error.contains("needs declared internals"), "{error}");
-    Manifest::parse(&format!(
-        "{HEADER}internals=[{{path='Game',hash='h'}}]\n{wasm}{injection}"
-    ))
-    .unwrap();
+fn native_modules_stay_native() {
+    let [native, _wasm] = targets();
     let manifest = Manifest::parse(&format!("{HEADER}{native}[[native.module]]\nid='support'\nfile='src/game.rs'\nname='support'\nsource='src/support.rs'\n")).unwrap();
     assert_eq!(manifest.native.unwrap().module[0].id, "support");
 }

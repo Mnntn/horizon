@@ -205,7 +205,7 @@ fn sync(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Manifest edits follow a user-managed symlink; slot publishing replaces its output link.
+/// Manifest edits follow a user-managed symlink.
 pub(crate) fn atomic_write_manifest(path: &Path, contents: String) -> Result<(), String> {
     let referent = fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()))?;
     atomic_write(&referent, contents)

@@ -156,7 +156,6 @@ mod edge_tests {
                 format!(r#"{{"lib":{{"Z":"{hash}","A":"{hash}"}}}}"#).as_bytes(),
             )
             .unwrap(),
-            points: None,
         }
     }
     fn check(native: bool, mismatch: bool) {

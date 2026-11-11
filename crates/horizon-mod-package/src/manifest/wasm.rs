@@ -13,7 +13,6 @@ pub struct Wasm {
     toolchain: String,
     linked: std::collections::BTreeMap<String, String>,
     built_with: Option<String>,
-    points: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -24,7 +23,6 @@ struct Fields {
     #[serde(default)]
     linked: std::collections::BTreeMap<String, String>,
     built_with: Option<String>,
-    points: Option<String>,
 }
 
 impl TryFrom<Fields> for Wasm {
@@ -38,9 +36,6 @@ impl TryFrom<Fields> for Wasm {
         for (id, hash) in &fields.linked {
             sha512_hex(hash).map_err(|e| format!("[wasm] linked {id} {e}"))?;
         }
-        if let Some(points) = &fields.points {
-            sha512_hex(points).map_err(|e| format!("[wasm] points {e}"))?;
-        }
         if fields.built_with.as_deref().is_some_and(str::is_empty) {
             return Err("[wasm] built_with is empty".into());
         }
@@ -49,7 +44,6 @@ impl TryFrom<Fields> for Wasm {
             toolchain: fields.toolchain,
             linked: fields.linked,
             built_with: fields.built_with,
-            points: fields.points,
         })
     }
 }
@@ -126,12 +120,6 @@ impl Wasm {
     /// Rust source of its own.
     pub fn built_with(&self) -> Option<&str> {
         self.built_with.as_deref()
-    }
-
-    /// The SHA-512 of the package's `points.json` (#2339), when its build listed mod points: the
-    /// catalog an addon's declarations route through is bound to the package by it.
-    pub fn points(&self) -> Option<&str> {
-        self.points.as_deref()
     }
 
     /// Checks `bytes` are this section's `mod.wasm`.
@@ -243,7 +231,6 @@ mod tests {
             toolchain: "1.99.1".into(),
             linked: Default::default(),
             built_with: None,
-            points: None,
         })
         .unwrap()
     }

@@ -1,18 +1,12 @@
 id = "hello_wasm"
 name = "Hello Wasm"
 version = "0.1.0"
-description = "Signs every chat message and counts server ticks at a point, to show a mod.wasm running in the game."
+description = "Signs every chat message and counts server ticks through a hook, to show a mod.wasm running in the game."
 api = "0.2"
 side = "both"
 capabilities = ["registries"]
 
 # The mod listens at the game's tick, filled by its mod.wasm: no game rebuild.
-[[inject]]
-id = "count_ticks"
-at = "horizon_client::game::Game<'_>::tick"
-kind = "head"
-with = "tick"
-hash = "98019f886ec32cc7"
 
 [wasm]
 sha512 = "51b83b0f81b32da48144d0e88e2be3f7ab1b23324e4f87e2daa9490a53c08fb6138dd790bfe3db96ff2b25d33bd535b29d5320745385a7140938a5f19d5c36ac"

@@ -34,24 +34,6 @@ wat = "1.261"
 [lints]
 workspace = true
 
-# Synthetic points are opt-in for the listener matrix only. Dev-dependencies
-# would unify them into every integration test's game layout.
+
 [features]
 runtime-fixture = []
-listener-fixture = []
-
-[[test]]
-name = "real_member"
-required-features = ["listener-fixture"]
-
-[[test]]
-name = "native_listener"
-required-features = ["listener-fixture"]
-
-[[test]]
-name = "no_wire_registration"
-required-features = ["listener-fixture"]
-
-[[test]]
-name = "bench"
-required-features = ["listener-fixture"]
