@@ -8,6 +8,8 @@ pub use incoming::{Body, Classified, Failure, Incoming};
 mod endpoint;
 pub use endpoint::{Endpoint, Prepared};
 mod executor;
+#[cfg(test)]
+mod executor_tests;
 pub use executor::dispatch;
 mod main_queue;
 pub use main_queue::MainQueue;
