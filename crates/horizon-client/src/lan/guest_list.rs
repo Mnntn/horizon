@@ -133,7 +133,7 @@ impl GuestList {
         &mut self,
         index: usize,
     ) -> Option<
-        &mut std::collections::VecDeque<(horizon_protocol::packets::play::Serverbound, usize)>,
+        &mut std::collections::VecDeque<super::guest::InboxItem>,
     > {
         Some(&mut self.rows.get_mut(index)?.inbox)
     }
