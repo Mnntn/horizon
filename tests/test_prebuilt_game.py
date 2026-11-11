@@ -228,7 +228,7 @@ class PrebuiltContentsTests(unittest.TestCase):
     def test_compiler_outputs_pass(self):
         root = self.folder(
             "horizon-prebuilt.json", "Cargo.lock", "native_main.rs.template", "deps/libhorizon_client.so", "deps/libmod_api-1.rmeta",
-            "native/libwindows.0.52.0.a", "points.json", "internals.json", "mod-catalog.json",
+            "native/libwindows.0.52.0.a", "internals.json", "mod-catalog.json",
             "deps/libserde_derive-2.so", "deps/libhorizon_client.dll.a", "deps/libhorizon_mod_wasm.so",
             "deps/horizon_mod_wasm.dll", "deps/libhorizon_mod_wasm.dylib", "deps/libhorizon_mod_host.so",
         )

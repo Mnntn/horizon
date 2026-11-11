@@ -37,8 +37,6 @@ LINK_ARG = "cargo:horizon-executable-link-arg="
 # cargo passes their folders to rustc, a plain rustc gets them from here (`-L native=OUT/native`).
 NATIVE = "native"
 NATIVE_SUFFIXES = (".a", ".lib")
-# The game's injection points, listed by the staging pass: the launcher routes mods' point injections by it.
-POINTS = "points.json"
 CATALOG = "mod-catalog.json"
 # The staged internals signatures, checked against a mod's declared access list.
 INTERNALS = "internals.json"
@@ -72,8 +70,9 @@ def api_version(root: Path) -> str:
 
 
 def stage(target_dir: Path) -> Path:
-    """A copy of the tracked source with the staging pass run over it (#589): every point method gets its
-    `#[point]`, internals become public, and both manifests are written. The working tree is never rewritten."""
+    """A copy of the tracked source with the staging pass run over it: internals become public, every replaceable
+    function gets its replacement slot, and the internals manifest and SDK catalog are written. The working tree
+    is never rewritten."""
     staged = target_dir / "stage"
     if staged.exists():
         shutil.rmtree(staged)
@@ -84,7 +83,7 @@ def stage(target_dir: Path) -> Path:
             (staged / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, staged / name)
     print(run(["cargo", "run", "--locked", "--release", "-q", "-p", "horizon-mod-api-gen", "--bin", "horizon-stage",
-               "--", str(staged), str(staged / POINTS), str(staged / INTERNALS), api_version(staged)],
+               "--", str(staged), str(staged / INTERNALS), api_version(staged)],
               cwd=staged, env={**os.environ, "CARGO_TARGET_DIR": str(target_dir / "tools")}), end="")
     # Only the prebuilt game splits the wasm runtime out: normal source builds stay static. With
     # prefer-dynamic, rustc picks this dylib for the game rather than folding its runtime stack into it.
@@ -235,7 +234,7 @@ def build(out: Path, server: bool) -> None:
         if source is not None:
             shutil.copy2(source, out / name)
     game = next(script for script in scripts if script["package_id"].split("#")[0].endswith("/horizon-client"))
-    for manifest in (POINTS, INTERNALS, CATALOG):
+    for manifest in (INTERNALS, CATALOG):
         shutil.copy2(staged / manifest, out / manifest)
     output = Path(game["out_dir"]).parent / "output"
     link_args = executable_link_args(output)
@@ -291,7 +290,7 @@ def check(out: Path) -> None:
     """Only compiler outputs: a stray asset, vanilla file or anything else fails the build."""
     stray = [
         path for path in out.rglob("*")
-        if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name in (POINTS, INTERNALS, CATALOG)))
+        if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name in (INTERNALS, CATALOG)))
         and not (path.parent == out / "deps" and path.name.endswith(SUFFIXES))
         and not (path.parent == out / "host" and path.name.endswith((".so", ".dll", ".dylib", ".dll.a")))
         and not (path.parent == out / NATIVE and path.name.endswith(NATIVE_SUFFIXES))
@@ -369,7 +368,7 @@ def exports(out: Path) -> None:
         print(f"{library.name}: {names} exported names (Windows' limit is 65,535)")
         if names >= EXPORT_WARNING:
             warning = (f"{library.name} exports {names:,} names, {65_535 - names:,} short of Windows' 65,535: "
-                       "cut exported names before adding points or internals (#589)")
+                       "cut exported names before adding internals")
             print(f"::warning::{warning}")
             if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
                 with open(summary, "a", encoding="utf-8") as file:

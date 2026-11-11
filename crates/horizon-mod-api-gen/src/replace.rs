@@ -440,7 +440,7 @@ fn rewrite(
         let items = quote! {
             #[doc(hidden)]
             #[inline(always)]
-            #[allow(unsafe_code, clippy::all)]
+            #[allow(unsafe_code, dead_code, clippy::all)]
             pub fn #reader() -> ::std::option::Option<#ty> {
                 let installed = crate::__REPLACE[#slot].load(::std::sync::atomic::Ordering::Relaxed);
                 if installed.is_null() {
@@ -452,7 +452,7 @@ fn rewrite(
             }
             #[doc(hidden)]
             #[inline]
-            #[allow(clippy::all)]
+            #[allow(dead_code, clippy::all)]
             pub fn #installer(replacement: #ty) -> bool {
                 crate::__REPLACE[#slot]
                     .compare_exchange(
