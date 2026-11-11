@@ -1184,6 +1184,11 @@ pub(crate) fn format_translatable_origin(
     format_translation_origin(&template, args, origin)
 }
 
+/// Copying argument spans makes nested fallback references multiply, unlike vanilla's
+/// argument references. Bound each expansion before copying server- or mod-controlled text.
+const MAX_TRANSLATION_SPANS: usize = 1 << 15;
+const MAX_TRANSLATION_BYTES: usize = 1 << 22;
+
 /// TranslatableContents.decomposeTemplate: `%s` takes the next argument,
 /// `%n$s` a numbered one and `%%` is a percent sign. Malformed templates are
 /// shown verbatim.
@@ -1193,6 +1198,7 @@ pub fn format_translation(template: &str, args: &[Text]) -> Text {
 }
 pub(crate) fn format_translation_origin(template: &str, args: &[Text], origin: Origin) -> Text {
     let mut out = Text::default();
+    let mut bytes = 0usize;
     let mut literal = String::new();
     let mut next = 0usize;
     let chars: Vec<char> = template.chars().collect();
@@ -1246,6 +1252,23 @@ pub(crate) fn format_translation_origin(template: &str, args: &[Text], origin: O
                         origin,
                     }]);
                 };
+                bytes = bytes
+                    .saturating_add(literal.len())
+                    .saturating_add(arg.rendered.spans.iter().map(|s| s.text.len()).sum());
+                if out
+                    .rendered
+                    .spans
+                    .len()
+                    .saturating_add(arg.rendered.spans.len())
+                    >= MAX_TRANSLATION_SPANS
+                    || bytes > MAX_TRANSLATION_BYTES
+                {
+                    return Text::from_spans(vec![Span {
+                        text: template.into(),
+                        style: Style::default(),
+                        origin,
+                    }]);
+                }
                 if !literal.is_empty() {
                     out.rendered.spans.push(Span {
                         origin,

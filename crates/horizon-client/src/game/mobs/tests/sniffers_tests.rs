@@ -39,8 +39,8 @@ fn posted() -> Vec<(&'static str, [f64; 3], Option<Who>)> {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn digging_posts_entity_action_every_ten_ticks_outside_the_dust_window() {
-    game(|mut game| {
-        let (id, head) = digging_sniffer(&mut game);
+    game(|game| {
+        let (id, head) = digging_sniffer(game);
         let at = [
             head[0] as f64 + 0.5,
             head[1] as f64 + 0.5,
@@ -76,8 +76,8 @@ fn digging_posts_entity_action_every_ten_ticks_outside_the_dust_window() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_silent_sniffer_still_plays_the_local_searching_and_hit_sounds() {
-    game(|mut game| {
-        let _ = digging_sniffer(&mut game);
+    game(|game| {
+        let _ = digging_sniffer(game);
         game.mobs[0].silent = true;
         game.mobs[0].age = 20;
         sniffer::set_state(&mut game.mobs[0], sniffer::SEARCHING);
