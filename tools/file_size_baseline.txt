@@ -5,8 +5,8 @@ crates/horizon-client-render/src/gfx.rs 13342
 crates/horizon-client/src/game.rs 18101
 crates/horizon-client/src/game/administration/commands/mod.rs 4748
 crates/horizon-client/src/game/entities/minecarts.rs 3367
-crates/horizon-client/src/game/mobs/creatures/mod.rs 9388
-crates/horizon-client/src/mobs.rs 5578
+crates/horizon-client/src/game/mobs/creatures/mod.rs 9064
+crates/horizon-client/src/mobs.rs 5571
 crates/horizon-client/src/mobs/animal_brain.rs 3137
 crates/horizon-client/src/mobs/goals.rs 3227
 crates/horizon-client/src/title/tests.rs 3044
