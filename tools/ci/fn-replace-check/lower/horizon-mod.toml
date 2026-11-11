@@ -17,3 +17,9 @@ id = "commands"
 target = "horizon_client_lib::lan::hub::Hub::set_mod_commands"
 kind = "HEAD"
 helper = "src/mixins/commands.rs"
+
+[[native.mixin]]
+id = "worldgen"
+target = "horizon_client_lib::vanillagen::shared_data_with"
+kind = "HEAD"
+helper = "src/mixins/worldgen.rs"

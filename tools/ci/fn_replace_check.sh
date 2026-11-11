@@ -37,7 +37,9 @@ printf '%s' "$revision" > "$source/.horizon-revision"
 # The prebuilt game, where the launcher keeps a downloaded one.
 host=$(rustc -vV | sed -n 's/^host: //p')
 mkdir -p "$data/native/prebuilt"
-cp -a "$sdk" "$data/native/prebuilt/$revision-$archive$host-$side"
+sdk_suffix=
+if [ "$side" = server ]; then sdk_suffix=-server; fi
+cp -a "$sdk" "$data/native/prebuilt/$revision-$archive$host$sdk_suffix"
 
 base=$data/versions/ci
 mkdir -p "$base/.local/horizon-client/26.3"
