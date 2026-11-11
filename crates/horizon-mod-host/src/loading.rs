@@ -22,7 +22,8 @@ pub fn main_with(
             std::process::exit(1);
         }
     };
-    horizon_engine_slots::install_seal(mod_points::__private::seal);
+    horizon_engine_slots::install_seal(mod_points::__private::seal)
+        .expect("provider installed before engine startup");
     horizon_client::entry::start(
         native,
         |native, launch| {

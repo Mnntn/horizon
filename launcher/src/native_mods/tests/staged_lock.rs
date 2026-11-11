@@ -13,6 +13,10 @@ fn generated_game_edges_are_frozen_before_mod_resolution() {
         "struct Game; impl Game { fn tick(&mut self) {} }",
     );
     put(
+        "crates/horizon-client/Cargo.toml",
+        "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n",
+    );
+    put(
         "crates/horizon-client-input/src/lib.rs",
         "pub fn pressed() -> bool { true }",
     );
@@ -27,6 +31,7 @@ fn generated_game_edges_are_frozen_before_mod_resolution() {
     );
     let mut original = String::from("version = 4\n\n");
     for name in [
+        "horizon-client",
         "horizon-client-input",
         "horizon-mod-api",
         "horizon-mod-api-macros",

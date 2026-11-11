@@ -2,8 +2,8 @@
 use super::*;
 use crate::native_mods::{api, internals::Catalog, slots};
 use horizon_mod_package::{
-    Manifest,
     manifest::inject::{Access, Inject, Kind, SlotKind},
+    Manifest,
 };
 use std::{fs, process::Command};
 

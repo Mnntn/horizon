@@ -84,7 +84,7 @@ fn production_listed_records() {
         }
         impl<'ast> syn::visit::Visit<'ast> for Caller<'_> {
             fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
-                if matches!(&*node.cond, syn::Expr::MethodCall(load) if load.method == "load" && matches!(&*load.receiver, syn::Expr::Index(_)))
+                if matches!(&*node.cond, syn::Expr::MethodCall(load) if load.method == "active_site")
                     && node.cond.to_token_stream().to_string().contains(self.name)
                 {
                     assert!(self.expression.is_none());

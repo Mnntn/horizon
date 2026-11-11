@@ -469,6 +469,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-engine-slots"
+version = "0.1.0"
+
+[[package]]
 name = "horizon-game-discovery"
 version = "0.1.0"
 dependencies = [
@@ -571,6 +575,7 @@ dependencies = [
  "bytemuck",
  "glam",
  "horizon-core",
+ "horizon-engine-slots",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-runtime",
