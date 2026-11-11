@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ClientStopgap(unittest.TestCase):
     def test_actual_yaml_routes_only_two_exact_client_selectors(self):
-        job = yaml.safe_load((ROOT / '.github/workflows/dyna-ci.yml').read_text())["jobs"]["ignored-tests-shards"]
+        job = yaml.safe_load((ROOT / '.github/workflows/main-data.yml').read_text())["jobs"]["ignored-tests-shards"]
         expression = job["runs-on"]
         selectors = ignored_shards.expand(ignored_shards.SHARDS) + [
             "horizon-client", "horizon-client#1of1", "horizon-client#1of3",

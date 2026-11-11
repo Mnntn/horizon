@@ -36,13 +36,7 @@ class DynaRoutingTests(unittest.TestCase):
 
     @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
     def test_live_and_snapshot_lease_routing_on_main(self):
-        from test_ci_runners import jobs
-        import textwrap
-        route = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["changes"]
-        script = textwrap.dedent(route.split('        run: |\n          if [ "$SAME_REPO"', 1)[1]
-                                .split("      - id: hosted", 1)[0])
-        script = 'if [ "$SAME_REPO" ' + script
-        script = script.replace("${{ inputs.github-fallback }}", "false")
+        script = (ROOT / "tools/ci/dyna_ci_route.sh").read_text()
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
             for live, snapshot, expected in (("9999999999", "0", "true"),
@@ -189,7 +183,7 @@ class DynaRoutingTests(unittest.TestCase):
         blocks = dict(jobs(workflow))
         route = blocks["changes"]
         for item in ("vars.DYNA_CI_SELF_HOSTED", "vars.DYNA_CI_POOL_UNTIL", "github.event_name",
-                     "github.event.pull_request.head.repo.full_name == github.repository", "dyna_ci_runner.sh"):
+                     "github.event.pull_request.head.repo.full_name == github.repository", "dyna_ci_route.sh"):
             self.assertIn(item, route)
         for name, label in (("verify", "dyna-large"), ("launcher", "dyna-medium")):
             block = blocks[name]
@@ -204,7 +198,7 @@ class DynaRoutingTests(unittest.TestCase):
     def test_prepared_data_sentinel_reports_and_rejects_missing_coverage(self):
         from test_ci_runners import jobs
         import textwrap
-        workflow = (ROOT / ".github/workflows/dyna-ci.yml").read_text()
+        workflow = (ROOT / ".github/workflows/main-data.yml").read_text()
         aggregate = dict(jobs(workflow))["ignored-tests"]
         condition = aggregate.split("if: >-", 1)[1].split("runs-on:", 1)[0]
         self.assertIn("always()", condition)
@@ -220,12 +214,15 @@ class DynaRoutingTests(unittest.TestCase):
                     env = dict(os.environ, RESULT=result, ROUTE=route,
                                REASON="enabled=true; lease=0; live=unreadable",
                                CHANGES="success", FORCED_GITHUB="false",
-                               GITHUB_STEP_SUMMARY=str(summary))
+                               GITHUB_STEP_SUMMARY=str(summary), TESTED_SHA="abc123",
+                               RUN_URL="https://github.com/arismoko/horizon/actions/runs/42")
                     run = subprocess.run(["bash", "-e", "-c", script], env=env,
                                          capture_output=True, text=True)
                     self.assertEqual(run.returncode, 0 if result == "success" else 1)
                     self.assertIn("live=unreadable", summary.read_text())
                     self.assertIn(f"Shard result: {result}", summary.read_text())
+                    self.assertIn("Triggering SHA: abc123", summary.read_text())
+                    self.assertIn("Run: https://github.com/arismoko/horizon/actions/runs/42", summary.read_text())
                     summary.unlink()
 
     def test_tooling_tests_run_only_after_every_earlier_verify_step_succeeded(self):
@@ -242,7 +239,7 @@ class DynaRoutingTests(unittest.TestCase):
     def test_missing_prepared_data_fails_push_and_nightly_dispatch(self):
         from test_ci_runners import jobs
         import textwrap
-        workflow = (ROOT / ".github/workflows/dyna-ci.yml").read_text()
+        workflow = (ROOT / ".github/workflows/main-data.yml").read_text()
         shard = dict(jobs(workflow))["ignored-tests-shards"]
         script = textwrap.dedent(shard.split("        run: |\n          for dir", 1)[1]
                                 .split("      - name: Generate", 1)[0])
@@ -263,15 +260,70 @@ class DynaRoutingTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/telemetry-server.yml").read_text()
         self.assertEqual(triggers(workflow), {"workflow_dispatch"})
 
+    def test_split_workflow_contracts(self):
+        from test_ci_concurrency import yaml
+        import re
+        workflows = {name: yaml.safe_load((ROOT / f".github/workflows/{name}.yml").read_text())
+                     for name in ("dyna-ci", "main-data", "wasm-mods")}
+        gate, data, wasm = (workflows[name]["jobs"] for name in workflows)
+        from test_ci_runners import triggers
+        self.assertEqual(triggers((ROOT / ".github/workflows/dyna-ci.yml").read_text()),
+                         {"push", "pull_request", "workflow_dispatch"})
+        for name in ("dyna-ci", "main-data"):
+            route = next(step for step in workflows[name]["jobs"]["changes"]["steps"]
+                         if step.get("id") == "runner")
+            self.assertEqual(route["run"], "bash tools/ci/dyna_ci_route.sh")
+            self.assertEqual(route["env"]["EVENT"], "${{ github.event_name }}")
+            self.assertEqual(route["env"]["VARS_ENABLED"], "${{ vars.DYNA_CI_SELF_HOSTED }}")
+            self.assertEqual(route["env"]["VARS_LEASE"], "${{ vars.DYNA_CI_POOL_UNTIL }}")
+
+        required = {"lint", "verify", "launcher", "pool-watch"}
+        self.assertTrue(required <= gate.keys())
+        self.assertFalse(required & data.keys())
+        self.assertIn("fixture", wasm)
+        self.assertNotIn("fixture", gate)
+        self.assertNotIn("fixture", data)
+        moved = {"ignored-tests-shards", "ignored-tests", "prepared-output-check", "vanilla-parity"}
+        self.assertTrue(moved <= data.keys())
+        self.assertFalse(moved & gate.keys())
+        self.assertNotIn("boat-watch", data)
+        self.assertEqual(data["data-pool-watch"]["steps"][-1]["run"],
+                         "python3 tools/ci/dyna_ci_pool_watch.py")
+        for name, job in data.items():
+            for step in job.get("steps", []):
+                if step.get("uses", "").startswith("actions/checkout@"):
+                    self.assertEqual(step["with"]["ref"], "${{ github.sha }}", name)
+                    self.assertIs(step["with"]["persist-credentials"], False, name)
+        summary_env = data["ignored-tests"]["steps"][0]["env"]
+        self.assertEqual(summary_env["TESTED_SHA"], "${{ github.sha }}")
+        self.assertEqual(summary_env["RUN_URL"],
+                         "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+        # Execute actual job predicates over event/input combinations, not an alternate policy.
+        for event in ("push", "workflow_dispatch", "schedule", "pull_request"):
+            for prepare in (False, True):
+                for fallback in (False, True):
+                    values = {"github.repository": "arismoko/horizon", "github.event_name": event,
+                              "inputs.prepare-output-check": prepare, "inputs.github-fallback": fallback}
+                    for name in ("prepared-output-check", "vanilla-parity", "nightly-dispatch"):
+                        expression = re.sub(r"(?:github|inputs)\.[a-z_.-]+",
+                                            lambda match: repr(values[match[0]]), data[name]["if"])
+                        expression = expression.replace("&&", " and ").replace("||", " or ")
+                        expression = re.sub(r"!(?!=)", " not ", expression).strip()
+                        actual = eval(expression, {"__builtins__": {}})
+                        expected = (event == "schedule" if name == "nightly-dispatch" else
+                                    event == "workflow_dispatch" and
+                                    (prepare if name == "prepared-output-check" else not prepare and not fallback))
+                        self.assertEqual(actual, expected, (name, event, prepare, fallback))
+
     def test_schedule_only_dispatches_and_parity_only_runs_on_dispatch(self):
         from test_ci_runners import jobs, triggers
-        workflow = (ROOT / ".github/workflows/dyna-ci.yml").read_text()
-        self.assertEqual(triggers(workflow), {"pull_request", "push", "workflow_dispatch", "schedule"})
+        workflow = (ROOT / ".github/workflows/main-data.yml").read_text()
+        self.assertEqual(triggers(workflow), {"push", "workflow_dispatch", "schedule"})
         blocks = dict(jobs(workflow))
         dispatcher = blocks["nightly-dispatch"]
         self.assertIn("github.event_name == 'schedule'", dispatcher)
         self.assertIn("runs-on: ubuntu-latest", dispatcher)
-        self.assertIn('gh workflow run dyna-ci.yml --repo "$GITHUB_REPOSITORY" --ref main', dispatcher)
+        self.assertIn('gh workflow run main-data.yml --repo "$GITHUB_REPOSITORY" --ref main', dispatcher)
         self.assertIn("if: github.event_name != 'schedule'", blocks["changes"])
         parity = blocks["vanilla-parity"]
         self.assertIn("github.event_name == 'workflow_dispatch'", parity)

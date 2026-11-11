@@ -104,10 +104,11 @@ class OwnRunnerTests(unittest.TestCase):
             # output and dyna-medium, or SELF_HOSTED_CI=all with the fork guard
             # before the playhorizon-ci labels; the carried upstream files use
             # SELF_HOSTED_CI != 'off'. Both fall back to GitHub's runners.
-            if "dyna-ci.yml" in where:
+            if where.split()[0] in {"dyna-ci.yml", "main-data.yml"}:
                 self.assertIn("needs.changes.outputs.self_hosted == 'true'", value, where)
                 self.assertIn("vars.SELF_HOSTED_CI == 'all'", value, where)
-                self.assertIn(FORK_GUARD, value, where)
+                if "pull_request" in triggers((WORKFLOWS / where.split()[0]).read_text()):
+                    self.assertIn(FORK_GUARD, value, where)
             else:
                 self.assertIn("vars.SELF_HOSTED_CI != 'off'", value, where)
             self.assertTrue(value.endswith("|| 'ubuntu-latest' }}"), where)

@@ -402,6 +402,44 @@ class ReleaseTrainTests(unittest.TestCase):
             records[:] = records[:2]
             self.assertIsNone(train.green_main_head(), "PR checks cannot supply a release base")
 
+    def test_fork_picker_latest_run_attempt_and_workflow_independence(self):
+        def record(ident, status="completed"):
+            return dict(id=ident, head_sha="same", head_branch="main", event="push",
+                        status=status, conclusion=None)
+        def successful(names):
+            return [dict(name=name, status="completed", conclusion="success") for name in names]
+        gates = successful(["lint", "verify", "launcher", "pool-watch"])
+        gate_runs = [record(2), record(1)]
+        fixture_runs = [record(4), record(3)]
+        latest = {1: gates, 2: gates, 3: successful(["fixture"]), 4: successful(["fixture"])}
+        previous = {2: gates, 4: successful(["fixture"])}
+        paths = []
+        def api(*args):
+            path = args[-1]
+            paths.append(path)
+            self.assertNotIn("main-data", path)
+            if "dyna-ci.yml/runs?" in path:
+                return [{"workflow_runs": gate_runs}]
+            if "wasm-mods.yml/runs?" in path:
+                return [{"workflow_runs": fixture_runs[:1]}, {"workflow_runs": fixture_runs[1:]}]
+            ident = int(path.split("/runs/")[1].split("/")[0])
+            # An unfiltered API would include an earlier successful attempt.
+            jobs = latest[ident] if "filter=latest" in path else previous.get(ident, []) + latest[ident]
+            return [{"jobs": jobs}]
+        with mock.patch.object(train, "REPO", "arismoko/horizon"), \
+                mock.patch.object(train, "gh_json", side_effect=api):
+            for status in ("queued", "in_progress", "completed"):
+                gate_runs[0]["status"] = status
+                self.assertEqual(train.green_main_head(), "same")
+            latest[2] = []
+            self.assertIsNone(train.green_main_head(), "zero-job replacement cannot borrow older run")
+            latest[2] = gates[:-1] + [dict(name="pool-watch", status="completed", conclusion="failure")]
+            self.assertIsNone(train.green_main_head(), "older attempt success cannot hide latest failure")
+            latest[2] = gates
+            latest[4] = [dict(name="fixture", status="completed", conclusion="failure")]
+            self.assertIsNone(train.green_main_head(), "fixture cannot borrow older run or attempt")
+            self.assertFalse(any("/runs/1/jobs" in path or "/runs/3/jobs" in path for path in paths))
+
     def test_a_release_is_published_only_after_its_smoke_test_and_with_no_blocker(self):
         drew = {"error": None, "frames": 12710, "chunks": 81, "meshed_sections": 550, "player": [160.5, 71.0, 156.5]}
         self.assertIsNone(train.gate(drew, []))

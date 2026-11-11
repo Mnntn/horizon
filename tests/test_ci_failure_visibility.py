@@ -126,7 +126,7 @@ class Visibility(unittest.TestCase):
         self.assertNotIn("private unexpected payload", log.getvalue())
 
     def test_data_end_memory_telemetry_is_bounded_best_effort(self):
-        steps = yaml.safe_load((ROOT / '.github/workflows/dyna-ci.yml').read_text())["jobs"]["ignored-tests-shards"]["steps"]
+        steps = yaml.safe_load((ROOT / '.github/workflows/main-data.yml').read_text())["jobs"]["ignored-tests-shards"]["steps"]
         step = next(s for s in steps if s.get("name") == "Record data-leg end and compiler cache")
         self.assertEqual(step["if"], "always()")
         script = step["run"]
