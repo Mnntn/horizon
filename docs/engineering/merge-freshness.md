@@ -8,7 +8,8 @@ python3 tools/ci/merge_fresh.py 3065
 
 All remote operations are read-only `gh api` requests. The command does not fetch,
 checkout, merge, dispatch, or post. Exit 0 means `FRESH`, 1 means `STALE` due to
-an intervening conflict, and 2 means `STALE` because evidence is unavailable.
+an intervening conflict, and 2 prints `UNAVAILABLE (treat as STALE): <reason>`
+because evidence is unavailable.
 For STALE, merge current main into the owned branch once and obtain a fresh gate.
 
 The newest dyna-ci pull-request run associated with this PR and its current head
